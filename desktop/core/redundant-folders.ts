@@ -1,0 +1,45 @@
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import { beneath, code, contained, syncDirectory, within } from './paths';
+
+/** Files the operating system creates that are not user content. The app's own recovery
+ * files (.import-*, .photo-importer-*) are deliberately absent: they are never removed here. */
+const serviceNames=new Set(['.ds_store','thumbs.db','desktop.ini','icon\r']);
+const serviceFile=(name:string)=>name.startsWith('._')||serviceNames.has(name.toLowerCase());
+
+/** Remove folders under the chosen source folders that hold nothing but service files once
+ * their media has moved. A folder with any user file, link or app recovery data is kept, as is
+ * everything inside a kept folder (the backup). Returns how many folders were removed. */
+export async function removeRedundantFolders(library:string,folders:string[],keep:string[]):Promise<number> {
+  const root=await fs.realpath(library),kept=keep.map(folder=>path.resolve(folder));
+  let removed=0;
+  async function sweep(folder:string):Promise<boolean> {
+    await contained(path.join(folder,'.sweep-check'),root);
+    const stat=await fs.lstat(folder);
+    if(!stat.isDirectory()||stat.isSymbolicLink()) return false;
+    let removable=!kept.some(item=>within(item,folder));
+    const service:string[]=[];
+    for(const entry of await fs.readdir(folder,{withFileTypes:true})) {
+      const child=path.join(folder,entry.name);
+      if(entry.isSymbolicLink()) removable=false;
+      else if(entry.isDirectory()) {
+        if(kept.some(item=>within(child,item))||entry.name.toLowerCase()==='.photo-importer-recovery') removable=false;
+        else if(!await sweep(child)) removable=false;
+      } else if(entry.isFile()&&serviceFile(entry.name)) service.push(child);
+      else removable=false;
+    }
+    if(!removable) return false;
+    for(const file of service) await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+    try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST'].includes(code(error)??''))return false; throw error; }
+    await syncDirectory(path.dirname(folder));removed++;
+    return true;
+  }
+  for(const chosen of folders) {
+    const folder=path.resolve(chosen);
+    if(folder===root) throw new Error('Choose folders inside the library, not the library root itself.');
+    if(!beneath(folder,root)) throw new Error(`Only folders inside the library can be cleaned up: ${folder}`);
+    if(kept.some(item=>within(folder,item))) throw new Error(`The backup folder is never cleaned up: ${folder}`);
+    if(await fs.lstat(folder).then(()=>true,()=>false)) await sweep(folder);
+  }
+  return removed;
+}

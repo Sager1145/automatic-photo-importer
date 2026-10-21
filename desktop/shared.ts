@@ -1,0 +1,44 @@
+import type {StateUpdate} from './state-channel';
+export type Language = 'en'|'zh-Hans'|'zh-Hant'|'ja';
+export type Appearance = 'system'|'light'|'dark';
+export type Accent = 'coral'|'ocean'|'forest';
+export type CopyMode = 'single'|'mirror'|'sequential';
+/** Drive backup: additive keeps files deleted from the source; mirror moves them aside. */
+export type BackupMode = 'additive'|'mirror';
+export type MediaKind = 'RAW'|'JPEG'|'HEIF'|'Videos'|'Images'|'Other';
+export type UnknownFileRule = string|null|{action:'camera'};
+/** For extensions without a rule: skip silently, copy to Other files/<ext>, or ask. */
+export type UnknownDefault = 'skip'|'other'|'ask';
+export interface SystemFile {id:string;vendor:string;label:string;}
+export interface SkippedFile {path:string;reason:'system'|'unknown-rule'|'unknown-skip'|'unknown-ask';label?:string;}
+export interface Source {id:string;name:string;path:string;transport:'storage'|'camera'|'folder';selected?:boolean;camera?:boolean;total?:number;free?:number;}
+export interface Preferences {sourceLayout?:'list'|'grid';language:Language;appearance:Appearance;textScale:number;accent:Accent;automatic:boolean;parallel:number;destinations:string[];destinationIds?:string[];copyMode:CopyMode;basePath:string;template:string;separateMedia:boolean;allowFolderSource:boolean;backupMode?:BackupMode;/** Re-read each copy and compare checksums before publishing it; default true. */verifyCopies?:boolean;/** After organizing, remove source folders left with no user files; default true. */removeEmptySourceFolders?:boolean;/** Files in the backup folder outside the folder the rules give them: off (no check), ask (report them), auto (organize after imports); default ask. */autoOrganizeBackup?:AutoOrganizeBackup;unknownDefault?:UnknownDefault;rememberedDevices?:Record<string,{name:string;lastSelected:string}>;ignoredDevices?:Record<string,{name:string;ignoredAt:string}>;unknownRules:Record<string,UnknownFileRule>;editedFolder?:string;}
+export interface InventoryFile {path:string;relative:string;size:number;kind:MediaKind;included:boolean;companionOf?:string;system?:SystemFile;}
+export interface Inventory {issues?:{path:string;message:string}[];files:InventoryFile[];media:number;companions:number;unknown:number;bytes:number;unknownExtensions:Record<string,number>;/** Each listed folder's identity, so a later import can reuse this listing. */listing?:{backup:boolean;folders:[string,string,string[]?][]};system?:number;systemKinds?:Record<string,number>;skipped?:SkippedFile[];elapsedMs:number;}
+/** Capture units: f-number, ISO, seconds, millimeters and EV respectively. */
+export interface Exposure {lens?:string;aperture?:number;iso?:number;exposureTime?:number;focalLength?:number;exposureCompensation?:number;}
+export interface Metadata {edited?:boolean;camera?:string;date?:string;fields:Record<string,unknown>;exposure?:Exposure;shutterCount?:string;shutterNote?:string;preview?:string;}
+/** digest is absent until a copy streams the source ("computed during copy"); planning hashes
+ * only when a same-size file already sits at a candidate destination. sourceIdentity is the
+ * plan-time dev:ino:size:mtimeNs:ctimeNs of the source. */
+export interface PlanEntry {captureTimeMs?:number;allocation?:{destination:string;folder:string};id:string;source:string;destination:string;size:number;kind:MediaKind;digest?:string;sourceIdentity?:string;skip:boolean;family:string;}
+export interface MirrorRemoval {path:string;size:number;reason:'missing'|'changed';}
+export interface TransferPlan {source:string;root:string;entries:PlanEntry[];rootIdentity:string;drive?:{folder:string;identity:string;name:string};removals?:MirrorRemoval[];}
+/** completed: files staged (copying) or verified/published (verifying); failed: files in a failed group. */
+export interface Progress {phase?:'copying'|'verifying';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;}
+export interface Job {/** Every file was already in the backup and verified; nothing was copied. */alreadyImported?:boolean;organization?:boolean;id:string;source:Source;phase:'queued'|'discovering'|'verifying'|'copying'|'complete'|'stopped'|'error';
+/** A stopped job the user paused; Start continues it. */paused?:boolean;detail:string;inventory?:Inventory;progress?:Progress;errors:string[];backup:boolean;}
+export interface HistoryEntry {id:string;date:string;title:string;detail:string;}
+export interface DestinationStatus {path:string;total?:number;free?:number;available:boolean;detail?:string;volumeId?:string;physicalId?:string;}
+export interface Review {id:string;kind:'import'|'reorganize';source:Source;plans:TransferPlan[];backup:boolean;sourceFolders?:string[];}
+/** retainedFiles/retainedBytes: originals kept for undo; finalizable: they can be released;
+ * undoable: every organized file can still be put back. */
+export interface OrganizationRecovery {id:string;root:string;status:'pending'|'complete';files:number;completed:number;error?:string;retainedFiles?:number;retainedBytes?:number;finalizable?:boolean;undoable?:boolean;}
+export interface SourceCameraInfo {issues?:{path:string;message:string}[];status:'reading'|'complete'|'stopped'|'error';hints:{name:string;evidence:'drive-name'|'file-type'|'camera-layout'}[];models:{name:string;files:number;bytes:number}[];lenses?:{name:string;files:number;bytes:number}[];noLens?:number;checked:number;total:number;unknown:number;error?:string;}
+export type AutoOrganizeBackup='off'|'ask'|'auto';
+/** Result of the read-only check of one destination's backup folder, keyed by destination path. */
+export interface MisplacedFiles {count:number;bytes:number;checkedAt:string;}
+export interface AppState {misplacedFiles?:Record<string,MisplacedFiles>;newDevices?:string[];scanProgress?:Record<string,{files:number;bytes:number}>;sessionUnknownRules?:Preferences['unknownRules'];organizationFolders?:Record<string,string[]>;reviewProgress?:{count:number;file:string};sourceCameraInfo?:Record<string,SourceCameraInfo>;sourceInventories?:Record<string,Inventory>;scanningSources?:string[];organizationRecovery?:OrganizationRecovery[];review?:Review;busyReview?:boolean;destinationStatus?:DestinationStatus[];preferences:Preferences;sources:Source[];jobs:Job[];history:HistoryEntry[];platform:string;error?:string;}
+export type Action = {type:'organize';destinationIndex:number}|{type:'chooseOrganizationFolders';destinationIndex:number}|{type:'resetOrganizationFolders';destinationIndex:number}|{type:'scanSource';sourceId:string}|{type:'scanSources'}|{type:'refreshOrganization'}|{type:'resumeOrganization';id:string;root:string}| {type:'preview';sourceId:string}|{type:'previewOrganization';destinationIndex:number}|{type:'applyReview'}|{type:'discardReview'}|{type:'window';command:'minimize'|'maximize'|'close'}|{type:'refresh'}|{type:'preferences';patch:Partial<Preferences>}|{type:'chooseDestination';index:number}|{type:'removeDestination';index:number}|{type:'chooseSource';backup:boolean}|{type:'start';sourceId?:string}|{type:'stop';jobId?:string}|{type:'unknownRule';extension:string;folder:UnknownFileRule;remember:boolean}|{type:'reveal';path:string}|{type:'clearError'}|{type:'pause';sourceId?:string}|{type:'organizeFolder'}|{type:'finalizeOrganization';root:string;id:string}|{type:'undoOrganization';root:string;id:string}|{type:'selectSource';sourceId:string;selected:boolean}|{type:'forgetDevice';deviceId:string};
+export interface DesktopAPI {state():Promise<StateUpdate>;action(action:Action):Promise<void>;subscribe(listener:(state:StateUpdate)=>void):()=>void;inspect(path:string):Promise<Metadata>;}
+declare global {interface Window {importer:DesktopAPI;}}

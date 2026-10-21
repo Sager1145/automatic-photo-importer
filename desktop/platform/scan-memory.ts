@@ -1,0 +1,92 @@
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import type { Inventory, Metadata } from '../shared';
+import { mediaKindForPath } from '../media-formats';
+
+/** What a scan learned about one card, kept across app restarts under its volume UUID.
+ * Paths are relative to the card and stats omit the device number, which changes on
+ * every mount. Nothing here is trusted as-is: folders are reused only when their entry
+ * names still match, and EXIF results only when a file's inode, size and times match. */
+interface Stored {
+  version:1;volume:string;saved:string;backup:boolean;
+  folders:[string,string[]][];
+  files:[string,number][];
+  routing:[string,string,Metadata][];
+}
+const MAX_BYTES=64*1024*1024;
+const memoryFile=(store:string,volume:string)=>path.join(store,'scan-memory',createHash('sha256').update(volume).digest('hex').slice(0,32)+'.json');
+const safeRelative=(relative:unknown):relative is string=>typeof relative==='string' && !path.isAbsolute(relative) && !relative.split(/[\\/]/).includes('..');
+
+export async function saveScanMemory(store:string,volume:string,mount:string,scan:Inventory,routing:[string,Metadata][]):Promise<void> {
+  if(!scan.listing) return;
+  const prefix=mount+path.sep,stored:Stored={
+    version:1,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
+    // A folder without remembered names cannot be checked after a remount; it is listed again.
+    folders:scan.listing.folders.filter((folder):folder is [string,string,string[]]=>Array.isArray(folder[2])).map(([relative,,names])=>[relative,names]),
+    files:scan.files.map(file=>[file.relative,file.size]),
+    routing:routing.filter(([key])=>key.startsWith(prefix)).flatMap(([key,metadata])=>{
+      const [file,stat]=key.split('\0'),parts=stat?.split(':');
+      return file&&parts?.length===5?[[path.relative(mount,file),parts.slice(1).join(':'),metadata] as [string,string,Metadata]]:[];
+    }),
+  };
+  const target=memoryFile(store,volume),temporary=`${target}.${randomUUID()}.tmp`;
+  await fs.mkdir(path.dirname(target),{recursive:true});
+  try { await fs.writeFile(temporary,JSON.stringify(stored),{mode:0o600}); await fs.rename(temporary,target); }
+  catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
+}
+
+/** The remembered listing (as a reusable inventory) and EXIF results rebased onto the
+ * card's current mount, or undefined when nothing usable is remembered. */
+export async function loadScanMemory(store:string,volume:string,mount:string):Promise<{inventory:Inventory;routing:[string,Metadata][]}|undefined> {
+  try {
+    const file=memoryFile(store,volume);
+    if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
+    const stored=JSON.parse(await fs.readFile(file,'utf8')) as Stored;
+    if(stored?.version!==1 || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
+    const dev=(await fs.lstat(mount,{bigint:true})).dev;
+    const folders=stored.folders.filter(([relative,names])=>safeRelative(relative)&&Array.isArray(names)&&names.every(name=>typeof name==='string'));
+    const files=stored.files.filter(([relative,size])=>safeRelative(relative)&&relative!==''&&Number.isSafeInteger(size)&&size>=0);
+    const inventory:Inventory={
+      files:files.map(([relative,size])=>({path:path.join(mount,relative),relative,size,kind:mediaKindForPath(relative),included:false})),
+      media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0,
+      // An empty identity never matches, so every folder is checked by its names.
+      listing:{backup:!!stored.backup,folders:folders.map(([relative,names])=>[relative,'',names])},
+    };
+    const routing=stored.routing.filter(([relative,stat,metadata])=>safeRelative(relative)&&typeof stat==='string'&&/^\d+:\d+:\d+:\d+$/.test(stat)&&metadata&&typeof metadata==='object')
+      .map(([relative,stat,metadata])=>[`${path.join(mount,relative)}\0${dev}:${stat}`,metadata] as [string,Metadata]);
+    return {inventory,routing};
+  } catch { return undefined; }
+}
+
+/** Checksums of card files this app copied and verified, kept per card (volume UUID) with the
+ * inode, size and times they were read under. A later plan uses one only while the card file
+ * still has that exact identity, so an unchanged card is recognised without being read. */
+const importedFile=(store:string,volume:string)=>memoryFile(store,volume).replace(/\.json$/,'.imported.json');
+type Imported=Record<string,{stat:string;sha256:string}>;
+const withoutDevice=(identity:string)=>identity.split(':').slice(1).join(':');
+async function readImported(store:string,volume:string):Promise<Imported> {
+  try {
+    const file=importedFile(store,volume);
+    if((await fs.lstat(file)).size>MAX_BYTES) return {};
+    const stored=JSON.parse(await fs.readFile(file,'utf8'));
+    if(stored?.version!==1||stored.volume!==volume||!stored.files||typeof stored.files!=='object') return {};
+    return Object.fromEntries(Object.entries(stored.files as Imported).filter(([relative,value])=>safeRelative(relative)&&relative!==''&&typeof value?.stat==='string'&&/^-?\d+:\d+:\d+:\d+$/.test(value.stat)&&/^[a-f0-9]{64}$/.test(value?.sha256??'')));
+  } catch { return {}; }
+}
+export async function rememberImported(store:string,volume:string,mount:string,verified:Record<string,{sha256:string;identity:string}>):Promise<void> {
+  const files=await readImported(store,volume),prefix=mount+path.sep;
+  for(const [file,{sha256,identity}] of Object.entries(verified)) if(file.startsWith(prefix)&&/^[a-f0-9]{64}$/.test(sha256)) files[path.relative(mount,file)]={stat:withoutDevice(identity),sha256};
+  const target=importedFile(store,volume),temporary=`${target}.${randomUUID()}.tmp`;
+  await fs.mkdir(path.dirname(target),{recursive:true});
+  try { await fs.writeFile(temporary,JSON.stringify({version:1,volume,files}),{mode:0o600}); await fs.rename(temporary,target); }
+  catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
+}
+export async function loadImported(store:string,volume:string,mount:string):Promise<(file:string,identity:string)=>string|undefined> {
+  const files=await readImported(store,volume),prefix=mount+path.sep;
+  return (file,identity)=>{
+    if(!file.startsWith(prefix)) return undefined;
+    const known=files[path.relative(mount,file)];
+    return known&&known.stat===withoutDevice(identity)?known.sha256:undefined;
+  };
+}

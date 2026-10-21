@@ -1,0 +1,80 @@
+{
+  "name": "automatic-photo-importer",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Verified photo imports and non-deleting drive backups",
+  "main": "dist/desktop/main.cjs",
+  "scripts": {
+    "build": "tsc --noEmit && vite build && node Scripts/build-desktop.mjs",
+    "start": "npm run build && electron .",
+    "test": "node --import tsx --test desktop/tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "package:mac": "npm run native:mac && npm run build && electron-builder --mac dir --arm64",
+    "package:win": "npm run build && electron-builder --win dir",
+    "package:linux": "npm run build && electron-builder --linux dir",
+    "native:mac": "bash Scripts/build_camera_bridge.sh",
+    "codex:test": "node Scripts/codex-test.mjs",
+    "codex:qa": "node Scripts/codex-test.mjs --interactive"
+  },
+  "build": {
+    "appId": "com.sager.automatic-photo-importer.desktop",
+    "productName": "Automatic Photo Importer",
+    "directories": {
+      "output": "build/desktop"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/exiftool-*/**/*"
+    ],
+    "mac": {
+      "icon": "Icon.icns",
+      "category": "public.app-category.photography",
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Import originals from connected cameras.",
+        "NSRemovableVolumesUsageDescription": "Read camera cards and write verified copies to selected backup drives."
+      },
+      "extraResources": [
+        {
+          "from": "build/native",
+          "to": "native",
+          "filter": [
+            "NativeCameraBridge"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        "dir"
+      ]
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Photography"
+    }
+  },
+  "dependencies": {
+    "exiftool-vendored": "^39.0.1",
+    "lucide-react": "^1.60.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.9.1",
+    "electron-builder": "^26.15.3",
+    "rolldown": "^1.2.14",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,23 @@
+# Camera import research
+
+Consulted ChatGPT in Chat mode at Extra High effort: [architecture consultation](https://chatgpt.com/c/6ad725c1-42bc-83e9-9a1b-1ee112b0d5f5), completed 2026-10-20. Recommendations are advisory; implementation was checked locally against the installed SDK and filesystem tests.
+
+| Prior art | Useful lesson |
+| --- | --- |
+| [Rapid Photo Downloader](https://github.com/damonlynch/rapid-photo-downloader), especially [camera.py](https://github.com/damonlynch/rapid-photo-downloader/blob/main/raphodo/camera.py), metadata and naming modules | Separate camera transport from metadata-based naming. RAW/JPEG associations and camera-model/date presets are core domain behavior. |
+| [iPhone Syncronizer](https://github.com/thechandanbhagat/iphone-syncronizer), especially [DeviceManager.swift](https://github.com/thechandanbhagat/iphone-syncronizer/blob/main/iPhoneSyncronizer/DeviceManager.swift) and [SyncManager.swift](https://github.com/thechandanbhagat/iphone-syncronizer/blob/main/iPhoneSyncronizer/SyncManager.swift) | Native SwiftUI/ImageCaptureCore precedent. Device discovery, open sessions and asynchronous catalogs are separate stages. Filename existence alone does not establish a duplicate. |
+| [Shotwell](https://github.com/GNOME/shotwell), camera import and batch import modules | Keep camera access serialized per device while filesystem imports may use bounded workers. Separate quick duplicate hints from actual content checks. |
+| [PhotoPrism](https://github.com/photoprism/photoprism), import worker | Copy and move need distinct policies. Recheck destination content and retain the source when a move cannot be established safely. |
+| [libgphoto2](https://github.com/gphoto/libgphoto2), [PTP backend](https://github.com/gphoto/libgphoto2/blob/master/camlibs/ptp2/library.c) | A possible future compatibility adapter. Native detection does not guarantee every vendor's PTP/MTP mode can be read. |
+
+Selected architecture: NSWorkspace + FileManager for mounted SD/CFexpress/readers and mass-storage cameras; ImageCaptureCore for exposed USB camera catalogs; ImageIO and AVFoundation for metadata; CryptoKit SHA-256 for content verification. No third-party project code is copied or linked. libgphoto2 and ExifTool are not bundled.
+
+The app performs a startup inventory and listens for volume lifecycle changes. Camera directory layouts are signals for automatic import. Ordinary hard drives and folders require explicit manual-source opt-in. Destination protection rejects detected camera source volumes, external volumes containing camera layouts, and removable media. This conservatively also excludes removable USB flash drives. macOS cannot universally classify every physical card; actual reader reporting remains a hardware verification item.
+
+The implementation uses a plan/execute boundary, verifies skips again at execution, streams copies to hidden temporary files on the destination filesystem, synchronizes them, verifies content, and publishes without intentional replacement. Library reorganization requires a preview and explicit Apply Moves action; existing identical duplicates in wrong locations are retained rather than deleted. History is stored locally. The exFAT publication fallback writes synchronized intent records; a full SQLite import journal is not implemented. Interrupted completed files are rediscovered by a fresh content scan.
+
+Compatibility limits: vendor RAW parsing follows ImageIO support. Unknown metadata is flagged and files are preserved using Unknown Camera and file dates. Camera EXIF wall-clock components are retained for folder dates across timezone boundaries. PTP downloads are size checked where the device supplies a size, but cannot be independently compared to a camera-side checksum when the protocol does not expose one. PTP staging needs temporary space on the Mac before copying to the chosen backup destination.
+
+Hardware protocols, APFS/exFAT behavior under unplugging/power loss, privacy permissions on supported macOS versions, and representative real RAW generations require physical testing. Proprietary Wi-Fi transfer and unsupported MTP/vendor modes are not claimed.
+
+Additional focused research: [shutter-count consultation](https://chatgpt.com/c/6ad72c70-a778-83e9-a48b-7d641f3e66fe). The upstream Sony correction shipped in ExifTool13.44. The checker validates decoder version, preserves duplicate tag instances, rejects Nikon’s unavailable sentinel and distinguishes conflicts from absent metadata. It does not infer camera wear from ImageCount or filenames.
