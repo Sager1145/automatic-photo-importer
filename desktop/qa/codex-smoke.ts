@@ -191,7 +191,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('Errors stay on top: at 200% the error toast is the topmost element at its centre, also on the frames after each page switch',async()=>{
    const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();
    // The toast is hit first at its centre and sits in the top layer; no transition is running over it.
-   const probe="(()=>{const t=document.querySelector('[data-testid=error-toast]');if(!t)return {present:false};const r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {present:true,topLayer:t.matches(':popover-open'),topmost:!!hit&&t.contains(hit),transition:!!document.documentElement.dataset.transition};})()";
+   const probe="(()=>{const t=document.querySelector('[data-error-layer]');if(!t)return {present:false};const r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {present:true,topLayer:t.matches(':popover-open'),topmost:!!hit&&t.contains(hit),transition:!!document.documentElement.dataset.transition};})()";
    // Switch pages and probe two frames later, when a transition would already be drawing.
    const go=async(label:string)=>js<Record<string,unknown>>(`(async()=>{Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return ${probe};})()`);
    const onTop={present:true,topLayer:true,topmost:true,transition:false};
@@ -200,7 +200,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
     window.setContentSize(1000,720);await action({type:'preferences',patch:{textScale:2}});await wait(()=>js<boolean>("getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()==='2'"),'200 percent text');
     await clearToast();await go('Import desk');await settle();
     await action({type:'preferences',patch:{unknownDefault:'ask'}});
-    await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')===true"),'error toast in the top layer');
+    await wait(()=>js<boolean>("document.querySelector('[data-error-layer]')?.matches(':popover-open')===true"),'error or warning toast in the top layer');
     await settle();settled=await js(probe);await shot('error-toast-on-top-200');
     for(const page of ['Drives','Organization','Import desk'])during.push(await go(page));
    }finally{
@@ -401,18 +401,22 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('A fixture organization review shows its progress with a file name, time left and speed',async()=>{
    const seen:{file:string;total:number;share?:number;eta?:number;speed:number;fileRate?:number}[]=[];
    const pending=action({type:'previewOrganization',destinationIndex:0});let done=false;void pending.finally(()=>{done=true;});
-   while(!done){const progress=(await state()).reviewProgress;if(progress)seen.push({file:progress.file,total:progress.total,share:progress.share,eta:progress.eta,speed:progress.speed,fileRate:progress.fileRate});await new Promise(r=>setTimeout(r,5));}
+   const shownLayouts:{speed:boolean;file:boolean;count:boolean}[]=[];
+   while(!done){const progress=(await state()).reviewProgress;if(progress)shownLayouts.push(await js<{speed:boolean;file:boolean;count:boolean}>("(()=>{const d=document.querySelector('[data-progress-display]');return {speed:!!d?.querySelector('[data-testid=speed]'),file:!!d?.querySelector('[data-testid=progress-file]'),count:!!d?.querySelector('[data-testid=progress-count]')}})()"));if(progress)seen.push({file:progress.file,total:progress.total,share:progress.share,eta:progress.eta,speed:progress.speed,fileRate:progress.fileRate});await new Promise(r=>setTimeout(r,5));}
    await pending;await wait(async()=>(await state()).review!==undefined,'organization review ready');
    // A fixture review is quick, so only what was observed is checked: every sample names a file, and a known total or estimate is a determinate bar.
    for(const sample of seen)if(sample.total>0||sample.share!==undefined||sample.file){assert.notEqual(sample.file,'','review progress names the file it is on');}
    const timed=seen.filter(sample=>sample.eta!==undefined||sample.speed>0||(sample.fileRate??0)>0);
    if(timed.length)assert.ok(timed.every(sample=>sample.file!==''),'progress with a speed or time left also names its file');
+   // The shared layout shows the count always, and the file and speed whenever the backend reported them.
+   assert.ok(shownLayouts.every(layout=>layout.count),'every progress display shows its count');
+   if(timed.length)assert.ok(shownLayouts.some(layout=>layout.speed&&layout.file),'speed and file appear in the shared progress display');
    await action({type:'discardReview'});
   });
   await check('Organization applies changed folder settings and can recheck its recovery journal',async()=>{
    if(organizationOnly){await fs.copyFile(path.join(root,'source-1','photo.png'),path.join(root,'destination','unorganized.png'));await fs.copyFile(path.join(root,'source-1','clip.mp4'),path.join(root,'destination','unorganized.mp4'));}
    await action({type:'preferences',patch:{basePath:'organized-library'}});
-   const reviewed=await action({type:'previewOrganization',destinationIndex:0});assert.equal(reviewed.review?.kind,'reorganize');assert.ok(reviewed.review!.plans[0].entries.length>=2);assert.equal(reviewed.review!.plans[0].source,path.join(root,'destination'));assert.equal(reviewed.review!.plans[0].root,path.join(root,'destination','organized-library'));
+   const reviewed=await action({type:'previewOrganization',destinationIndex:0});assert.equal(reviewed.review?.kind,'reorganize');{const reviewedPlan=reviewed.review!.plans[0];/* Video-root is the default layout, so videos are planned into their own folder. */assert.ok(reviewedPlan.entries.length+(reviewedPlan.videos?.entries.length??0)>=2,JSON.stringify({photos:reviewedPlan.entries.length,videos:reviewedPlan.videos?.entries.length}));}assert.equal(reviewed.review!.plans[0].source,path.join(root,'destination'));assert.equal(reviewed.review!.plans[0].root,path.join(root,'destination','organized-library'));
    const previous=new Set((await state()).jobs.map(job=>job.id));await js("Promise.all([window.importer.action({type:'applyReview'}),window.importer.action({type:'applyReview'})])");await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'organization finish');
    assert.equal((await state()).jobs.filter(job=>!previous.has(job.id)).length,1,'Double Apply must create only one organization job');
    await action({type:'refreshOrganization'});const recovery=(await state()).organizationRecovery?.find(job=>job.status==='complete');assert.ok(recovery,JSON.stringify((await state()).jobs));

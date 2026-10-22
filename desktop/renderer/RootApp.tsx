@@ -8,7 +8,7 @@ import {
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
   ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
   EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
-  LayoutGrid, List, ListOrdered, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
+  Circle, LayoutGrid, List, ListOrdered, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
@@ -17,7 +17,7 @@ import { errorPath, filePath, formatMessage, message, text, type Message } from 
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
-import { shortCapacity, sidebarFit } from './sidebar-fit';
+import { sidebarFit } from './sidebar-fit';
 import { settingsLocked } from '../settings-lock';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
@@ -67,6 +67,41 @@ export function truncateMiddle(value: string, max = 56): string {
 function ProgressFile({ file }: { file?: string }) {
   return file ? <span className="progress-file" data-testid="progress-file" title={file}>{truncateMiddle(file)}</span> : null;
 }
+/** The one progress layout every operation uses: the bar, then "{done} of {total} {unit}" with the percent, the speed,
+ * elapsed and time left, and the file it is on. Indeterminate only before the first event (or while no estimate exists),
+ * and never full before the work has ended. */
+export interface ProgressDisplayProps {
+  label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: Pick<Progress, 'speed' | 'fileRate'>;
+  startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
+  heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean;
+}
+export function ProgressDisplay(props: ProgressDisplayProps) {
+  const { t, formatNumber } = useTranslation();
+  const known = props.fraction !== undefined;
+  const shown = known ? (props.finished ? 1 : Math.min(.99, Math.max(0, props.fraction!))) : 0;
+  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.testId ? { 'data-testid': props.testId } : {})}>
+    {props.heading}
+    <ProgressBar value={shown} indeterminate={!known} label={props.label} />
+    <div className="progress-display-line">
+      <span className="progress-count" data-testid="progress-count">{props.count ?? t("Starting…")}</span>
+      {known && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
+      {props.speed && <ProgressSpeed progress={props.speed} />}
+      <ProgressTiming startedAt={props.startedAt} endedAt={props.endedAt} left={props.left} etaTestId={props.etaTestId} />
+      <ProgressFile file={props.file} />
+      {props.extra}{props.actions}
+    </div>
+  </div>;
+}
+/** Time left for an operation that is not a job (a review, a check, a listing). */
+function progressLeft(progress: Pick<Progress, 'eta' | 'total' | 'share'>, t: ReturnType<typeof createTranslator>): string | undefined {
+  return progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 || progress.share !== undefined ? t("Estimating time left…") : undefined;
+}
+/** An operation that is not a job, shown with the shared layout: a review, the backup folder check, the leftover check, the recovery listing. */
+export function OperationProgress({ progress, label, testId, className }: { progress?: Progress; label: string; testId?: string; className?: string }) {
+  const { t, formatNumber, formatBytes } = useTranslation();
+  if (!progress) return <ProgressDisplay label={label} testId={testId} className={className} />;
+  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t)} file={progress.file} />;
+}
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
 function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
   return <IconComponent size={size} strokeWidth={1.8} aria-hidden="true" className={className} />;
@@ -96,7 +131,20 @@ function formatSegments(inventory:Inventory){
   });
   formatSegmentCache.set(inventory,segments);return segments;
 }
-export function CapacityBar({ total, free, inventory, scanning, unavailable = 'Capacity unavailable' }: { total?: number; free?: number; inventory?: Inventory; scanning?: boolean; unavailable?: string }) {
+/** What a source's storage meter shows: its own, or for a library or folder the drive it sits on (the connected source or backup destination that holds its path). */
+export interface SourceCapacity { total?: number; free?: number; drive?: string }
+export function sourceCapacity(state: AppState, source: Source): SourceCapacity {
+  if (source.total !== undefined && source.free !== undefined) return { total: source.total, free: source.free };
+  if (!source.path) return {};
+  const inside = (root: string) => { const base = root.replace(/[\\/]+$/, ''); return source.path === root || source.path.startsWith(base + '/') || source.path.startsWith(base + '\\'); };
+  const holders = [
+    ...state.sources.filter(item => item.id !== source.id && item.path).map(item => ({ path: item.path, name: item.name, total: item.total, free: item.free })),
+    ...(state.destinationStatus ?? []).map(item => ({ path: item.path, name: item.path.split(/[\\/]/).filter(Boolean).pop() ?? item.path, total: item.total, free: item.free })),
+  ].filter(item => item.total !== undefined && item.free !== undefined && inside(item.path)).sort((a, b) => b.path.length - a.path.length);
+  const holder = holders[0];
+  return holder ? { total: holder.total, free: holder.free, drive: holder.name } : {};
+}
+export function CapacityBar({ total, free, inventory, scanning, unavailable = 'Capacity unavailable', driveName }: { total?: number; free?: number; inventory?: Inventory; scanning?: boolean; unavailable?: string; driveName?: string }) {
   const { t, formatBytes: bytes } = useTranslation();
   if (!total || !Number.isFinite(total) || total < 0 || free === undefined || !Number.isFinite(free)) return <div className="capacity-unavailable"><Icon icon={HardDrive} size={13} />{t(unavailable)}</div>;
   const available = Math.max(0,Math.min(total,free)), used=total-available;
@@ -108,7 +156,7 @@ export function CapacityBar({ total, free, inventory, scanning, unavailable = 'C
   const segments=[...classified.map(item=>({...item,width:item.size*scale/total*100,label:item.kind})),{kind:'other',color:'var(--storage-used)',size:Math.max(0,used-classifiedBytes*scale),width:Math.max(0,used-classifiedBytes*scale)/total*100,label:inventory?t('Other or unscanned'):t('Used')}].filter(item=>item.width>0);
   const percent=used/total*100;
   return <div className={`capacity storage-capacity ${percent>90?'capacity-low':''}`} data-testid="storage-capacity">
-    <div className="storage-heading"><span>{t("{used} of {total} used",{used:bytes(used),total:bytes(total)})}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
+    <div className="storage-heading"><span>{t("{free} free of {total}",{free:bytes(available),total:bytes(total)})}{driveName ? ` · ${driveName}` : ''}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
     <div className="storage-track" role="meter" aria-label={t("Storage used")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{used} used, {free} free, {total} total",{used:bytes(used),free:bytes(available),total:bytes(total)})}>
       {segments.map(segment=><span key={segment.kind} className="storage-segment" data-storage-kind={segment.kind} title={`${segment.label}: ${bytes(segment.size)}`} style={{width:`${segment.width}%`,background:segment.color}} />)}
       <span className="storage-free" data-storage-kind="free" style={{width:`${available/total*100}%`}} title={t("{size} free",{size:bytes(available)})}>{available/total>=.18&&<span>{bytes(available)}</span>}</span>
@@ -293,7 +341,7 @@ function SidebarCapacity({ total, free, unavailable, status }: { total?: number;
   const used = known ? Math.min(1, Math.max(0, 1 - free! / total!)) : 0;
   return <>
     <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${used > .9 ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
-    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(free), total: bytes(total) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{shortCapacity(free!, total!, bytes)}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
+    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(free), total: bytes(total) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{t("{size} free", { size: bytes(free) })}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
   </>;
 }
 
@@ -315,24 +363,28 @@ function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
   useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
 }
 
-function MiniSteps({ states }: { states: StepState[] }) {
+function MiniSteps({ states, moving = false }: { states: StepState[]; moving?: boolean }) {
   const { t } = useTranslation();
-  const names = [t("Scanning"), t("Copying"), t("Verifying")];
+  const names = [t("Scanning"), t(moving ? "Moving" : "Copying"), t("Verifying")];
   const labels: Record<StepState, string> = { pending: t("Waiting"), active: t("In progress"), done: t("Complete"), error: t("Needs attention"), paused: t("Paused"), skipped: t("Skipped") };
-  return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state}>{state === 'done' ? <Icon icon={Check} size={9} /> : state === 'error' ? '!' : state === 'skipped' ? '–' : index + 1}</i>)}</span>;
+  const icons: Record<StepState, LucideIcon | null> = { pending: null, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
+  return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state}>{icons[state] ? <Icon icon={icons[state]!} size={9} /> : null}</i>)}</span>;
 }
 
 export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
   const { t } = useTranslation();
   const verifyOff = state.preferences.verifyCopies === false;
+  // A library or folder with a job running (an organization, a folder backup) is a source here too, while it runs.
+  const running = state.jobs.filter(job => (activePhases.includes(job.phase) || job.phase === 'queued') && !state.sources.some(source => source.id === job.source.id)).map(job => job.source);
+  const listed = [...state.sources, ...running.filter((source, index) => running.findIndex(other => other.id === source.id) === index)];
   return <section className="sidebar-section" aria-labelledby="sidebar-sources"><h2 id="sidebar-sources">{t("Sources")}</h2>
-    {state.sources.length ? <ul>{state.sources.map(source => {
-      const job = state.jobs.find(item => !item.organization && item.source.id === source.id);
+    {listed.length ? <ul>{listed.map(source => {
+      const job = state.jobs.find(item => item.source.id === source.id && (!item.organization || !state.sources.some(other => other.id === source.id)));
       const scanning = !!state.scanningSources?.includes(source.id);
       const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
-      const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff);
+      const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff), capacity = sourceCapacity(state, source);
       return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
-        <SidebarCapacity total={source.total} free={source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} />} /></li>;
+        <SidebarCapacity total={capacity.total ?? source.total} free={capacity.free ?? source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} moving={!!job?.progress?.renames} />} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
   </section>;
 }
@@ -520,6 +572,11 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // Steps that only rename or check files report files per second instead of bytes.
   const fileRate = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.fileRate ?? 0),0);
   const startedAt = active.map(job => job.startedAt).filter(Boolean).sort()[0];
+  // What the files count counts depends on the step every running job is on.
+  const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
+  const filesLabel = doing.size === 1 ? ({ checked: "Files checked", verified: "Files verified", moved: "Files moved", copied: "Files copied", processed: "Files processed" } as const)[[...doing][0] as 'checked'] : "Files processed";
+  const warnings = gatherErrors(state).filter(error => error.severity === 'warning').length;
+  const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   const remaining = active.length && active.every(job => job.eta !== undefined) ? Math.max(...active.map(job => job.eta!)) : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
@@ -529,7 +586,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const organizing = active.length > 0 && active.every(job => job.organization), planningJob = active.find(job => !job.organization && job.progress?.phase === 'planning');
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
   const verify = state.preferences.verifyCopies !== false;
-  const measured = latestJobs.flatMap(job => { const fraction = job.organization ? organizationFraction(job) : importFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
+  const measured = latestJobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
   const overall = measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
       <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
@@ -537,13 +594,16 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
         <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
-        <div><dt><Icon icon={CheckCheck} size={16}/>{t("Files checked")}</dt><dd>{latestJobs.reduce((sum,job)=>sum+(job.progress?.completed??0),0).toLocaleString(language)}</dd><small>{t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
+        <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+(job.progress?.completed??0),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
-      <div className="dashboard-total" data-testid="total-progress">
-        <div><strong>{t("Total progress")}</strong><span>{overall !== undefined ? `${formatNumber(shownPercent(overall, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : planningJob?.progress ? `${importStatus(planningJob, t)} · ${planningJob.source.name} · ${progressCount(planningJob.progress, t, formatNumber, false, bytes)}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small><ProgressTiming startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined} etaTestId="total-eta" /></div>
-        <ProgressBar value={overall ?? 0} indeterminate={active.length > 0 && overall === undefined} label={t("Combined copy progress")} />
-      </div>
+      <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
+        heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
+        fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => job.phase === 'complete')}
+        count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
+        speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
+        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined}
+        file={lead?.progress?.file} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
     </section>);
@@ -556,13 +616,14 @@ function savedCategory(): SettingsCategory {
 }
 // Leftovers of interrupted runs on the connected destinations, removed automatically while nothing
 // runs; Clean up looks again now and also removes copies a re-import could continue.
-function LeftoverFiles({ state, act, busy }: { state: AppState; act: Dispatch; busy: boolean }) {
+export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Dispatch; busy: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const residue = state.residue;
   const files = (count: number) => count === 1 ? t("1 leftover file") : t("{count} leftover files", { count: formatNumber(count) });
   const status = residue?.checking ? t("Looking for leftover files…") : !residue?.checkedAt ? t("Not checked yet.") : residue.files ? `${files(residue.files)} · ${formatBytes(residue.bytes)}` : t("No leftover files.");
   return <div data-testid="residue-cleanup">
     <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
+    {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
     {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
     <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
@@ -617,7 +678,6 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
     </fieldset></>,
     folders: <>{locked}<fieldset className="settings-fieldset" disabled={busy}><FolderSettings state={state} act={act} /></fieldset></>,
     organization: <>
-      <SettingsSection title={t("After organizing")} icon={FolderCog}><div data-testid="remove-empty-folders-setting"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div data-testid="release-duplicates-setting"><Switch checked={p.releaseDuplicatesAfterOrganizing !== false} disabled={busy} onChange={releaseDuplicatesAfterOrganizing => act({ type: 'preferences', patch: { releaseDuplicatesAfterOrganizing } })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div></SettingsSection>
       <SettingsSection title={t("Backup folder check")} icon={ShieldCheck}>
         <div className="segmented" role="group" aria-label={t("Check the backup folder")}>{(['off', 'ask', 'auto'] as const).map(mode => <button key={mode} type="button" aria-pressed={(p.autoOrganizeBackup ?? 'ask') === mode} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: mode } })}>{{ off: t("Off"), ask: t("Ask"), auto: t("Automatic") }[mode]}</button>)}</div>
         <p className="settings-row-note">{p.autoOrganizeBackup === 'auto' ? t("Misplaced files are moved into place after each import.") : p.autoOrganizeBackup === 'off' ? t("Not checked automatically.") : t("Checked after each import. You choose when to move files.")}</p>
@@ -846,8 +906,8 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
         <div className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
           {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
           {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
-          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
-          <div className="source-footer"><Switch label={t("Enable media folder selection")} checked={state.preferences.allowFolderSource} disabled={settingsLocked(state)} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folders…")}</Button></div>
+          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, job.source)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} originalsSize={state.originalsSize} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, source)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
+          <div className="source-footer"><Switch label={t("Enable media folder selection")} detail={t("Import: copy, source untouched")} checked={state.preferences.allowFolderSource} disabled={settingsLocked(state)} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folders…")}</Button></div>
         </div>
       </section>
       {selectedJob?.inventory && <InventoryPanel inventory={selectedJob.inventory} sourceName={selectedJob.source.name} backup={selectedJob.backup} inspect={inspect} act={act} />}
@@ -919,12 +979,15 @@ export function sourceStepStates(job: Job | undefined, inventory: Inventory | un
   return [0, 1, 2].map(index => index === 2 && verifyOff ? 'skipped' : index < stage ? 'done' : index === stage ? current : 'pending');
 }
 export function SourceSteps({ job, inventory, scanning, verifyOff }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean }) {
-  const { t } = useTranslation();
+  const { t, formatNumber } = useTranslation();
   const states = sourceStepStates(job, inventory, scanning, verifyOff);
-  const icons: Record<StepState, LucideIcon | null> = { pending: null, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
-  return <ol className="source-steps" aria-label={t("Import steps")} data-testid="source-steps">{[t("Scanning"), t("Copying"), t("Verifying")].map((label, index) => {
-    const state = states[index]!, icon = icons[state];
-    return <li key={index} data-state={state} aria-current={state === 'active' ? 'step' : undefined} title={state === 'skipped' ? t("Verification after copy is off") : undefined}><span className="step-mark">{icon ? <Icon icon={icon} size={12} /> : index + 1}</span><span>{label}</span></li>;
+  const icons: Record<StepState, LucideIcon> = { pending: Circle, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
+  const names = [t("Scanning"), t(job?.progress?.renames ? "Moving" : "Copying"), t("Verifying")];
+  const fraction = job ? cardFraction(job) : undefined;
+  // One style for every step: done is checked, the current one shows its percent, the rest wait.
+  return <ol className="source-steps" aria-label={t("Import steps")} data-testid="source-steps">{names.map((label, index) => {
+    const state = states[index]!;
+    return <li key={index} data-state={state} aria-current={state === 'active' ? 'step' : undefined} title={state === 'skipped' ? t("Verification after copy is off") : undefined}><span className="step-mark"><Icon icon={icons[state]} size={12} /></span><span>{label}</span>{state === 'active' && fraction !== undefined && <span className="step-percent">{`${formatNumber(shownPercent(fraction, false))}%`}</span>}</li>;
   })}</ol>;
 }
 
@@ -935,18 +998,30 @@ export function SourceSteps({ job, inventory, scanning, verifyOff }: { job?: Job
 export function shownPercent(fraction: number, finished: boolean): number {
   return finished ? 100 : Math.min(99, Math.floor(Math.max(0, fraction) * 100));
 }
-function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
-  const files = progress.total ? progress.completed / progress.total : undefined, data = progress.totalBytes ? progress.bytes / progress.totalBytes : undefined;
-  // A listing's total is an estimate: its share stays below 100% until the listing ends and the next step begins.
-  if (progress.phase === 'planning' && progress.step === 'listing') { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
+/** Steps that count files, not bytes: a rename moves no data, and checks, deletes and downloads read none. */
+const fileSteps = ['history', 'earlier', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
+/** How far a step is, the same number the count and the percent show. Undefined only while nothing can be estimated. */
+export function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
+  // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
+  const files = progress.total ? progress.completed / progress.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
+  // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
+  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
-  return progress.phase === 'verifying' || progress.renames ? files ?? data : data ?? files;
+  return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
 }
-function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
+export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
   const counts = { completed: formatNumber(progress.completed), total: formatNumber(progress.total) };
   // While listing, the size found so far is the only other measure.
   if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
   if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
+  if (progress.step === 'downloading') return t("{completed} of {total} files downloaded", counts);
+  if (progress.step === 'removing') return t("{completed} of {total} extra files set aside", counts);
+  if (progress.step === 'scanning') return t("{completed} files looked at", counts);
+  if (progress.step === 'stashing') return t("Setting aside duplicates: {completed} of {total}", counts);
+  if (progress.step === 'tidying') return t("Finishing up: {completed} of {total}", counts);
+  if (progress.step === 'releasing') return t("{completed} of {total} files released", counts);
+  if (progress.step === 'restoring') return t("{completed} of {total} files put back", counts);
+  if (progress.step === 'deleting') return t("{completed} of {total} files deleted", counts);
   if (progress.step === 'history') return t("Reading organization history: {completed} of {total} files", counts);
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
@@ -971,11 +1046,21 @@ export function ProgressTiming({ startedAt, endedAt, left, etaTestId = 'eta' }: 
   return <span className="progress-elapsed" data-testid="timing"><Icon icon={Timer} size={12} />{time && <span data-testid="elapsed">{endedAt ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>}{time && left && ' · '}{left && <em className="progress-eta" data-testid={etaTestId}>{left}</em>}</span>;
 }
 /** A job's elapsed time with its time left, and its total time once it ends. */
-function JobTiming({ job }: { job: Job }) {
-  const { t } = useTranslation();
+function jobTiming(job: Job, t: ReturnType<typeof createTranslator>): { startedAt?: string; endedAt?: string; left?: string } {
   const running = activePhases.includes(job.phase), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
   const startedAt = running || (finished && job.phaseStartedAt) ? job.startedAt : undefined;
-  return <ProgressTiming startedAt={startedAt} endedAt={finished ? job.phaseStartedAt : undefined} left={running ? jobRemaining(job, t) : undefined} />;
+  return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left: running ? jobRemaining(job, t) : undefined };
+}
+/** The bar of a job's card: files for renames and organizations, the step's own share otherwise; a finished job is full. */
+export function cardFraction(job: Job): number | undefined {
+  if (job.phase === 'complete') return 1;
+  const progress = job.progress;
+  if (!progress) return undefined;
+  return job.organization || progress.renames ? organizationFraction(job) : progressFraction(progress);
+}
+/** The fraction the dashboard's total counts for one job: the card's own for renames and organizations, the whole import's otherwise. */
+function totalFraction(job: Job, verify: boolean): number | undefined {
+  return job.organization || job.progress?.renames ? organizationFraction(job) : importFraction(job, verify);
 }
 /** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
 export function formatRemaining(seconds: number, t: ReturnType<typeof createTranslator>): string {
@@ -1028,6 +1113,12 @@ export function importFraction(job: Job, verify = true): number | undefined {
   if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
   return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
 }
+/** What a running job is doing, for the dashboard's total. */
+function leadStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
+  if (job.organization) return organizationStatus(job, t);
+  const p = job.progress;
+  return p?.phase === 'planning' ? importStatus(job, t) : p?.phase === 'verifying' ? t("Verifying copied files") : p?.renames ? t("Moving files") : t("Copying files");
+}
 /** The step an import is on before copying, or its verification. */
 function importStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
   const step = job.progress?.phase === 'planning' ? job.progress.step : undefined;
@@ -1074,6 +1165,50 @@ export function RevealButton({ path, act, name }: { path: string; act: Dispatch;
   return <Button kind="quiet" icon={ExternalLink} data-testid="reveal" aria-label={name ? `${label}: ${name}` : label} title={`${label}: ${path}`} onClick={() => act({ type: 'reveal', path })} />;
 }
 /** A job that ended with errors: Retry runs it again. One stopped on a file it couldn't read or check also offers Skip (that file) and Skip all (every file that fails). */
+/** Delete originals already in the backup asks twice, like Delete recovery files: the first sheet names how many
+ * verified files and how much space, the second asks again with Cancel focused. Only the second confirmation deletes. */
+export function OriginalsConfirm({ step, name, size, onCancel, onConfirm }: { step: 'first' | 'second'; name: string; size?: AppState['originalsSize']; onCancel: () => void; onConfirm: () => void }) {
+  const { t, formatNumber, formatBytes: bytes } = useTranslation();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useAnimatedClose(dialog, onCancel);
+  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
+  const measured = size?.files !== undefined && size.bytes !== undefined;
+  const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!), name } : undefined;
+  const none = measured && size.files === 0;
+  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Counting verified originals…")}</p>;
+  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-originals-heading" data-testid={`delete-originals-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
+    <div className="dialog-heading"><h2 id="delete-originals-heading">{step === 'first' ? t("Delete originals already in the backup?") : t("Delete originals permanently?")}</h2></div>
+    <div className="activity-content">
+      {step === 'first' ? <><p>{t("Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.")}</p>{amount && !none && <p>{t("{count} files ({size}) will be deleted from {name}.", amount)}</p>}{none && <p>{t("No verified originals to delete.")}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.", amount)}</p>}
+      {detail}{measured && !!size.kept && <p className="muted">{t("{count} files will stay where they are.", { count: formatNumber(size.kept) })}</p>}
+    </div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount || none} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
+  </dialog>;
+}
+
+/** The separate "Delete originals already in the backup" step on a finished folder import's card. */
+export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; size?: AppState['originalsSize']; act: Dispatch; busy?: boolean }) {
+  const { t, formatNumber, formatBytes: bytes } = useTranslation();
+  const [step, setStep] = useState<DeleteRecoveryStep>('closed');
+  if (job.source.transport !== 'folder' || job.organization || job.phase !== 'complete') return null;
+  const measured = size?.jobId === job.id ? size : undefined;
+  const choose = (choice: 'open' | 'confirm' | 'cancel') => {
+    const next = nextDeleteRecoveryStep(step, choice);
+    if (choice === 'open') act({ type: 'measureOriginals', jobId: job.id });
+    setStep(next.step);
+    if (next.delete) act({ type: 'deleteOriginals', jobId: job.id });
+  };
+  const done = job.originalsDeleted;
+  if (!job.verifiedOriginals && !done) return null;
+  return <div className="source-choice" data-testid="delete-originals">
+    <p><Icon icon={Info} size={14} />{t("Import: copy, source untouched")}</p>
+    {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept) })}</p>}
+    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}</p>}
+    {!!job.verifiedOriginals && <div className="rule-actions"><Button kind="danger" icon={Trash2} data-testid="delete-originals-button" disabled={busy || !!job.deletingOriginals} title={t("Deletes only source files verified in the backup")} onClick={() => choose('open')}>{t("Delete originals already in the backup")}</Button></div>}
+    {step !== 'closed' && <OriginalsConfirm key={step} step={step} name={job.source.name} size={measured} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
+  </div>;
+}
+
 function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   if (job.phase !== 'error') return null;
@@ -1084,13 +1219,13 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
 }
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
-  const progress = job.progress, running = activePhases.includes(job.phase) || job.phase === 'queued', paused = job.phase === 'stopped' && !!job.paused;
-  const fraction = organizationFraction(job);
-  const label = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
+  const progress = job.progress, working = activePhases.includes(job.phase), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
+  const fraction = queued ? 0 : cardFraction(job);
+  const count = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queued") : !progress ? undefined : progressCount(progress, t, formatNumber, true, formatBytes);
+  const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
-    <div className="organization-progress-line"><span>{label}</span><JobTiming job={job} />{activePhases.includes(job.phase) && progress && hasSpeed(progress) && <ProgressSpeed progress={progress} />}{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
-    {(running || paused) && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
-    {activePhases.includes(job.phase) && progress && <ProgressFile file={progress.file} />}
+    <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={job.phase === 'complete'} count={count}
+      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={working && progress ? progress.file : undefined} actions={actions} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
@@ -1103,19 +1238,20 @@ export function scanTotalBytes(source: Source, previous?: Inventory): number | u
 }
 /** Files checked (or read) before anything is written: import and organization reviews, the backup folder check. */
 export function PlanningProgress({ progress, label }: { progress: Progress; label: string }) {
-  const { t, formatNumber } = useTranslation();
-  const fraction = progressFraction(progress);
-  return <div className="source-progress" data-testid="planning-progress"><ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={label} /><div><span>{progress.total || progress.share !== undefined ? progressCount(progress, t, formatNumber) : t("Listing files…")}</span><ProgressTiming startedAt={progress.startedAt} left={progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 ? t("Estimating time left…") : undefined} /><ProgressSpeed progress={progress} /><ProgressFile file={progress.file} /></div></div>;
+  return <OperationProgress progress={progress} label={label} testId="planning-progress" className="progress-planning" />;
 }
 // Listing: share of the drive's used space already listed. Metadata: share of media files read.
 export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; usedBytes?: number }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
   const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
-  return <div className="source-scan-progress" data-testid="scan-progress" aria-live="polite">
-    <div><span>{reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : t("Listing files…")}{fraction !== undefined && <b className="scan-percent"> {t("{percent}% scanned", { percent: formatNumber(Math.floor(fraction * 100)) })}</b>}</span><ProgressTiming startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined} />{reading && <ProgressSpeed progress={{ speed: 0, fileRate: cameraInfo.fileRate }} />}{!reading && listing && <ProgressSpeed progress={{ speed: 0, fileRate: listing.fileRate }} />}{!reading && <ProgressFile file={listing?.file} />}{!reading && listing && <strong>{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong>}</div>
-    <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} scanning", { name: sourceName })} />
-  </div>;
+  const count = reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : listing ? t("Listing files…") : undefined;
+  return <ProgressDisplay testId="scan-progress" className="progress-scan" label={t("{name} scanning", { name: sourceName })} fraction={fraction}
+    count={count}
+    speed={reading ? { speed: 0, fileRate: cameraInfo.fileRate } : listing ? { speed: 0, fileRate: listing.fileRate } : undefined}
+    startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined}
+    file={reading ? undefined : listing?.file}
+    extra={!reading && listing ? <strong className="scan-found">{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong> : undefined} />;
 }
 
 // A drive or folder that holds a backup destination: planning leaves the backup folder out.
@@ -1125,7 +1261,7 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, startBlocked = false, needsChoice = false, canMoveUp = false }: { canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+function SourceRow({ source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize }: { originalsSize?: AppState['originalsSize']; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
@@ -1140,24 +1276,29 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
   const statusText = excluded ? t("Not selected · won't be imported") : paused ? t("Paused") : already ? t("Already imported") : status;
   return <article data-source-id={source.id} className={`source-row ${selected ? 'source-selected' : ''} ${job?.phase === 'error' ? 'source-error' : ''} ${excluded ? 'source-unselected' : selectionKnown(source) ? 'source-included' : ''} ${already ? 'source-already' : ''} ${needsChoice ? 'source-needs-choice' : ''}`}>
     <div className="source-row-top"><div className="source-device"><Icon icon={icon} size={21} /></div><div className="source-identity"><h3 title={source.name}>{source.name}</h3><span className={`source-status ${excluded ? 'unselected' : paused ? 'paused' : already ? 'already' : job?.phase ?? 'ready'}`}><Icon icon={excluded ? Pause : paused ? Pause : already ? CheckCheck : statusIcon} size={13} /><span key={statusText} className="source-status-text">{statusText}</span>{job?.backup && <span className="small-tag">{t("Folder backup")}</span>}</span></div><div className="source-row-actions">{canMoveUp && <Button kind="quiet" icon={ArrowUpToLine} data-testid="move-to-top" aria-label={t("Move {name} to the top", { name: source.name })} title={t("Move to the top")} onClick={() => act({ type: 'moveToTop', sourceId: source.id })} />}{selectionKnown(source) && <SelectionChip source={source} act={act} disabled={active || queued} />}<Button kind="quiet" icon={scanning ? LoaderCircle : ScanLine} disabled={excluded || source.transport === 'camera' || reviewBusy || active || queued || scanning} aria-label={t("Scan media on {name}", { name: source.name })} title={source.transport === 'camera' ? t("Use Review for USB cameras.") : t("Read photo and video formats without copying files")} onClick={() => act({ type: 'scanSource', sourceId: source.id })}>{scanning ? t("Scanning…") : t("Scan media")}</Button>{!active && !queued && <Button kind={mirrorReview ? 'primary' : 'quiet'} icon={Eye} disabled={excluded || !configured || reviewBusy} aria-label={t("Review import from {name}", { name: source.name })} title={t("Review files before copying")} onClick={() => act({ type: 'preview', sourceId: source.id })}>{t("Review")}</Button>}{active || queued ? <><Button icon={Pause} disabled={!!job?.stopping} aria-label={t("Pause {name}", { name: source.name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} disabled={job?.stopping === 'stop'} aria-label={t("Stop source")} title={t("Stop source")} onClick={() => act({ type: 'stop', jobId: job!.id })} /></> : <Button icon={paused ? Play : ArrowDownToLine} kind={paused ? 'primary' : 'secondary'} disabled={excluded || !configured || startBlocked} onClick={() => act({ type: 'start', sourceId: source.id })}>{paused ? t("Continue") : t("Import")}</Button>}</div></div>
-    {already && <div className="source-progress source-progress-calm" data-testid="already-imported"><ProgressBar value={1} label={t("{name} copy progress", { name: source.name })} /><div><span>{progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")}</span></div></div>}
+    {already && <ProgressDisplay calm className="progress-in-card" testId="already-imported" fraction={1} finished label={t("{name} copy progress", { name: source.name })} count={progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")} />}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
-    {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
-    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <JobTiming job={job} />}<strong>{hasSpeed(progress) && active ? <ProgressSpeed progress={progress} /> : job?.phase === 'complete' ? t("Verified") : '—'}</strong>{active && progress.phase === 'planning' && <ProgressFile file={progress.file} />}</div></div>}
+    {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
+    {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={job?.phase === 'complete'}
+      count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
+      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined}
+      extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
+    {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
-    {active && !progress && <ProgressBar value={0} indeterminate label={t("{name} scanning", { name: source.name })} />}
-    {job?.detail && active && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
+    {active && !progress && <ProgressDisplay className="progress-in-card" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
+    {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <details className="source-disclosure">
-      <summary aria-label={t("Drive details")}><div className="source-compact-capacity"><CapacityBar total={source.total} free={source.free} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
+      <summary aria-label={t("Drive details")}><div className="source-compact-capacity"><CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
       <div className="source-expanded-details">
         <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
         <SourceMediaSummary source={source} inventory={inventory} scanning={scanning} />
         {inventory && <SkippedFilesNotice inventory={inventory} />}
+        {job?.problemFiles && !job.organization && <ProblemFilesReview review={{ kind: 'import', problems: job.problemFiles }} act={act} />}
         {cameraInfo && <SourceCameraInformation sourceId={source.id} info={cameraInfo} />}
         {job?.inventory && <button type="button" className="inventory-open" aria-pressed={selected} onClick={onSelect}><Icon icon={Files} size={15} /><span>{t("{count} included files", { count: job.inventory.files.filter(file => file.included).length.toLocaleString(language) })}</span><span>{bytes(job.inventory.bytes)}</span><Icon icon={ChevronRight} size={15} /></button>}
       </div>
@@ -1306,6 +1447,7 @@ function BackupCheck({ state, act, busy, organizeBusy, destinationIndex }: { sta
   const modes: { value: AutoOrganizeBackup; label: string }[] = [{ value: 'off', label: t("Off") }, { value: 'ask', label: t("Ask") }, { value: 'auto', label: t("Automatic") }];
   return <section className="organization-action backup-check" aria-labelledby="backup-check-heading" data-testid="backup-check"><CardHeader icon={FolderCog} id="backup-check-heading" title={t("Backup folder")} detail={mode === 'auto' ? t("Misplaced files are moved into place after each import.") : mode === 'ask' ? t("Checked after each import. You choose when to move files.") : t("Not checked automatically.")}><Button kind={misplaced ? 'primary' : 'secondary'} icon={FolderCog} disabled={organizeBusy} onClick={() => act({ type: 'organizeBackup', destinationIndex })}>{t("Organize backup")}</Button></CardHeader>
     <div className="segmented" role="group" aria-label={t("Check the backup folder")}>{modes.map(item => <button key={item.value} type="button" aria-pressed={mode === item.value} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: item.value } })}>{item.label}</button>)}</div>
+    {state.misplacedProgress?.[destination] && <OperationProgress progress={state.misplacedProgress[destination]} label={t("Backup folder check progress")} testId="misplaced-progress" />}
     {found && (misplaced ? <p className="misplaced-files" data-testid="misplaced-files" role="status"><Icon icon={CircleAlert} size={15} /><span>{misplacedText(found.count, t, formatNumber)} · {formatBytes(found.bytes)}</span></p> : <p className="misplaced-files is-clean" role="status"><Icon icon={CheckCircle2} size={15} /><span>{t("Backup folder is in order.")}</span></p>)}
   </section>;
 }
@@ -1319,17 +1461,18 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
   const recovery = state.organizationRecovery ?? [];
   const runningOrganization = state.jobs.find(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'));
   const organizing = organizeBusy(state);
+  const organizeOptions = state.organizeOptions ?? { removeEmptyFolders: true, releaseDuplicates: true };
   return <div className="organization-page">
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
     {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
-    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy || settingsLocked(state)} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
-    <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")}><Button icon={FolderOpen} disabled={organizing} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></CardHeader></section>
+    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={organizeOptions.removeEmptyFolders} disabled={busy} onChange={removeEmptyFolders => act({ type: 'organizeOptions', removeEmptyFolders })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div className="organization-option" data-testid="release-duplicates"><Switch checked={organizeOptions.releaseDuplicates} disabled={busy} onChange={releaseDuplicates => act({ type: 'organizeOptions', releaseDuplicates })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div><div className="organization-option" data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles !== false} disabled={busy} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div><p className="inline-note" data-testid="organize-default"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
+    <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")}><Button icon={FolderOpen} disabled={organizing} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></CardHeader><p className="inline-note"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p></section>
     {state.busyReview && <div role="status" aria-live="polite"><p className="notice"><Icon icon={LoaderCircle} />{state.reviewProgress ? t("Checking organization files: {count} · {file}", { count: formatNumber(state.reviewProgress.completed), file: state.reviewProgress.file }) : t("Preparing organization review…")}</p>{state.reviewProgress && <PlanningProgress progress={state.reviewProgress} label={t("Organization review progress")} />}</div>}
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
     </div>
 
   </div>;
@@ -1450,7 +1593,34 @@ export function MirrorRemovals({ review }: { review: NonNullable<AppState['revie
   </section>;
 }
 
-function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dispatch; inspect: (path: string) => void }) {
+export function ProblemFilesReview({ review, act, busy = false }: { review: Pick<NonNullable<AppState['review']>, 'kind' | 'problems' | 'collectProblemFiles' | 'destinationIndex'>; act: Dispatch; busy?: boolean }) {
+  const { t, formatNumber } = useTranslation();
+  const problems = review.problems ?? [];
+  if (!problems.length) return null;
+  const organizing = review.kind === 'reorganize';
+  const collected = problems.filter(item => item.collected), left = problems.length - collected.length;
+  const groups = (['empty', 'unreadable'] as const).map(group => ({ group, count: problems.filter(item => item.group === group).length })).filter(item => item.count > 0);
+  const groupName = (group: 'empty' | 'unreadable') => group === 'empty' ? t("Empty files") : t("Unreadable files");
+  const reasonName = (reason: 'empty' | 'emptyPrimary' | 'unreadable') => reason === 'unreadable' ? t("Could not be read") : t(message(reason === 'empty' ? 'inventory.emptyFile' : 'inventory.emptyPrimaryFile'));
+  const shown = problems.slice(0, 200);
+  const summary = [
+    organizing && collected.length > 0 && t("{count} problem files will be collected into Problem files/…", { count: formatNumber(collected.length) }),
+    organizing && left > 0 && t("{count} problem files will stay where they are", { count: formatNumber(left) }),
+    !organizing && t("{count} problem files are skipped and not copied", { count: formatNumber(problems.length) }),
+  ].filter(Boolean).join(' · ');
+  return <section className="problem-files" data-testid="problem-files">
+    <details className="skipped-files">
+      <summary><Icon icon={Info} size={14} /><span>{summary}</span><Icon icon={ChevronDown} size={14} /></summary>
+      <div className="skipped-files-content">
+        <div><dl>{groups.map(item => <div key={item.group}><dt>{groupName(item.group)}</dt><dd>{formatNumber(item.count)}</dd></div>)}</dl></div>
+        <div><dl>{shown.map(item => <div key={item.path}><dt>{item.relative}</dt><dd>{reasonName(item.reason)}</dd></div>)}</dl>{problems.length > shown.length && <p>{t("and {count} more", { count: formatNumber(problems.length - shown.length) })}</p>}</div>
+      </div>
+    </details>
+    {organizing && review.destinationIndex !== undefined && <div data-testid="collect-problem-files-review"><Switch checked={review.collectProblemFiles !== false} disabled={busy} onChange={collectProblemFiles => act({ type: 'previewOrganization', destinationIndex: review.destinationIndex!, collectProblemFiles })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div>}
+  </section>;
+}
+
+export function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dispatch; inspect: (path: string) => void }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const review = state.review;
   const [query, setQuery] = useState('');
@@ -1464,5 +1634,5 @@ function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dispatch; 
   const pageSize = 100;
   const lastPage = Math.max(0, Math.ceil(visible.length / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
-  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div><div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
+  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p><p className="review-mode" data-testid="review-mode"><strong>{review.kind === 'reorganize' ? t("Organize: move, source removed") : t("Import: copy, source untouched")}</strong>{review.kind === 'reorganize' && review.options && <> · {review.options.removeEmptyFolders ? t("Emptied source folders are removed") : t("Emptied source folders are kept")} · {review.options.releaseDuplicates ? t("Confirmed duplicates are released") : t("Confirmed duplicates are kept for undo")}</>}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div><div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><ProblemFilesReview review={review} act={act} busy={!!state.busyReview} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
 }

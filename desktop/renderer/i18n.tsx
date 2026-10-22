@@ -105,6 +105,26 @@ Combined active sources|所有活动来源合计|所有進行中來源合計|実
 No active transfers|没有正在进行的传输|沒有進行中的傳輸|転送は実行されていません
 Transferred|已传输|已傳輸|転送済み
 No transfer planned|尚无传输计划|尚無傳輸計畫|転送予定なし
+Starting…|正在开始…|開始中…|開始しています…
+Moving|移动|移動|移動
+Files processed|已处理的文件|已處理的檔案|処理済みファイル
+Files verified|已验证的文件|已驗證的檔案|検証済みファイル
+Files moved|已移动的文件|已移動的檔案|移動済みファイル
+Files copied|已复制的文件|已複製的檔案|コピー済みファイル
+{complete} sources complete · {errors} need attention · {warnings} warnings|{complete} 个来源完成 · {errors} 个需处理 · {warnings} 个警告|{complete} 個來源完成 · {errors} 個需處理 · {warnings} 個警告|{complete} 件完了 · {errors} 件要確認 · 警告 {warnings} 件
+The backup folder {folder} isn't scanned as a source|备份文件夹 {folder} 不会作为来源被扫描|備份資料夾 {folder} 不會作為來源被掃描|バックアップフォルダー {folder} はソースとしてスキャンされません
+The backup folder isn't scanned as a source|备份文件夹不会作为来源被扫描|備份資料夾不會作為來源被掃描|バックアップフォルダーはソースとしてスキャンされません
+{completed} of {total} files downloaded|已下载 {completed}/{total} 个文件|已下載 {completed}/{total} 個檔案|{total} 件中 {completed} 件ダウンロード済み
+{completed} of {total} extra files set aside|已搁置 {completed}/{total} 个多余文件|已擱置 {completed}/{total} 個多餘檔案|余分なファイル {total} 件中 {completed} 件を退避済み
+{completed} files looked at|已查看 {completed} 个文件|已查看 {completed} 個檔案|{completed} 件のファイルを確認済み
+Setting aside duplicates: {completed} of {total}|正在搁置重复文件：{completed}/{total}|正在擱置重複檔案：{completed}/{total}|重複ファイルを退避中：{total} 件中 {completed} 件
+Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在收尾：{completed}/{total}|仕上げ中：{total} 件中 {completed} 件
+{completed} of {total} files released|已释放 {completed}/{total} 个文件|已釋放 {completed}/{total} 個檔案|{total} 件中 {completed} 件を解放済み
+{completed} of {total} files put back|已放回 {completed}/{total} 个文件|已放回 {completed}/{total} 個檔案|{total} 件中 {completed} 件を元に戻し済み
+{completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
+Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
+Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
+Organization history progress|整理记录读取进度|整理記錄讀取進度|整理履歴の読み込み状況
 Files checked|已检查的文件|已檢查的檔案|確認済みファイル
 Destinations ready|已就绪的目标|已就緒的目的地|準備済みの保存先
 Choose a backup destination|选择备份目标|選擇備份目的地|バックアップ先を選択
@@ -241,6 +261,15 @@ Photo folder template|照片文件夹模板|照片資料夾範本|写真のフ�
 This folder path is a custom template. Edit it under Advanced, or start again with the folder builder.|此文件夹路径是自定义模板。可在“高级”中编辑，或使用文件夹构建器重新设置。|此資料夾路徑是自訂範本。可在「進階」中編輯，或使用資料夾建構器重新設定。|このフォルダー構成はカスタムテンプレートです。「詳細」で編集するか、フォルダービルダーで設定し直してください。
 Use the folder builder|使用文件夹构建器|使用資料夾建構器|フォルダービルダーを使う
 Folder template|文件夹模板|資料夾範本|フォルダーテンプレート
+Collect problem files|收集问题文件|收集問題檔案|問題のあるファイルを集める
+Move 0-byte files and their companions into Problem files. Undo puts them back.|将 0 字节文件及其伴随文件移入“Problem files”。撤销会把它们放回原处。|將 0 位元組檔案及其隨附檔案移入「Problem files」。還原會把它們放回原處。|0 バイトのファイルとその関連ファイルを「Problem files」に移動します。取り消すと元に戻ります。
+{count} problem files will be collected into Problem files/…|{count} 个问题文件将被收集到 Problem files/…|{count} 個問題檔案將被收集到 Problem files/…|問題のあるファイル {count} 件を Problem files/… に集めます
+{count} problem files will stay where they are|{count} 个问题文件将保留在原处|{count} 個問題檔案將保留在原處|問題のあるファイル {count} 件はそのまま残ります
+{count} problem files are skipped and not copied|已跳过 {count} 个问题文件，不会复制|已略過 {count} 個問題檔案，不會複製|問題のあるファイル {count} 件はスキップされ、コピーされません
+Empty files|空文件|空檔案|空のファイル
+Unreadable files|无法读取的文件|無法讀取的檔案|読み取れないファイル
+Could not be read|无法读取|無法讀取|読み取れませんでした
+and {count} more|还有 {count} 个|還有 {count} 個|ほか {count} 件
 Edited exports folder|编辑导出文件夹|編輯匯出資料夾|編集済み書き出しフォルダー
 Editor-exported photos go in this folder within each month. RAW originals and XMP stay together.|编辑器导出的照片会保存在每月目录中的此文件夹内。RAW 原片和 XMP 保存在一起。|編輯器匯出的照片會儲存在每月目錄中的此資料夾內。RAW 原始檔與 XMP 儲存在一起。|編集ソフトから書き出した写真を各月のこのフォルダーに保存します。RAWの原本とXMPは一緒に保存します。
 Your edited export lands here|编辑导出的照片将保存在这里|編輯匯出的照片將儲存在這裡|編集済み写真の保存先
@@ -473,7 +502,6 @@ Verifying|校验|驗證|検証
 Already imported|已导入|已匯入|読み込み済み
 All {count} files are in the backup and verified|全部 {count} 个文件已在备份中并通过校验|全部 {count} 個檔案已在備份中並通過驗證|{count} 件すべてがバックアップ済みで検証済みです
 All files are in the backup and verified|所有文件已在备份中并通过校验|所有檔案已在備份中並通過驗證|すべてのファイルがバックアップ済みで検証済みです
-Your backup folder is left out of this drive|此驱动器中的备份文件夹会被排除|此磁碟中的備份資料夾會被排除|このドライブ内のバックアップフォルダーは除外されます
 A destination is offline. Reconnect it to import.|有目标离线，请重新连接后再导入。|有目的地離線，請重新連接後再匯入。|保存先がオフラインです。再接続してから読み込んでください。
 A verified copy on both drives.|在两个驱动器上各保存一份校验副本。|在兩個磁碟上各保存一份驗證副本。|両方のドライブに検証済みコピーを保存します。
 Apply or discard the review.|请应用或放弃此审核。|請套用或放棄此審核。|確認内容を適用するか破棄してください。
@@ -781,6 +809,24 @@ Review changes…|预览更改…|預覽變更…|変更を確認…
 Library organization|媒体库整理|媒體庫整理|ライブラリの整理
 Organization waits for queued imports to finish. Every new file is verified before its original is retained in the recovery store. Use Review changes to inspect the paths first.|整理会等待排队的导入完成。每个新文件都会经过验证，然后将原文件保留在恢复目录中。可使用“预览更改”先检查路径。|整理會等待佇列中的匯入完成。每個新檔案都會經過驗證，然後將原始檔案保留在復原目錄中。可使用「預覽變更」先檢查路徑。|整理は待機中のインポートが完了してから始まります。新しいファイルを検証してから、オリジナルを復旧領域に保持します。先にパスを確認するには「変更を確認」を使用してください。
 How camera folders are chosen|如何选择相机文件夹|如何選擇相機資料夾|カメラ別フォルダーの選択方法
+Import: copy, source untouched|导入：复制，来源保持不变|匯入：複製，來源保持不變|インポート：コピー、ソースはそのまま
+Organize: move, source removed|整理：移动，来源文件已移除|整理：移動，來源檔案已移除|整理：移動、ソースから削除
+Emptied source folders are removed|已清空的来源文件夹会被删除|已清空的來源資料夾會被刪除|空になった元フォルダーは削除されます
+Emptied source folders are kept|已清空的来源文件夹会保留|已清空的來源資料夾會保留|空になった元フォルダーは残ります
+Confirmed duplicates are released|已确认的重复文件会被释放|已確認的重複檔案會被釋放|確認済みの重複ファイルは解放されます
+Confirmed duplicates are kept for undo|已确认的重复文件会保留以便撤销|已確認的重複檔案會保留以便復原|確認済みの重複ファイルは取り消し用に保持されます
+Delete originals already in the backup|删除已在备份中的原文件|刪除已在備份中的原始檔案|バックアップ済みの元のファイルを削除
+Deletes only source files verified in the backup|只删除已在备份中验证过的来源文件|只刪除已在備份中驗證過的來源檔案|バックアップで検証済みのソースファイルだけを削除します
+Delete originals already in the backup?|要删除已在备份中的原文件吗？|要刪除已在備份中的原始檔案嗎？|バックアップ済みの元のファイルを削除しますか？
+Delete originals permanently?|要永久删除原文件吗？|要永久刪除原始檔案嗎？|元のファイルを完全に削除しますか？
+Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.|只会删除已复制并通过校验和验证的备份文件对应的原文件。未复制的文件会保留在原处。|只會刪除已複製並通過檢查碼驗證的備份檔案所對應的原始檔案。未複製的檔案會保留在原處。|コピーされ、チェックサムでバックアップ内の確認が取れたファイルだけを削除します。コピーされていないファイルはそのまま残ります。
+{count} files ({size}) will be deleted from {name}.|将从 {name} 删除 {count} 个文件（{size}）。|將從 {name} 刪除 {count} 個檔案（{size}）。|{name} から {count} 件（{size}）のファイルを削除します。
+No verified originals to delete.|没有可删除的已验证原文件。|沒有可刪除的已驗證原始檔案。|削除できる検証済みの元のファイルはありません。
+This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.|这将从 {name} 永久删除 {count} 个文件（{size}）。删除前会逐个与备份中的副本核对。此操作无法撤销。|這將從 {name} 永久刪除 {count} 個檔案（{size}）。刪除前會逐一與備份中的副本核對。此操作無法復原。|{name} から {count} 件（{size}）のファイルを完全に削除します。削除前に、それぞれバックアップ内のコピーと照合します。この操作は取り消せません。
+Counting verified originals…|正在统计已验证的原文件…|正在統計已驗證的原始檔案…|検証済みの元のファイルを数えています…
+{count} files will stay where they are.|有 {count} 个文件会保留在原处。|有 {count} 個檔案會保留在原處。|{count} 件のファイルはそのまま残ります。
+{count} originals deleted ({size}); {kept} left in place|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残しました
+Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {
