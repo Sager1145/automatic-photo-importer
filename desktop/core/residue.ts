@@ -113,16 +113,22 @@ async function journalLeftovers(storage:string,root:string,items:ResidueItem[],s
     if(any&&emptied) await folder(originals);
   }
 }
-async function walk(folder:string,root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
+/** What a look through the backup folders has covered: entries seen, and top-level folders finished of the total
+ * (the share the interface bars by). */
+export interface ResidueScan {looked:number;done:number;total:number;file:string;}
+async function walk(folder:string,root:string,items:ResidueItem[],signal?:AbortSignal,scan?:{state:ResidueScan;emit():void},top=false):Promise<void> {
   checkAbort(signal);
   const entries=await list(folder);
+  if(scan){scan.state.looked+=entries.length;scan.state.file=path.relative(root,folder)||path.basename(root);scan.emit();}
   await importLeftovers(folder,entries,root,items,signal);
+  if(scan&&top){scan.state.done++;scan.emit();}
   for(const entry of entries) {
     if(!entry.isDirectory()) continue;
     const child=path.join(folder,entry.name);
     if(isRecoveryName(entry.name)) await journalLeftovers(child,root,items,signal);
     // Other hidden folders (.Trashes, .Spotlight-V100, .mirror-removed…) are not this app's to clean.
-    else if(!entry.name.startsWith('.')) await walk(child,root,items,signal);
+    else if(!entry.name.startsWith('.')) await walk(child,root,items,signal,scan);
+    if(scan&&top){scan.state.done++;scan.state.file=path.relative(root,child);scan.emit();}
   }
 }
 
@@ -132,12 +138,20 @@ const used=async(folder:string,inUse?:InUse)=>!!inUse&&(await Promise.all(inUse(
 /** Read-only: the app's leftovers under each backup folder in `roots`, and its camera and preview
  * folders in `temporary` (the system temporary folder) other than those `inUse`. User files are
  * never listed, whatever their names. */
-export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal}={}):Promise<Residue> {
+export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal;/** Hears how far the look has come, as it goes (the caller throttles). */onProgress?:(scan:ResidueScan)=>void}={}):Promise<Residue> {
   const items:ResidueItem[]=[];
   // Canonical paths, as removal checks every item is still inside its root (macOS /var is /private/var).
   const canonical=(folder:string)=>fs.realpath(folder).catch(()=>undefined);
-  for(const root of roots){const real=await canonical(root);if(real)await walk(real,real,items,options.signal);}
+  // Units: each backup folder's own files, each folder directly inside it, each leftover folder in the temporary folder.
+  const reals:string[]=[];
+  for(const root of roots){const real=await canonical(root);if(real)reals.push(real);}
   const temporary=options.temporary&&await canonical(options.temporary);
+  const temporaryNames=temporary?(await list(temporary)).filter(entry=>entry.isDirectory()&&temporaryFolder.test(entry.name)).map(entry=>entry.name):[];
+  const top=await Promise.all(reals.map(async real=>1+(await list(real)).filter(entry=>entry.isDirectory()).length));
+  const state:ResidueScan={looked:0,done:0,total:top.reduce((sum,count)=>sum+count,0)+temporaryNames.length,file:''};
+  const scan=options.onProgress&&{state,emit:()=>options.onProgress!({...state})};
+  scan?.emit();
+  for(const real of reals)await walk(real,real,items,options.signal,scan,true);
   if(temporary) for(const entry of await list(temporary)) {
     checkAbort(options.signal);
     const folder=path.join(temporary,entry.name);
@@ -145,6 +159,7 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
     // A preview removes its own folder when it finishes.
     const stat=await fs.lstat(folder,{bigint:true}).catch(()=>undefined);
     if(stat) items.push({path:folder,kind:'temporary',bytes:await folderBytes(folder,options.signal),root:temporary,stat});
+    state.done++;state.looked++;state.file=entry.name;scan?.emit();
   }
   return summary(items);
 }
@@ -157,12 +172,17 @@ function summary(items:ResidueItem[]):Residue {
 /** Remove what findResidue listed, each only while it is still the very file or folder found.
  * Folders go only when empty. keepResumable leaves copies a re-import could continue and those not
  * proven dead. */
-export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
+export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
+  // Only what this run removes counts toward the total: kept copies are not work.
+  const doomed=residue.items.filter(item=>!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
+  let handled=0,handledBytes=0;
+  options.onProgress?.(0,doomed.length,0,doomedBytes,'');
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
     if(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) continue;
+    handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);
       const now=await fs.lstat(item.path,{bigint:true});
@@ -176,6 +196,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
       }
       left.pop();removed.files++;removed.bytes+=item.bytes;
     } catch { /* Gone, changed, in use or unavailable: left for a later check. */ }
+    options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path));
   }
   return {removed,left:summary(left)};
 }
