@@ -146,3 +146,20 @@ test('the backup folder check reports each file it checks out of the total',asyn
  assert.equal(found.count,2);
  assert.deepEqual(seen.map(([count])=>count).sort(),[1,2,3]);assert.ok(seen.every(([,total])=>total===3));
 });
+
+test('a video-root organization supersedes an earlier journal kept in the photo folder',async t=>{
+ const {drive,photos,videos}=await fixture(t,[]);
+ const {getOrganizationRecovery}=await import('../core/index');
+ const clip=path.join(drive,'2025','C0016.MOV');await fs.mkdir(path.dirname(clip),{recursive:true});await fs.writeFile(clip,'bytes of a Sony clip');
+ // First: the year folder organized into one backup folder, journaled in photobackup.
+ const first=(await plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
+ assert.deepEqual((await executeReorganization(first,undefined,undefined,{strategy:'rename'})).errors,[]);
+ // Then: photos and videos split; the clip moves on to videobackup under a journal kept there.
+ const options={...base,layout:'video-root' as const,videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true};
+ const {plans:[second]}=await plan(drive,[photos],options,metadata);
+ for(const part of parts(second!))assert.deepEqual((await executeReorganization(part,undefined,undefined,{strategy:'rename'})).errors,[]);
+ await fs.access(path.join(videos,camera,'C0016.MOV'));
+ const earlier=await getOrganizationRecovery(photos),later=await getOrganizationRecovery(videos);
+ assert.deepEqual(earlier.filter(job=>job.error),[],'the earlier journal is superseded, not reported as broken');
+ assert.equal(later.length,1);assert.equal(later[0]!.error,undefined);assert.equal(later[0]!.status,'complete');
+});

@@ -427,7 +427,9 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
   const jobs = state.jobs, active = jobs.filter(job => activePhases.includes(job.phase)), queued = jobs.filter(job => job.phase === 'queued');
   const latestJobs = jobs.filter((job,index) => jobs.findIndex(item => item.source.id === job.source.id) === index);
-  const transferred = latestJobs.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = latestJobs.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
+  // Bytes count only once copying starts: planning measures the source, not the transfer.
+  const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning');
+  const transferred = transferring.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = transferring.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
   const speed = active.reduce((sum,job) => sum + (job.progress?.speed ?? 0),0);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   const remaining = active.length && active.every(job => job.eta !== undefined) ? Math.max(...active.map(job => job.eta!)) : undefined;
@@ -435,8 +437,11 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const readyDestinations = (state.destinationStatus ?? []).filter(disk => disk.available && state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
   const organizationJobs = jobs.filter(job => job.organization), runningOrganization = organizationJobs.find(job => activePhases.includes(job.phase));
-  // With nothing copying, the running organization is the progress to show.
-  const organizing = active.length > 0 && active.every(job => job.organization), organized = !total && runningOrganization ? organizationFraction(runningOrganization) : undefined;
+  const organizing = active.length > 0 && active.every(job => job.organization), planningJob = active.find(job => !job.organization && job.progress?.phase === 'planning');
+  // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
+  const verify = state.preferences.verifyCopies !== false;
+  const measured = latestJobs.flatMap(job => { const fraction = job.organization ? organizationFraction(job) : importFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
+  const overall = measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
       <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
@@ -447,8 +452,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
       <div className="dashboard-total" data-testid="total-progress">
-        <div><strong>{t("Total progress")}</strong><span>{total > 0 ? `${formatNumber(shownPercent(transferred / total, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : organized !== undefined ? `${formatNumber(shownPercent(organized, false))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small>{remaining !== undefined && <em className="progress-eta" data-testid="total-eta">{t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) })}</em>}</div>
-        <ProgressBar value={total > 0 ? transferred / total : organized ?? 0} indeterminate={active.length > 0 && !total && organized === undefined} label={t("Combined copy progress")} />
+        <div><strong>{t("Total progress")}</strong><span>{overall !== undefined ? `${formatNumber(shownPercent(overall, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : planningJob?.progress ? `${importStatus(planningJob, t)} · ${planningJob.source.name} · ${progressCount(planningJob.progress, t, formatNumber, false, bytes)}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small>{remaining !== undefined && <em className="progress-eta" data-testid="total-eta">{t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) })}</em>}</div>
+        <ProgressBar value={overall ?? 0} indeterminate={active.length > 0 && overall === undefined} label={t("Combined copy progress")} />
       </div>
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
@@ -771,6 +776,8 @@ function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typ
   if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
+  if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
+  if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
@@ -810,6 +817,25 @@ function Remaining({ job }: { job: Job }) {
 function organizationFraction(job: Job): number | undefined {
   const progress = job.progress;
   return job.phase === 'complete' ? 1 : !progress ? undefined : progress.phase === 'planning' ? progressFraction(progress) : progress.total ? progress.completed / progress.total : progressFraction(progress);
+}
+/** How far a whole import is: reading the source's metadata 10%, comparing with the destinations 10%,
+ * then copying, and verifying the last 10% when it runs. Bytes drive the copy; a finished import is 100%. */
+export function importFraction(job: Job, verify = true): number | undefined {
+  const progress = job.progress;
+  if (job.phase === 'complete') return 1;
+  if (!progress) return undefined;
+  const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
+  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
+  return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
+}
+/** The step an import is on before copying, or its verification. */
+function importStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
+  const step = job.progress?.phase === 'planning' ? job.progress.step : undefined;
+  if (job.progress?.phase === 'verifying') return t("Verifying copied files");
+  if (step === 'listing') return t("Listing files");
+  if (step === 'checking') return job.backup ? t("Checking files") : t("Reading metadata");
+  if (step === 'reading') return t("Reading files");
+  return t("Checking existing files");
 }
 /** What an organization reads: "A006 › photobackup + videobackup", or the full path. */
 export function organizationPlace(job: Job, full = false): string {
@@ -882,7 +908,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
-  const status = !job ? t("Ready to import") : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: job?.progress?.phase === 'verifying' ? t("Verifying copied files") : t("Checking existing files"), copying: t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
+  const status = !job ? t("Ready to import") : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
   const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
   const paused = job?.phase === 'stopped' && !!job.paused;
   const already = job?.phase === 'complete' && !!job.alreadyImported;
@@ -894,7 +920,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {already && <div className="source-progress source-progress-calm" data-testid="already-imported"><ProgressBar value={1} label={t("{name} copy progress", { name: source.name })} /><div><span>{progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")}</span></div></div>}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
-    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}{job && <Remaining job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
+    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}{job && <Remaining job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}

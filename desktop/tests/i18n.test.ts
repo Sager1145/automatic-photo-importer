@@ -343,8 +343,8 @@ test('the import overview shows total progress and sizes keep their decimals', a
   for (const language of languages) {
     const t = createTranslator(language);
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state, act: () => {} }) }));
-    assert.ok(markup.includes('data-testid="total-progress"') && markup.includes(t('Total progress')) && markup.includes('25%'), `${language}: total progress`);
-    assert.ok(markup.includes(t('of {size} planned', { size: formatBytes(5_000_000_000, language) })) && markup.includes('aria-valuenow="25"'));
+    assert.ok(markup.includes('data-testid="total-progress"') && markup.includes(t('Total progress')) && markup.includes('37%'), `${language}: total progress`);
+    assert.ok(markup.includes(t('of {size} planned', { size: formatBytes(5_000_000_000, language) })) && markup.includes('aria-valuenow="38"'));
   }
 });
 

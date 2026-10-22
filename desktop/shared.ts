@@ -31,8 +31,9 @@ export interface MirrorRemoval {path:string;size:number;reason:'missing'|'change
 export interface TransferPlan {source:string;root:string;entries:PlanEntry[];rootIdentity:string;drive?:{folder:string;identity:string;name:string};removals?:MirrorRemoval[];/** video-root: the same destination's video backup folder, planned and executed as its own root. */videos?:TransferPlan;}
 /** completed: files staged (copying) or verified/published (verifying); failed: files in a failed group. */
 /** phase 'planning': files checked before anything is written (step 'listing': files found so far, total 0; step 'checking': metadata of every file;
- * step 'reading': library organization reading the files it will move). completed/total count files. */
-export interface Progress {phase?:'planning'|'copying'|'verifying';step?:'listing'|'checking'|'reading'|'earlier'|'confirming'|'moving'|'releasing'|'restoring';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;/** Seconds left in this step; absent while estimating or when the total is unknown. */eta?:number;}
+ * step 'reading': library organization reading the files it will move; step 'comparing': planned files compared with each destination;
+ * step 'existing': before copying, the files a destination already holds are confirmed). completed/total count files. */
+export interface Progress {phase?:'planning'|'copying'|'verifying';step?:'listing'|'checking'|'reading'|'comparing'|'existing'|'earlier'|'confirming'|'moving'|'releasing'|'restoring';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;/** Seconds left in this step; absent while estimating or when the total is unknown. */eta?:number;}
 /** One destination's space for an import, from its plan: needed is what will be written (new files, conflict copies,
  * videos routed to its video root) plus publication workspace; existing is what is already there and is skipped. */
 export interface DestinationSpace {needed:number;free:number;existing:number;existingFiles:number;newFiles:number;}
