@@ -36,7 +36,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
 interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
-type Resolve=(entry:PlanEntry)=>Promise<string>;
+type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
 // Only a plan produced for an explicit library review can authorize relocation.
 // A renderer-provided or reconstructed TransferPlan cannot opt into moving files.
 const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>();
@@ -349,13 +349,13 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     for(const {entry} of prepared) entry.digest=hashes.get(entry.source)!;
   }
   const resolved=new Map<string,string>();let readToCompare=0;
-  const resolve:Resolve=async entry=>{
+  const resolve:Resolve=async (entry,readSignal=signal)=>{
     if(entry.digest) return entry.digest;
     let value=resolved.get(entry.source)??options.sourceDigest?.(entry.source,statKey(sourceStats.get(entry.source)!));
     if(value!==undefined) resolved.set(entry.source,value);
     else {
       // A same-size file at the destination: the source is read to compare; the bytes count as they stream.
-      await contained(entry.source,sourceRoot);value=await digest(entry.source,signal,bytes=>{readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
+      await contained(entry.source,sourceRoot);value=await digest(entry.source,readSignal,bytes=>{readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
       if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       resolved.set(entry.source,value);
     }
@@ -389,7 +389,14 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         if(mirror?.known.has(pathKey(entry.destination))) return;
         const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
         if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
-        await Promise.all([resolve(entry),index.hinted.digestOf(entry.destination,signal)]);
+        // If one side fails, stop the other read and wait for it, so nothing reads a card file after this settles.
+        const local=new AbortController(),stopLocal=()=>local.abort();let first:{error:unknown}|undefined;
+        if(signal?.aborted) local.abort(); else signal?.addEventListener('abort',stopLocal,{once:true});
+        const fail=(error:unknown)=>{first??={error};local.abort();throw error;};
+        try {
+          await Promise.allSettled([resolve(entry,local.signal).catch(fail),index.hinted.digestOf(entry.destination,local.signal).catch(fail)]);
+          if(first) throw first.error;
+        } finally { signal?.removeEventListener('abort',stopLocal); }
       }
       catch(error) { if(isAbort(error)) throw error; /* Allocation checks it again and reports it where it always has. */ }
       finally { if(!signal?.aborted) {compared++;comparing(path.relative(sourceRoot,entry.source));} }

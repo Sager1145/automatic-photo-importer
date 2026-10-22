@@ -123,8 +123,10 @@ export const fileFlags=constants.O_RDONLY | (constants.O_NOFOLLOW??0);
 export async function regularHandle(file:string) {
   if(!(await fs.lstat(file)).isFile()) throw new Error(`Unsafe non-regular source: ${file}`);
   const handle=await fs.open(file,fileFlags);
-  const stat=await handle.stat({bigint:true});
-  if(!stat.isFile()) { await handle.close(); throw new Error(`Unsafe non-regular source: ${file}`); }
+  try {
+    const stat=await handle.stat({bigint:true});
+    if(!stat.isFile()) throw new Error(`Unsafe non-regular source: ${file}`);
+  } catch(error) { await handle.close().catch(()=>{}); throw error; }
   return handle;
 }
 export function sameStat(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStats):boolean {

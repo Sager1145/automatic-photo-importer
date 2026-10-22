@@ -34,13 +34,18 @@ class Pool {
       worker.on('message',(message:{id:number;ack?:boolean;hex?:string})=>{settle(slot);const item=waiting.get(message.id);if(!item)return;if(message.ack)item.acked();else if(message.hex!==undefined){waiting.delete(message.id);item.done?.(message.hex);}});
       // A worker that dies fails its hashes (the copy reports an error and can be retried);
       // later hashes run on the main thread.
-      const broken=(error:Error)=>{this.failed=true;slot.busy=0;for(const item of waiting.values())item.fail(error);waiting.clear();};
+      const broken=(error:Error)=>{if(!this.workers.includes(slot))return;this.failed=true;slot.busy=0;for(const item of waiting.values())item.fail(error);waiting.clear();};
       worker.on('error',broken);worker.on('exit',code=>broken(new Error(`Hashing worker stopped (${code})`)));
       // An idle worker never keeps the app (or a test run) alive; one with replies due does.
       worker.unref();
       this.workers.push(slot);
     } catch { this.failed=true; return undefined; }
     return this.workers[this.next++%this.workers.length];
+  }
+  /** Stop every worker thread. Call only while no hash is running; the next hash starts workers again. */
+  async terminate():Promise<void> {
+    const slots=this.workers;this.workers=[];this.next=0;this.failed=false;
+    await Promise.allSettled(slots.map(async slot=>{for(const item of slot.waiting.values())item.fail(new Error('Hashing worker stopped'));slot.waiting.clear();slot.busy=0;await slot.worker.terminate();}));
   }
   hasher():Hasher {
     const slot=this.worker();
@@ -63,3 +68,5 @@ class Pool {
 }
 const pool=new Pool(Math.max(1,Math.min(4,Math.floor(availableParallelism()/2))));
 export const hasher=():Hasher=>pool.hasher();
+/** Release the hashing threads while idle; they restart on demand. */
+export const terminateHasher=():Promise<void>=>pool.terminate();
