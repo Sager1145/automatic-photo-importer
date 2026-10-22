@@ -139,8 +139,10 @@ test('organization moves files from the old media-type folders into format folde
 test('the backup folder check reports each file it checks out of the total',async t=>{
  const {photos}=await fixture(t,[]);
  for(const name of ['wrong/A.JPG','wrong/B.JPG',camera+'/C.JPG']){const file=path.join(photos,name);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,name);}
- const seen:[number,number|undefined][]=[];
- const found=await findMisplaced(photos,photos,{...base,layout:'flat'},metadata,undefined,(count,_file,detail)=>seen.push([count,detail?.total]));
+ const seen:[number,number|undefined][]=[];let listed=0;
+ const found=await findMisplaced(photos,photos,{...base,layout:'flat'},metadata,undefined,(count,_file,detail)=>{if(detail?.step==='listing')listed=count;else seen.push([count,detail?.total]);});
+ // Listing reports files found before the check counts them against the total.
+ assert.equal(listed,3);
  assert.equal(found.count,2);
  assert.deepEqual(seen.map(([count])=>count).sort(),[1,2,3]);assert.ok(seen.every(([,total])=>total===3));
 });

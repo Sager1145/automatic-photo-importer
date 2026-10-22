@@ -401,9 +401,11 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const readyDestinations = (state.destinationStatus ?? []).filter(disk => disk.available && state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
-  const organizationJobs = jobs.filter(job => job.organization);
+  const organizationJobs = jobs.filter(job => job.organization), runningOrganization = organizationJobs.find(job => activePhases.includes(job.phase));
+  // With nothing copying, the running organization is the progress to show.
+  const organizing = active.length > 0 && active.every(job => job.organization), organized = !total && runningOrganization ? organizationFraction(runningOrganization) : undefined;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
-      <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? ArrowDownToLine : state.review ? Eye : Pause} size={15}/>{active.length ? t("Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
+      <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
@@ -412,11 +414,11 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
       <div className="dashboard-total" data-testid="total-progress">
-        <div><strong>{t("Total progress")}</strong><span>{total > 0 ? `${formatNumber(Math.floor(Math.min(1, transferred / total) * 100))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : t("No transfer planned")}</small></div>
-        <ProgressBar value={total > 0 ? transferred / total : 0} indeterminate={active.length > 0 && !total} label={t("Combined copy progress")} />
+        <div><strong>{t("Total progress")}</strong><span>{total > 0 ? `${formatNumber(Math.floor(Math.min(1, transferred / total) * 100))}%` : organized !== undefined ? `${formatNumber(Math.floor(Math.min(1, organized) * 100))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small></div>
+        <ProgressBar value={total > 0 ? transferred / total : organized ?? 0} indeterminate={active.length > 0 && !total && organized === undefined} label={t("Combined copy progress")} />
       </div>
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
-      {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><strong>{job.organization ? t("Library organization") : job.source.name}</strong><span>{job.phase === 'error' ? t("Needs attention") : job.phase === 'queued' ? t("Queued") : job.phase === 'complete' ? t("Complete") : job.phase === 'stopped' ? t("Stopped") : t("Import in progress")}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
+      {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
     </section>);
 }
 
@@ -722,9 +724,11 @@ function progressFraction(progress: NonNullable<Job['progress']>): number | unde
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
   return progress.phase === 'verifying' ? files ?? data : data ?? files;
 }
-function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false): string {
+function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
   const counts = { completed: formatNumber(progress.completed), total: formatNumber(progress.total) };
-  if (progress.phase === 'planning') return t(progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
+  // While listing, the size found so far is the only other measure.
+  if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
+  if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
 export function formatDuration(ms: number): string {
@@ -741,12 +745,30 @@ function Elapsed({ job }: { job: Job }) {
   const time = formatDuration((finished ? Date.parse(job.phaseStartedAt!) : now) - Date.parse(job.startedAt));
   return <span className="progress-elapsed" data-testid="elapsed"><Icon icon={Timer} size={12} />{finished ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>;
 }
+/** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */
+function organizationFraction(job: Job): number | undefined {
+  const progress = job.progress;
+  return job.phase === 'complete' ? 1 : !progress ? undefined : progress.phase === 'planning' ? progressFraction(progress) : progress.total ? progress.completed / progress.total : progressFraction(progress);
+}
+/** What an organization reads: "A006 › photobackup + videobackup", or the full path. */
+export function organizationPlace(job: Job, full = false): string {
+  const place = full ? job.source.path : filename(job.source.path) || job.source.path;
+  return job.folders?.length ? `${place} › ${job.folders.join(' + ')}` : place;
+}
+/** The step an organization is on, for its status label. */
+function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
+  if (job.phase === 'error') return t("Needs attention");
+  if (job.phase === 'queued') return t("Queued");
+  if (job.phase === 'complete') return t("Complete");
+  if (job.phase === 'stopped') return t("Stopped");
+  if (job.phase === 'discovering' || job.progress?.step === 'listing') return t("Listing files");
+  return job.progress?.phase === 'planning' ? t("Checking files") : t("Organizing");
+}
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
-  const { t, formatNumber } = useTranslation();
+  const { t, formatNumber, formatBytes } = useTranslation();
   const progress = job.progress, running = activePhases.includes(job.phase) || job.phase === 'queued';
-  // Organizing moves files by renaming them, so bytes stay at 0: count files, and a finished job is 100%.
-  const fraction = job.phase === 'complete' ? 1 : !progress ? undefined : progress.phase === 'planning' ? progressFraction(progress) : progress.total ? progress.completed / progress.total : progressFraction(progress);
-  const label = !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true);
+  const fraction = organizationFraction(job);
+  const label = !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
   return <div className="organization-progress" data-testid="organization-progress">
     <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} />{fraction !== undefined && <strong>{formatNumber(Math.floor(Math.min(1, fraction) * 100))}%</strong>}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
     {running && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
@@ -968,7 +990,7 @@ export function Organization({ state, act, busy }: { state: AppState; act: Dispa
   return <div className="organization-page">
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
-    {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={runningOrganization.source.path} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
+    {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
     <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizeBusy || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => setSelectedDestination(Number(event.target.value))}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
     <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")}><Button icon={FolderOpen} disabled={organizeBusy} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></CardHeader></section>
     {state.busyReview && <div role="status" aria-live="polite"><p className="notice"><Icon icon={LoaderCircle} />{state.reviewProgress ? t("Checking organization files: {count} · {file}", { count: formatNumber(state.reviewProgress.completed), file: state.reviewProgress.file }) : t("Preparing organization review…")}</p>{state.reviewProgress && <PlanningProgress progress={state.reviewProgress} label={t("Organization review progress")} />}</div>}

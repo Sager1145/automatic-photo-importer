@@ -509,6 +509,11 @@ Choose whether to import this drive.|请选择是否导入此驱动器。|請選
 Decide later|稍后决定|稍後決定|あとで決める
 Organizing now|正在整理|正在整理|整理中
 Preparing organization…|正在准备整理…|正在準備整理…|整理を準備中…
+Organizing|正在整理|正在整理|整理中
+Listing files|正在列出文件|正在列出檔案|ファイルを一覧中
+Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
+{completed} files found|已找到 {completed} 个文件|已找到 {completed} 個檔案|{completed} 件見つかりました
+{completed} files found · {size}|已找到 {completed} 个文件 · {size}|已找到 {completed} 個檔案 · {size}|{completed} 件見つかりました · {size}
 Reconnect it to choose.|重新连接后即可选择。|重新連接後即可選擇。|再接続すると選べます。
 Unplugged|已拔出|已拔出|取り外し済み
 {completed} of {total} files organized|已整理 {completed}/{total} 个文件|已整理 {completed}/{total} 個檔案|{total} 件中 {completed} 件を整理済み

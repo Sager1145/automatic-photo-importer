@@ -138,7 +138,8 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
 /** Planning progress: `count` files of `detail.total` done. Every plan first checks each file
  * (metadata and identity, without reading contents); library organization then reads the files
  * that will move to checksum them. */
-export type PlanProgress=(count:number,file:string,detail?:{step:'checking'|'reading';total:number;bytes:number;totalBytes:number})=>void;
+/** step 'listing': files found so far (total 0, not yet known); 'checking': metadata of every file; 'reading': files organization moves. */
+export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading';total:number;bytes:number;totalBytes:number})=>void;
 async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
@@ -172,7 +173,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   if(options.reorganize) excludedRoots.push(...allRoots.map(({root})=>path.join(root,DRIVE_BACKUPS)));
   const organizationOwned=(file:string)=>options.reorganize===true&&allRoots.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
-  const scan=await inventory(sourceRoot,{backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots},signal), files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
+  const scan=await inventory(sourceRoot,{backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes)=>onProgress?.(found,'',{step:'listing',total:0,bytes,totalBytes:0})},signal), files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
   const listedBytes=files.reduce((sum,file)=>sum+file.size,0);let checkedBytes=0;
   const infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for

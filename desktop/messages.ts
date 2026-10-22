@@ -14,6 +14,7 @@ export const backendMessages={
  'job.stepChecking':{en:'Checking: {completed} of {total}','zh-Hans':'正在检查：{completed}/{total}','zh-Hant':'正在檢查：{completed}/{total}',ja:'確認中：{total} 件中 {completed} 件'},
  'job.stepReleasing':{en:'Releasing kept originals: {completed} of {total}','zh-Hans':'正在释放保留的原文件：{completed}/{total}','zh-Hant':'正在釋放保留的原始檔案：{completed}/{total}',ja:'保持中の元のファイルを解放中：{total} 件中 {completed} 件'},
  'job.stepRestoring':{en:'Putting files back: {completed} of {total}','zh-Hans':'正在将文件放回原处：{completed}/{total}','zh-Hant':'正在將檔案放回原處：{completed}/{total}',ja:'ファイルを元に戻し中：{total} 件中 {completed} 件'},
+ 'job.listing':{en:'Listing files: {count} found','zh-Hans':'正在列出文件：已找到 {count} 个','zh-Hant':'正在列出檔案：已找到 {count} 個',ja:'ファイルを一覧中：{count} 件'},
  'job.readingToMove':{en:'Reading files to move: {count} of {total} · {file}','zh-Hans':'正在读取要移动的文件：{count}/{total} · {file}','zh-Hant':'正在讀取要移動的檔案：{count}/{total} · {file}',ja:'移動するファイルを読み取り中：{total} 件中 {count} 件 · {file}'},
  'job.checkingSourceOf':{en:'Checking source: {count} of {total} files · {file}','zh-Hans':'正在检查来源：{count}/{total} 个文件 · {file}','zh-Hant':'正在檢查來源：{count}/{total} 個檔案 · {file}',ja:'ソースを確認中：{total} ファイル中 {count} 件 · {file}'},
  'job.readingMetadata':{en:'Reading source metadata and checking destination folders','zh-Hans':'正在读取来源元数据并检查目标文件夹','zh-Hant':'正在讀取來源中繼資料並檢查目的地資料夾',ja:'ソースのメタデータを読み取り、保存先フォルダーを確認中'},

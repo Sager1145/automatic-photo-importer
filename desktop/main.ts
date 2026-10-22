@@ -232,7 +232,7 @@ function assertOrganizationIdle(){
  * request.prefs' single destination/basePath with journaled, undoable moves, once imports finish. */
 function queueOrganization(root:string,name:string,request:RunRequest){
  assertOrganizationIdle();
- const job:Job={id:randomUUID(),source:{id:'library:'+root,path:root,name,transport:'folder'},organization:true,phase:'queued',detail:message('job.waitingForImports'),errors:[],backup:false};
+ const job:Job={id:randomUUID(),source:{id:'library:'+root,path:root,name,transport:'folder'},organization:true,...(request.sourceFolders?.length?{folders:request.sourceFolders}:{}),phase:'queued',detail:message('job.waitingForImports'),errors:[],backup:false};
  organizationQueue.set(job.id,request);state.jobs.unshift(job);emit();pump();
 }
 /** One destination's backup as a library: its backup folder, organized in place. In the video-root
@@ -305,7 +305,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   }
   else{
    job.phase='discovering';job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
-   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
    // Mirror moves only run from a review the user applied.
    const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
    if(moving)throw new MessageError('error.mirrorReview',{count:moving});

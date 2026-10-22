@@ -29,10 +29,10 @@ export interface PlanEntry {captureTimeMs?:number;allocation?:{destination:strin
 export interface MirrorRemoval {path:string;size:number;reason:'missing'|'changed';}
 export interface TransferPlan {source:string;root:string;entries:PlanEntry[];rootIdentity:string;drive?:{folder:string;identity:string;name:string};removals?:MirrorRemoval[];/** video-root: the same destination's video backup folder, planned and executed as its own root. */videos?:TransferPlan;}
 /** completed: files staged (copying) or verified/published (verifying); failed: files in a failed group. */
-/** phase 'planning': files checked before anything is written (step 'checking': metadata of every file;
+/** phase 'planning': files checked before anything is written (step 'listing': files found so far, total 0; step 'checking': metadata of every file;
  * step 'reading': library organization reading the files it will move). completed/total count files. */
-export interface Progress {phase?:'planning'|'copying'|'verifying';step?:'checking'|'reading'|'releasing'|'restoring';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;}
-export interface Job {/** Every file was already in the backup and verified; nothing was copied. */alreadyImported?:boolean;organization?:boolean;id:string;source:Source;phase:'queued'|'discovering'|'verifying'|'copying'|'complete'|'stopped'|'error';
+export interface Progress {phase?:'planning'|'copying'|'verifying';step?:'listing'|'checking'|'reading'|'releasing'|'restoring';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;}
+export interface Job {/** Every file was already in the backup and verified; nothing was copied. */alreadyImported?:boolean;organization?:boolean;/** Organization only: the folders of source.path it reads; absent means all of it. */folders?:string[];id:string;source:Source;phase:'queued'|'discovering'|'verifying'|'copying'|'complete'|'stopped'|'error';
 /** A stopped job the user paused; Start continues it. */paused?:boolean;/** ISO time the job left the queue and began running. */startedAt?:string;/** ISO time the current phase began. */phaseStartedAt?:string;detail?:Message;inventory?:Inventory;progress?:Progress;errors:Message[];backup:boolean;}
 export interface HistoryEntry {id:string;date:string;title:Message;detail:Message;}
 export interface DestinationStatus {path:string;total?:number;free?:number;available:boolean;detail?:string;volumeId?:string;physicalId?:string;}

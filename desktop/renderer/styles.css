@@ -774,6 +774,11 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .progress-jobs:empty{display:none}
 .progress-jobs li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.35rem 1rem;padding:.75rem .95rem;border-radius:var(--radius-lg);box-shadow:inset 0 0 0 1px var(--separator)}
 .progress-jobs li>span{font-size:var(--text-footnote);font-weight:600;color:var(--label-secondary)}
+.progress-jobs li>.organization-progress{grid-column:1/-1}
+.progress-job-heading{display:flex;align-items:baseline;gap:.6rem;min-width:0}
+.progress-job-heading>strong{flex:none}
+.progress-job-place{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-footnote);color:var(--label-secondary)}
+.progress-job-status{padding:.15rem .6rem;border-radius:var(--radius-capsule);background:var(--fill-3);white-space:nowrap}
 .progress-jobs li>p{grid-column:1/-1;font-size:var(--text-footnote);color:var(--label-secondary);overflow-wrap:anywhere}
 .progress-jobs li>.progress-track{grid-column:1/-1}
 
