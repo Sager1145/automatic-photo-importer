@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DeviceSelection,deviceId} from '../device-selection';
+import {DeviceSelection,deviceId,recordDeviceHistory} from '../device-selection';
 import type {Preferences,Source} from '../shared';
 
 type Remembered=NonNullable<Preferences['rememberedDevices']>;
@@ -61,4 +61,31 @@ test('deselecting a drive ignores it: it stays deselected without a popup until 
  assert.deepEqual([remembered,ignored],[{},{}]);
  const later=new DeviceSelection();later.apply([ssd],remembered,ignored);
  assert.deepEqual(later.newDevices,['9C3D-UUID-SSD'],'after stop-ignoring it is asked about again');
+});
+
+test('a re-plugged drive with history or a remembered choice is announced as reconnected, once per connection',()=>{
+ const remembered:Remembered={'6A1F-UUID-CARD':{name:'NIKON Z F',lastSelected:'2026-10-20T10:00:00.000Z'}};
+ const history:NonNullable<Preferences['deviceHistory']>={'9C3D-UUID-SSD':{name:'PMHOME',lastScanCompleted:'2026-10-21T09:00:00.000Z'}};
+ const selection=new DeviceSelection();
+ selection.apply([card,ssd,camera,folder],remembered,{},history);
+ assert.deepEqual(selection.reconnectedDevices,['6A1F-UUID-CARD','9C3D-UUID-SSD']);
+ assert.deepEqual(selection.newDevices,['9C3D-UUID-SSD','camera:0x1234'],'a drive the user never answered for still needs a choice');
+ selection.dismissReconnected('6A1F-UUID-CARD');
+ selection.apply([card,ssd,camera,folder],remembered,{},history);
+ assert.deepEqual(selection.reconnectedDevices,['9C3D-UUID-SSD'],'dismissed drives stay dismissed while connected');
+ // Unplugged and plugged in again: announced again.
+ selection.apply([ssd],remembered,{},history);
+ assert.deepEqual(selection.reconnectedDevices,['9C3D-UUID-SSD']);
+ selection.apply([card,ssd],remembered,{},history);
+ assert.deepEqual(selection.reconnectedDevices,['9C3D-UUID-SSD','6A1F-UUID-CARD']);
+ selection.dismissReconnected();
+ assert.deepEqual(selection.reconnectedDevices,[]);
+});
+
+test('device history records completed scans and verified imports per device',()=>{
+ const history:NonNullable<Preferences['deviceHistory']>={};
+ recordDeviceHistory(history,card,'scan','2026-10-21T09:00:00.000Z');
+ recordDeviceHistory(history,card,'import','2026-10-21T10:00:00.000Z');
+ recordDeviceHistory(history,folder,'import','2026-10-21T10:00:00.000Z');
+ assert.deepEqual(history,{'6A1F-UUID-CARD':{name:'NIKON Z F',lastScanCompleted:'2026-10-21T09:00:00.000Z',lastImportVerified:'2026-10-21T10:00:00.000Z'}});
 });
