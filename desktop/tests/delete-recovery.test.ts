@@ -138,3 +138,38 @@ test('interrupted after the journal is set aside, it is gone from the list and C
  assert.deepEqual((await fs.readdir(storage(root)).catch(()=>[])).filter(name=>name.startsWith('deleting-')),[]);
  assert.equal(await fs.readFile(destination,'utf8'),'precious original');
 });
+
+// Anything in the kept originals that is not a checked original stops the deletion: a file where a slot
+// folder belongs, or a folder inside a slot, could hold the only copy of some bytes.
+async function replaced(t:test.TestContext){
+ const {root}=await fixture(t);
+ assert.deepEqual((await organize(root,'first')).result.errors,[]);const old=(await core.getOrganizationRecovery(root))[0]!.id;
+ assert.deepEqual((await organize(root,'second')).result.errors,[]);
+ const originals=path.join(storage(root),old,'originals','0'),[slot]=await fs.readdir(originals);
+ return {root,old,originals,slot:path.join(originals,slot!)};
+}
+test('a stray file among the kept originals stops the deletion',async t=>{
+ const {root,old,originals}=await replaced(t);
+ await fs.writeFile(path.join(originals,'not-a-slot.bin'),'only copy');
+ await assert.rejects(core.deleteOrganizationRecovery(root,old),/Unexpected/);
+ assert.equal(await fs.readFile(path.join(originals,'not-a-slot.bin'),'utf8'),'only copy');
+});
+test('a folder inside a kept-original slot stops the deletion',async t=>{
+ const {root,old,slot}=await replaced(t);
+ await fs.mkdir(path.join(slot,'nested'));await fs.writeFile(path.join(slot,'nested','x.bin'),'only copy');
+ await assert.rejects(core.deleteOrganizationRecovery(root,old),/Unexpected/);
+ assert.equal(await fs.readFile(path.join(slot,'nested','x.bin'),'utf8'),'only copy');
+});
+test('Finder metadata in the recovery folder never blocks a deletion',async t=>{
+ const {root,old,slot}=await replaced(t);
+ for(const file of [path.join(storage(root),old,'.DS_Store'),path.join(slot,'._A.JPG'),path.join(storage(root),old,'originals','.DS_Store')])await fs.writeFile(file,'finder');
+ await core.deleteOrganizationRecovery(root,old);
+ assert.equal(await exists(path.join(storage(root),old)),false);
+});
+test('a journal that cannot be read beside this one stops the deletion instead of being assumed unrelated',async t=>{
+ const {root}=await fixture(t);
+ assert.deepEqual((await organize(root,'first')).result.errors,[]);const [job]=await core.getOrganizationRecovery(root);
+ const other=path.join(storage(root),'6b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f');await fs.mkdir(other);await fs.writeFile(path.join(other,'manifest.json'),'{torn');
+ await assert.rejects(core.deleteOrganizationRecovery(root,job!.id),/6b1f1b8e/);
+ assert.ok(await exists(path.join(storage(root),job!.id,'manifest.json')));
+});

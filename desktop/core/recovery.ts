@@ -1185,18 +1185,26 @@ function deletable(m:Manifest,state:JournalState):void{
  if(!state.undoComplete&&!state.superseded&&unfinished(state))throw new Error(`Organization ${m.id} is not finished; finish or undo it before deleting its recovery files`);
 }
 /** Other journals that still name this one: one it replaced, or one whose files it took over. Each must
- * go first; without this journal, they could no longer be checked. */
+ * go first; without this journal, they could no longer be checked. Read in this journal's folder, the
+ * folders it lists or leaves pointers in, its neighbours, the folders pointers here name, and the folders
+ * each journal found lists. A journal that cannot be read stops the deletion: it may name this one. */
 async function dependents(m:Manifest):Promise<string[]>{
- const names:string[]=[],folders=new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)]);
- for(const name of await fs.readdir(path.join(m.root,storage)).catch(()=>[] as string[])){const pointed=await siblingPointer(m.root,name).catch(()=>undefined);if(pointed)folders.add(pointed);}
- for(const folder of folders)for(const id of await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[])){
-  if(id===m.id||!uuid.test(id))continue;
-  // A journal this host cannot read was never written by it, and never names this one.
-  const other=await readManifest(folder,id).catch(()=>undefined);if(!other)continue;
-  const state=await readEvents(other,undefined,undefined,false).catch(()=>undefined);if(!state)continue;
-  const replaced=state.superseded===m.id&&(state.successorRoot??other.root)===m.root;
-  const handed=!state.undoComplete&&[...state.handedOff.values()].some(handOff=>handOff.successor===m.id&&handOff.successorRoot===m.root);
-  if(replaced||handed)names.push(id);
+ const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
+ for(const name of await fs.readdir(path.join(m.root,storage)).catch(()=>[] as string[])){const pointed=await siblingPointer(m.root,name).catch(()=>undefined);if(pointed&&!folders.includes(pointed))folders.push(pointed);}
+ const unreadable=(id:string,folder:string,error:unknown)=>new Error(`Organization ${id} in ${folder} cannot be read, so it is not known whether it still relies on this one; nothing was deleted (${error instanceof Error?error.message:String(error)})`);
+ for(let position=0;position<folders.length;position++){
+  const folder=folders[position]!;
+  for(const id of await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[])){
+   if(id===m.id||!uuid.test(id))continue;
+   // A folder with no manifest holds no journal; one another host signed was never written by this app.
+   const other=await readManifest(folder,id).catch(error=>{if(code(error)==='ENOENT'||error instanceof Error&&error.message.startsWith('Recovery journal authentication failed'))return undefined;throw unreadable(id,folder,error);});
+   if(!other)continue;
+   for(const library of other.libraries??[])if(!folders.includes(library))folders.push(library);
+   const state=await readEvents(other,undefined,undefined,false).catch(error=>{throw unreadable(id,folder,error);});
+   const replaced=state.superseded===m.id&&(state.successorRoot??other.root)===m.root;
+   const handed=!state.undoComplete&&[...state.handedOff.values()].some(handOff=>handOff.successor===m.id&&handOff.successorRoot===m.root);
+   if(replaced||handed)names.push(id);
+  }
  }
  return names;
 }
@@ -1217,18 +1225,26 @@ async function copyElsewhere(m:Manifest,state:JournalState,index:number,expected
  if(await same(await savedOriginal(next,at,nextState).catch(()=>undefined),next.root))return true;
  return copyElsewhere(next,nextState,at,expected,signal,depth+1);
 }
-/** Every file in the journal folder is one the app writes there; every kept original left has a
- * byte-identical copy elsewhere. Anything else stops the deletion before anything is removed. */
+/** Finder's folder settings and the AppleDouble files macOS writes on exFAT: never media, never checked. */
+const finderMetadata=(name:string)=>name==='.DS_Store'||name.startsWith('._');
+/** Every entry in the journal folder is one the app writes there; every kept original left has a
+ * byte-identical copy elsewhere. Anything else, or anything that cannot be read, stops the deletion
+ * before anything is removed. */
 async function checkJournalFolder(m:Manifest,state:JournalState,folder:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<void>{
- for(const name of await fs.readdir(folder))if(!journalFile.test(name))throw new Error(`Unexpected file in recovery folder; nothing was deleted: ${path.join(folder,name)}`);
+ const unexpected=(file:string)=>new Error(`Unexpected file in recovery folder; nothing was deleted: ${file}`);
+ const entries=async(directory:string)=>{const stat=await fs.lstat(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw unexpected(directory);return (await fs.readdir(directory)).filter(name=>!finderMetadata(name));};
+ for(const name of await entries(folder))if(!journalFile.test(name))throw unexpected(path.join(folder,name));
  const originals=path.join(folder,'originals'),kept:{index:number;file:string}[]=[];
- const stat=await maybeStat(originals);if(stat&&(!stat.isDirectory()||stat.isSymbolicLink()))throw new Error('Unsafe recovery storage');
- for(const index of stat?await fs.readdir(originals):[]){
+ for(const index of await maybeStat(originals)?await entries(originals):[]){
   const position=Number(index),indexFolder=path.join(originals,index);
-  if(!/^\d+$/.test(index)||position>=m.entries.length)throw new Error(`Unexpected file in recovery folder; nothing was deleted: ${indexFolder}`);
-  for(const slot of await fs.readdir(indexFolder).catch(()=>[] as string[])){
-   const slotFolder=path.join(indexFolder,slot);
-   for(const name of await fs.readdir(slotFolder).catch(()=>[] as string[])){const file=path.join(slotFolder,name);if((await fs.lstat(file)).isFile())kept.push({index:position,file});}
+  if(!/^\d+$/.test(index)||position>=m.entries.length)throw unexpected(indexFolder);
+  for(const slot of await entries(indexFolder)){
+   const slotFolder=path.join(indexFolder,slot);if(!uuid.test(slot))throw unexpected(slotFolder);
+   for(const name of await entries(slotFolder)){
+    // A link holds no bytes of its own, and removing the folder never follows it.
+    const file=path.join(slotFolder,name),stat=await fs.lstat(file);
+    if(stat.isFile())kept.push({index:position,file});else if(!stat.isSymbolicLink())throw unexpected(file);
+   }
   }
  }
  for(const [position,{index,file}] of kept.entries()){
