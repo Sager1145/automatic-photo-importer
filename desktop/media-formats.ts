@@ -2,11 +2,11 @@ import type { MediaKind } from './shared';
 
 const extensions: Record<string, MediaKind> = {};
 for (const [kind, names] of Object.entries({
-  RAW: 'nef nrw arw srf sr2 crw cr2 cr3 raf orf ori rw2 rwl dng pef ptx 3fr fff iiq mos mrw raw x3f srw',
+  RAW: 'nef nrw arw arq srf sr2 crw cr2 cr3 raf orf ori rw2 rwl dng gpr pef ptx 3fr fff iiq mos mrw mef erf kdc dcr raw x3f srw',
   JPEG: 'jpg jpeg jpe',
   HEIF: 'heic heif hif',
-  Images: 'tif tiff png bmp gif jxl avif',
-  Videos: 'mov mp4 m4v mts m2ts avi mxf mpg mpeg insv 360 r3d braw crm nraw nev lrf',
+  Images: 'tif tiff png bmp gif jxl avif insp mpo',
+  Videos: 'mov mp4 m4v mts m2ts m2t mod tod 3gp avi mxf mpg mpeg insv osv 360 r3d braw crm nev lrf',
 })) {
   for (const extension of names.split(' ')) extensions[extension] = kind as MediaKind;
 }

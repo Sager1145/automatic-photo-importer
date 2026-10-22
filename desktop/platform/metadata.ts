@@ -57,7 +57,7 @@ function dateFamily(entries:TagEntries,plainName:string,compositeName:string,sub
   return {key:plain.key,date:base.clock+fraction+zone};
 }
 function recordedCamera(entries:TagEntries):string|undefined {
-  for(const name of ['Model','CameraModelName','CameraModel','DeviceModelName']){
+  for(const name of ['Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel']){
     const candidates=entries.filter(([key])=>tagName(key)===name);
     if(name==='Model'){
       const priority=(key:string)=>/^(?:IFD0|EXIF|ExifIFD)$/.test(tagGroup(key))?0:tagGroup(key)==='Keys'?1:2;
@@ -176,7 +176,8 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   for(const [key,value] of entries)flatten(key,value);
   const exposure=exposureSummary(entries);if(exposure)result.exposure=exposure;
   const mechanical=entries.filter(([key])=>tagName(key)==='MechanicalShutterCount').map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined);
-  const total=entries.filter(([key])=>tagName(key)==='ShutterCount');
+  // Sony bodies that keep their count only in ShutterCount2 or ShutterCount3 (ExifTool Sony Tag9050a-c) fall back to it.
+  const total=['ShutterCount','ShutterCount2','ShutterCount3'].map(name=>entries.filter(([key])=>tagName(key)===name)).find(found=>found.some(([key,value])=>counter(key,value)!==undefined))??[];
   const mechanicalValues=new Set(mechanical);
   const totalValues=new Set(total.map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined));
   if(mechanicalValues.size>1)result.shutterNote='Conflicting mechanical shutter counters were found. Review the individual metadata values.';
@@ -224,7 +225,7 @@ async function preview(filename:string):Promise<string|undefined> {
 // Routing reads only what camera, capture date, editor provenance, lens and
 // read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
-  'Make','Model','CameraModelName','CameraModel','DeviceModelName',
+  'Make','Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel',
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',

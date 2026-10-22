@@ -253,3 +253,12 @@ test('destination capacity status does not enumerate camera layouts, but destina
   await assert.rejects(validateDestination(root,[],{volumes:snapshot}),/inspect this volume/);
   assert.equal(probe.mock.callCount(),1);
 });
+
+test('Android phone videos are named from their QuickTime Keys model',()=>{
+  assert.equal(metadataFromTags({'Keys:AndroidMake':'Google','Keys:AndroidModel':'Pixel 8 Pro'},{details:false}).camera,'Pixel 8 Pro');
+});
+
+test('Sony bodies that record only ShutterCount2 or ShutterCount3 still report a count',()=>{
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7M3','Sony:ShutterCount2':12345}).shutterCount,'12,345');
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7RM3','Sony:ShutterCount3':678}).shutterCount,'678');
+});
