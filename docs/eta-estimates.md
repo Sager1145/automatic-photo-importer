@@ -32,6 +32,12 @@ Imports run for hours on spinning external drives. Each stage, each job and the 
 7. **Whole job.** The job ETA is the current stage's remainder plus estimates for the stages still ahead. Those use the work known from the plan: the files and bytes listed, times the number of destinations, until the copy plan gives exact numbers. Each is divided by the rate remembered for that stage, or by a conservative default (checking 40 files/s, comparing 300 files/s, copying 60 MB/s, verifying 100 MB/s). The dashboard shows the longest ETA among the running jobs, because jobs run in parallel.
 8. **Listing.** On a drive or card, the bytes found are measured against the drive's used space. The progress bar already does this. On a folder, where the total is unknown, only "Listing files…" is shown.
 
+9. **Shown together.** Every progress line shows the elapsed time and the time left side by side ("12:03 elapsed · about 8 min left", `ProgressTiming` in `RootApp.tsx`). Jobs use `Job.startedAt`; the review, the backup folder check and source scans get a `startedAt` from `stampEstimates`, kept for as long as they run (a scan's listing and metadata reading share one clock).
+
+## Read speed
+
+Copying reports its own speed. For the steps that report none, `stampEstimates` measures one with `RateMeter` (an EWMA of the running total with a 5 s time constant, so it falls during a stall): bytes read for organization reading and comparing with the destination, the verified share of the bytes for verification, and files per second for metadata checking, which reads only headers. Every speed goes through `formatSpeed` in `i18n.tsx`: decimal units (B/s, KB/s, MB/s, GB/s), 3 significant digits, and `speedUnit` holds the shown unit until the speed falls below 0.9 of it, so it does not flicker near a boundary.
+
 ## Sources
 
 - rclone accounting: https://github.com/rclone/rclone/blob/master/fs/accounting/stats.go
