@@ -800,6 +800,24 @@ Review changes…|预览更改…|預覽變更…|変更を確認…
 Library organization|媒体库整理|媒體庫整理|ライブラリの整理
 Organization waits for queued imports to finish. Every new file is verified before its original is retained in the recovery store. Use Review changes to inspect the paths first.|整理会等待排队的导入完成。每个新文件都会经过验证，然后将原文件保留在恢复目录中。可使用“预览更改”先检查路径。|整理會等待佇列中的匯入完成。每個新檔案都會經過驗證，然後將原始檔案保留在復原目錄中。可使用「預覽變更」先檢查路徑。|整理は待機中のインポートが完了してから始まります。新しいファイルを検証してから、オリジナルを復旧領域に保持します。先にパスを確認するには「変更を確認」を使用してください。
 How camera folders are chosen|如何选择相机文件夹|如何選擇相機資料夾|カメラ別フォルダーの選択方法
+Import: copy, source untouched|导入：复制，来源保持不变|匯入：複製，來源保持不變|インポート：コピー、ソースはそのまま
+Organize: move, source removed|整理：移动，来源文件已移除|整理：移動，來源檔案已移除|整理：移動、ソースから削除
+Emptied source folders are removed|已清空的来源文件夹会被删除|已清空的來源資料夾會被刪除|空になった元フォルダーは削除されます
+Emptied source folders are kept|已清空的来源文件夹会保留|已清空的來源資料夾會保留|空になった元フォルダーは残ります
+Confirmed duplicates are released|已确认的重复文件会被释放|已確認的重複檔案會被釋放|確認済みの重複ファイルは解放されます
+Confirmed duplicates are kept for undo|已确认的重复文件会保留以便撤销|已確認的重複檔案會保留以便復原|確認済みの重複ファイルは取り消し用に保持されます
+Delete originals already in the backup|删除已在备份中的原文件|刪除已在備份中的原始檔案|バックアップ済みの元のファイルを削除
+Deletes only source files verified in the backup|只删除已在备份中验证过的来源文件|只刪除已在備份中驗證過的來源檔案|バックアップで検証済みのソースファイルだけを削除します
+Delete originals already in the backup?|要删除已在备份中的原文件吗？|要刪除已在備份中的原始檔案嗎？|バックアップ済みの元のファイルを削除しますか？
+Delete originals permanently?|要永久删除原文件吗？|要永久刪除原始檔案嗎？|元のファイルを完全に削除しますか？
+Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.|只会删除已复制并通过校验和验证的备份文件对应的原文件。未复制的文件会保留在原处。|只會刪除已複製並通過檢查碼驗證的備份檔案所對應的原始檔案。未複製的檔案會保留在原處。|コピーされ、チェックサムでバックアップ内の確認が取れたファイルだけを削除します。コピーされていないファイルはそのまま残ります。
+{count} files ({size}) will be deleted from {name}.|将从 {name} 删除 {count} 个文件（{size}）。|將從 {name} 刪除 {count} 個檔案（{size}）。|{name} から {count} 件（{size}）のファイルを削除します。
+No verified originals to delete.|没有可删除的已验证原文件。|沒有可刪除的已驗證原始檔案。|削除できる検証済みの元のファイルはありません。
+This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.|这将从 {name} 永久删除 {count} 个文件（{size}）。删除前会逐个与备份中的副本核对。此操作无法撤销。|這將從 {name} 永久刪除 {count} 個檔案（{size}）。刪除前會逐一與備份中的副本核對。此操作無法復原。|{name} から {count} 件（{size}）のファイルを完全に削除します。削除前に、それぞれバックアップ内のコピーと照合します。この操作は取り消せません。
+Counting verified originals…|正在统计已验证的原文件…|正在統計已驗證的原始檔案…|検証済みの元のファイルを数えています…
+{count} files will stay where they are.|有 {count} 个文件会保留在原处。|有 {count} 個檔案會保留在原處。|{count} 件のファイルはそのまま残ります。
+{count} originals deleted ({size}); {kept} left in place|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残しました
+Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {
