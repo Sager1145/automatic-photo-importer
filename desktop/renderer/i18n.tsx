@@ -504,6 +504,8 @@ Waiting|等待中|等待中|待機中
 In progress|进行中|進行中|処理中
 Skipped|已跳过|已略過|スキップ
 Remove emptied source folders|删除已清空的来源文件夹|刪除已清空的來源資料夾|空になった元フォルダーを削除
+Remove confirmed duplicates|删除已确认的重复文件|刪除已確認的重複檔案|確認済みの重複ファイルを削除
+After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.|整理无错误完成后，再次校验已存在于目标位置的原文件，然后将其删除，而不是保留以供撤销。|整理無錯誤完成後，再次校驗已存在於目標位置的原始檔案，然後將其刪除，而不是保留以供復原。|整理がエラーなく完了したら、移動先に既にある元のファイルを再確認し、元に戻す用に残さず削除します。
 Folders left empty after organizing are removed. Folders with files are kept.|整理后变空的文件夹会被删除，仍有文件的文件夹会保留。|整理後變空的資料夾會被刪除，仍有檔案的資料夾會保留。|整理後に空になったフォルダーは削除します。ファイルが残るフォルダーは残します。
 Large sizes shrink to fit small windows.|窗口较小时，大字号会自动缩小以适应。|視窗較小時，大字級會自動縮小以符合。|ウィンドウが小さいときは大きな文字が自動で縮小されます。
 Choose whether to import this drive.|请选择是否导入此驱动器。|請選擇是否匯入此磁碟。|このドライブを読み込むか選んでください。

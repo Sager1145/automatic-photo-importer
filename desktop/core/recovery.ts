@@ -7,8 +7,9 @@ export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { beneath, checkAbort, code, contained, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
 
-/** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none. */
-export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];}
+/** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
+ * released: retained duplicates removed right after a clean run (only when that was asked for). */
+export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;}
 /** rename: move each file on its volume with rename(2); copy: verified copy plus a retained original. */
 export type OrganizationStrategy='rename'|'copy';
 export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;}
@@ -441,7 +442,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  for(const [index,entry] of m.entries.entries())if(!state.finalizing.has(index)&&await savedOriginal(m,index,state).catch(()=>undefined)){result.retained++;result.retainedBytes+=entry.size;}
  return result;
 }
-export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[]):Promise<ReorganizationResult> {
+export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false):Promise<ReorganizationResult> {
  checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
  const id=randomUUID(),manifest:Manifest={version:1,id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,sourceIdentity:await identity(transfer.source),entries:[],...(strategy==='rename'?{strategy:'rename' as const}:{}),...(keepFolders?{keepFolders:true as const}:{}),...(libraries.length?{libraries}:{})};
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.source;folder=path.dirname(folder)){if(!beneath(folder,transfer.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
@@ -449,7 +450,16 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  // No destination publication or original relocation occurs until the complete
  // immutable review and containing directories have been synchronized.
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
- return locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress));
+ const result=await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress));
+ // Release re-verifies every destination by checksum before removing a kept original.
+ if(releaseDuplicates&&result.errors.length===0&&result.retained>0){
+  try{
+   const released=await finalizeOrganization(transfer.root,id,signal);
+   result.released=released.removed;result.releasedBytes=released.bytes;
+   result.retained=Math.max(0,result.retained-released.removed);result.retainedBytes=Math.max(0,result.retainedBytes-released.bytes);
+  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
+ }
+ return result;
 }
 export async function resumeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<ReorganizationResult> {
  const job=jobPath(root,id);return locked(job,async()=>run(await readManifest(root,id),signal,onProgress));

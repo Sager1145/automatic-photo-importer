@@ -677,7 +677,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   checkAbort(signal);
   return runs.map(run=>run.error??run.result);
 }
-export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{strategy?:import('./recovery').OrganizationStrategy;keepSourceFolders?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
+export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{strategy?:import('./recovery').OrganizationStrategy;keepSourceFolders?:boolean;/** After a clean run, remove the confirmed duplicates kept in recovery storage. */releaseDuplicates?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
   const review=reorganizationReviews.get(transfer),scope=reorganizationScopes.get(transfer);
   if(!review || !scope || scope.source!==transfer.source || scope.root!==transfer.root || scope.rootIdentity!==transfer.rootIdentity || (transfer.source!==transfer.root && !beneath(transfer.root,transfer.source)) || review.size!==transfer.entries.length || transfer.entries.some(entry=>{
     const original=review.get(entry.id);
@@ -695,7 +695,7 @@ export async function executeReorganization(transfer:TransferPlan,signal?:AbortS
     }
     // Organization renames files; drop the cached checksums for this library.
     index.clear();
-    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries);
+    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries,options.releaseDuplicates);
   });
   await flushIndex(index);
   return result;

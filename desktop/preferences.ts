@@ -2,7 +2,7 @@ import type {MediaLayout,Preferences} from './shared';
 
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,removeEmptySourceFolders:true,autoOrganizeBackup:'ask',unknownDefault:'skip',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{}};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,removeEmptySourceFolders:true,releaseDuplicatesAfterOrganizing:false,autoOrganizeBackup:'ask',unknownDefault:'skip',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{}};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -42,6 +42,7 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   backupMode:oneOf(value.backupMode,['additive','mirror'] as const,base.backupMode??'additive'),
   verifyCopies:value.verifyCopies===undefined?base.verifyCopies!==false:value.verifyCopies!==false,
   removeEmptySourceFolders:value.removeEmptySourceFolders===undefined?base.removeEmptySourceFolders!==false:value.removeEmptySourceFolders!==false,
+  releaseDuplicatesAfterOrganizing:flag(value.releaseDuplicatesAfterOrganizing,base.releaseDuplicatesAfterOrganizing===true),
   autoOrganizeBackup:oneOf(value.autoOrganizeBackup,['off','ask','auto'] as const,base.autoOrganizeBackup??'ask'),
   unknownDefault:oneOf(value.unknownDefault,['skip','other','ask'] as const,base.unknownDefault??'skip'),
   rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected']),
