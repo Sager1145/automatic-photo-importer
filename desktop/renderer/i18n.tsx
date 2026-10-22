@@ -522,7 +522,7 @@ Run this job again, including files that had errors|重新运行此任务，包�
 This job ended with errors.|此任务完成时有错误。|此工作完成時有錯誤。|このジョブはエラーがある状態で終了しました。
 Show in Finder|在访达中显示|在 Finder 中顯示|Finder で表示
 Review what Mirror will move to continue.|请先审核镜像将移动的文件再继续。|請先審核鏡像將移動的檔案再繼續。|続行するには、ミラーで移動するファイルを確認してください。
-Settings are locked while importing or reviewing.|导入或审核期间设置已锁定。|匯入或審核期間設定已鎖定。|読み込み中または確認中は設定を変更できません。
+Settings are locked while an import, organization or review is running, queued or paused. Stop it completely to change them.|导入、整理或审核正在运行、排队或已暂停时，设置已锁定。请先完全停止再更改。|匯入、整理或審核正在執行、排隊或已暫停時，設定已鎖定。請先完全停止再變更。|読み込み・整理・確認が実行中、待機中、または一時停止中は設定がロックされます。変更するには完全に停止してください。
 Showing 500 matches. Search to narrow.|显示 500 个匹配项，可搜索以缩小范围。|顯示 500 個符合項目，可搜尋以縮小範圍。|500件を表示中。検索で絞り込めます。
 This deletes the kept originals. Undo won't be possible.|这会删除保留的原始文件，之后将无法撤销。|這會刪除保留的原始檔案，之後將無法復原。|保持している元のファイルを削除します。元に戻せなくなります。
 Unknown files are not copied.|未知文件不会被复制。|未知檔案不會被複製。|不明なファイルはコピーしません。
