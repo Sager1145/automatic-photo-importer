@@ -16,7 +16,8 @@ export const run=promisify(execFile);
 export const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 export const fileSha=async(file:string)=>sha(await fs.readFile(file));
 
-/** Disk images mounted inside each temporary folder, detached before it is removed. */
+/** Disk images attached inside each temporary folder, detached by device before it is removed (a
+ * volume a test unmounted with umount stays attached, so its mount path cannot detach it). */
 const mounts=new Map<string,string[]>();
 /** A private temporary folder, removed after the test (read-only folders made writable first). */
 export async function temporary(t:test.TestContext,prefix:string):Promise<string> {
@@ -69,12 +70,13 @@ export async function leftovers(root:string):Promise<string[]> {
  * detached when that folder is removed. */
 export async function diskImage(base:string,size:string,fsType:'ExFAT'|'APFS'|'HFS+',name:string,options:{readOnly?:boolean}={}):Promise<string|undefined> {
  if(process.platform!=='darwin')return undefined;
- const image=path.join(base,`${name}.dmg`),mount=path.join(base,name);
+ const image=path.join(base,`${name}.dmg`),mount=path.join(base,name);let device:string|undefined;
  await fs.mkdir(mount);
  try{
   await run('hdiutil',['create','-quiet','-size',size,'-fs',fsType,'-volname',name,image]);
-  await run('hdiutil',['attach','-quiet','-nobrowse',...(options.readOnly?['-readonly']:[]),'-mountpoint',mount,image]);
+  const {stdout}=await run('hdiutil',['attach','-nobrowse',...(options.readOnly?['-readonly']:[]),'-mountpoint',mount,image]);
+  device=stdout.match(/^\/dev\/disk\d+/m)?.[0];
  }catch{return undefined;}
- mounts.set(base,[...(mounts.get(base)??[]),mount]);
+ mounts.set(base,[...(mounts.get(base)??[]),device??mount]);
  return fs.realpath(mount);
 }
