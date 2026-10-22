@@ -22,6 +22,7 @@ export const backendMessages={
  'job.destinationFile':{en:'Destination {index} of {count}: {file}','zh-Hans':'目标 {index}/{count}：{file}','zh-Hant':'目的地 {index}/{count}：{file}',ja:'保存先 {index}/{count}：{file}'},
  'job.revalidating':{en:'Revalidating reviewed paths','zh-Hans':'正在重新验证已审核的路径','zh-Hant':'正在重新驗證已審核的路徑',ja:'確認済みのパスを再検証中'},
  'job.copied':{en:'{copied} copied · {skipped} verified','zh-Hans':'已复制 {copied} 个 · 已验证 {skipped} 个','zh-Hant':'已複製 {copied} 個 · 已驗證 {skipped} 個',ja:'{copied} 件コピー · {skipped} 件検証済み'},
+ 'job.skippedErrors':{en:'{count} skipped with errors','zh-Hans':'{count} 个因错误跳过','zh-Hant':'{count} 個因錯誤略過',ja:'エラーで {count} 件スキップ'},
  'job.mirrorRemoved':{en:'{count} moved to .mirror-removed','zh-Hans':'{count} 个已移至 .mirror-removed','zh-Hant':'{count} 個已移至 .mirror-removed',ja:'{count} 件を .mirror-removed に移動'},
  'job.errors':{en:'{count} errors','zh-Hans':'{count} 个错误','zh-Hant':'{count} 個錯誤',ja:'エラー {count} 件'},
  'job.mirrorIncomplete':{en:'Mirror incomplete; originals retained','zh-Hans':'镜像未完成；原文件已保留','zh-Hant':'鏡像未完成；原始檔案已保留',ja:'ミラーは未完了です。元のファイルは保持されています'},
@@ -94,6 +95,7 @@ export const backendMessages={
  'error.destinationUnavailable':{en:'The destination is unavailable.','zh-Hans':'目标不可用。','zh-Hant':'目的地無法使用。',ja:'保存先を利用できません。'},
  'error.destinationChanged':{en:'The selected destination disk changed or cannot be identified. Choose it again before copying.','zh-Hans':'所选目标磁盘已更改或无法识别。请在复制前重新选择。','zh-Hant':'所選目的地磁碟已變更或無法識別。請在複製前重新選擇。',ja:'選択した保存先のディスクが変更されたか、識別できません。コピーする前にもう一度選択してください。'},
  'error.backupFolderCheck':{en:'Backup folder check: {error}','zh-Hans':'备份文件夹检查：{error}','zh-Hant':'備份資料夾檢查：{error}',ja:'バックアップフォルダーの確認：{error}'},
+ 'error.fileSkipped':{en:'Skipped {path}: {error}','zh-Hans':'已跳过 {path}：{error}','zh-Hant':'已略過 {path}：{error}',ja:'スキップしました {path}：{error}'},
  'error.folderCleanup':{en:'Folder cleanup: {error}','zh-Hans':'文件夹清理：{error}','zh-Hant':'資料夾清理：{error}',ja:'フォルダーの整理：{error}'},
 } as const satisfies Record<string,Record<Language,string>>;
 
