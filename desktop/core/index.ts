@@ -53,8 +53,9 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
   const video=options.layout==='video-root'&&!!media?.video;
   const template=info.edited?`{year}/{yyyymm}/${editedFolder}/{camera}`:video&&options.videoTemplate?options.videoTemplate:options.template;
-  const result=template.replace(/\{([^{}]+)\}/g,(token,key:string)=>values[key]??token);
-  if(/[{}]/u.test(result)) throw new MessageError('error.invalidTemplate',{template});
+  // The template is checked, not the result: a camera name may itself contain braces.
+  if(/[{}]/u.test(template.replace(/\{([^{}]+)\}/g,(token,key:string)=>Object.hasOwn(values,key)?'':token))) throw new MessageError('error.invalidTemplate',{template});
+  const result=template.replace(/\{([^{}]+)\}/g,(_token,key:string)=>values[key]!);
   validateRelative(result);
   // Edited exports stay directly in their edited camera folder.
   return {root:video?'videos':'photos',camera:result,sub:media&&!info.edited?path.join(...layoutFolders(options.layout,media.video,media.format)):''};
