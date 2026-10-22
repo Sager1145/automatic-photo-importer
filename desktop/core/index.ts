@@ -398,6 +398,17 @@ async function rebindStage(open:OpenStage):Promise<void> {
   const stat=await open.output.stat({bigint:true});
   open.staged.dev=stat.dev;open.staged.ino=stat.ino;open.staged.birthtime=stat.birthtimeNs;
 }
+/** A receipt names its file by inode. The temporary inode exFAT gives an empty file (see above)
+ * is gone after the first write, and APFS may lower birthtime when an older date is applied, so
+ * the receipt is rewritten for the file as it now is: a later run can then resume or release it. */
+async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.open>>,entry:PlanEntry,transfer:TransferPlan,recovery:RecoveryIndex):Promise<OwnedPartial> {
+  const now=await output.stat({bigint:true});
+  if(now.dev===owned.stat.dev&&now.ino===owned.stat.ino&&now.birthtimeNs===owned.stat.birthtimeNs) return owned;
+  await output.sync();
+  const next=await recordPartial(owned.record.kind,owned.file,await output.stat({bigint:true}),entry,transfer,recovery);
+  await clearPartialRecord(owned,transfer.root,recovery);
+  return next;
+}
 async function abandonStage(open:OpenStage,error:unknown):Promise<void> {
   open.error??=error;
   await rebindStage(open).catch(()=>{});
@@ -430,6 +441,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
             // A resumed partial already holds a verified prefix of these bytes.
             let offset=Math.max(0,Math.min(bytesRead,open.initialSize-position));
             while(offset<bytesRead) { const {bytesWritten}=await open.output.write(buffer,offset,bytesRead-offset,position+offset); if(!bytesWritten) throw new Error('Unable to write staged file'); offset+=bytesWritten; }
+            if(!position&&open.staged.record) open.staged.record=await rebound(open.staged.record,open.output,open.target.entry,open.target.transfer,open.target.recovery);
             open.target.onBytes(bytesRead);
           } catch(error) { await abandonStage(open,error); }
         }
@@ -446,9 +458,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
           await applyFileTimestamps(output,before,target.entry.captureTimeMs);
           await rebindStage(open);
           await output.sync();
-          // APFS may lower birthtime when applying an older source mtime. Refresh
-          // the signed identity durably before retiring the previous receipt.
-          if(staged.record&&(await output.stat({bigint:true})).birthtimeNs!==staged.record.stat.birthtimeNs){const previous=staged.record;staged.record=await recordPartial('stage',staged.file,await output.stat({bigint:true}),target.entry,target.transfer,staged.recovery);await clearPartialRecord(previous,target.transfer.root,staged.recovery);}
+          if(staged.record)staged.record=await rebound(staged.record,output,target.entry,target.transfer,staged.recovery);
           await output.close();
         } catch(error) { await abandonStage(open,error); }
       }
@@ -534,9 +544,10 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
       if(!owned){await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);}
       const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(1024*1024);let position=Number((await output.stat({bigint:true})).size);
       try {for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,position);if(!bytesRead)break;let offset=0;
-        while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}position+=bytesRead;
+        while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}
+        if(!position)owned=await rebound(owned,output,publicationEntry,transfer,recovery);position+=bytesRead;
       }const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();
-      if(owned&&(await output.stat({bigint:true})).birthtimeNs!==owned.stat.birthtimeNs){const previous=owned;owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);await clearPartialRecord(previous,transfer.root,recovery);}}finally{await input.close();}
+      owned=await rebound(owned,output,publicationEntry,transfer,recovery);}finally{await input.close();}
       const stat=await output.stat({bigint:true});if(!sameStat(stat,await fs.lstat(destination,{bigint:true})))throw new Error('Destination changed while publishing');
     }finally{await output.close();}
   }

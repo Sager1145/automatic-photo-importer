@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
@@ -71,4 +72,23 @@ test('a re-import releases a staged copy left by a crashed run once the publishe
   assert.deepEqual(result.errors,[]);assert.equal(result.skipped,1);
   assert.deepEqual(await leftovers(root),[]);
   assert.equal((await fs.stat(entry.destination)).size,300_000);
+});
+
+test('a copy stopped while publishing on exFAT is finished in place by the next import, not copied again',async t=>{
+  const mount=await exfat(t);
+  if(!mount) return t.skip('exFAT disk images are unavailable here');
+  const source=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'exfat-source-')));
+  t.after(()=>fs.rm(source,{recursive:true,force:true}));
+  await fs.writeFile(path.join(source,'DSC_0001.NEF'),Buffer.alloc(3*1024*1024,7));
+  const root=path.join(mount,'photobackup');await fs.mkdir(root);
+  const first=(await plan(source,[root],options,metadata)).plans[0]!,destination=first.entries[0]!.destination;
+  // exFAT gives the new, empty file a temporary inode; its receipt must name the inode the bytes went to.
+  const stopped={get aborted(){try{return statSync(destination).size>0;}catch{return false;}}} as AbortSignal;
+  await assert.rejects(execute(first,stopped),{name:'AbortError'});
+  assert.ok((await fs.stat(destination)).size<3*1024*1024);
+  const again=(await plan(source,[root],options,metadata)).plans[0]!;
+  assert.equal(again.entries[0]!.destination,destination);
+  assert.deepEqual(await execute(again),{copied:1,skipped:0,errors:[]});
+  assert.equal((await fs.stat(destination)).size,3*1024*1024);
+  assert.deepEqual(await leftovers(root),[]);
 });
