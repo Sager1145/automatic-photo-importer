@@ -817,3 +817,22 @@ test('a finished organization shows 100%, and one misplaced file is counted in t
     if (language === 'en') assert.notEqual(t('1 file outside your folder structure'), t('{count} files outside your folder structure', { count: '1' }));
   }
 });
+
+test('Settings › Organization shows leftover temporary files with a Clean up button in every language', async () => {
+  const { SettingsPage } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const row = (residue?: AppState['residue'], busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', residue }, act: () => {}, busy }) })).match(/data-testid="residue-cleanup"[\s\S]*?<\/section>/)?.[0] ?? '';
+    const cleanUp = (markup: string) => markup.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?<\/button>/g)?.find(button => button.includes(t('Clean up'))) ?? '';
+    assert.ok(row().includes(t('Not checked yet.')) && cleanUp(row()) && !/disabled/.test(cleanUp(row())), `${language}: unchecked, Clean up available`);
+    const found = row({ files: 37, bytes: 2.5e9, resumable: { files: 2, bytes: 1e8 }, checkedAt: '2026-10-22T10:00:00Z' });
+    assert.ok(found.includes(t('{count} leftover files', { count: formatNumber(37, language) })) && found.includes(formatBytes(2.5e9, language)), `${language}: count and size`);
+    assert.ok(found.includes(t('{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.', { count: formatNumber(2, language), size: formatBytes(1e8, language) })), `${language}: resumable copies reported apart`);
+    assert.ok(row({ files: 1, bytes: 10, resumable: { files: 0, bytes: 0 }, checkedAt: '2026-10-22T10:00:00Z' }).includes(t('1 leftover file')), `${language}: singular`);
+    const clean = row({ files: 0, bytes: 0, resumable: { files: 0, bytes: 0 }, checkedAt: '2026-10-22T10:00:00Z', cleaned: { files: 5, bytes: 1e6, at: '2026-10-22T10:00:00Z' } });
+    assert.ok(clean.includes(t('No leftover files.')) && clean.includes(t('Last cleanup removed {files} ({size}).', { files: t('{count} leftover files', { count: formatNumber(5, language) }), size: formatBytes(1e6, language) })), `${language}: clean, with the last cleanup`);
+    assert.ok(row({ files: 0, bytes: 0, resumable: { files: 0, bytes: 0 }, checking: true }).includes(t('Looking for leftover files…')) && /disabled/.test(cleanUp(row({ files: 0, bytes: 0, resumable: { files: 0, bytes: 0 }, checking: true }))), `${language}: disabled while checking`);
+    assert.ok(/disabled/.test(cleanUp(row(undefined, true))), `${language}: disabled while importing or reviewing`);
+  }
+});

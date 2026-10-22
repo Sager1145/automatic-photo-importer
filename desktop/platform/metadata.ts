@@ -201,6 +201,9 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   return result;
 }
 const previewLimit=20*1024*1024;
+const previewFolders=new Set<string>();
+/** Preview folders being read now, which the leftover cleanup must not remove. */
+export function previewFoldersInUse():string[] {return [...previewFolders];}
 async function preview(filename:string):Promise<string|undefined> {
   const extension=path.extname(filename).toLowerCase();
   if(['.mov','.mp4','.m4v','.avi','.mts','.m2ts','.mxf','.3gp','.webm'].includes(extension))return undefined;
@@ -210,7 +213,7 @@ async function preview(filename:string):Promise<string|undefined> {
     return `data:${mime};base64,${(await readFile(filename)).toString('base64')}`;
   }
   // HEIF and camera RAW files can expose JPEG previews. Only our private temporary directory is written.
-  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));
+  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));previewFolders.add(scratch);
   try {
     for(const tag of ['PreviewImage','JpgFromRaw','ThumbnailImage'] as const) {
       const output=path.join(scratch,`${tag}.jpg`);
@@ -221,7 +224,7 @@ async function preview(filename:string):Promise<string|undefined> {
         if(buffer[0]===0xff && buffer[1]===0xd8)return `data:image/jpeg;base64,${buffer.toString('base64')}`;
       }catch{/* Missing embedded previews are normal for some formats. */}
     }
-  }finally{await rm(scratch,{recursive:true,force:true});}
+  }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
   return undefined;
 }
 // Routing reads only what camera, capture date, editor provenance, lens and
