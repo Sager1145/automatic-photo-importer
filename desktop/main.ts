@@ -587,8 +587,8 @@ async function action(input:Action):Promise<void>{
   case 'applyReview':await applyReview();break;
   case 'discardReview':await discardReview();pump();break;
   case 'window': if(input.command==='minimize')window?.minimize();else if(input.command==='maximize'){if(window?.isMaximized())window.unmaximize();else window?.maximize();}else if(input.command==='close')window?.close();break;
-  case 'clearError':if(typeof input.id==='string')clearErrors(errorLog,state,input.id);else state.error=undefined;break;
-  case 'clearErrors':clearErrors(errorLog,state);break;
+  case 'clearError':if(typeof input.id==='string')clearErrors(errorLog,state,input.id,input.severity==='error'||input.severity==='warning'?input.severity:undefined);else state.error=undefined;break;
+  case 'clearErrors':clearErrors(errorLog,state,undefined,input.severity==='error'||input.severity==='warning'?input.severity:undefined);break;
   case 'refresh':await refresh();break;
   case 'preferences':{
    const patch=input.patch;
