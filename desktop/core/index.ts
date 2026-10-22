@@ -382,13 +382,17 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     // A same-size file at a destination is compared by content. Both sides are hashed here, several
     // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
     // allocation below then reuses those digests unless a file changed in between.
+    // This is where the comparison spends its time, so each file counts as compared here.
     await pool(pending,STREAM_CONCURRENCY,async entry=>{
       checkAbort(signal);
-      if(mirror?.known.has(pathKey(entry.destination))) return;
-      const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
-      if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
-      try { await Promise.all([resolve(entry),index.hinted.digestOf(entry.destination,signal)]); }
+      try {
+        if(mirror?.known.has(pathKey(entry.destination))) return;
+        const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
+        if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
+        await Promise.all([resolve(entry),index.hinted.digestOf(entry.destination,signal)]);
+      }
       catch(error) { if(isAbort(error)) throw error; /* Allocation checks it again and reports it where it always has. */ }
+      finally { if(!signal?.aborted) {compared++;comparing(path.relative(sourceRoot,entry.source));} }
     });
     const reservations=new Map<string,PlanEntry>(),entries:PlanEntry[]=[];
     for(const family of groups(pending)) {
@@ -398,7 +402,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal,mirror?.known),familyFolders(family),signal); }
       catch(error) { for(const entry of family) skip(entry.source,error); continue; }
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
-      compared+=family.length;comparing(path.relative(sourceRoot,family[0]!.source));
+      comparing(path.relative(sourceRoot,family[0]!.source));
     }
     await flushIndex(index);
     await rootUnchanged(destinationRoot,rootIdentity);
