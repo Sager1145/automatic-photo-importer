@@ -4,12 +4,12 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {Action,AppState,Preferences,Job,Source,TransferPlan,DestinationStatus,Inventory,Progress,Review} from './shared';
+import type {Action,AppState,Preferences,Job,Source,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace} from './shared';
 import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders} from './core';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
-import {destinationEntries,destinationParts,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
+import {destinationEntries,destinationParts,destinationSpace,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {backupDriveIdentity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
 import {backupFolders,destinationRoots,sourceInsideBackup} from './platform/destination-roots';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
@@ -81,7 +81,7 @@ let lastEmit=0;
 const livePreferences=new Set(['language','appearance','sourceLayout','showDashboard','textScale','accent','parallel','automatic']);
 const jobPreferences=new Set(['copyMode','backupMode','verifyCopies','removeEmptySourceFolders','autoOrganizeBackup','unknownDefault','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder']);
 /** Reserved destination plans for one source. A review holds one until applied. */
-interface Prepared {review:Review;prefs:Preferences;inventory:Inventory;stage?:{path:string;cleanup():Promise<void>};}
+interface Prepared {review:Review;prefs:Preferences;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};}
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
@@ -289,8 +289,10 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   // A same-drive organization moves files; it never needs room for a second library.
   const needed=reorganize?plans.map((item,index)=>{const bytes=requiredOrganizationSpace(item);if(bytes>available[index]!)throw new MessageError('error.organizeSpace',{index:index+1,size:gigabytes(bytes)});return bytes;}):allocateDestinations(plans,available,prefs.copyMode);
   reservations.set(owner,infos.map((info,index)=>({volume:info.volumeId??info.path,bytes:needed[index]})));
+  // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
+  const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!));
   if(!reorganize&&!stage&&!backup)rememberScan(source,inventory);
-  return {review:{id:owner,source,backup,plans,kind:reorganize?'reorganize':'import',...(sourceFolders?{sourceFolders}:{})},prefs,inventory,stage};
+  return {review:{id:owner,source,backup,plans,kind:reorganize?'reorganize':'import',...(sourceFolders?{sourceFolders}:{})},prefs,inventory,stage,...(space?{space}:{})};
  }catch(error){await stage?.cleanup().catch(()=>{});throw error;}
 }
 async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
@@ -314,7 +316,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(moving)throw new MessageError('error.mirrorReview',{count:moving});
   }
   const {review:{plans,kind,sourceFolders},prefs}=prepared,reorganize=kind==='reorganize';
-  job.inventory=prepared.inventory;if(state.sources.some(source=>source.id===job.source.id))(state.sourceInventories??={})[job.source.id]=prepared.inventory;emit();
+  job.inventory=prepared.inventory;job.space=prepared.space;if(state.sources.some(source=>source.id===job.source.id))(state.sourceInventories??={})[job.source.id]=prepared.inventory;emit();
   if(reorganize)for(const part of destinationParts(plans[0]))await rememberOrganization(part.root,prefs);
   reportDirectory=path.join(app.getPath('userData'),'operation-reports',job.id);await fs.mkdir(reportDirectory,{recursive:true});
   await saveReport('plan.json',{producer:'desktop-app',jobId:job.id,kind,sourceFolders,plans,skipped:job.inventory?.skipped??[],inventory:job.inventory});

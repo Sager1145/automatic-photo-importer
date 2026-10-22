@@ -32,8 +32,11 @@ export interface TransferPlan {source:string;root:string;entries:PlanEntry[];roo
 /** phase 'planning': files checked before anything is written (step 'listing': files found so far, total 0; step 'checking': metadata of every file;
  * step 'reading': library organization reading the files it will move). completed/total count files. */
 export interface Progress {phase?:'planning'|'copying'|'verifying';step?:'listing'|'checking'|'reading'|'earlier'|'confirming'|'moving'|'releasing'|'restoring';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;}
+/** One destination's space for an import, from its plan: needed is what will be written (new files, conflict copies,
+ * videos routed to its video root) plus publication workspace; existing is what is already there and is skipped. */
+export interface DestinationSpace {needed:number;free:number;existing:number;existingFiles:number;newFiles:number;}
 export interface Job {/** Every file was already in the backup and verified; nothing was copied. */alreadyImported?:boolean;organization?:boolean;/** Organization only: the folders of source.path it reads; absent means all of it. */folders?:string[];id:string;source:Source;phase:'queued'|'discovering'|'verifying'|'copying'|'complete'|'stopped'|'error';
-/** A stopped job the user paused; Start continues it. */paused?:boolean;/** ISO time the job left the queue and began running. */startedAt?:string;/** ISO time the current phase began. */phaseStartedAt?:string;detail?:Message;inventory?:Inventory;progress?:Progress;errors:Message[];backup:boolean;}
+/** A stopped job the user paused; Start continues it. */paused?:boolean;/** ISO time the job left the queue and began running. */startedAt?:string;/** ISO time the current phase began. */phaseStartedAt?:string;detail?:Message;inventory?:Inventory;/** Per destination, once the plan exists. */space?:DestinationSpace[];progress?:Progress;errors:Message[];backup:boolean;}
 export interface HistoryEntry {id:string;date:string;title:Message;detail:Message;}
 export interface DestinationStatus {path:string;total?:number;free?:number;available:boolean;detail?:string;volumeId?:string;physicalId?:string;}
 export interface Review {id:string;kind:'import'|'reorganize';source:Source;plans:TransferPlan[];backup:boolean;sourceFolders?:string[];}
