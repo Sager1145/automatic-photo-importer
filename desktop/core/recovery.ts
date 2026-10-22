@@ -916,7 +916,7 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
 /** Listing skips media reads. A recheck reads file contents for every entry the first time in a session
  * and for a full recheck, and later only for entries changed since their last verified pass (on exFAT and
  * FAT "changed" means size or dates; finalize and undo always read contents). */
-export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean}={}):Promise<OrganizationRecovery[]> {
+export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean}={}):Promise<OrganizationRecovery[]> {
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
@@ -924,7 +924,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const jobs:OrganizationRecovery[]=[];
  for(const id of(await fs.readdir(folder)).sort()) {
   if(!uuid.test(id))continue;const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m);if(state.superseded||state.undoComplete)continue;
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m);if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
@@ -973,7 +973,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
 export interface OrganizationFinalization {removed:number;bytes:number;finalized:number;handedOff:number;}
 /** Finalize and undo first check every entry, then change them: `completed` is the entry being
  * handled, 1-based, out of `total` journal entries. */
-export interface OrganizationProgress {step:'checking'|'releasing'|'restoring';completed:number;total:number;file:string;}
+export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'deleting';completed:number;total:number;file:string;}
 /** Explicitly release verified retained duplicates; never delete ordinary source paths.
  * All finalized entries become target-based, allowing a separate explicit
  * dedupe to remove unrelocated duplicate source paths. This call never does so.
@@ -1131,6 +1131,153 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    await checkpoint(m,'undone',index);state.undone.add(index);
   }
   await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
+  return result;
+ });
+}
+
+/** files and bytes: everything deleting an organization's recovery files removes (its journal folder,
+ * including kept originals, and its pointers in other folders). released: kept originals released
+ * through finalizeOrganization first, counted in files and bytes too. */
+export interface RecoveryDeletion {files:number;bytes:number;released:number;}
+/** A journal folder set aside for deletion: never read as a journal, removed by residue cleanup if a
+ * deletion stopped before it was gone. */
+export const deletingPattern=new RegExp(`^deleting-${UUID_PATTERN}-${UUID_PATTERN}$`);
+const journalFile=/^(?:manifest\.json|event-log\.jsonl|event-[a-f0-9-]+\.json|stage-[0-9a-f-]{36}\.partial|incomplete-[0-9a-f-]{36}|originals)$/;
+/** Files and bytes under `folder`; links are counted, not followed. */
+async function tally(folder:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
+ let files=0,bytes=0;const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
+ // Several at a time: a journal from an earlier version holds tens of thousands of small files.
+ await Promise.all(Array.from({length:Math.min(32,entries.length)},async()=>{while(next<entries.length){
+  checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);
+  if(entry.isDirectory()){const inner=await tally(file,signal);files+=inner.files;bytes+=inner.bytes;}
+  else{const stat=await maybeStat(file);if(stat){files++;bytes+=Number(stat.size);}}
+ }}));
+ return {files,bytes};
+}
+/** This journal's pointers (and their crash leftovers) in the folders it leaves them in. */
+async function ownPointers(m:Manifest):Promise<{file:string;folder:string;size:number}[]>{
+ const found:{file:string;folder:string;size:number}[]=[];
+ for(const folder of pointerFolders(m)){
+  const storageFolder=path.join(folder,storage);
+  for(const name of await fs.readdir(storageFolder).catch(()=>[] as string[])){
+   if(name!==`journal-${m.id}.json`&&!(pointerTemporary.test(name)&&name.replace(/^\./,'').startsWith(`journal-${m.id}-`)))continue;
+   const file=path.join(storageFolder,name);await contained(file,folder);const stat=await maybeStat(file);
+   if(stat?.isFile())found.push({file,folder,size:Number(stat.size)});
+  }
+ }
+ return found;
+}
+async function journalFolder(root:string,id:string):Promise<string>{
+ const folder=jobPath(root,id);await contained(folder,root);const stat=await fs.lstat(folder);
+ if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('Unsafe recovery storage');
+ return folder;
+}
+/** What deleting this organization's recovery files would remove: files and bytes. */
+export async function measureOrganizationRecovery(root:string,id:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
+ await adoptLegacyStorage(root);
+ const size=await tally(await journalFolder(root,id),signal);
+ const m=await readManifest(root,id).catch(()=>undefined);
+ for(const pointer of m?await ownPointers(m):[]){size.files++;size.bytes+=pointer.size;}
+ return size;
+}
+/** Only a finished (and fully finalized), replaced or fully undone organization can lose its records. */
+function deletable(m:Manifest,state:JournalState):void{
+ if(!state.undoComplete&&!state.superseded&&unfinished(state))throw new Error(`Organization ${m.id} is not finished; finish or undo it before deleting its recovery files`);
+}
+/** Other journals that still name this one: one it replaced, or one whose files it took over. Each must
+ * go first; without this journal, they could no longer be checked. */
+async function dependents(m:Manifest):Promise<string[]>{
+ const names:string[]=[],folders=new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)]);
+ for(const name of await fs.readdir(path.join(m.root,storage)).catch(()=>[] as string[])){const pointed=await siblingPointer(m.root,name).catch(()=>undefined);if(pointed)folders.add(pointed);}
+ for(const folder of folders)for(const id of await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[])){
+  if(id===m.id||!uuid.test(id))continue;
+  // A journal this host cannot read was never written by it, and never names this one.
+  const other=await readManifest(folder,id).catch(()=>undefined);if(!other)continue;
+  const state=await readEvents(other,undefined,undefined,false).catch(()=>undefined);if(!state)continue;
+  const replaced=state.superseded===m.id&&(state.successorRoot??other.root)===m.root;
+  const handed=!state.undoComplete&&[...state.handedOff.values()].some(handOff=>handOff.successor===m.id&&handOff.successorRoot===m.root);
+  if(replaced||handed)names.push(id);
+ }
+ return names;
+}
+/** Whether a file with exactly these bytes is somewhere outside this journal: where it put the file, back
+ * at its original path, where a later organization moved it, or kept by the organization that replaced it. */
+async function copyElsewhere(m:Manifest,state:JournalState,index:number,expected:{digest:string;size:bigint},signal?:AbortSignal,depth=0):Promise<boolean>{
+ const entry=m.entries[index]!;
+ const same=async(file:string|undefined,scope:string)=>{
+  if(!file)return false;try{await contained(file,scope);}catch{return false;}
+  const stat=await maybeStat(file);return !!stat?.isFile()&&!stat.isSymbolicLink()&&stat.size===expected.size&&await digest(file,signal)===expected.digest;
+ };
+ if(await same(entry.destination,m.root)||await same(entry.source,m.source))return true;
+ const handOff=state.handedOff.get(index);if(handOff&&await same(handOff.destination,handOff.successorRoot))return true;
+ if(!state.superseded||depth>=16)return false;
+ const next=await readManifest(state.successorRoot??m.root,state.superseded).catch(()=>undefined);if(!next)return false;
+ const nextState=await readEvents(next,undefined,undefined,false).catch(()=>undefined);if(!nextState)return false;
+ const at=next.entries.findIndex(item=>pathKey(item.source)===pathKey(entry.destination));if(at<0)return false;
+ if(await same(await savedOriginal(next,at,nextState).catch(()=>undefined),next.root))return true;
+ return copyElsewhere(next,nextState,at,expected,signal,depth+1);
+}
+/** Every file in the journal folder is one the app writes there; every kept original left has a
+ * byte-identical copy elsewhere. Anything else stops the deletion before anything is removed. */
+async function checkJournalFolder(m:Manifest,state:JournalState,folder:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<void>{
+ for(const name of await fs.readdir(folder))if(!journalFile.test(name))throw new Error(`Unexpected file in recovery folder; nothing was deleted: ${path.join(folder,name)}`);
+ const originals=path.join(folder,'originals'),kept:{index:number;file:string}[]=[];
+ const stat=await maybeStat(originals);if(stat&&(!stat.isDirectory()||stat.isSymbolicLink()))throw new Error('Unsafe recovery storage');
+ for(const index of stat?await fs.readdir(originals):[]){
+  const position=Number(index),indexFolder=path.join(originals,index);
+  if(!/^\d+$/.test(index)||position>=m.entries.length)throw new Error(`Unexpected file in recovery folder; nothing was deleted: ${indexFolder}`);
+  for(const slot of await fs.readdir(indexFolder).catch(()=>[] as string[])){
+   const slotFolder=path.join(indexFolder,slot);
+   for(const name of await fs.readdir(slotFolder).catch(()=>[] as string[])){const file=path.join(slotFolder,name);if((await fs.lstat(file)).isFile())kept.push({index:position,file});}
+  }
+ }
+ for(const [position,{index,file}] of kept.entries()){
+  checkAbort(signal);onProgress?.({step:'checking',completed:position+1,total:kept.length,file});
+  const expected={digest:await digest(file,signal),size:(await fs.lstat(file,{bigint:true})).size};
+  if(!await copyElsewhere(m,state,index,expected,signal))throw new Error(`A kept original has no checked copy elsewhere; nothing was deleted: ${file}`);
+ }
+}
+/** Delete an organization's recovery files: its journal folder (manifest, events, kept originals, staging
+ * leftovers) and its pointers in other folders. Organized files and other journals are never touched.
+ * Refused while it is unfinished, or while another journal still names it. Kept originals of a finished
+ * organization are first released by finalizeOrganization, which checks every destination by SHA-256;
+ * any other kept original must have a byte-identical copy elsewhere. The folder is renamed aside in one
+ * step before anything is removed, so a stop leaves the journal either whole or out of every listing. */
+export async function deleteOrganizationRecovery(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<RecoveryDeletion>{
+ await adoptLegacyStorage(root);
+ const check=async()=>{
+  const m=await readManifest(root,id),state=await readEvents(m);deletable(m,state);
+  const needed=await dependents(m);
+  if(needed.length)throw new Error(`Organization ${needed.join(', ')} still relies on this organization's records; delete ${needed.length===1?'that one':'those'} first`);
+  return {m,state};
+ };
+ const first=await locked(jobPath(root,id),check);
+ const result:RecoveryDeletion={files:0,bytes:0,released:0};
+ const releasable=!first.state.superseded&&!first.state.undoComplete&&first.m.entries.some((_,index)=>!first.state.finalizing.has(index)&&!first.state.handedOff.has(index)&&!!first.state.slots.get(index)?.length);
+ if(releasable){
+  const released=await finalizeOrganization(root,id,signal,onProgress);
+  result.released=released.removed;result.files+=released.removed;result.bytes+=released.bytes;
+ }
+ return locked(jobPath(root,id),async()=>{
+  checkAbort(signal);const {m,state}=await check(),folder=await journalFolder(root,id);
+  await checkJournalFolder(m,state,folder,signal,onProgress);
+  const size=await tally(folder,signal),pointers=await ownPointers(m);
+  checkAbort(signal);
+  const parent=path.join(root,storage),aside=path.join(parent,`deleting-${id}-${randomUUID()}`);await contained(aside,root);
+  await fs.rename(folder,aside);await syncDirectory(parent);
+  for(const key of [...finishedJournals.keys()])if(key.split('\0')[1]===id)finishedJournals.delete(key);
+  for(const key of [...verifiedPasses.keys()])if(key.split('\0')[1]===id)verifiedPasses.delete(key);
+  syncedLogs.delete(path.join(folder,eventLog));
+  onProgress?.({step:'deleting',completed:0,total:size.files,file:folder});
+  await fs.rm(aside,{recursive:true,force:true});await syncDirectory(parent);
+  result.files+=size.files;result.bytes+=size.bytes;
+  for(const pointer of pointers){
+   try{await fs.unlink(pointer.file);await syncDirectory(path.dirname(pointer.file));result.files++;result.bytes+=pointer.size;}catch{/* Left as an inert pointer; residue cleanup removes it. */}
+   await fs.rmdir(path.dirname(pointer.file)).then(()=>syncDirectory(pointer.folder),()=>{});
+  }
+  // The recovery folder goes too once nothing else is in it.
+  await fs.rmdir(parent).then(()=>syncDirectory(root),()=>{});
+  onProgress?.({step:'deleting',completed:size.files,total:size.files,file:folder});
   return result;
  });
 }

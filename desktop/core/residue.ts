@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
 import { INDEX_PREFIX } from './destination-index';
 import { leftoverReceipt } from './import-recovery';
-import { isRecoveryName, journalTerminal, pointerLeftover } from './recovery';
+import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover } from './recovery';
 import { checkAbort, code, contained, sameStat } from './paths';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
@@ -81,6 +81,12 @@ async function journalLeftovers(storage:string,root:string,items:ResidueItem[],s
     checkAbort(signal);
     const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name)?await regular(file):undefined;
     if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
+  }
+  // A journal folder set aside by a deletion that stopped before it was gone.
+  for(const entry of await list(storage)) {
+    if(!entry.isDirectory()||!deletingPattern.test(entry.name)) continue;
+    const aside=path.join(storage,entry.name),stat=await fs.lstat(aside,{bigint:true}).catch(()=>undefined);
+    if(stat) items.push({path:aside,kind:'organization',bytes:await folderBytes(aside,signal),root,stat});
   }
   for(const job of await list(storage)) {
     if(!job.isDirectory()||!uuid.test(job.name)) continue;
@@ -160,8 +166,9 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
     try {
       await contained(item.path,item.root);
       const now=await fs.lstat(item.path,{bigint:true});
-      if(item.kind==='folder'||item.kind==='temporary') {
+      if(item.kind==='folder'||item.kind==='temporary'||item.stat.isDirectory()) {
         if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
+        // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
         if(item.kind==='folder') await fs.rmdir(item.path); else await fs.rm(item.path,{recursive:true});
       } else {
         if(!now.isFile()||!sameStat(now,item.stat)) continue;
