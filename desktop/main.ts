@@ -6,7 +6,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace} from './shared';
-import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
+import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
@@ -207,7 +207,7 @@ async function listOrganizations(){
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
-    const found=await getOrganizationRecovery(location.root,{verifyContents:false});byRoot.set(location.root,found);
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true});byRoot.set(location.root,found);
     // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
     if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
     // The sibling backup folders those journals list are read too, on the same drive.
@@ -229,7 +229,7 @@ const gigabytes=(bytes:number)=>`${(bytes/1e9).toFixed(1)} GB`;
 /** "2592 moved · 2592 originals kept for undo (49.0 GB) · 0 errors"; only true claims are made. */
 function organizedText(moved:number,retained:number,retainedBytes:number,errors:number){return [message('job.moved',{count:moved}),retained?message('job.retained',{count:retained,size:gigabytes(retainedBytes)}):undefined,message('job.errors',{count:errors})];}
 /** `source`: the card a paused organization continues on, so its resume shows in the same place. */
-async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'='resume',source?:Source,folders?:string[],full=false){
+async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'|'delete'='resume',source?:Source,folders?:string[],full=false){
  const operation=JSON.stringify([root,id]);if(resumingOrganizations.has(operation))return;
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');
  if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
@@ -242,12 +242,13 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  await validateDestination(location.destination,state.sources,{identity:location.volumeId});
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busyResume');
  if(!location.folder&&!state.preferences.destinations.some((destination,index)=>destination===location.destination&&state.preferences.destinationIds?.[index]===location.volumeId))throw new MessageError('error.organizationDestination');
- const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);emit();
+ const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':kind==='delete'?'job.recheckDelete':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);emit();
  void settle((async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
-  const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
+  const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message('history.organization'),job.detail);}
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message('history.organizationUndone'),job.detail);}
+  else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
@@ -527,6 +528,15 @@ async function action(input:Action):Promise<void>{
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id,'resume',undefined,undefined,input.full===true);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;
   case 'undoOrganization':await resumeOrganizationJob(input.root,input.id,'undo');break;
+  case 'deleteOrganizationRecovery':await resumeOrganizationJob(input.root,input.id,'delete');break;
+  case 'measureOrganizationRecovery':{
+   // Read-only: what Delete recovery files would remove, shown in its confirmations.
+   const {root,id}=input;if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
+   state.recoverySize={root,id};emit();
+   try{const size=await measureOrganizationRecovery(root,id);if(state.recoverySize?.root===root&&state.recoverySize.id===id)state.recoverySize={root,id,...size};}
+   catch(error){if(state.recoverySize?.root===root&&state.recoverySize.id===id)state.recoverySize={root,id,error:toMessage(error)};}
+   break;
+  }
   case 'chooseOrganizationFolders':{
    if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');
    const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');

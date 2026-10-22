@@ -641,11 +641,20 @@ function SelectionChip({ source, act, disabled = false }: { source: Source; act:
 
 // Same-volume organizations are renames that keep nothing but can still be undone;
 // cross-filesystem ones keep originals until they are released.
-export function RetainedOriginals({ job, act, busy }: { job: NonNullable<AppState['organizationRecovery']>[number]; act: Dispatch; busy: boolean }) {
+export function RetainedOriginals({ job, act, busy, recoverySize }: { job: NonNullable<AppState['organizationRecovery']>[number]; act: Dispatch; busy: boolean; recoverySize?: AppState['recoverySize'] }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const [confirming, setConfirming] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<DeleteRecoveryStep>('closed');
   const retainedFiles = job.retainedFiles ?? 0;
-  if (!retainedFiles && !job.undoable && !job.missing) return null;
+  const deletable = recoveryDeletable(job);
+  if (!retainedFiles && !job.undoable && !job.missing && !deletable) return null;
+  const measured = recoverySize?.root === job.root && recoverySize.id === job.id ? recoverySize : undefined;
+  const deleteChoice = (choice: 'open' | 'confirm' | 'cancel') => {
+    const next = nextDeleteRecoveryStep(deleteStep, choice);
+    if (choice === 'open') act({ type: 'measureOrganizationRecovery', root: job.root, id: job.id });
+    setDeleteStep(next.step);
+    if (next.delete) act({ type: 'deleteOrganizationRecovery', root: job.root, id: job.id });
+  };
   const size = bytes(job.retainedBytes ?? 0);
   return <section className="organization-retained" data-testid="organization-retained">
     {retainedFiles > 0 && <p><Icon icon={Info} size={15} />{t("{count} originals ({size}) kept for undo.", { count: formatNumber(retainedFiles), size })}</p>}
@@ -653,8 +662,10 @@ export function RetainedOriginals({ job, act, busy }: { job: NonNullable<AppStat
     <div className="rule-actions">
       {job.undoable && <Button icon={RotateCcw} disabled={busy} onClick={() => act({ type: 'undoOrganization', root: job.root, id: job.id })}>{t("Undo organization")}</Button>}
       {retainedFiles > 0 && <Button icon={Trash2} disabled={busy || !job.finalizable} onClick={() => setConfirming(true)}>{t("Release {size}", { size })}</Button>}
+      <Button kind="danger" icon={Trash2} data-testid="delete-recovery" disabled={busy || !deletable} title={deletable ? undefined : t("Finish or undo this organization before deleting its recovery files.")} onClick={() => deleteChoice('open')}>{t("Delete recovery files")}</Button>
     </div>
     {confirming && <ReleaseConfirm size={size} root={job.root} onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); act({ type: 'finalizeOrganization', root: job.root, id: job.id }); }} />}
+    {deleteStep !== 'closed' && <DeleteRecoveryConfirm key={deleteStep} step={deleteStep} root={job.root} size={measured} onCancel={() => deleteChoice('cancel')} onConfirm={() => deleteChoice('confirm')} />}
   </section>;
 }
 
@@ -667,6 +678,37 @@ export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: stri
     <div className="dialog-heading"><h2 id="release-heading">{t("Release {size}?", { size })}</h2></div>
     <div className="activity-content"><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></div>
     <div className="dialog-footer"><Button onClick={close}>{t("Cancel")}</Button><Button kind="danger" icon={Trash2} onClick={onConfirm}>{t("Release {size}", { size })}</Button></div>
+  </dialog>;
+}
+
+/** Deleting recovery files asks twice: the first sheet says undo goes away and how much is freed, the
+ * second asks again with the exact amount, Cancel focused. Only confirming the second deletes. */
+export type DeleteRecoveryStep = 'closed' | 'first' | 'second';
+export function nextDeleteRecoveryStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
+  if (choice === 'cancel') return { step: 'closed', delete: false };
+  if (choice === 'open') return { step: step === 'closed' ? 'first' : step, delete: false };
+  if (step === 'first') return { step: 'second', delete: false };
+  return { step: 'closed', delete: step === 'second' };
+}
+/** Only a finished, replaced or fully undone organization's recovery files can be deleted. */
+export const recoveryDeletable = (job: NonNullable<AppState['organizationRecovery']>[number]) => !job.error && (job.status === 'complete' || job.status === 'superseded' || job.status === 'undone');
+
+export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }: { step: 'first' | 'second'; root: string; size?: AppState['recoverySize']; onCancel: () => void; onConfirm: () => void }) {
+  const { t, formatNumber, formatBytes: bytes } = useTranslation();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useAnimatedClose(dialog, onCancel);
+  // The second sheet opens with Cancel focused, so Return never deletes by accident.
+  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
+  const measured = size?.files !== undefined && size.bytes !== undefined;
+  const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!) } : undefined;
+  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Measuring recovery files…")}</p>;
+  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-recovery-heading" data-testid={`delete-recovery-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
+    <div className="dialog-heading"><h2 id="delete-recovery-heading">{step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")}</h2></div>
+    <div className="activity-content">
+      {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
+      {detail}<p className="recovery-root">{root}</p>
+    </div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
   </dialog>;
 }
 
@@ -1172,7 +1214,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'complete' ? 'complete' : 'queued'}`}><Icon icon={job.status === 'complete' ? CheckCircle2 : Clock3} size={15} />{job.status === 'complete' ? t("Last completed") : t("Needs recovery")}</span><Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p><p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p><RetainedOriginals job={job} act={act} busy={busy} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}</section>
     </div>
 
   </div>;
