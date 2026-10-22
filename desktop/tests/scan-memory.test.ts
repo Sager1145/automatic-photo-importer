@@ -65,10 +65,10 @@ test('checksums of imported card files are remembered per card and offered only 
  assert.equal(known(path.join(moved,'DCIM','100NCZ_F','DSC0.NEF'),`${again.dev}:${again.ino}:${again.size+1n}:${again.mtimeNs}:${again.ctimeNs}`),undefined);
 });
 
-test('a scan remembered before DJI camera names were read is not reused',async t=>{
+test('a scan remembered before the current DJI camera names is not reused',async t=>{
  const f=await fixture(t);
  await saveScanMemory(f.store,'CARD-UUID',f.mount,await inventory(f.mount,{}),[await routingFor(path.join(f.folder,'DSC0.NEF'),'NIKON Z f')]);
  const dir=path.join(f.store,'scan-memory'),[name]=(await fs.readdir(dir)).filter(file=>!file.includes('.imported.'));
- const stored=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:1}));
+ const stored=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:2}));
  assert.equal(await loadScanMemory(f.store,'CARD-UUID',f.mount),undefined);
 });

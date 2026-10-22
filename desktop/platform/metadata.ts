@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Exposure, Metadata } from '../shared';
+import { djiProduct } from './dji-models';
 
 let reader:ExifTool|undefined;
 function exiftool():ExifTool {
@@ -55,7 +56,7 @@ function dateFamily(entries:TagEntries,plainName:string,compositeName:string,sub
   const zone=base.zone||(offsets.length>1?'':offset||composite?.zone||nikonOffset||'');
   return {key:plain.key,date:base.clock+fraction+zone};
 }
-function cameraModel(entries:TagEntries):string|undefined {
+function recordedCamera(entries:TagEntries):string|undefined {
   for(const name of ['Model','CameraModelName','CameraModel','DeviceModelName']){
     const candidates=entries.filter(([key])=>tagName(key)===name);
     if(name==='Model'){
@@ -71,6 +72,11 @@ function cameraModel(entries:TagEntries):string|undefined {
   // Newer DJI video names its product only in the item list ("DJI OsmoPocket3", "DJI Mini4 Pro").
   // Older drones write a codec name there ("Dji AVC Encoder"), and other software (Lavf) is never a camera.
   for(const [key,value] of entries)if(['ItemList','UserData'].includes(tagGroup(key))&&tagName(key)==='Encoder'&&typeof value==='string'&&/^DJI\b/i.test(value.trim())&&!/encoder|\b(?:avc|hevc|h\.?26[45])\b/i.test(value))return value.trim().replace(/\s+/g,' ');
+}
+/** A DJI photo's hardware code and its videos' encoder name become the product's one folder name. */
+function cameraModel(entries:TagEntries):string|undefined {
+  const model=recordedCamera(entries),make=find(entries,['Make']);
+  return model&&(/^DJI\b/i.test(model)||/^DJI\b/i.test(String(make??'').trim()))?djiProduct(model)??model:model;
 }
 /** DJI names files DJI_<camera-local yyyyMMddhhmmss>_…, while its QuickTime CreateDate has no
  * offset and is usually UTC (some firmware records the clip's end instead). Such a name is the
@@ -218,7 +224,7 @@ async function preview(filename:string):Promise<string|undefined> {
 // Routing reads only what camera, capture date, editor provenance, lens and
 // read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
-  'Model','CameraModelName','CameraModel','DeviceModelName',
+  'Make','Model','CameraModelName','CameraModel','DeviceModelName',
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',
