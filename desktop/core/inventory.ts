@@ -132,17 +132,18 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;
     const rule=unknownRule(extension(file.path),custom,defaults);
-    file.included=!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
+    file.included=(!!options.backup || file.size>0) && (!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera'));
   }
   // Nothing is dropped silently: every file left out is listed with its reason.
   const skipped:SkippedFile[]=[],systemKinds:Record<string,number>={};
   for(const file of files) {
     if(file.system) systemKinds[file.system.id]=(systemKinds[file.system.id]??0)+1;
     if(file.included) continue;
+    if(file.size===0&&!file.system){skipped.push({path:file.path,reason:'empty'});continue;}
     const rule=file.system?undefined:unknownRule(extension(file.path),custom,defaults);
     skipped.push(file.system?{path:file.path,reason:'system',label:file.system.label}:{path:file.path,reason:rule===null?'unknown-rule':defaults.fallback==='ask'?'unknown-ask':'unknown-skip'});
   }
-  const unknown=files.filter(f=>f.kind==='Other' && !f.companionOf && !f.system), unknownExtensions:Record<string,number>={};
+  const unknown=files.filter(f=>f.kind==='Other' && !f.companionOf && !f.system && (options.backup || f.size>0)), unknownExtensions:Record<string,number>={};
   for(const file of unknown) {const ext=extension(file.path); unknownExtensions[ext]=(unknownExtensions[ext]??0)+1;}
-  return {files,media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:{backup:!!options.backup,folders:listedFolders}}),system:files.filter(f=>!!f.system).length,systemKinds,skipped,elapsedMs:performance.now()-started};
+  return {files,media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:{backup:!!options.backup,folders:listedFolders}}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,systemKinds,skipped,elapsedMs:performance.now()-started};
 }

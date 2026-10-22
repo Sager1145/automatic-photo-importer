@@ -177,11 +177,13 @@ test('an organization stopped partway can be undone, and an interrupted undo can
  assert.deepEqual(await core.getOrganizationRecovery(f.root),[]);
 });
 
-test('an empty file is organized by the copy path, which works on exFAT',async t=>{
+test('an empty file is left where it is: it is not planned or moved',async t=>{
  const f=await fixture(t);await fs.writeFile(f.original,'');
- const result=await core.executeReorganization(await prepare(f.root),undefined,undefined,rename);
- assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
- assert.equal((await fs.lstat(f.destination())).size,0);
+ const reviewed=await prepare(f.root);
+ assert.deepEqual(reviewed.entries,[]);
+ const result=await core.executeReorganization(reviewed,undefined,undefined,rename);
+ assert.deepEqual(result.errors,[]);assert.equal(result.moved,0);
+ assert.equal((await fs.lstat(f.original)).size,0);
 });
 
 const dated=async(root:string)=>(await core.plan(root,[root],options,async()=>({camera:'Sony',date:'2024-02-03T12:00:00',fields:{}}))).plans[0]!;
