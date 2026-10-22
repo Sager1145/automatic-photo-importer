@@ -62,7 +62,7 @@ test('mirror review lists extra and changed files, then moves them to a dated ho
  assert.deepEqual(review.removals?.map(item=>[path.relative(folder,item.path),item.reason]).sort(),[['DCIM/changed.txt','changed'],['DCIM/gone.JPG','missing']]);
  assert.equal(review.entries.find(entry=>entry.source.endsWith('changed.txt'))?.destination,path.join(folder,'DCIM/changed.txt'));
  assert.deepEqual(await execute(review),{copied:1,skipped:1,removed:2,errors:[]});
- assert.deepEqual((await files(folder)).filter(file=>!file.startsWith('.photo-importer-drive')),['DCIM/changed.txt','same.txt']);
+ assert.deepEqual((await files(folder)).filter(file=>!file.startsWith('photo-importer-drive')),['DCIM/changed.txt','same.txt']);
  assert.equal(await fs.readFile(path.join(folder,'DCIM/changed.txt'),'utf8'),'version 2');
  const held=await files(path.join(root,'Drive backups/Removed by mirror'));
  assert.equal(held.length,2);

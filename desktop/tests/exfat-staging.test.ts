@@ -34,7 +34,7 @@ async function exfat(t:test.TestContext):Promise<string|undefined> {
 async function leftovers(folder:string):Promise<string[]> {
   const found:string[]=[];
   for(const entry of await fs.readdir(folder,{withFileTypes:true,recursive:true}))
-    if(entry.name.startsWith('.import-')) found.push(path.join(entry.parentPath,entry.name));
+    if(/^photo-importer-(?!index)/.test(entry.name)) found.push(path.join(entry.parentPath,entry.name));
   return found;
 }
 
@@ -63,7 +63,7 @@ test('a re-import releases a staged copy left by a crashed run once the publishe
   const first=(await plan(source,[root],options,metadata)).plans[0]!,entry=first.entries[0]!;
   // What a crash between staging and cleanup leaves: a complete staged copy and its signed stage record.
   await fs.mkdir(path.dirname(entry.destination),{recursive:true});
-  const partial=path.join(path.dirname(entry.destination),`.import-${randomUUID()}.partial`);
+  const partial=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
   await fs.copyFile(original,partial);
   await recordPartial('stage',partial,await fs.lstat(partial,{bigint:true}),entry,first,new Map());
   // The file reached the backup anyway (published before the crash, or by an earlier version).

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { inventory, plan as planDestinations, execute, executeReorganization, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
-const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('.photo-importer-index'));
+const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
 
 
 async function plan(source:string,root:string,...args:Parameters<typeof planDestinations> extends [string,string[],...infer Rest]?Rest:never){return (await planDestinations(source,[root],...args)).plans[0]!;}
@@ -253,7 +253,7 @@ test('interrupted exclusive publication retains intent journal and partial outpu
   assert.equal(await fs.readFile(path.join(root,'keep.txt'),'utf8'),'existing destination data');
   assert.equal(await fs.readFile(p.entries[0]!.destination,'utf8'),'origina');
   const remaining=await visible(path.dirname(p.entries[0]!.destination));
-  const journal=remaining.find(name=>name.startsWith('.import-intent-'));
+  const journal=remaining.find(name=>name.startsWith('photo-importer-intent-'));
   assert.ok(journal); assert.equal(remaining.some(name=>name.endsWith('.partial')),false);
   const intent=JSON.parse(await fs.readFile(path.join(path.dirname(p.entries[0]!.destination),journal),'utf8'));
   assert.equal(intent.source,original); assert.equal(intent.destination,p.entries[0]!.destination); assert.equal(intent.sha256,createHash('sha256').update(await fs.readFile(original)).digest('hex'));

@@ -18,10 +18,11 @@ function proxyOriginals(file:string):string[] {
   return names.map(item=>pathKey(path.join(folder,item)));
 }
 const audio=new Set('wav m4a mp3 aac'.split(' '));
-const artifacts=new Set(['.photo-importer-recovery','photo importer recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
-const importArtifact=/^\.import-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
+const artifacts=new Set(['.photo-importer-recovery','photo-importer-drive.json','.photo-importer-drive.json','photo-importer-index.json','photo importer recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
+const importArtifact=/^(?:\.import|photo-importer)-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
+const indexTemporary=/^photo-importer-index-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.tmp$/i;
 /** Filesystem service files and this app's own recovery artifacts. */
-export function ignoredName(name:string):boolean {return artifacts.has(name.toLowerCase()) || importArtifact.test(name) || name.startsWith('._') || name.startsWith('.photo-importer-index');}
+export function ignoredName(name:string):boolean {return artifacts.has(name.toLowerCase()) || importArtifact.test(name) || indexTemporary.test(name) || name.startsWith('._') || name.startsWith('.photo-importer-index');}
 export function extension(file:string):string {return path.extname(file).slice(1).toLowerCase();}
 export function stem(file:string):string {return pathKey(path.join(path.dirname(file),path.basename(file,path.extname(file))));}
 /** NX Studio keeps edits in NKSC_PARAM/<original name>.nksc beside the original. */

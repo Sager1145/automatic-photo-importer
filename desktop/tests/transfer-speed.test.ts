@@ -24,7 +24,7 @@ function countReads(t:test.TestContext,original:string,roots:string[]){
  const open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
   const handle=await open(...args),file=String(args[0]);
-  const kind=file===original?'source':roots.some(root=>file.startsWith(root+path.sep))?file.endsWith('.partial')?'stage':path.basename(file).startsWith('.photo-importer-index')?undefined:'target':undefined;
+  const kind=file===original?'source':roots.some(root=>file.startsWith(root+path.sep))?file.endsWith('.partial')?'stage':path.basename(file).startsWith('photo-importer-index')?undefined:'target':undefined;
   if(kind){const reader=handle.read.bind(handle);t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await reader(...values);read[kind]+=result.bytesRead;return result;});}
   return handle;
  });syncBuiltinESMExports();
@@ -84,7 +84,7 @@ test('a touched or replaced destination file is hashed again instead of trusted'
 test('a corrupt or foreign index is ignored and rebuilt by the next app session',async t=>{
  const f=await fixture(t);
  await execute((await plan(f.source,f.roots,options,noMetadata)).plans[0]!);
- const index=path.join(f.roots[0]!,'.photo-importer-index.json');
+ const index=path.join(f.roots[0]!,'photo-importer-index.json');
  assert.ok((await fs.stat(index)).isFile());
  await fs.writeFile(index,'{not json');dropDestinationIndexes();
  const counter=countReads(t,f.original,f.roots);

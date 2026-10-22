@@ -477,7 +477,7 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
   const candidate=await findPartial('stage',entry,transfer.root,recovery,signal);
   const recovered=candidate&&!claimedStages.has(candidate.file)?candidate:undefined;
   if(recovered)claimedStages.add(recovered.file);
-  const file=recovered?.file??path.join(path.dirname(entry.destination),`.import-${randomUUID()}.partial`);
+  const file=recovered?.file??path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
   let output:Awaited<ReturnType<typeof fs.open>>;
   try{output=recovered?await openPartial(recovered,transfer.root):await fs.open(file,'wx',0o600);}catch(error){claimedStages.delete(file);throw error;}
   claimedStages.add(file);

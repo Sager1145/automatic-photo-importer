@@ -6,7 +6,7 @@ import os from 'node:os';
 import {fork} from 'node:child_process';
 import {createHash} from 'node:crypto';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
-const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('.photo-importer-index'));
+const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
 
 
 // These are actual SIGKILL process-termination tests. They do not emulate loss

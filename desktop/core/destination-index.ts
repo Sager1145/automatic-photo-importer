@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
 import { checkAbort, digest, identity, sameStat, statKey, syncDirectory } from './paths';
 
-/** Per-destination cache of verified SHA-256 values. Name prefix is ignored by inventory. */
-export const INDEX_PREFIX='.photo-importer-index';
-const INDEX_NAME=`${INDEX_PREFIX}.json`, MAX_INDEX_BYTES=256*1024*1024;
+/** Per-destination cache of verified SHA-256 values. Its names (and the older hidden ones) are ignored by inventory. */
+export const INDEX_PREFIX='photo-importer-index';
+const INDEX_NAME=`${INDEX_PREFIX}.json`, LEGACY_INDEX_NAME=`.${INDEX_NAME}`, MAX_INDEX_BYTES=256*1024*1024;
 interface Recorded {dev:string;ino:string;size:string;mtime:string;ctime:string;sha256:string;}
 const fingerprint=(stat:BigIntStats)=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 /** FAT and exFAT report ctime equal to mtime and reuse entry numbers as inodes, so
@@ -41,14 +41,18 @@ export class DestinationIndex implements Digests {
   constructor(readonly root:string,readonly rootIdentity:string) {}
   static async load(root:string,rootIdentity:string):Promise<DestinationIndex> {
     const index=new DestinationIndex(root,rootIdentity);
-    try {
-      const file=path.join(root,INDEX_NAME),stat=await fs.lstat(file);
-      if(!stat.isFile() || stat.size>MAX_INDEX_BYTES) return index;
-      const data=JSON.parse(await fs.readFile(file,'utf8'));
-      if(data?.version!==1 || data.rootIdentity!==rootIdentity || !data.files || typeof data.files!=='object') return index;
-      for(const [relative,value] of Object.entries(data.files as Record<string,Recorded>))
-        if(value && ['dev','ino','size','mtime','ctime','sha256'].every(key=>typeof (value as unknown as Record<string,unknown>)[key]==='string') && /^[a-f0-9]{64}$/.test(value.sha256)) index.files.set(relative,value);
-    } catch { /* Missing, unreadable or corrupt: start empty and rebuild. */ }
+    for(const name of [INDEX_NAME,LEGACY_INDEX_NAME]) {
+      try {
+        const file=path.join(root,name),stat=await fs.lstat(file);
+        if(!stat.isFile() || stat.size>MAX_INDEX_BYTES) continue;
+        const data=JSON.parse(await fs.readFile(file,'utf8'));
+        if(data?.version!==1 || data.rootIdentity!==rootIdentity || !data.files || typeof data.files!=='object') continue;
+        for(const [relative,value] of Object.entries(data.files as Record<string,Recorded>))
+          if(value && ['dev','ino','size','mtime','ctime','sha256'].every(key=>typeof (value as unknown as Record<string,unknown>)[key]==='string') && /^[a-f0-9]{64}$/.test(value.sha256)) index.files.set(relative,value);
+        if(name===LEGACY_INDEX_NAME) index.dirty=true; // Rewritten under the visible name by the next flush.
+        return index;
+      } catch { /* Missing, unreadable or corrupt: try the older name, else start empty and rebuild. */ }
+    }
     return index;
   }
   private key(file:string):string {return path.relative(this.root,file);}
@@ -92,6 +96,7 @@ export class DestinationIndex implements Digests {
         finally { await handle.close(); }
         await fs.rename(temporary,target);
       } catch(error) { await fs.unlink(temporary).catch(()=>{}); this.dirty=true; throw error; }
+      await fs.unlink(path.join(this.root,LEGACY_INDEX_NAME)).catch(()=>{});
       await syncDirectory(this.root);
     });
     this.writing=write.catch(()=>{});

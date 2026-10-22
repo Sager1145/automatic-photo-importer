@@ -5,7 +5,7 @@ import { destinationEntries, destinationParts } from './allocation';
 import type { TransferPlan } from '../shared';
 
 /** Files the operating system creates that are not user content. The app's own recovery
- * files (.import-*, .photo-importer-*) are deliberately absent: they are never removed here. */
+ * files (.import-*, photo-importer-*, .photo-importer-*) are deliberately absent: they are never removed here. */
 const serviceNames=new Set(['.ds_store','thumbs.db','desktop.ini','icon\r']);
 const serviceFile=(name:string)=>name.startsWith('._')||serviceNames.has(name.toLowerCase());
 

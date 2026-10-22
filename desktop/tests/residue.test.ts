@@ -48,12 +48,12 @@ async function littered(t:test.TestContext) {
   const [first,second]=reviewed.entries as [typeof reviewed.entries[0],typeof reviewed.entries[0]];
   const camera=path.dirname(first.destination);await fs.mkdir(camera,{recursive:true});
   // Resumable: a staged prefix whose signed receipt still binds it to the unchanged card file.
-  const resumable=path.join(camera,`.import-${randomUUID()}.partial`);
+  const resumable=path.join(camera,`photo-importer-${randomUUID()}.partial`);
   await fs.writeFile(resumable,Buffer.alloc(1000,1));
   const resumableReceipt=(await recordPartial('stage',resumable,await fs.lstat(resumable,{bigint:true}),first,reviewed,new Map())).journal;
   // Orphans: a staged copy without a receipt, and a receipt whose staged copy is gone.
   const orphan=path.join(camera,`.import-${randomUUID()}.partial`);await fs.writeFile(orphan,Buffer.alloc(2500,9));
-  const gone=path.join(camera,`.import-${randomUUID()}.partial`);await fs.writeFile(gone,'x');
+  const gone=path.join(camera,`photo-importer-${randomUUID()}.partial`);await fs.writeFile(gone,'x');
   const goneReceipt=(await recordPartial('stage',gone,await fs.lstat(gone,{bigint:true}),second,reviewed,new Map())).journal;await fs.unlink(gone);
   // A publication receipt still bound to its file is the existing recovery path: kept.
   await fs.writeFile(second.destination,Buffer.alloc(100,2));
@@ -62,8 +62,9 @@ async function littered(t:test.TestContext) {
   const vanished=path.join(camera,'DSC_0009.NEF');await fs.writeFile(vanished,'x');
   const vanishedReceipt=(await recordPartial('publication',vanished,await fs.lstat(vanished,{bigint:true}),{...first,digest:'1'.repeat(64)},reviewed,new Map())).journal;await fs.unlink(vanished);
   // A receipt that does not authenticate with this host's key is not this app's to judge.
-  const foreign=path.join(camera,`.import-stage-${randomUUID()}.json`);await fs.writeFile(foreign,JSON.stringify({version:1,kind:'stage',file:orphan,seal:'0'.repeat(64)}));
+  const foreign=path.join(camera,`photo-importer-stage-${randomUUID()}.json`);await fs.writeFile(foreign,JSON.stringify({version:1,kind:'stage',file:orphan,seal:'0'.repeat(64)}));
   const indexTemp=path.join(root,`.photo-importer-index-${randomUUID()}.tmp`);await fs.writeFile(indexTemp,'{}');
+  const visibleIndexTemp=path.join(root,`photo-importer-index-${randomUUID()}.tmp`);await fs.writeFile(visibleIndexTemp,'{}');
   // Organization journal: a staged copy and a preserved incomplete copy, an emptied slot, and a kept original.
   const job=path.join(root,'.photo-importer-recovery',randomUUID());
   await fs.mkdir(path.join(job,'originals','0',randomUUID()),{recursive:true});
@@ -79,7 +80,7 @@ async function littered(t:test.TestContext) {
   const user=[path.join(camera,'.import-holiday.partial'),path.join(camera,`import-${randomUUID()}.partial`),path.join(camera,`.import-${randomUUID()}.partial.jpg`),path.join(camera,`.import-stage-${randomUUID()}.json.bak`),path.join(root,'.photo-importer-index.json'),path.join(temporary,'photo-importer-electron-fixtures','keep.txt'),path.join(job,'notes.txt')];
   for(const file of user){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'user data');}
   const hidden=path.join(root,'.Trashes',`.import-${randomUUID()}.partial`);await fs.mkdir(path.dirname(hidden));await fs.writeFile(hidden,'not looked at');
-  return {card,root,temporary,inUse,resumable,resumableReceipt,orphan,goneReceipt,vanishedReceipt,bound,second,foreign,indexTemp,kept,organizationStage,incomplete,camera1,preview,user,hidden,emptySlot:path.join(job,'originals','0')};
+  return {card,root,temporary,inUse,resumable,resumableReceipt,orphan,goneReceipt,vanishedReceipt,bound,second,foreign,indexTemp,visibleIndexTemp,kept,organizationStage,incomplete,camera1,preview,user,hidden,emptySlot:path.join(job,'originals','0')};
 }
 
 test('residue lists only the app\'s own leftovers, with resumable copies apart',async t=>{
@@ -88,7 +89,7 @@ test('residue lists only the app\'s own leftovers, with resumable copies apart',
   const listed=new Map(found.items.map(item=>[item.path,item.kind]));
   assert.equal(listed.get(f.resumable),'resumable');assert.equal(listed.get(f.resumableReceipt),'resumable');
   assert.equal(listed.get(f.orphan),'partial');assert.equal(listed.get(f.goneReceipt),'receipt');assert.equal(listed.get(f.vanishedReceipt),'receipt');
-  assert.equal(listed.get(f.indexTemp),'index');
+  assert.equal(listed.get(f.indexTemp),'index');assert.equal(listed.get(f.visibleIndexTemp),'index');
   assert.equal(listed.get(f.organizationStage),'organization');assert.equal(listed.get(f.incomplete),'organization');
   assert.equal(listed.get(f.camera1),'temporary');assert.equal(listed.get(f.preview),'temporary');
   assert.ok([...listed.keys()].some(item=>item.startsWith(f.emptySlot+path.sep)),'an emptied original slot is listed');
@@ -105,7 +106,7 @@ test('cleaning removes the residue and nothing else; automatic cleaning keeps re
   assert.ok(automatic.removed.files>0);
   assert.deepEqual(automatic.left.items.map(item=>item.kind),['resumable','resumable']);
   await fs.lstat(f.resumable);await fs.lstat(f.resumableReceipt);
-  for(const removed of [f.orphan,f.goneReceipt,f.vanishedReceipt,f.indexTemp,f.organizationStage,f.incomplete,f.camera1,f.preview,f.emptySlot])await assert.rejects(fs.lstat(removed),{code:'ENOENT'},removed);
+  for(const removed of [f.orphan,f.goneReceipt,f.vanishedReceipt,f.indexTemp,f.visibleIndexTemp,f.organizationStage,f.incomplete,f.camera1,f.preview,f.emptySlot])await assert.rejects(fs.lstat(removed),{code:'ENOENT'},removed);
   const left=await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]});
   assert.deepEqual(left.items.map(item=>item.kind),['resumable','resumable']);
   const manual=await cleanResidue(left);

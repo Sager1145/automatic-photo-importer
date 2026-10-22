@@ -37,7 +37,7 @@ export async function tree(root:string):Promise<Map<string,string>> {
  const found=new Map<string,string>();
  for(const entry of await fs.readdir(root,{withFileTypes:true,recursive:true})){
   const file=path.join(entry.parentPath,entry.name),relative=path.relative(root,file);
-  if(!entry.isFile()||entry.name.startsWith('._')||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')||part==='Photo Importer Recovery'))continue;
+  if(!entry.isFile()||entry.name.startsWith('._')||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')||/^photo-importer-(?:index|drive)/.test(part)||part==='Photo Importer Recovery'))continue;
   found.set(relative,await fileSha(file));
  }
  return found;
@@ -62,7 +62,7 @@ export async function assertCopied(transfer:TransferPlan):Promise<void> {
 /** Staging files or stage records left in a destination. */
 export async function leftovers(root:string):Promise<string[]> {
  const found:string[]=[];
- for(const entry of await fs.readdir(root,{withFileTypes:true,recursive:true}))if(entry.name.startsWith('.import-'))found.push(path.join(entry.parentPath,entry.name));
+ for(const entry of await fs.readdir(root,{withFileTypes:true,recursive:true}))if(/^photo-importer-(?!index)/.test(entry.name))found.push(path.join(entry.parentPath,entry.name));
  return found;
 }
 /** A disk image mounted privately inside `base`, a folder from temporary() (macOS only); it is
