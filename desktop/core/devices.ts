@@ -78,9 +78,10 @@ export class DeviceStreams {
     await new Promise<void>((resolve,reject)=>{
       // Stop leaves the queue at once; a slot already handed over is released by the caller.
       const stop=()=>{const position=slot.waiting.indexOf(grant);if(position>=0){slot.waiting.splice(position,1);reject(new DOMException('Import stopped','AbortError'));}};
-      const grant=()=>{signal?.removeEventListener('abort',stop);resolve();};
+      const grant=()=>{if(typeof signal?.removeEventListener==='function')signal.removeEventListener('abort',stop);resolve();};
       if(signal?.aborted) {reject(new DOMException('Import stopped','AbortError'));return;}
-      slot.waiting.push(grant);signal?.addEventListener('abort',stop,{once:true});this.wake(slot);
+      // Only a real AbortSignal can be listened to; anything else just waits.
+      slot.waiting.push(grant);if(typeof signal?.addEventListener==='function')signal.addEventListener('abort',stop,{once:true});this.wake(slot);
     });
   }
   private release(dev:bigint):void {

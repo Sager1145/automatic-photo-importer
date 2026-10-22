@@ -7,6 +7,8 @@ export const languages = Object.keys(localeNames) as Language[];
 // English keys are also the fallback. Placeholder names and user data never pass through translation.
 const rows = `
 Copying files|正在复制文件|正在複製檔案|ファイルをコピー中
+Stopping…|正在停止…|正在停止…|停止しています…
+Pausing…|正在暂停…|正在暫停…|一時停止しています…
 Verifying copied files|正在验证已复制文件|正在驗證已複製檔案|コピーしたファイルを検証中
 Drive path|存储位置|儲存位置|保存場所
 

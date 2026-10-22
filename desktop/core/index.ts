@@ -13,6 +13,7 @@ export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
 import { streams } from './devices';
+import { hasher } from './hasher';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError} from '../messages';
@@ -458,8 +459,9 @@ interface StageTarget {entry:PlanEntry;transfer:TransferPlan;recovery:RecoveryIn
 interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<typeof fs.open>>;initialSize:number;error?:unknown;}
 /** Wait for `work`, or stop waiting (without stopping it) as soon as `signal` aborts. */
 function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T> {
-  if(!signal) return work;
   checkAbort(signal);
+  // Callers may pass any object with `aborted` (all checkAbort needs); only a real signal can be listened to.
+  if(typeof signal?.addEventListener!=='function') return work;
   let stop!:()=>void;
   const stopped=new Promise<never>((_resolve,reject)=>{stop=()=>reject(new DOMException('Import stopped','AbortError'));signal.addEventListener('abort',stop,{once:true});});
   return Promise.race([work,stopped]).finally(()=>signal.removeEventListener('abort',stop));
@@ -517,26 +519,30 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
       const before=await input.stat({bigint:true});
       if(before.size!==BigInt(entry.size) || (entry.sourceIdentity!==undefined && statKey(before)!==entry.sourceIdentity)) throw sourceChanged(entry);
       for(const open of opened) if(!open.staged.record&&importRecoveryAvailable()) try { await open.output.sync(); open.staged.record=await recordPartial('stage',open.staged.file,await open.output.stat({bigint:true}),open.target.entry,open.target.transfer,open.target.recovery); } catch(error) { await abandonStage(open,error); }
-      const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(chunk);let position=0;
-      for(;;) {
-        checkAbort(signal);
-        if(opened.every(open=>open.error)) break;
-        const {bytesRead}=await input.read(buffer,0,buffer.length,null);
-        if(!bytesRead) break;
-        hash.update(buffer.subarray(0,bytesRead));
-        for(const open of opened) {
-          if(open.error) continue;
-          try {
-            // A resumed partial already holds a verified prefix of these bytes.
-            let offset=Math.max(0,Math.min(bytesRead,open.initialSize-position));
-            while(offset<bytesRead) { const {bytesWritten}=await open.output.write(buffer,offset,bytesRead-offset,position+offset); if(!bytesWritten) throw new Error('Unable to write staged file'); offset+=bytesWritten; }
-            if(!position&&open.staged.record) open.staged.record=await rebound(open.staged.record,open.output,open.target.entry,open.target.transfer,open.target.recovery);
-            open.target.onBytes(bytesRead);
-          } catch(error) { await abandonStage(open,error); }
+      // SHA-256 of exactly the bytes written, computed on a worker thread (the chunk is copied first).
+      const hash=hasher(), buffer=Buffer.allocUnsafe(chunk);let position=0,streamDigest:string;
+      try {
+        for(;;) {
+          checkAbort(signal);
+          if(opened.every(open=>open.error)) break;
+          const {bytesRead}=await input.read(buffer,0,buffer.length,null);
+          if(!bytesRead) break;
+          await hash.update(buffer.subarray(0,bytesRead));
+          for(const open of opened) {
+            if(open.error) continue;
+            try {
+              // A resumed partial already holds a verified prefix of these bytes.
+              let offset=Math.max(0,Math.min(bytesRead,open.initialSize-position));
+              while(offset<bytesRead) { const {bytesWritten}=await open.output.write(buffer,offset,bytesRead-offset,position+offset); if(!bytesWritten) throw new Error('Unable to write staged file'); offset+=bytesWritten; }
+              if(!position&&open.staged.record) open.staged.record=await rebound(open.staged.record,open.output,open.target.entry,open.target.transfer,open.target.recovery);
+              open.target.onBytes(bytesRead);
+            } catch(error) { await abandonStage(open,error); }
+          }
+          position+=bytesRead;
         }
-        position+=bytesRead;
-      }
-      const after=await input.stat({bigint:true}), pathname=await fs.lstat(entry.source,{bigint:true}),streamDigest=hash.digest('hex');
+        streamDigest=await hash.digest();
+      } finally { hash.drop(); }
+      const after=await input.stat({bigint:true}), pathname=await fs.lstat(entry.source,{bigint:true});
       if(!opened.every(open=>open.error) && (position!==entry.size || !sameStat(before,after) || !sameStat(after,pathname))) throw sourceChanged(entry);
       for(const open of opened) {
         if(open.error) continue;

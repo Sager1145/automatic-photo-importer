@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { hasher } from './hasher';
 import { streams } from './devices';
 
 export function checkAbort(signal?:AbortSignal):void {
@@ -140,17 +140,20 @@ export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:num
     const handle=await regularHandle(file);
     try {
       const before=await handle.stat({bigint:true});
-      const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(chunk);
-      for(;;) {
-        checkAbort(signal);
-        const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
-        if(!bytesRead) break;
-        hash.update(buffer.subarray(0,bytesRead));onBytes?.(bytesRead);
-      }
-      const after=await handle.stat({bigint:true});
-      const pathname=await fs.lstat(file,{bigint:true});
-      if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
-      return hash.digest('hex');
+      // SHA-256 runs on a worker thread while the next chunk is read.
+      const hash=hasher(), buffer=Buffer.allocUnsafe(chunk);
+      try {
+        for(;;) {
+          checkAbort(signal);
+          const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
+          if(!bytesRead) break;
+          await hash.update(buffer.subarray(0,bytesRead));onBytes?.(bytesRead);
+        }
+        const after=await handle.stat({bigint:true});
+        const pathname=await fs.lstat(file,{bigint:true});
+        if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
+        return await hash.digest();
+      } finally { hash.drop(); }
     } finally { await handle.close(); }
   },signal);
 }
