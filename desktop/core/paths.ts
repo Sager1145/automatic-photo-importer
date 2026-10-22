@@ -129,11 +129,14 @@ export async function regularHandle(file:string) {
   } catch(error) { await handle.close().catch(()=>{}); throw error; }
   return handle;
 }
+/** An empty file has no start cluster on exFAT/FAT, so macOS gives it a fileID that changes whenever its
+ * vnode is recreated; with no bytes to protect, its inode number is not part of its identity. */
+const fileNumber=(stat:Pick<import('node:fs').BigIntStats,'ino'|'size'>)=>stat.size===0n?0n:stat.ino;
 export function sameStat(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStats):boolean {
-  return a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
+  return a.dev===b.dev && fileNumber(a)===fileNumber(b) && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
 }
 /** dev:ino:size:mtimeNs:ctimeNs — the identity a plan, review or receipt binds a file to. */
-export function statKey(stat:import('node:fs').BigIntStats):string {return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
+export function statKey(stat:import('node:fs').BigIntStats):string {return `${stat.dev}:${fileNumber(stat)}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
 /** `onBytes` hears each chunk as it is read, so a long file shows progress before it is done. */
 export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<string> {
   checkAbort(signal);

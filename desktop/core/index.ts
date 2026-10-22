@@ -195,7 +195,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // With skipErrors a failing file is left out and reported; otherwise it fails the plan. A mirror
   // never skips: a file left out of it would read as removed from the drive and its copy moved away.
   const skipping=options.skipErrors===true&&!options.drive?.mirror;
-  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!skipping)throw error;failures.set(file,toError(error));};
+  // Organization never moves a file that changed while it was reviewed, but one such file must not
+  // stop the review of all the others: it stays where it is and is reported.
+  const changedDuringReview=(error:unknown)=>options.reorganize===true&&error instanceof MessageError&&error.key==='error.sourceChanged';
+  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!skipping&&!changedDuringReview(error))throw error;failures.set(file,toError(error));};
   // A file is copied or moved with its whole family (RAW, JPG, sidecars), so a failure leaves the family out.
   const skipFamilies=<T>(items:T[],file:(item:T)=>string,family:(item:T)=>string|undefined)=>{
     const failed=new Map<string,Error>();for(const item of items){const error=failures.get(file(item)),key=family(item);if(error&&key!==undefined&&!failed.has(key))failed.set(key,error);}
