@@ -90,6 +90,25 @@ interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIden
 /** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
 interface HandOff {successor:string;successorRoot:string;destination:string;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
+/** Finished journals' events, by journal folder, kept for this app session. A journal from an earlier
+ * version can hold tens of thousands of event files: on a USB drive, reading them takes many minutes,
+ * and every listing and every organization's check of earlier journals would read them again. */
+const finishedJournals=new Map<string,{stamp:string;state:JournalState}>();
+/** Changes whenever an event is added: the folder itself (identity and dates), how many files it
+ * holds, and the event log's size and dates. */
+async function journalStamp(folder:string,names:string[]):Promise<string>{
+ const [own,log]=await Promise.all([fs.lstat(folder,{bigint:true}),fs.lstat(path.join(folder,eventLog),{bigint:true}).catch(()=>undefined)]);
+ return [own.dev,own.ino,own.mtimeNs,own.ctimeNs,names.length,log?.ino,log?.size,log?.mtimeNs].join(':');
+}
+/** Fully undone, superseded, or complete with every finalize finished and nothing undone. Only these
+ * are cached. Anything the app records later (a successor, a hand-off, a finalize or an undo) is an
+ * append, which changes the stamp; the app never rewrites events in place. */
+const finished=(state:JournalState)=>state.undoComplete||!!state.superseded||state.complete&&state.finalizing.size===state.finalized.size&&state.undone.size===0;
+function copyState(state:JournalState):JournalState{
+ return {...state,slots:new Map([...state.slots].map(([index,slots])=>[index,[...slots]])),exclusive:new Map([...state.exclusive].map(([index,stats])=>[index,[...stats]])),
+  finalizing:new Set(state.finalizing),finalized:new Set(state.finalized),renameIntent:new Set(state.renameIntent),renamed:new Map(state.renamed),
+  dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),handedOff:new Map(state.handedOff)};
+}
 /** `onRead`: records read so far out of the journal's files, for journals written one file per event.
  * `follow` false reads only this journal's own signed events, without checking its successor.
  * `folder`: where the journal's folder is now, when it differs from its recorded root only by case. */
@@ -130,6 +149,9 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
  const names=await fs.readdir(jobPath(folder,m.id));let read=0;
+ // A finished journal read before in this session, and unchanged since, is not read again.
+ const stamp=await journalStamp(jobPath(folder,m.id),names),cacheKey=`${folder}\0${m.id}\0${m.rootIdentity}\0${mountDevices.get(m)??''}`,cached=finishedJournals.get(cacheKey);
+ if(cached&&cached.stamp===stamp){onRead?.(names.length,names.length);Object.assign(state,copyState(cached.state));return finishJournalRead(m,state,chain,follow);}
  // Journals from before the event log hold one small file per event (tens of thousands on a large
  // organization); on a USB drive these are read several at a time, then applied in folder order.
  const texts:(string|string[]|undefined)[]=new Array(names.length);let next=0;
@@ -149,6 +171,11 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   if(Array.isArray(text)){for(const line of text){if(line.length>2048)throw new Error('Invalid recovery event');if(line)parse(line);}}
   else if(text!==undefined)parse(text);
  }
+ if(finished(state))finishedJournals.set(cacheKey,{stamp,state:copyState(state)});
+ return finishJournalRead(m,state,chain,follow);
+}
+/** Checks that need the events of the whole journal, and its successor and hand-offs; never cached. */
+async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>,follow:boolean):Promise<JournalState> {
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
  // Each hand-off names a signed journal that really moved this entry's file on from its destination.

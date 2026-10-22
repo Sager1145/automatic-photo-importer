@@ -6,7 +6,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace} from './shared';
-import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders} from './core';
+import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
@@ -165,6 +165,12 @@ async function scanSource(source:Source){
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();void releaseIfIdle();}
 }
+/** Roughly how much there is to read in a folder's journals: the size of each journal's folder. */
+async function journalWeight(root:string):Promise<number>{
+ const folder=path.join(root,RECOVERY_FOLDER),names=await fs.readdir(folder).catch(()=>[] as string[]);
+ const sizes=await Promise.all(names.filter(name=>/^[0-9a-f-]{36}$/.test(name)).map(name=>fs.lstat(path.join(folder,name)).then(stat=>stat.size,()=>0)));
+ return sizes.reduce((sum,size)=>sum+size,0);
+}
 let organizationListing:Promise<void>|undefined,organizationListingAgain=false;
 /** One listing at a time. A request while one runs gets one more listing right after it, so a
  * change made meanwhile (an undo or resume that just finished) is always shown. */
@@ -184,6 +190,15 @@ async function listOrganizations(){
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
  const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
  const listed=new Set<string>();state.organizationRecoveryLoading=true;emit();
+ // Small folders first, so they show at once; a folder holding a large journal from an earlier version
+ // (one file per event, slow to read on a USB drive) comes last.
+ // Only folders on a connected, unchanged destination are weighed, one at a time.
+ const weights=new Map<string,number>();
+ for(const location of locations){
+  const status=location.folder?undefined:destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
+  weights.set(location.root,status?.available&&status.volumeId===location.volumeId?await journalWeight(location.root):0);
+ }
+ locations.sort((a,b)=>weights.get(a.root)!-weights.get(b.root)!);
  try{
   for(let position=0;position<locations.length;position++){
    const location=locations[position]!;
