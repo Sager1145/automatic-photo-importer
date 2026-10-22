@@ -2,7 +2,7 @@ import { ExifTool } from 'exiftool-vendored';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
-import type { Exposure, Metadata } from '../shared';
+import type { DuplicateExif, Exposure, Metadata } from '../shared';
 import { djiProduct } from './dji-models';
 
 let reader:ExifTool|undefined;
@@ -160,13 +160,41 @@ function editorProvenance(entries:TagEntries):boolean {
   }
   return false;
 }
+function identifier(entries:TagEntries,names:string[]):string|undefined {
+  for(const name of names)for(const [key,value] of entries){
+    if(tagName(key)!==name||(typeof value!=='string'&&typeof value!=='number'))continue;
+    const text=String(value).trim();
+    if(text&&!/^0+$/.test(text)&&!/^(?:n\/a|unknown|none)$/i.test(text))return text;
+  }
+}
+function dimension(entries:TagEntries,names:string[]):number|undefined {
+  for(const name of names)for(const [key,value] of entries){
+    if(tagName(key)!==name)continue;
+    const number=typeof value==='number'?value:Number(value);
+    if(Number.isFinite(number)&&number>0)return number;
+  }
+}
+/** What tells two captures apart without reading their bytes: camera body serial, shutter count or image
+ * number, dimensions and lens, next to the capture time and camera model. */
+export function duplicateFingerprint(entries:TagEntries,camera:string|undefined,date:string|undefined):DuplicateExif {
+  const fingerprint:DuplicateExif={};
+  if(date)fingerprint.date=date;
+  if(camera)fingerprint.camera=camera;
+  const serial=identifier(entries,['SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber']);if(serial)fingerprint.serial=serial;
+  for(const name of ['ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3'])for(const [key,value] of entries){const count=tagName(key)===name?counter(key,value):undefined;if(count&&fingerprint.shutterCount===undefined)fingerprint.shutterCount=String(count);}
+  const number=identifier(entries,['ImageNumber','FileNumber']);if(number&&!fingerprint.shutterCount)fingerprint.imageNumber=number;
+  const width=dimension(entries,['ExifImageWidth','ImageWidth','SourceImageWidth']),height=dimension(entries,['ExifImageHeight','ImageHeight','SourceImageHeight']);
+  if(width&&height){fingerprint.width=width;fingerprint.height=height;}
+  const lens=lensModel(entries);if(lens)fingerprint.lens=lens;
+  return fingerprint;
+}
 /** Pure interpretation keeps maker-note counter rules testable without camera hardware. */
 /** `file` (its name only) lets DJI clips take their local capture time from the name. */
 export function metadataFromTags(tags:Record<string,unknown>, options:{details?:boolean;file?:string}={}):Metadata {
   const entries=Object.entries(tags);
   const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries));
   const fields:Record<string,unknown>={};
-  const result:Metadata={camera,date,fields};
+  const result:Metadata={camera,date,fields,fingerprint:duplicateFingerprint(entries,camera,date)};
   if(editorProvenance(entries))result.edited=true;
   if(options.details===false){for(const [key,value] of entries)if(tagName(key)==='Error'&&value!==undefined)fields[key]=String(value);const lens=lensModel(entries);if(lens)result.exposure={lens};return result;}
   function flatten(key:string,value:unknown) {
@@ -235,6 +263,8 @@ const routingTags=[
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',
   'Encoder','LensModel','Error','Warning',
+  'SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber','ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3','ImageNumber','FileNumber',
+  'ExifImageWidth','ExifImageHeight','ImageWidth','ImageHeight','SourceImageWidth','SourceImageHeight',
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();

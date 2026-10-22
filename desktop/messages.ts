@@ -11,6 +11,7 @@ export const backendMessages={
  'job.finding':{en:'Finding media without reading file contents','zh-Hans':'正在查找媒体文件（不读取文件内容）','zh-Hant':'正在尋找媒體檔案（不讀取檔案內容）',ja:'ファイルの内容を読まずにメディアを検索中'},
  'job.cameraDownload':{en:'Downloading camera files: {done} of {total}','zh-Hans':'正在下载相机文件：{done}/{total}','zh-Hant':'正在下載相機檔案：{done}/{total}',ja:'カメラのファイルをダウンロード中：{total} 件中 {done} 件'},
  'job.checkingSource':{en:'Checking source: {count} files · {file}','zh-Hans':'正在检查来源：{count} 个文件 · {file}','zh-Hant':'正在檢查來源：{count} 個檔案 · {file}',ja:'ソースを確認中：{count} ファイル · {file}'},
+ 'job.confirmingCandidates':{en:'Confirming possible duplicates: {count} of {total} · {file}','zh-Hans':'正在确认可能的重复文件：{count}/{total} · {file}','zh-Hant':'正在確認可能的重複檔案：{count}/{total} · {file}',ja:'重複の可能性があるファイルを確認中：{total} 件中 {count} 件 · {file}'},
  'job.stepChecking':{en:'Checking: {completed} of {total}','zh-Hans':'正在检查：{completed}/{total}','zh-Hant':'正在檢查：{completed}/{total}',ja:'確認中：{total} 件中 {completed} 件'},
  'job.stepReleasing':{en:'Releasing kept originals: {completed} of {total}','zh-Hans':'正在释放保留的原文件：{completed}/{total}','zh-Hant':'正在釋放保留的原始檔案：{completed}/{total}',ja:'保持中の元のファイルを解放中：{total} 件中 {completed} 件'},
  'job.stepDeleting':{en:'Deleting recovery files: {completed} of {total}','zh-Hans':'正在删除恢复文件：{completed}/{total}','zh-Hant':'正在刪除復原檔案：{completed}/{total}',ja:'復元用ファイルを削除中：{total} 件中 {completed} 件'},

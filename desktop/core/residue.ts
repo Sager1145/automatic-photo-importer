@@ -17,7 +17,7 @@ export interface Residue {items:ResidueItem[];files:number;bytes:number;resumabl
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const stagePattern=new RegExp(`^(?:\\.import|photo-importer)-${UUID}\\.partial$`),receiptPattern=new RegExp(`^(?:\\.import|photo-importer)-(?:stage|intent)-${UUID}\\.json$`);
-const indexTemporary=new RegExp(`^\\.?${INDEX_PREFIX}-${UUID}\\.tmp$`),uuid=new RegExp(`^${UUID}$`);
+const indexTemporary=new RegExp(`^\\.?(?:${INDEX_PREFIX}|photo-importer-duplicates)-${UUID}\\.tmp$`),uuid=new RegExp(`^${UUID}$`);
 const journalScratch=new RegExp(`^(?:stage-${UUID}\\.partial|incomplete-${UUID})$`);
 const temporaryFolder=/^photo-importer-(?:camera|preview)-[A-Za-z0-9]{6}$/;
 

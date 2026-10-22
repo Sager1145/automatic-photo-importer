@@ -234,7 +234,7 @@ test('routing metadata skips inspector work with identical camera/date normaliza
   for(const fixture of fixtures){
     const tags={...fixture,'ExifIFD:ISO':400,'Nikon:ShutterCount':0,'Maker:Details':{nested:['a','b']}};
     const rich=metadataFromTags(tags),routing=metadataFromTags(tags,{details:false});
-    assert.deepEqual(routing,{camera:rich.camera,date:rich.date,fields:{}});
+    assert.deepEqual(routing,{camera:rich.camera,date:rich.date,fields:{},fingerprint:rich.fingerprint});
     assert.deepEqual(rich.exposure,{iso:400});assert.equal(rich.shutterCount,'0');
     assert.equal(rich.fields['Maker:Details.nested'],'["a","b"]');
     assert.deepEqual(metadataFromTags(tags,{details:true}),rich);

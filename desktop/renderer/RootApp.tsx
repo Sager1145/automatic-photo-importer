@@ -1018,6 +1018,9 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'removing') return t("{completed} of {total} extra files set aside", counts);
   if (progress.step === 'scanning') return t("{completed} files looked at", counts);
   if (progress.step === 'stashing') return t("Setting aside duplicates: {completed} of {total}", counts);
+  if (progress.step === 'fingerprinting') return t("Reading metadata: {completed} of {total} files", counts);
+  if (progress.step === 'candidates') return t("Confirming possible duplicates: {completed} of {total} files", counts);
+  if (progress.step === 'collisions') return t("Looking for identical files: {completed} of {total} files", counts);
   if (progress.step === 'tidying') return t("Finishing up: {completed} of {total}", counts);
   if (progress.step === 'releasing') return t("{completed} of {total} files released", counts);
   if (progress.step === 'restoring') return t("{completed} of {total} files put back", counts);

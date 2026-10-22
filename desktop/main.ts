@@ -23,6 +23,9 @@ import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse} from './platform/metadata';
 import {findResidue,cleanResidue} from './core/residue';
+import {recordPlanDuplicates,scanDuplicates,type PlanDuplicates} from './core/duplicates';
+import {destinationIndex} from './core/destination-index';
+import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
@@ -105,7 +108,7 @@ const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
 let lastEmit=0;
 const livePreferences=new Set(['language','appearance','sourceLayout','showDashboard','textScale','accent','parallel','automatic']);
 /** Reserved destination plans for one source. A review holds one until applied. */
-interface Prepared {review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;}
+interface Prepared {review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;}
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
@@ -449,7 +452,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const previous=reorganize||sourceFolders?undefined:reusableScan(source),previousBytes=previous?.files.reduce((sum,file)=>sum+file.size,0)??0;
   const used=!reorganize&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previous?.files.length?{files:previous.files.length,bytes:previousBytes}:used>0?{bytes:used}:undefined);
-  const {inventory,plans,failures}=await plan(sourcePath,roots,{backup,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
+  const {inventory,plans,failures,duplicates}=await plan(sourcePath,roots,{backup,duplicates:!backup,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
   // A same-drive organization moves files; it never needs room for a second library.
@@ -459,7 +462,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!));
   if(!reorganize&&!stage&&!backup)rememberScan(source,inventory);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
-  return {review:{id:owner,source,backup,plans,kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)}))};
+  return {review:{id:owner,source,backup,plans,kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{})};
  }catch(error){await stage?.cleanup().catch(()=>{});throw error;}
 }
 async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
@@ -481,7 +484,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   else{
    job.phase='discovering';job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
    await stopResidueCheck();
-   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
    // Mirror moves only run from a review the user applied.
    const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
    if(moving)throw new MessageError('error.mirrorReview',{count:moving});
@@ -507,6 +510,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));
+  await recordDuplicates(job,plans,prepared.duplicates,reorganize);
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
@@ -533,6 +537,20 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&!(job.backup&&prefs?.backupMode==='mirror')&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail);}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;void releaseIfIdle();});emit();
+}
+/** Duplicate detection, recorded only: stage 1 findings of the plan, then stage 2 (SHA collisions from the hashes
+ * verification already stored). Best effort; it never fails or changes a job and never deletes a file. */
+async function recordDuplicates(job:Job,plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+ try{
+  for(const part of plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])])){
+   const moves=new Map(part.entries.map(entry=>[entry.source,entry.destination]));
+   // An organization leaves a file where it is when it already is where the rules put it.
+   if(found)await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
+   job.phase='verifying';
+   await scanDuplicates(part.root,{metadata:p=>metadata(p,{preview:false,details:false}),index:await destinationIndex(part.root,await identity(part.root))},{mode:'recorded',onProgress:progress=>{job.progress={...progress,phase:'verifying',step:'collisions'};progressEmit();}});
+  }
+ }catch{/* Only a record. */}
+ job.phase='copying';job.progress=undefined;
 }
 async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number){
