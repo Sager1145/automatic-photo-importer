@@ -18,7 +18,9 @@ An organization needs free space for verified new files while the originals rema
 
 The app saves an authenticated journal before publishing new files or relocating originals. It verifies new file contents using SHA-256 and synchronizes the file and containing directories before relocating an original. It rechecks source contents, destination contents and filesystem identities before proceeding.
 
-After verification, each original is renamed into a private slot in the recovery store on the **same filesystem**. The original file's contents are retained. A completed operation does not delete these retained originals, and there is no automatic cleanup or cleanup button.
+After verification, each original is renamed into a private slot in the recovery store on the **same filesystem**. The original file's contents are retained. A completed operation does not delete these retained originals automatically.
+
+**Delete recovery files** on each Organization recovery card removes that organization's recovery data: its journal folder (manifest, events, retained originals, staging leftovers) and its pointers in other backup folders. It asks twice, and it cannot be undone: the organization can no longer be undone or rechecked. It is refused while the organization is unfinished, and while another journal still names it (an earlier organization it replaced, or one whose files it took over); delete those first. Retained originals of a finished organization are released first, after every destination is checked by SHA-256; any other retained original must have a byte-identical copy elsewhere, and anything unexpected in the folder stops the deletion. The folder is renamed aside in one step before anything is removed, so an interruption leaves it either whole or out of the list; Clean up removes what is left. Organized files and other journals are never touched.
 
 The store is beneath the operation's organization root: the first selected destination plus the backup folder used by that review. For example:
 
