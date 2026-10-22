@@ -92,3 +92,17 @@ test('total progress covers the whole import and is not full right after scannin
  assert.ok(total.includes('10%'));
  assert.ok(total.includes('Reading metadata'));
 });
+
+test('with several files compared at once, the file count rises while they are still being read',async t=>{
+ const {source,roots}=await fixture(t);
+ // Same size, other bytes at the first destination: every one is read to compare.
+ for(let index=0;index<8;index++){
+  const name=`P${index}.JPG`;await fs.writeFile(path.join(source,name),Buffer.alloc(3*1024*1024,index+1));
+  const taken=path.join(roots[0]!,'2024/202402/Sony A7',name);await fs.mkdir(path.dirname(taken),{recursive:true});await fs.writeFile(taken,Buffer.alloc(3*1024*1024,200));
+ }
+ const events:{step:string;count:number;bytes:number}[]=[];
+ await plan(source,[roots[0]!],options,metadata,undefined,(count,_file,detail)=>{if(detail?.step==='comparing')events.push({step:detail.step,count,bytes:detail.bytes});});
+ const read=events.at(-1)!.bytes;
+ assert.equal(read,8*3*1024*1024,'every source byte read to compare is counted');
+ assert.ok(events.some(event=>event.count>0&&event.bytes<read),'files are counted as each comparison finishes, not only after all reading');
+});
