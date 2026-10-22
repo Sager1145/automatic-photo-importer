@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Language } from '../shared';
+import { formatMessage, type Message } from '../messages';
 
 export const localeNames: Record<Language, string> = { en: 'English', 'zh-Hans': '简体中文', 'zh-Hant': '繁體中文', ja: '日本語' };
 export const languages = Object.keys(localeNames) as Language[];
@@ -629,9 +630,10 @@ for (const row of rows.trim().split('\n').filter(Boolean)) {
   translationCatalogs['zh-Hant'][english] = traditional;
   translationCatalogs.ja[english] = japanese;
 }
-export type Translator = (english: string, values?: Record<string, string | number>) => string;
+export type Translator = (english: string | Message, values?: Record<string, string | number>) => string;
 export function createTranslator(language: Language): Translator {
   return (english, values) => {
+    if (typeof english !== 'string') return formatMessage(english, language);
     const translated = language === 'en' ? english : Object.hasOwn(translationCatalogs[language] ?? {}, english) ? translationCatalogs[language][english] : english;
     return translated.replace(/\{(\w+)\}/g, (placeholder, key: string) => values && Object.hasOwn(values, key) ? String(values[key]) : placeholder);
   };

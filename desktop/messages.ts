@@ -1,0 +1,115 @@
+import type {Language} from './shared';
+
+/** Text the main process shows the user: a catalog key plus parameters, translated by the renderer.
+ * `text` carries raw text (low-level errors, file names, history from earlier versions) unchanged. */
+export const backendMessages={
+ text:{en:'{text}','zh-Hans':'{text}','zh-Hant':'{text}',ja:'{text}'},
+
+ 'job.waiting':{en:'Waiting for an available slot','zh-Hans':'等待空闲的处理位置','zh-Hant':'等待空閒的處理位置',ja:'空きを待っています'},
+ 'job.waitingForImports':{en:'Waiting for imports to finish before organizing','zh-Hans':'等待导入完成后再整理','zh-Hant':'等待匯入完成後再整理',ja:'インポートの完了を待ってから整理します'},
+ 'job.stagingCamera':{en:'Downloading camera originals to a temporary staging folder','zh-Hans':'正在将相机原始文件下载到临时暂存文件夹','zh-Hant':'正在將相機原始檔案下載到暫存資料夾',ja:'カメラの元のファイルを一時フォルダーにダウンロード中'},
+ 'job.finding':{en:'Finding media without reading file contents','zh-Hans':'正在查找媒体文件（不读取文件内容）','zh-Hant':'正在尋找媒體檔案（不讀取檔案內容）',ja:'ファイルの内容を読まずにメディアを検索中'},
+ 'job.cameraDownload':{en:'Downloading camera files: {done} of {total}','zh-Hans':'正在下载相机文件：{done}/{total}','zh-Hant':'正在下載相機檔案：{done}/{total}',ja:'カメラのファイルをダウンロード中：{total} 件中 {done} 件'},
+ 'job.checkingSource':{en:'Checking source: {count} files · {file}','zh-Hans':'正在检查来源：{count} 个文件 · {file}','zh-Hant':'正在檢查來源：{count} 個檔案 · {file}',ja:'ソースを確認中：{count} ファイル · {file}'},
+ 'job.readingMetadata':{en:'Reading source metadata and checking destination folders','zh-Hans':'正在读取来源元数据并检查目标文件夹','zh-Hant':'正在讀取來源中繼資料並檢查目的地資料夾',ja:'ソースのメタデータを読み取り、保存先フォルダーを確認中'},
+ 'job.destinationFile':{en:'Destination {index} of {count}: {file}','zh-Hans':'目标 {index}/{count}：{file}','zh-Hant':'目的地 {index}/{count}：{file}',ja:'保存先 {index}/{count}：{file}'},
+ 'job.revalidating':{en:'Revalidating reviewed paths','zh-Hans':'正在重新验证已审核的路径','zh-Hant':'正在重新驗證已審核的路徑',ja:'確認済みのパスを再検証中'},
+ 'job.copied':{en:'{copied} copied · {skipped} verified','zh-Hans':'已复制 {copied} 个 · 已验证 {skipped} 个','zh-Hant':'已複製 {copied} 個 · 已驗證 {skipped} 個',ja:'{copied} 件コピー · {skipped} 件検証済み'},
+ 'job.mirrorRemoved':{en:'{count} moved to .mirror-removed','zh-Hans':'{count} 个已移至 .mirror-removed','zh-Hant':'{count} 個已移至 .mirror-removed',ja:'{count} 件を .mirror-removed に移動'},
+ 'job.errors':{en:'{count} errors','zh-Hans':'{count} 个错误','zh-Hant':'{count} 個錯誤',ja:'エラー {count} 件'},
+ 'job.mirrorIncomplete':{en:'Mirror incomplete; originals retained','zh-Hans':'镜像未完成；原文件已保留','zh-Hant':'鏡像未完成；原始檔案已保留',ja:'ミラーは未完了です。元のファイルは保持されています'},
+ 'job.mirrorVerified':{en:'Both destinations verified','zh-Hans':'两个目标均已验证','zh-Hant':'兩個目的地均已驗證',ja:'両方の保存先を検証済み'},
+ 'job.alreadyImported':{en:'Already imported · all {count} files are in the backup and verified','zh-Hans':'已导入 · 全部 {count} 个文件均已在备份中并通过验证','zh-Hant':'已匯入 · 全部 {count} 個檔案均已在備份中並通過驗證',ja:'読み込み済み · {count} ファイルすべてがバックアップにあり検証済みです'},
+ 'job.moved':{en:'{count} moved','zh-Hans':'已移动 {count} 个','zh-Hant':'已移動 {count} 個',ja:'{count} 件移動'},
+ 'job.retained':{en:'{count} originals kept for undo ({size})','zh-Hans':'保留 {count} 个原文件以便撤销（{size}）','zh-Hant':'保留 {count} 個原始檔案以便復原（{size}）',ja:'取り消し用に元のファイル {count} 件を保持（{size}）'},
+ 'job.foldersRemoved':{en:'{count} empty folders removed','zh-Hans':'已删除 {count} 个空文件夹','zh-Hant':'已刪除 {count} 個空資料夾',ja:'空のフォルダー {count} 件を削除'},
+ 'job.paused':{en:'Paused. Verified copies are kept; Start continues with the remaining files.','zh-Hans':'已暂停。已验证的副本会保留；点击“开始”继续处理剩余文件。','zh-Hant':'已暫停。已驗證的副本會保留；點選「開始」繼續處理剩餘檔案。',ja:'一時停止しました。検証済みのコピーは保持され、「開始」で残りのファイルを続行します。'},
+ 'job.pausedQueued':{en:'Paused before copying. Start continues.','zh-Hans':'已在复制前暂停。点击“开始”继续。','zh-Hant':'已在複製前暫停。點選「開始」繼續。',ja:'コピー前に一時停止しました。「開始」で続行します。'},
+ 'job.stopped':{en:'Stopped. Completed copies and source originals remain.','zh-Hans':'已停止。已完成的副本和来源原文件均保留。','zh-Hant':'已停止。已完成的副本和來源原始檔案均保留。',ja:'停止しました。完了したコピーとソースの元のファイルは残ります。'},
+ 'job.removedFromQueue':{en:'Removed from queue','zh-Hans':'已从队列中移除','zh-Hant':'已從佇列中移除',ja:'キューから削除しました'},
+ 'job.automaticDisabled':{en:'Automatic queue disabled','zh-Hans':'自动队列已关闭','zh-Hant':'自動佇列已關閉',ja:'自動キューは無効です'},
+ 'job.recheckFinalize':{en:'Rechecking organized files before releasing kept originals','zh-Hans':'正在重新检查已整理的文件，然后释放保留的原文件','zh-Hant':'正在重新檢查已整理的檔案，然後釋放保留的原始檔案',ja:'保持中の元のファイルを解放する前に、整理済みファイルを再確認中'},
+ 'job.recheckUndo':{en:'Rechecking organized files before putting them back','zh-Hans':'正在重新检查已整理的文件，然后将其放回原处','zh-Hant':'正在重新檢查已整理的檔案，然後將其放回原處',ja:'元に戻す前に、整理済みファイルを再確認中'},
+ 'job.recheckJournal':{en:'Rechecking journal and retained originals','zh-Hans':'正在重新检查日志和保留的原文件','zh-Hant':'正在重新檢查日誌和保留的原始檔案',ja:'ジャーナルと保持中の元のファイルを再確認中'},
+ 'job.resuming':{en:'Rechecking and resuming organization','zh-Hans':'正在重新检查并继续整理','zh-Hant':'正在重新檢查並繼續整理',ja:'再確認して整理を再開中'},
+ 'job.released':{en:'Released {count} kept originals ({size}). The organized files are unchanged.','zh-Hans':'已释放 {count} 个保留的原文件（{size}）。已整理的文件保持不变。','zh-Hant':'已釋放 {count} 個保留的原始檔案（{size}）。已整理的檔案保持不變。',ja:'保持していた元のファイル {count} 件（{size}）を解放しました。整理済みファイルは変更されていません。'},
+ 'job.undone':{en:'{restored} files put back where they were · {removed} organized copies removed','zh-Hans':'{restored} 个文件已放回原处 · 已删除 {removed} 个整理后的副本','zh-Hant':'{restored} 個檔案已放回原處 · 已刪除 {removed} 個整理後的副本',ja:'{restored} ファイルを元の場所に戻しました · 整理済みのコピー {removed} 件を削除'},
+
+ 'history.import':{en:'Import: {name}','zh-Hans':'导入：{name}','zh-Hant':'匯入：{name}',ja:'インポート：{name}'},
+ 'history.driveBackup':{en:'Drive backup: {name}','zh-Hans':'驱动器备份：{name}','zh-Hant':'磁碟備份：{name}',ja:'ドライブのバックアップ：{name}'},
+ 'history.organization':{en:'Library organization','zh-Hans':'媒体库整理','zh-Hant':'媒體庫整理',ja:'ライブラリの整理'},
+ 'history.organizationUndone':{en:'Library organization undone','zh-Hans':'媒体库整理已撤销','zh-Hant':'媒體庫整理已復原',ja:'ライブラリの整理を取り消しました'},
+ 'history.organizationRecovery':{en:'Library organization recovery','zh-Hans':'媒体库整理恢复','zh-Hant':'媒體庫整理復原',ja:'ライブラリ整理の復元'},
+
+ 'error.sourceDisconnected':{en:'Source disconnected.','zh-Hans':'来源已断开连接。','zh-Hant':'來源已中斷連線。',ja:'ソースが切断されました。'},
+ 'error.sourceChanged':{en:'Source changed; scan again: {path}','zh-Hans':'来源已更改，请重新扫描：{path}','zh-Hant':'來源已變更，請重新掃描：{path}',ja:'ソースが変更されました。再スキャンしてください：{path}'},
+ 'error.alreadyInBackup':{en:'{source} is already in your backup ({root}); there is nothing to import from it.','zh-Hans':'{source} 已在你的备份中（{root}），无需从中导入。','zh-Hant':'{source} 已在你的備份中（{root}），無需從中匯入。',ja:'{source} はすでにバックアップ内にあります（{root}）。インポートするものはありません。'},
+ 'error.cameraScan':{en:'This camera must download originals before its media can be inspected. Use Review.','zh-Hans':'必须先下载此相机的原始文件才能检查其媒体。请使用“审核”。','zh-Hant':'必須先下載此相機的原始檔案才能檢查其媒體。請使用「審核」。',ja:'このカメラのメディアを確認するには、先に元のファイルをダウンロードする必要があります。「確認」を使ってください。'},
+ 'error.selectDrive':{en:'Select this drive first.','zh-Hans':'请先选择此驱动器。','zh-Hant':'請先選擇此磁碟。',ja:'先にこのドライブを選択してください。'},
+ 'error.folderSourcesOff':{en:'Enable folder sources first.','zh-Hans':'请先启用文件夹来源。','zh-Hant':'請先啟用資料夾來源。',ja:'先にフォルダーソースを有効にしてください。'},
+ 'error.busy':{en:'Finish transfers or discard the current review first.','zh-Hans':'请先完成传输或放弃当前审核。','zh-Hant':'請先完成傳輸或捨棄目前的審核。',ja:'先に転送を完了するか、現在の確認を破棄してください。'},
+ 'error.busyScan':{en:'Finish transfers or the current review before scanning.','zh-Hans':'请先完成传输或当前审核，然后再扫描。','zh-Hant':'請先完成傳輸或目前的審核，然後再掃描。',ja:'スキャンする前に、転送または現在の確認を完了してください。'},
+ 'error.busyReview':{en:'Wait for transfers to finish or stop them before reviewing.','zh-Hans':'请等待传输完成或将其停止，然后再审核。','zh-Hant':'請等待傳輸完成或將其停止，然後再審核。',ja:'確認する前に、転送の完了を待つか停止してください。'},
+ 'error.busyResume':{en:'Wait for the other transfer or review to finish, then resume again.','zh-Hans':'请等待其他传输或审核完成，然后再次继续。','zh-Hant':'請等待其他傳輸或審核完成，然後再次繼續。',ja:'ほかの転送または確認が終わるのを待ってから、もう一度再開してください。'},
+ 'error.reviewOpen':{en:'Finish the current review first.','zh-Hans':'请先完成当前审核。','zh-Hant':'請先完成目前的審核。',ja:'先に現在の確認を完了してください。'},
+ 'error.rulesDuringReview':{en:'Stop the current review before changing file rules.','zh-Hans':'更改文件规则前，请先停止当前审核。','zh-Hant':'變更檔案規則前，請先停止目前的審核。',ja:'ファイルのルールを変更する前に、現在の確認を停止してください。'},
+ 'error.recoveryListStale':{en:'Refresh the organization recovery list first.','zh-Hans':'请先刷新整理恢复列表。','zh-Hant':'請先更新整理復原清單。',ja:'先に整理の復元一覧を更新してください。'},
+ 'error.organizationDestination':{en:'Choose the original organization destination again.','zh-Hans':'请重新选择原来的整理目标。','zh-Hant':'請重新選擇原本的整理目的地。',ja:'元の整理先をもう一度選択してください。'},
+ 'error.organizationRunning':{en:'Organization is already queued or running.','zh-Hans':'整理已在排队或正在进行。','zh-Hant':'整理已在佇列中或正在進行。',ja:'整理はすでに待機中か実行中です。'},
+ 'error.backupFolderOutside':{en:'The backup folder must be inside the destination.','zh-Hans':'备份文件夹必须位于目标内。','zh-Hant':'備份資料夾必須位於目的地內。',ja:'バックアップフォルダーは保存先の中に置く必要があります。'},
+ 'error.chooseDestination':{en:'Choose a destination first.','zh-Hans':'请先选择目标。','zh-Hant':'請先選擇目的地。',ja:'先に保存先を選択してください。'},
+ 'error.chooseDestinations':{en:'Choose the required backup destinations first.','zh-Hans':'请先选择所需的备份目标。','zh-Hant':'請先選擇所需的備份目的地。',ja:'先に必要なバックアップ保存先を選択してください。'},
+ 'error.foldersOutside':{en:'Choose folders inside the selected destination.','zh-Hans':'请选择所选目标内的文件夹。','zh-Hant':'請選擇所選目的地內的資料夾。',ja:'選択した保存先の中にあるフォルダーを選んでください。'},
+ 'error.folderUnidentified':{en:'This folder\'s drive cannot be identified, so an interrupted organization could not be resumed safely.','zh-Hans':'无法识别此文件夹所在的驱动器，因此中断的整理无法安全恢复。','zh-Hant':'無法識別此資料夾所在的磁碟，因此中斷的整理無法安全繼續。',ja:'このフォルダーのドライブを識別できないため、中断した整理を安全に再開できません。'},
+ 'error.editedFolderName':{en:'Choose a single safe folder name for edited exports.','zh-Hans':'请为编辑导出选择一个安全的单层文件夹名称。','zh-Hant':'請為編輯匯出選擇一個安全的單層資料夾名稱。',ja:'編集済み書き出し用に、安全な単一のフォルダー名を選んでください。'},
+ 'error.mirrorSequential':{en:'Mirror backup needs one destination or Copy to both; Fill first then second splits files across disks.','zh-Hans':'镜像备份需要单个目标或“复制到两个目标”；“先存满第一块再用第二块”会把文件分散到多块磁盘。','zh-Hant':'鏡像備份需要單一目的地或「複製到兩個目的地」；「先存滿第一顆再用第二顆」會把檔案分散到多顆磁碟。',ja:'ミラーバックアップには保存先が 1 つか「両方の保存先にコピー」が必要です。「1台目から順に保存」ではファイルが複数のディスクに分かれます。'},
+ 'error.mirrorNoUuid':{en:'Mirror backup needs a drive with a filesystem UUID. Use Additive backup for this drive.','zh-Hans':'镜像备份需要具有文件系统 UUID 的驱动器。请对此驱动器使用“只增不删”备份。','zh-Hant':'鏡像備份需要具有檔案系統 UUID 的磁碟。請對此磁碟使用「只增不刪」備份。',ja:'ミラーバックアップにはファイルシステム UUID のあるドライブが必要です。このドライブには「追加のみ」バックアップを使ってください。'},
+ 'error.mirrorReview':{en:'Mirror backup would move {count} files that are no longer on this drive into .mirror-removed. Open Review to confirm.','zh-Hans':'镜像备份会把此驱动器上已不存在的 {count} 个文件移至 .mirror-removed。请打开“审核”确认。','zh-Hant':'鏡像備份會把此磁碟上已不存在的 {count} 個檔案移至 .mirror-removed。請開啟「審核」確認。',ja:'ミラーバックアップは、このドライブにもうない {count} ファイルを .mirror-removed に移動します。「確認」を開いて承認してください。'},
+ 'error.organizeSpace':{en:'Destination {index} needs {size} free for organizing.','zh-Hans':'目标 {index} 需要 {size} 可用空间才能整理。','zh-Hant':'目的地 {index} 需要 {size} 可用空間才能整理。',ja:'保存先 {index} の整理には {size} の空き容量が必要です。'},
+ 'error.reviewSpace':{en:'A reviewed destination needs more free space. Review again.','zh-Hans':'已审核的目标需要更多可用空间。请重新审核。','zh-Hant':'已審核的目的地需要更多可用空間。請重新審核。',ja:'確認済みの保存先の空き容量が足りません。もう一度確認してください。'},
+ 'error.bothNeedSpace':{en:'Both destinations need more free space for the next related file group and publication workspace.','zh-Hans':'两个目标都需要更多可用空间，用于下一组相关文件和发布工作区。','zh-Hant':'兩個目的地都需要更多可用空間，用於下一組相關檔案和發布工作區。',ja:'次の関連ファイルグループと公開用の作業領域のため、両方の保存先に空き容量が必要です。'},
+ 'error.destinationNeedsSpace':{en:'Destination {index} needs more free space, including publication workspace.','zh-Hans':'目标 {index} 需要更多可用空间（包括发布工作区）。','zh-Hant':'目的地 {index} 需要更多可用空間（包括發布工作區）。',ja:'保存先 {index} に、公開用の作業領域を含めた空き容量が必要です。'},
+ 'error.backupFolderPath':{en:'Use a relative backup folder without . or .. components.','zh-Hans':'请使用不含 . 或 .. 的相对备份文件夹路径。','zh-Hant':'請使用不含 . 或 .. 的相對備份資料夾路徑。',ja:'. や .. を含まない相対パスのバックアップフォルダーを使ってください。'},
+ 'error.separateDisksUnverified':{en:'Could not verify that destinations are on separate physical disks.','zh-Hans':'无法确认两个目标位于不同的物理磁盘上。','zh-Hant':'無法確認兩個目的地位於不同的實體磁碟上。',ja:'保存先が別々の物理ディスクにあることを確認できませんでした。'},
+ 'error.separateDisks':{en:'Choose two separate physical backup disks.','zh-Hans':'请选择两块不同的物理备份磁盘。','zh-Hant':'請選擇兩顆不同的實體備份磁碟。',ja:'別々の物理バックアップディスクを 2 台選んでください。'},
+ 'error.destinationUnidentified':{en:'This destination disk cannot be identified.','zh-Hans':'无法识别此目标磁盘。','zh-Hant':'無法識別此目的地磁碟。',ja:'この保存先のディスクを識別できません。'},
+ 'error.destinationRelative':{en:'Choose an absolute destination folder.','zh-Hans':'请选择绝对路径的目标文件夹。','zh-Hant':'請選擇絕對路徑的目的地資料夾。',ja:'絶対パスの保存先フォルダーを選んでください。'},
+ 'error.destinationInSource':{en:'A destination cannot be on or inside an import source or camera card.','zh-Hans':'目标不能位于导入来源或相机卡上或其中。','zh-Hant':'目的地不能位於匯入來源或相機卡上或其中。',ja:'保存先をインポート元やカメラカードの上や中に置くことはできません。'},
+ 'error.destinationOnCard':{en:'A destination cannot be on a camera card or removable flash media.','zh-Hans':'目标不能位于相机卡或可移动闪存介质上。','zh-Hant':'目的地不能位於相機卡或可移除快閃媒體上。',ja:'保存先をカメラカードやリムーバブルフラッシュメディアに置くことはできません。'},
+ 'error.destinationUninspectable':{en:'Could not inspect this volume for camera folders. Authorize access or reconnect it before choosing a destination.','zh-Hans':'无法检查此宗卷中的相机文件夹。请先授权访问或重新连接，再选择目标。','zh-Hant':'無法檢查此宗卷中的相機資料夾。請先授權存取或重新連接，再選擇目的地。',ja:'このボリュームのカメラフォルダーを確認できませんでした。保存先を選ぶ前に、アクセスを許可するか接続し直してください。'},
+ 'error.destinationReadOnly':{en:'The destination filesystem is read-only.','zh-Hans':'目标文件系统为只读。','zh-Hant':'目的地檔案系統為唯讀。',ja:'保存先のファイルシステムは読み取り専用です。'},
+ 'error.destinationNotFolder':{en:'The destination must be a folder.','zh-Hans':'目标必须是文件夹。','zh-Hant':'目的地必須是資料夾。',ja:'保存先はフォルダーである必要があります。'},
+ 'error.destinationUnavailable':{en:'The destination is unavailable.','zh-Hans':'目标不可用。','zh-Hant':'目的地無法使用。',ja:'保存先を利用できません。'},
+ 'error.destinationChanged':{en:'The selected destination disk changed or cannot be identified. Choose it again before copying.','zh-Hans':'所选目标磁盘已更改或无法识别。请在复制前重新选择。','zh-Hant':'所選目的地磁碟已變更或無法識別。請在複製前重新選擇。',ja:'選択した保存先のディスクが変更されたか、識別できません。コピーする前にもう一度選択してください。'},
+ 'error.backupFolderCheck':{en:'Backup folder check: {error}','zh-Hans':'备份文件夹检查：{error}','zh-Hant':'備份資料夾檢查：{error}',ja:'バックアップフォルダーの確認：{error}'},
+ 'error.folderCleanup':{en:'Folder cleanup: {error}','zh-Hans':'文件夹清理：{error}','zh-Hant':'資料夾清理：{error}',ja:'フォルダーの整理：{error}'},
+} as const satisfies Record<string,Record<Language,string>>;
+
+export type MessageKey=keyof typeof backendMessages;
+export type MessageParam=string|number|Message|Message[];
+export interface Message {key:MessageKey;params?:Record<string,MessageParam>;}
+
+export function message(key:MessageKey,params?:Record<string,MessageParam>):Message {return params?{key,params}:{key};}
+export function text(value:string):Message {return {key:'text',params:{text:value}};}
+/** Parts of one detail line, joined with " · "; false, 0 and undefined parts are left out. */
+export function joined(...parts:(Message|false|0|undefined)[]):Message {return {key:'text',params:{text:parts.filter((part):part is Message=>!!part)}};}
+
+export function formatMessage(value:Message,language:Language):string {
+ return backendMessages[value.key][language].replace(/\{(\w+)\}/g,(placeholder,name:string)=>{
+  const param=value.params?.[name];
+  return param===undefined?placeholder:typeof param==='string'?param:typeof param==='number'?new Intl.NumberFormat(language).format(param):Array.isArray(param)?param.map(part=>formatMessage(part,language)).join(' · '):formatMessage(param,language);
+ });
+}
+
+/** An error the user sees translated. Its `message` is the English text, for logs and reports. */
+export class MessageError extends Error {
+ constructor(readonly key:MessageKey,readonly params?:Record<string,MessageParam>){super(formatMessage(message(key,params),'en'));}
+}
+export function toMessage(error:unknown):Message {
+ return error instanceof MessageError?message(error.key,error.params):text(error instanceof Error?error.message:String(error));
+}
+/** A message read from settings.json; earlier versions saved plain English strings. */
+export function savedMessage(value:unknown):Message|undefined {
+ if(typeof value==='string')return text(value);
+ if(value&&typeof value==='object'&&typeof (value as Message).key==='string'&&Object.hasOwn(backendMessages,(value as Message).key))return value as Message;
+}

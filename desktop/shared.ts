@@ -1,4 +1,5 @@
 import type {StateUpdate} from './state-channel';
+import type {Message} from './messages';
 export type Language = 'en'|'zh-Hans'|'zh-Hant'|'ja';
 export type Appearance = 'system'|'light'|'dark';
 export type Accent = 'coral'|'ocean'|'forest';
@@ -27,8 +28,8 @@ export interface TransferPlan {source:string;root:string;entries:PlanEntry[];roo
 /** completed: files staged (copying) or verified/published (verifying); failed: files in a failed group. */
 export interface Progress {phase?:'copying'|'verifying';completed:number;failed?:number;total:number;bytes:number;totalBytes:number;speed:number;file:string;}
 export interface Job {/** Every file was already in the backup and verified; nothing was copied. */alreadyImported?:boolean;organization?:boolean;id:string;source:Source;phase:'queued'|'discovering'|'verifying'|'copying'|'complete'|'stopped'|'error';
-/** A stopped job the user paused; Start continues it. */paused?:boolean;detail:string;inventory?:Inventory;progress?:Progress;errors:string[];backup:boolean;}
-export interface HistoryEntry {id:string;date:string;title:string;detail:string;}
+/** A stopped job the user paused; Start continues it. */paused?:boolean;detail?:Message;inventory?:Inventory;progress?:Progress;errors:Message[];backup:boolean;}
+export interface HistoryEntry {id:string;date:string;title:Message;detail:Message;}
 export interface DestinationStatus {path:string;total?:number;free?:number;available:boolean;detail?:string;volumeId?:string;physicalId?:string;}
 export interface Review {id:string;kind:'import'|'reorganize';source:Source;plans:TransferPlan[];backup:boolean;sourceFolders?:string[];}
 /** retainedFiles/retainedBytes: originals kept for undo; finalizable: they can be released;
@@ -38,7 +39,7 @@ export interface SourceCameraInfo {issues?:{path:string;message:string}[];status
 export type AutoOrganizeBackup='off'|'ask'|'auto';
 /** Result of the read-only check of one destination's backup folder, keyed by destination path. */
 export interface MisplacedFiles {count:number;bytes:number;checkedAt:string;}
-export interface AppState {misplacedFiles?:Record<string,MisplacedFiles>;newDevices?:string[];scanProgress?:Record<string,{files:number;bytes:number}>;sessionUnknownRules?:Preferences['unknownRules'];organizationFolders?:Record<string,string[]>;reviewProgress?:{count:number;file:string};sourceCameraInfo?:Record<string,SourceCameraInfo>;sourceInventories?:Record<string,Inventory>;scanningSources?:string[];organizationRecovery?:OrganizationRecovery[];review?:Review;busyReview?:boolean;destinationStatus?:DestinationStatus[];preferences:Preferences;sources:Source[];jobs:Job[];history:HistoryEntry[];platform:string;error?:string;}
+export interface AppState {misplacedFiles?:Record<string,MisplacedFiles>;newDevices?:string[];scanProgress?:Record<string,{files:number;bytes:number}>;sessionUnknownRules?:Preferences['unknownRules'];organizationFolders?:Record<string,string[]>;reviewProgress?:{count:number;file:string};sourceCameraInfo?:Record<string,SourceCameraInfo>;sourceInventories?:Record<string,Inventory>;scanningSources?:string[];organizationRecovery?:OrganizationRecovery[];review?:Review;busyReview?:boolean;destinationStatus?:DestinationStatus[];preferences:Preferences;sources:Source[];jobs:Job[];history:HistoryEntry[];platform:string;error?:Message;}
 export type Action = {type:'organize';destinationIndex:number}|{type:'chooseOrganizationFolders';destinationIndex:number}|{type:'resetOrganizationFolders';destinationIndex:number}|{type:'scanSource';sourceId:string}|{type:'scanSources'}|{type:'refreshOrganization'}|{type:'resumeOrganization';id:string;root:string}| {type:'preview';sourceId:string}|{type:'previewOrganization';destinationIndex:number}|{type:'applyReview'}|{type:'discardReview'}|{type:'window';command:'minimize'|'maximize'|'close'}|{type:'refresh'}|{type:'preferences';patch:Partial<Preferences>}|{type:'chooseDestination';index:number}|{type:'removeDestination';index:number}|{type:'chooseSource';backup:boolean}|{type:'start';sourceId?:string}|{type:'stop';jobId?:string}|{type:'unknownRule';extension:string;folder:UnknownFileRule;remember:boolean}|{type:'reveal';path:string}|{type:'clearError'}|{type:'pause';sourceId?:string}|{type:'organizeFolder'}|{type:'finalizeOrganization';root:string;id:string}|{type:'undoOrganization';root:string;id:string}|{type:'selectSource';sourceId:string;selected:boolean}|{type:'forgetDevice';deviceId:string};
 export interface DesktopAPI {state():Promise<StateUpdate>;action(action:Action):Promise<void>;subscribe(listener:(state:StateUpdate)=>void):()=>void;inspect(path:string):Promise<Metadata>;}
 declare global {interface Window {importer:DesktopAPI;}}
