@@ -493,6 +493,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
       <fieldset className="settings-fieldset" disabled={busy}>
         <SettingsSection title={t("Copying")} icon={ShieldCheck}>
           <Switch checked={p.verifyCopies !== false} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
+          <Switch checked={p.skipErrors === true} onChange={skipErrors => act({ type: 'preferences', patch: { skipErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
           <Switch checked={p.allowFolderSource} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} label={t("Enable media folder selection")} detail={t("Lets you choose a folder of photos as a source.")} />
         </SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
@@ -922,6 +923,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
     {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}{job && <Remaining job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
+    {job?.phase === 'error' && !job.skipErrors && !mirrorReview && (!job.progress || job.progress.phase === 'planning') && job.errors.some(error => error.key === 'error.sourceChanged' || error.key === 'text') && <div className="source-choice" data-testid="skip-and-continue"><p><Icon icon={CircleAlert} size={14} />{t("A file error stopped this import.")}</p><div className="rule-actions"><Button kind="primary" icon={Play} title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip and continue")}</Button></div></div>}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
