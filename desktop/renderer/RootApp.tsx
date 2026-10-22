@@ -122,7 +122,9 @@ export type InterfaceChange = 'crossfade' | 'layout' | 'forward' | 'back' | 'cat
 let interfaceTransition: ViewTransition | undefined;
 /** Runs a DOM change as a View Transition; a newer change skips the running one, and reduced motion applies it directly. */
 export function animateInterfaceChange(change: () => void, kind: InterfaceChange = 'crossfade') {
-  if (!document.startViewTransition || reducedMotion()) { change(); return; }
+  // While a sheet or an error message is up the page changes without a transition: a transition's snapshots
+  // would be drawn above the sheet's backdrop, and it takes every click and hit test away from the error message.
+  if (!document.startViewTransition || reducedMotion() || document.querySelector('dialog[open], [data-error-layer]:popover-open')) { change(); return; }
   document.documentElement.dataset.transition = kind;
   const transition = interfaceTransition = document.startViewTransition(() => flushSync(change));
   void transition.finished.catch(() => {}).then(() => { if (interfaceTransition === transition) { interfaceTransition = undefined; delete document.documentElement.dataset.transition; } });
@@ -137,9 +139,15 @@ export function interfaceChangeKind(previous: AppState, next: AppState): Interfa
   return layout(previous) !== layout(next) ? 'layout' : undefined;
 }
 // A sheet opened mid-transition would render beneath the page snapshots, so finish the transition first.
+// Errors are always on top: a sheet that opens over an error surface (the toast, All errors) is put back beneath it.
 function showSheet(dialog: HTMLDialogElement | null) {
   interfaceTransition?.skipTransition();
   dialog?.showModal();
+  for (const error of document.querySelectorAll<HTMLElement>('[data-error-layer]')) {
+    if (error === dialog) continue;
+    if (error instanceof HTMLDialogElement) { if (error.open) { error.close(); error.showModal(); } }
+    else if (error.matches(':popover-open')) { error.hidePopover(); error.showPopover(); }
+  }
 }
 /** Plays the exit of something React is about to remove (a sheet, the toast), then removes it. onClose returns false when new content arrived meanwhile: the element then stays, fully shown. */
 function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose: () => void | false) {
@@ -411,9 +419,11 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
     if (added.length && !hidden) setFresh(added);
   }, [errors, hidden]);
   useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, 7000); return () => window.clearTimeout(timer); }, [fresh]);
+  // The toast lives in the top layer, above the page, the sidebar, the titlebar and any sheet already open.
+  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) node.showPopover(); });
   if (!fresh.length || hidden) return null;
   const first = explainError(fresh[0]!.message, fresh[0]!.kind, language);
-  return <div ref={toast} className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
+  return <div ref={toast} popover="manual" data-error-layer className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
 }
 
 /** Copying, planning a review, showing one, or scanning sources: pages lock the settings these depend on. */
@@ -456,7 +466,7 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
   const clear = onClear ?? ((ids?: string[]) => { if (!ids) act({ type: 'clearErrors' }); else for (const id of ids) act({ type: 'clearError', id }); });
   const clearable = errors.some(error => error.id);
   const clearShown = () => target ? clear(errors.flatMap(error => error.id ? [error.id] : [])) : clear();
-  return <dialog className="activity-dialog" ref={dialog} aria-labelledby="activity-heading" data-testid="activity-panel" onCancel={event => {event.preventDefault();close();}}>
+  return <dialog className="activity-dialog" ref={dialog} data-error-layer aria-labelledby="activity-heading" data-testid="activity-panel" onCancel={event => {event.preventDefault();close();}}>
     <div className="dialog-heading"><h2 id="activity-heading">{t("All errors")}</h2><div className="card-actions">{errors.length > 0 && <Button kind="quiet" icon={Copy} onClick={() => copy(report())}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid="errors-clear-all" aria-label={target ? t("Clear all errors for {name}", { name: target.name }) : t("Clear all errors")} onClick={clearShown}>{t("Clear all")}</Button>}<Button kind="quiet" icon={X} data-testid="activity-close" aria-label={t("Close panel")} onClick={close} /></div></div>
     {target && <p className="error-filter" data-testid="errors-filter"><Icon icon={HardDrive} size={14} /><span>{t("Errors for {name}", { name: target.name })}</span>{onShowAll && <Button kind="quiet" onClick={onShowAll}>{t("Show all errors")}</Button>}</p>}
     <div className="activity-content">{errors.length ? <div className="error-groups">{groups.map(([source, items]) => <section key={source || 'app'} className="error-group">

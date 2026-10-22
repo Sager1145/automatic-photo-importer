@@ -27,7 +27,7 @@ Four mechanisms, each with one job:
 3. **CSS transitions with `@starting-style`**: entrances of anything that appears inside a page (notices, progress blocks, rows, badges), plus colour and transform changes. They retarget smoothly when interrupted.
 4. **`useAnimatedClose(ref, onClose)`**: exits for elements React would otherwise remove at once (sheets, the error toast).
 
-Rules: durations stay between 120 and 300 ms (the spring's long tail is imperceptible); only `transform`, `opacity`, colour and the View Transition snapshots move, so nothing re-lays out per frame; a new transition skips the running one, so every change is interruptible; the transition overlay ignores the pointer, so a click during a transition reaches the live control underneath; an exit that is overtaken by new content (a new issue for the toast, a new drive for the prompt) is cancelled and the element stays; `prefers-reduced-motion: reduce` turns off all of the above: no View Transitions, no WAAPI, CSS durations zeroed.
+Rules: durations stay between 120 and 300 ms (the spring's long tail is imperceptible); only `transform`, `opacity`, colour and the View Transition snapshots move, so nothing re-lays out per frame; a new transition skips the running one, so every change is interruptible; transitions stay short because Chromium holds clicks while one runs (every hit goes to `<html>`); an exit that is overtaken by new content (a new issue for the toast, a new drive for the prompt) is cancelled and the element stays; `prefers-reduced-motion: reduce` turns off all of the above: no View Transitions, no WAAPI, CSS durations zeroed.
 
 Deliberately not animated: direct manipulation (sliders, typing in search fields, the text-size slider, drag-resizing the window), where the interface must follow the hand without lag; repeating numbers (speed, counts, percentages), which use tabular figures and update in place so they stay readable.
 
@@ -136,12 +136,32 @@ Deliberately not animated: direct manipulation (sliders, typing in search fields
 | Resize between compact and wide (container queries) | Column count, button labels collapse to icons, settings tab strip | Instant reflow | Instant reflow (live resize must follow the pointer); scroll-driven titlebar shadow unchanged |
 | Scroll | Titlebar hairline, sections reveal | Scroll-driven | Same |
 
+## Layers
+
+Static stacking, bottom to top: page content (cards are `position: relative`, the destination bay and Settings list are sticky at `z-index: auto`), the sidebar (`z-index: 30`), the titlebar (`40`), then the top layer: sheets, and above them the error surfaces.
+
+Errors are always on top. The toast is a popover in the top layer, so no page content, card, sidebar or titlebar can cover it; when a sheet opens, `showSheet` raises the toast and the All errors panel above it again. Neither uses a z-index. While a sheet or an error message is on screen no View Transition runs: Chromium draws a document transition above the top layer and sends every hit test to `<html>` while it runs, so a page switch in those seconds is instant instead. (Scoping transitions to the app shell would avoid this, but a scoped transition gives its root `contain: layout`, which detaches the fixed titlebar and sidebar from the viewport.)
+
+During a View Transition every named element becomes a group drawn above everything unnamed, in paint order, and outside any clipping ancestor. Rules that keep each layer where it belongs:
+
+| Layer | Problem it had | Rule |
+| --- | --- | --- |
+| Sidebar and Settings selection capsules | The gliding capsule was drawn over its own label (sidebar hid it with a blend mode) | Labels and icons get their own groups, so the capsule passes beneath them |
+| Settings selection capsule in a narrow window | The strip scrolled sideways; the capsule escaped the strip's clipping and drew over the last visible tab | The strip wraps onto more rows instead of scrolling |
+| Titlebar | Its blur cannot be captured, so moving content showed through; its scroll shadow widened the old snapshot and drew the old buttons 20 px low | Opaque background and no scroll shadow while a transition runs |
+| Error toast | A `z-index: 60` element below any open sheet, and unnamed during transitions, so it was flattened into the bottom snapshot and sank under the page | A top-layer popover; no transition starts while it is shown (its own group, drawn last, covers one that was already running) |
+| Sheets (All errors, metadata, confirmations, new drives) | A layout change arriving under an open sheet lifted the page above the backdrop; a later sheet could cover All errors | No transition runs while a sheet is open; the change applies directly. Opening a sheet raises the error surfaces above it |
+
+Reduced motion runs no View Transitions, so none of these groups exist; the static order above is all there is.
+
+Checked by the Electron QA "Transitions keep each layer in place" (records each transition's layers and that none runs under an open sheet) and "Errors stay on top" (at 200%, the toast is the topmost element at its centre, including on the frames right after each page switch).
+
 ## Reduced motion
 
 `prefers-reduced-motion: reduce` (or `--force-prefers-reduced-motion` in QA):
 
 - `animateInterfaceChange` applies the change directly with no View Transition.
 - `useAnimatedClose` closes at once.
-- CSS sets every transition and animation duration to 0 and removes the scroll-driven effects; the indeterminate bar becomes a steady fill.
+- CSS sets every transition and animation duration to 0, disclosure heights (`::details-content`) included, and removes the scroll-driven effects; the indeterminate bar becomes a steady fill.
 
 Covered by `desktop/tests/motion.test.ts` (the helper and the state classifier) and the Electron QA check "Every page and Settings category switch animates through the motion helper" (`npm run codex:test`, and with `-- --reduced-motion`).
