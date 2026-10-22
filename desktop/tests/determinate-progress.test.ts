@@ -96,7 +96,7 @@ test('a long path is cut in the middle',()=>{
 test('the scanning card shows the file, speed and time left',()=>{
  const markup=render(createElement(ScanProgress,{sourceName:'A006',listing:{files:1200,bytes:3e9,file:'DCIM/100NIKON/DSC_0001.NEF',fileRate:850,eta:120,startedAt:new Date(0).toISOString()},usedBytes:12e9}));
  assert.ok(markup.includes('DCIM/100NIKON/DSC_0001.NEF'),markup);
- assert.ok(markup.includes('850'),markup);assert.ok(/left/.test(markup),markup);assert.ok(markup.includes('25% scanned'));
+ assert.ok(markup.includes('850'),markup);assert.ok(/left/.test(markup),markup);assert.ok(markup.includes('25%')&&markup.includes('aria-valuenow="25"'));
 });
 test('an organization reading its history shows a bar, file, speed and time left',()=>{
  const job:Job={id:'o',source:{id:'library:/V/A',name:'Org',path:'/V/A',transport:'folder'},organization:true,phase:'verifying',startedAt:new Date(0).toISOString(),errors:[],backup:false,progress:{phase:'verifying',step:'history',completed:500,total:2000,bytes:0,totalBytes:0,speed:0,fileRate:300,eta:90,file:'event-0001.json'}};

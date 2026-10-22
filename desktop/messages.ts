@@ -25,6 +25,7 @@ export const backendMessages={
  'job.comparingDestination':{en:'Checking the destination for existing files: {count} of {total} · {file}','zh-Hans':'正在检查目标中的现有文件：{count}/{total} · {file}','zh-Hant':'正在檢查目的地中的現有檔案：{count}/{total} · {file}',ja:'保存先の既存ファイルを確認中：{total} 件中 {count} 件 · {file}'},
  'job.confirmingExisting':{en:'Confirming files already on the destination: {count} of {total} · {file}','zh-Hans':'正在确认目标中已有的文件：{count}/{total} · {file}','zh-Hant':'正在確認目的地中已有的檔案：{count}/{total} · {file}',ja:'保存先にあるファイルを確認中：{total} 件中 {count} 件 · {file}'},
  'job.readingMetadata':{en:'Reading source metadata and checking destination folders','zh-Hans':'正在读取来源元数据并检查目标文件夹','zh-Hant':'正在讀取來源中繼資料並檢查目的地資料夾',ja:'ソースのメタデータを読み取り、保存先フォルダーを確認中'},
+ 'job.destinationLabel':{en:'Destination {index} of {count}','zh-Hans':'目标 {index}/{count}','zh-Hant':'目的地 {index}/{count}',ja:'保存先 {index}/{count}'},
  'job.destinationFile':{en:'Destination {index} of {count}: {file}','zh-Hans':'目标 {index}/{count}：{file}','zh-Hant':'目的地 {index}/{count}：{file}',ja:'保存先 {index}/{count}：{file}'},
  'job.revalidating':{en:'Revalidating reviewed paths','zh-Hans':'正在重新验证已审核的路径','zh-Hant':'正在重新驗證已審核的路徑',ja:'確認済みのパスを再検証中'},
  'job.copied':{en:'{copied} copied · {skipped} verified','zh-Hans':'已复制 {copied} 个 · 已验证 {skipped} 个','zh-Hant':'已複製 {copied} 個 · 已驗證 {skipped} 個',ja:'{copied} 件コピー · {skipped} 件検証済み'},

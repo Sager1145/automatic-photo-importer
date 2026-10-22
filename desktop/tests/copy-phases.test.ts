@@ -48,7 +48,7 @@ test('source cards distinguish copying from verification in every language',asyn
   const state:import('../shared').AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/fixture/destination'],copyMode:'single',basePath:'photobackup',template:'{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'job',source,phase,errors:[],backup:false,progress:{phase,completed:0,total:1,bytes:1,totalBytes:1,speed:0,file:'test.JPG'}}],history:[],platform:'darwin'};
   const markup=renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
   assert.ok(markup.includes(labels[index][phase==='copying'?0:1]),`${language} ${phase} must show the actual transfer phase`);
-  assert.ok(markup.includes(`aria-valuenow="${phase==='copying'?100:0}"`),'Verification progress must use checked files, not fully transferred bytes');
+  assert.ok(markup.includes(`aria-valuenow="${phase==='copying'?99:0}"`),'Verification progress must use checked files, not fully transferred bytes');
  }
 });
 

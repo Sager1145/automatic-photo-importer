@@ -559,11 +559,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .desk-page>.import-dashboard .dashboard-next-step p{font-size:var(--text-footnote)}
 .desk-page>.import-dashboard>.progress-jobs{grid-column:1/-1}
 .dashboard-total{grid-column:1/-1;display:grid;gap:.4rem}
-.dashboard-total>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem;min-width:0}
-.dashboard-total>div>:not(small){white-space:nowrap}
-.dashboard-total strong{font-size:var(--text-footnote);font-weight:650}
-.dashboard-total span{font-size:var(--text-headline);font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
-.dashboard-total small{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.dashboard-total-title{font-size:var(--text-footnote);font-weight:650}
+.dashboard-total .progress-percent{font-size:var(--text-headline);font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
 .dashboard-total .progress-track{height:.5rem}
 
 /* Mirror backup removals in a review */
@@ -1144,7 +1141,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .progress-eta{color:var(--label-tertiary);font-size:var(--text-caption);font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
 .progress-file{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--label-tertiary);font-size:var(--text-caption);white-space:nowrap}
 .progress-speed{color:var(--label-tertiary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
-.dashboard-total .progress-elapsed{flex:none}
 .drive-history{display:grid;gap:.25rem;margin:0;padding:0;list-style:none;font-size:var(--text-footnote);color:var(--label-secondary)}
 .drive-history li{display:flex;align-items:flex-start;gap:.4rem}
 .drive-history svg{flex:none;margin-top:.15em;color:var(--success)}
@@ -1160,9 +1156,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
   .desk-page>.import-dashboard .dashboard-metrics dd{order:-1;font-size:var(--text-headline);line-height:1.2}
   .desk-page>.import-dashboard .dashboard-metrics dt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .desk-page>.import-dashboard .dashboard-metrics dt svg,.desk-page>.import-dashboard .dashboard-metrics small{display:none}
-  .desk-page>.import-dashboard .dashboard-total{grid-template-columns:auto minmax(4rem,1fr);align-items:center;column-gap:.75rem}
-  .desk-page>.import-dashboard .dashboard-total>div{gap:.45rem;min-width:0}
-  .desk-page>.import-dashboard .dashboard-total span{font-size:var(--text-callout)}
   .desk-page>.import-dashboard .dashboard-total .progress-track{height:.375rem}
   .desk-page>.import-dashboard .dashboard-next-step{padding:.4rem .65rem}
   .desk-page>.import-dashboard>.progress-jobs li{grid-template-columns:auto minmax(0,1fr);gap:.2rem .75rem;padding:.4rem .7rem}
@@ -1181,9 +1174,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
   .desk-page>.import-dashboard .dashboard-metrics dd{order:-1;font-size:var(--text-headline);line-height:1.2}
   .desk-page>.import-dashboard .dashboard-metrics dt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .desk-page>.import-dashboard .dashboard-metrics dt svg,.desk-page>.import-dashboard .dashboard-metrics small{display:none}
-  .desk-page>.import-dashboard .dashboard-total{grid-template-columns:auto minmax(4rem,1fr);align-items:center;column-gap:.75rem}
-  .desk-page>.import-dashboard .dashboard-total>div{gap:.45rem;min-width:0}
-  .desk-page>.import-dashboard .dashboard-total span{font-size:var(--text-callout)}
   .desk-page>.import-dashboard .dashboard-total .progress-track{height:.375rem}
   .desk-page>.import-dashboard .dashboard-next-step{padding:.4rem .65rem}
   .desk-page>.import-dashboard>.progress-jobs li{grid-template-columns:auto minmax(0,1fr);gap:.2rem .75rem;padding:.4rem .7rem}
@@ -1258,3 +1248,21 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .sidebar-drive [data-testid=reveal]{flex:none;opacity:0;transition:opacity .15s ease}
 .sidebar-drive:hover [data-testid=reveal],.sidebar-drive [data-testid=reveal]:focus-visible{opacity:1}
 @media (hover:none){.sidebar-drive [data-testid=reveal]{opacity:1}}
+
+/* One progress layout for every operation: bar, then count, percent, speed, time and file. */
+.progress-display{display:grid;gap:.4rem;min-width:0}
+.progress-in-card{margin-top:.9rem}
+.progress-display-line{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .7rem;min-width:0;font-size:var(--text-footnote);color:var(--label-secondary);font-variant-numeric:tabular-nums}
+.progress-count{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.progress-percent{flex:none;color:var(--accent);font-weight:650}
+.progress-display-calm .progress-display-line,.source-progress-calm .progress-display-line{color:var(--success)}
+.scan-found{flex:none;color:var(--label-secondary);font-weight:500}
+.progress-planning,.progress-scan{margin-top:.5rem}
+.source-steps li+li::before{display:none}
+.source-steps{column-gap:1.1rem}
+.step-percent{color:var(--accent);font-variant-numeric:tabular-nums}
+.source-steps li[data-state=pending] .step-mark{opacity:.55}
+.source-steps li[data-state=active] .step-mark svg{animation:progress-spin 1.2s linear infinite}
+@keyframes progress-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.source-steps li[data-state=active] .step-mark svg{animation:none}}
+.mini-steps i[data-state=pending] svg{display:none}
