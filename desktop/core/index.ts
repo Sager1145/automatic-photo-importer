@@ -139,7 +139,7 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
  * (metadata and identity, without reading contents); library organization then reads the files
  * that will move to checksum them. */
 /** step 'listing': files found so far (total 0, not yet known); 'checking': metadata of every file; 'reading': files organization moves;
- * 'comparing': planned files compared with what each destination already holds. */
+ * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, totalBytes 0). */
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing';total:number;bytes:number;totalBytes:number})=>void;
 async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
   checkAbort(signal);
@@ -314,13 +314,14 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }));
     for(const {entry} of prepared) entry.digest=hashes.get(entry.source)!;
   }
-  const resolved=new Map<string,string>();
+  const resolved=new Map<string,string>();let readToCompare=0;
   const resolve:Resolve=async entry=>{
     if(entry.digest) return entry.digest;
     let value=resolved.get(entry.source)??options.sourceDigest?.(entry.source,statKey(sourceStats.get(entry.source)!));
     if(value!==undefined) resolved.set(entry.source,value);
     else {
-      await contained(entry.source,sourceRoot);value=await digest(entry.source,signal);
+      // A same-size file at the destination: the source is read to compare; the bytes count as they stream.
+      await contained(entry.source,sourceRoot);value=await digest(entry.source,signal,bytes=>{readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
       if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       resolved.set(entry.source,value);
     }
@@ -328,9 +329,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   };
   // One plan per backup folder: the files routed to it, checked against what it already holds.
   // Each file is compared once per destination; the count runs across all of them.
-  const comparingTotal=prepared.length*destinations.length,comparingBytes=prepared.reduce((sum,{entry})=>sum+entry.size,0)*destinations.length;
-  let compared=0,comparedBytes=0;
-  const comparing=(file:string)=>onProgress?.(compared,file,{step:'comparing',total:comparingTotal,bytes:comparedBytes,totalBytes:comparingBytes});
+  // bytes: source data read to compare with same-size files already there (how much is not known ahead).
+  const comparingTotal=prepared.length*destinations.length;
+  let compared=0;
+  const comparing=(file:string)=>onProgress?.(compared,file,{step:'comparing',total:comparingTotal,bytes:readToCompare,totalBytes:0});
   async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity);
     // Drive backups land in the folder this drive owns on each destination.
@@ -347,7 +349,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     for(const family of groups(pending)) {
       const allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index,signal,mirror?.known));
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
-      compared+=family.length;comparedBytes+=family.reduce((sum,entry)=>sum+entry.size,0);comparing(path.relative(sourceRoot,family[0]!.source));
+      compared+=family.length;comparing(path.relative(sourceRoot,family[0]!.source));
     }
     await flushIndex(index);
     await rootUnchanged(destinationRoot,rootIdentity);

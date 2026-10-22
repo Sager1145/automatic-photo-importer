@@ -518,6 +518,7 @@ Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
 {completed} of {total} files read · {size} of {totalSize}|已读取 {completed}/{total} 个文件 · {size}/{totalSize}|已讀取 {completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件を読み込み · {totalSize} 中 {size}
 Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
+Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
 Checking the destination: {completed} of {total} files|正在检查目标：{completed}/{total} 个文件|正在檢查目的地：{completed}/{total} 個檔案|保存先を確認中：{total} ファイル中 {completed} 件
 Confirming files already on the destination: {completed} of {total}|正在确认目标中已有的文件：{completed}/{total}|正在確認目的地中已有的檔案：{completed}/{total}|保存先にあるファイルを確認中：{total} 件中 {completed} 件
 Confirming files before moving: {completed} of {total}|移动前确认文件：{completed}/{total}|移動前確認檔案：{completed}/{total}|移動前にファイルを確認中：{total} 件中 {completed} 件

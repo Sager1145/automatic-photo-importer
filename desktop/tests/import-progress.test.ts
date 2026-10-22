@@ -37,6 +37,16 @@ test('after the metadata check, planning reports the destination comparison up t
  for(let index=1;index<comparing.length;index++)assert.ok(comparing[index]!.count>=comparing[index-1]!.count);
 });
 
+test('comparing reports the bytes it reads when a same-size file already sits at the destination',async t=>{
+ const {source,roots}=await fixture(t);
+ // Same size, other bytes: the source must be hashed before the plan can decide.
+ const taken=path.join(roots[0]!,'2024/202402/Sony A7/A.JPG');await fs.mkdir(path.dirname(taken),{recursive:true});await fs.writeFile(taken,'X'.repeat(50));
+ const events:{step:string;bytes:number}[]=[];
+ await plan(source,roots,options,metadata,undefined,(_count,_file,detail)=>{if(detail)events.push({step:detail.step,bytes:detail.bytes});});
+ // Only the one source file was read; files with no same-size neighbour are not.
+ assert.equal(events.filter(event=>event.step==='comparing').at(-1)!.bytes,50);
+});
+
 test('the copy first reports the check of existing destination files, then copies',async t=>{
  const {source,roots}=await fixture(t);
  const {plans}=await plan(source,roots,options,metadata);
@@ -56,14 +66,14 @@ const state=(value:Job):AppState=>({preferences,sources:[source],jobs:[value],hi
 const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
 const dashboard=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:state(value),act:()=>{}})})).match(/data-testid="total-progress"[\s\S]*?<\/small>/)?.[0]??'';
 const checked:Progress={phase:'planning',step:'checking',completed:64832,total:64832,bytes:834e9,totalBytes:834e9,speed:0,file:'DSC1.JPG'};
-const comparing:Progress={phase:'planning',step:'comparing',completed:3000,total:64832,bytes:36e9,totalBytes:834e9,speed:0,file:'DSC2.JPG'};
+const comparing:Progress={phase:'planning',step:'comparing',completed:3000,total:64832,bytes:36e9,totalBytes:0,speed:0,file:'DSC2.JPG'};
 
 test('the source card names the step it is on and its own progress',()=>{
  const reading=desk(job({...checked,completed:100}));
  assert.ok(reading.includes('Reading metadata'));assert.ok(reading.includes('100 of 64,832 files checked'));
  const destination=desk(job(comparing));
  assert.ok(destination.includes('Checking existing files'));
- assert.ok(destination.includes('Checking the destination: 3,000 of 64,832 files'));
+ assert.ok(destination.includes('Checking the destination: 3,000 of 64,832 files · 36.0 GB read'));
  assert.ok(destination.includes('aria-valuenow="5"'),'the bar shows the comparison, not the finished metadata check');
  const verifying=desk(job({phase:'verifying',completed:5,total:10,bytes:0,totalBytes:0,speed:0,file:''}));
  assert.ok(verifying.includes('Verifying copied files'));
