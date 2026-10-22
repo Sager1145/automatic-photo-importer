@@ -56,6 +56,14 @@ Resume uses the paths saved in that operation, even if the current folder settin
 
 The app stops rather than proceeding when a source changes, a target has unexpected contents, an authenticated journal fails validation, a root or parent directory changes identity, or a path passes through a symbolic link. Existing source or recovery bytes remain available for inspection. Resolve the reported condition before attempting to resume.
 
+## Separate photo and video backup folders
+
+With **A separate video backup folder**, one organization keeps a journal in each backup folder it changes. Before anything moves, it also leaves a small signed pointer, `journal-<id>.json`, in the recovery folder of every other folder its manifest lists or its files come from. A later organization reads these pointers, the signed folder lists of the journals it finds, and the folder named by any later journal that replaced one. So it refuses to move a file that an unfinished organization in another folder still owns. Instead it reports **Finish organization …**: resume or undo that organization first. Each pointer is removed when its journal finishes, is undone, or has its kept originals released. An undo or release in progress writes them again first. In backup folders, leftover-file cleanup (automatic when nothing is running, or **Leftover files → Clean up**) removes pointers left behind by a crash, pointers whose organization is gone, and their temporary `.tmp` files. A pointer a crash leaves in a folder the files came from, such as a card folder, is removed the next time that organization is rechecked. Until then that folder is kept.
+
+- A damaged pointer is repaired by the next organization when its journal is found next to it. If its journal can't be found, the error names the file; delete it only if that organization is finished or no longer needed.
+- If a backup folder is renamed only by case (`videobackup` to `VideoBackup`) while an organization in it is unfinished, organizing stops until it is renamed back. Once everything there has finished, the rename doesn't matter.
+- **Limit:** an organization stopped part-way by a version from before 22 October 2026 left no pointers. If no journal in the other folder lists its folder, a later organization can't find it. Before organizing, resume each pending organization once (Organization recovery → **Resume & recheck**). That writes its pointers.
+
 ## The private host key
 
 The Electron app keeps a private 32-byte authentication key at:

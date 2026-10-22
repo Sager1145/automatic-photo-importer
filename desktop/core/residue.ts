@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
 import { INDEX_PREFIX } from './destination-index';
 import { leftoverReceipt } from './import-recovery';
-import { isRecoveryName } from './recovery';
+import { isRecoveryName, pointerLeftover } from './recovery';
 import { checkAbort, code, contained, sameStat } from './paths';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
@@ -69,6 +69,13 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
  * originals were released. Journals and retained originals are never listed. */
 async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
   const folder=async(item:string)=>{const stat=await fs.lstat(item,{bigint:true}).catch(()=>undefined);if(stat)items.push({path:item,kind:'folder',bytes:0,root,stat});};
+  // Pointers to journals in other backup folders that are finished, undone or gone, and their crash leftovers.
+  for(const entry of await list(storage)) {
+    if(!entry.isFile()||!entry.name.startsWith('journal-')) continue;
+    checkAbort(signal);
+    const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name)?await regular(file):undefined;
+    if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
+  }
   for(const job of await list(storage)) {
     if(!job.isDirectory()||!uuid.test(job.name)) continue;
     const jobPath=path.join(storage,job.name);
