@@ -97,3 +97,31 @@ test('All errors shows each error with its time and drive, a Clear button, and C
  assert.equal(collectErrors(value).length,0);
  assert.equal(value.jobs[0]!.errors.length,2,'jobs keep their errors');
 });
+
+test('sidebar sources and destinations with errors show a live count that opens All errors for that drive',async()=>{
+ const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider,createTranslator,languages}=await import('../renderer/i18n');
+ const {ActivityPanel,SidebarSources,SidebarDestinations,collectErrors,errorsFor}=await import('../renderer/RootApp');
+ const organization={id:'library:/Volumes/A006',name:'Backup organization',path:'/Volumes/A006',transport:'folder' as const};
+ const value=state({jobs:[job({errors:[text('EIO: read A'),text('EIO: read B')]}),job({id:'o',source:organization,organization:true,errors:[text('ENOSPC')]})],
+  destinationStatus:[{path:'/Volumes/A006',available:true,detail:'Slow drive'}]});
+ const log=new ErrorLog();value.errorLog=log.update(gatherErrors(value));
+ let errors=collectErrors(value);
+ assert.equal(errorsFor(errors,{sourceId:'untitled',name:'Untitled'}).length,2);
+ assert.equal(errorsFor(errors,{sourceId:'folder',name:'photobackup'}).length,0);
+ assert.equal(errorsFor(errors,{destination:'/Volumes/A006',name:'A006'}).length,2,'destination and organization errors on A006');
+ for(const language of languages){
+  const t=createTranslator(language),render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
+  const sources=render(createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}}));
+  const badges=[...sources.matchAll(/<li[^>]*data-source-id="(\w+)"[\s\S]*?<\/li>/g)].map(match=>[match[1],(match[0].match(/data-testid="sidebar-errors"[^>]*aria-label="([^"]+)"/)??[])[1]]);
+  assert.deepEqual(badges,[['untitled',t('{count} errors',{count:2})],['folder',undefined]],`${language}: only the source with errors has a badge`);
+  const destinations=render(createElement(SidebarDestinations,{state:value,errors,onErrors:()=>{}}));
+  assert.ok(destinations.includes(`aria-label="${t('{count} errors',{count:2})}"`),`${language}: destination badge`);
+  const panel=render(createElement(ActivityPanel,{state:value,errors,target:{sourceId:'untitled',name:'Untitled'},act:()=>{},onClose:()=>{},onShowAll:()=>{}}));
+  assert.equal((panel.match(/data-testid="error-clear"/g)??[]).length,2,`${language}: filtered to the drive`);
+  assert.ok(panel.includes(t('Errors for {name}',{name:'Untitled'}))&&panel.includes(t('Show all errors')),`${language}: filter is named and can be removed`);
+ }
+ clearErrors(log,value,errors[0]!.id);clearErrors(log,value,errors[1]!.id);value.errorLog=log.update(gatherErrors(value));errors=collectErrors(value);
+ const sources=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
+ assert.ok(!sources.includes('sidebar-errors'),'the badge goes once its errors are cleared');
+});

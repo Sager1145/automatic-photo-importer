@@ -552,6 +552,10 @@ Clear all|全部清除|全部清除|すべて消去
 Clear all errors|清除所有错误|清除所有錯誤|すべてのエラーを消去
 Clear error: {title}|清除错误：{title}|清除錯誤：{title}|エラーを消去：{title}
 Drive: {name}|驱动器：{name}|磁碟：{name}|ドライブ：{name}
+Show errors for {name}|显示 {name} 的错误|顯示 {name} 的錯誤|{name} のエラーを表示
+Errors for {name}|{name} 的错误|{name} 的錯誤|{name} のエラー
+Show all errors|显示所有错误|顯示所有錯誤|すべてのエラーを表示
+Clear all errors for {name}|清除 {name} 的所有错误|清除 {name} 的所有錯誤|{name} のエラーをすべて消去
 Details|详情|詳細資訊|詳細
 {count} new issues|{count} 个新问题|{count} 個新問題|{count} 件の新しい問題
 View|查看|查看|表示
