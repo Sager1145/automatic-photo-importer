@@ -47,8 +47,9 @@ A stop or abrupt process exit can leave some files at their original paths and o
 | Control | What it does |
 | --- | --- |
 | **Refresh list** | Updates saved-operation rows using cached filesystem checks, without hashing all media contents. |
-| **Resume & recheck** on an operation | Authenticates the saved journal, checks full file contents and identities, then continues that operation. |
-| **Recheck** on a previously completed operation | Runs the same full validation and resumes any work needed for its saved paths. |
+| **Resume & recheck** on an operation | Authenticates the saved journal, checks file contents and identities, then continues that operation. A journal from an older version (one file per event) is first converted to a single log: its records are copied unchanged, still signed, and the files are removed only once the log is safely written. |
+| **Recheck** on a previously completed operation | Runs the same validation and resumes any work needed for its saved paths. The first Recheck in an app session reads every file's contents. Later ones read only files whose identity, size or dates changed since then; on exFAT and FAT a same-size edit that restores the date is not noticed. |
+| **Full recheck** on a previously completed operation | Reads every file's contents again. Releasing kept originals and undo always read contents first, whatever the last recheck did. |
 
 **Last completed** and **Last verified** describe the listed saved state. They are not a fresh full-content verification from a list refresh. Use the operation's own recheck action for that verification.
 

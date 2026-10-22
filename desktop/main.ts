@@ -229,7 +229,7 @@ const gigabytes=(bytes:number)=>`${(bytes/1e9).toFixed(1)} GB`;
 /** "2592 moved · 2592 originals kept for undo (49.0 GB) · 0 errors"; only true claims are made. */
 function organizedText(moved:number,retained:number,retainedBytes:number,errors:number){return [message('job.moved',{count:moved}),retained?message('job.retained',{count:retained,size:gigabytes(retainedBytes)}):undefined,message('job.errors',{count:errors})];}
 /** `source`: the card a paused organization continues on, so its resume shows in the same place. */
-async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'='resume',source?:Source,folders?:string[]){
+async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'='resume',source?:Source,folders?:string[],full=false){
  const operation=JSON.stringify([root,id]);if(resumingOrganizations.has(operation))return;
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');
  if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
@@ -248,7 +248,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message('history.organization'),job.detail);}
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message('history.organizationUndone'),job.detail);}
-  else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
+  else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
   if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();}})()).finally(()=>{resumingOrganizations.delete(operation);void releaseIfIdle();});
@@ -524,7 +524,7 @@ async function action(input:Action):Promise<void>{
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'refreshOrganization':await refreshOrganizations();break;
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
-  case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id);break;
+  case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id,'resume',undefined,undefined,input.full===true);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;
   case 'undoOrganization':await resumeOrganizationJob(input.root,input.id,'undo');break;
   case 'chooseOrganizationFolders':{
