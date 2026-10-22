@@ -1097,6 +1097,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .source-progress>div>span:first-child{margin-inline-end:auto}
 .progress-elapsed{display:inline-flex;align-items:center;gap:.3rem;color:var(--label-tertiary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
 .progress-elapsed>svg{flex:none}
+.progress-eta{color:var(--label-tertiary);font-size:var(--text-caption);font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dashboard-total .progress-eta{flex:none}
 .drive-history{display:grid;gap:.25rem;margin:0;padding:0;list-style:none;font-size:var(--text-footnote);color:var(--label-secondary)}
 .drive-history li{display:flex;align-items:flex-start;gap:.4rem}
 .drive-history svg{flex:none;margin-top:.15em;color:var(--success)}
