@@ -43,6 +43,8 @@ let organizationLocations:OrganizationLocation[]=[];
 const organizationJobIds=new Set<string>();
 interface RunRequest {prefs:Preferences;reorganize:boolean;sourceFolders?:string[];}
 const organizationQueue=new Map<string,RunRequest>();
+/** What each started organization was asked to do, so a paused one can run again. */
+const organizationRuns=new Map<string,RunRequest>();
 const resumingOrganizations=new Set<string>();
 const automaticallyQueued=new Set<string>();
 const seen=new Set<string>();
@@ -159,7 +161,8 @@ async function rememberOrganization(root:string,prefs:Preferences){
 const gigabytes=(bytes:number)=>`${(bytes/1e9).toFixed(1)} GB`;
 /** "2592 moved · 2592 originals kept for undo (49.0 GB) · 0 errors"; only true claims are made. */
 function organizedText(moved:number,retained:number,retainedBytes:number,errors:number){return [message('job.moved',{count:moved}),retained?message('job.retained',{count:retained,size:gigabytes(retainedBytes)}):undefined,message('job.errors',{count:errors})];}
-async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'='resume'){
+/** `source`: the card a paused organization continues on, so its resume shows in the same place. */
+async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finalize'|'undo'='resume',source?:Source,folders?:string[]){
  const operation=JSON.stringify([root,id]);if(resumingOrganizations.has(operation))return;
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');
  if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
@@ -171,14 +174,14 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  await validateDestination(location.destination,state.sources,{identity:location.volumeId});
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busyResume');
  if(!location.folder&&!state.preferences.destinations.some((destination,index)=>destination===location.destination&&state.preferences.destinationIds?.[index]===location.volumeId))throw new MessageError('error.organizationDestination');
- const job:Job={id:randomUUID(),source:{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=new AbortController();active.set(job.id,control);organizationJobIds.add(job.id);emit();
+ const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=new AbortController();active.set(job.id,control);organizationJobIds.add(job.id);emit();
  void(async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.released',{count:released.removed,size:gigabytes(released.bytes)});addHistory(message('history.organization'),job.detail);}
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.undone',{restored:undone.restored,removed:undone.removed});addHistory(message('history.organizationUndone'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
- }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}finally{active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
+ }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
   if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleMisplacedCheck(true);}})().finally(()=>{resumingOrganizations.delete(operation);});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
@@ -198,7 +201,7 @@ function enqueue(source:Source,backup=false,automatic=false){
 function pump(){if(state.review||state.busyReview||organizationJobIds.size)return;while(active.size<state.preferences.parallel){
  const job=nextQueued(state.jobs,sourceOrder);if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
- organizationQueue.delete(job.id);misplacedControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
+ organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);misplacedControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  void run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false}).finally(()=>{active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleMisplacedCheck(true);});
  if(organization)break;
 }}
@@ -340,7 +343,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.phase=job.errors.length?'error':'complete';
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,job.errors.length),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),notes.length>0&&text(notes[0]!)):job.alreadyImported?message('job.alreadyImported',{count:entries}):joined(message('job.copied',{copied,skipped}),removed&&message('job.mirrorRemoved',{count:removed}),message('job.errors',{count:job.errors.length}),prefs.copyMode==='mirror'&&message(job.errors.length?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail);
- }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)job.errors.push(job.detail);addHistory(text(job.source.name),job.detail);}}
+ }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)job.errors.push(job.detail);addHistory(text(job.source.name),job.detail);}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;});emit();
 }
@@ -427,11 +430,23 @@ async function action(input:Action):Promise<void>{
   }
   case 'pause':{
    // Pause stops at once like Stop; verified copies stay, and Start continues with the rest.
-   for(const job of state.jobs)if(!job.organization&&(!input.sourceId||job.source.id===input.sourceId)){
-    if(job.phase==='queued'){job.phase='stopped';job.paused=true;job.detail=message('job.pausedQueued');}
+   // An organization pauses only when its own card asks; its journal keeps the moves made so far.
+   for(const job of state.jobs)if(job.organization?job.source.id===input.sourceId:(!input.sourceId||job.source.id===input.sourceId)){
+    if(job.phase==='queued'){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.pausedQueued');}
     else if(active.has(job.id)){pausing.add(job.id);active.get(job.id)!.abort();}
    }
    break;
+  }
+  case 'continueOrganization':{
+   // A paused organization continues from its journal; one paused before any move was journaled runs again.
+   const paused=state.jobs.find(job=>job.id===input.jobId&&job.organization&&job.paused&&job.phase==='stopped');if(!paused)throw new MessageError('error.recoveryListStale');
+   if(organizationQueue.has(paused.id)){paused.phase='queued';paused.paused=false;paused.detail=message('job.waitingForImports');pump();break;}
+   await refreshOrganizations();
+   const journal=(state.organizationRecovery??[]).filter(item=>item.status==='pending'&&within(item.root,paused.source.path)).at(-1);
+   paused.paused=false;
+   if(journal){await resumeOrganizationJob(journal.root,journal.id,'resume',paused.source,paused.folders);break;}
+   const request=organizationRuns.get(paused.id);if(!request)throw new MessageError('error.recoveryListStale');
+   queueOrganization(paused.source.path,paused.source.name,request);break;
   }
   case 'moveToTop':{
    const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');

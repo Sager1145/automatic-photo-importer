@@ -14,6 +14,7 @@ export const backendMessages={
  'job.stepChecking':{en:'Checking: {completed} of {total}','zh-Hans':'正在检查：{completed}/{total}','zh-Hant':'正在檢查：{completed}/{total}',ja:'確認中：{total} 件中 {completed} 件'},
  'job.stepReleasing':{en:'Releasing kept originals: {completed} of {total}','zh-Hans':'正在释放保留的原文件：{completed}/{total}','zh-Hant':'正在釋放保留的原始檔案：{completed}/{total}',ja:'保持中の元のファイルを解放中：{total} 件中 {completed} 件'},
  'job.stepRestoring':{en:'Putting files back: {completed} of {total}','zh-Hans':'正在将文件放回原处：{completed}/{total}','zh-Hant':'正在將檔案放回原處：{completed}/{total}',ja:'ファイルを元に戻し中：{total} 件中 {completed} 件'},
+ 'job.organizationPaused':{en:'Paused. Files already moved stay in place; Resume rechecks them and continues.','zh-Hans':'已暂停。已移动的文件保持不变；点击“继续”会重新检查并继续整理。','zh-Hant':'已暫停。已移動的檔案保持不變；點選「繼續」會重新檢查並繼續整理。',ja:'一時停止しました。移動済みのファイルはそのままです。「再開」で確認して続行します。'},
  'job.listing':{en:'Listing files: {count} found','zh-Hans':'正在列出文件：已找到 {count} 个','zh-Hant':'正在列出檔案：已找到 {count} 個',ja:'ファイルを一覧中：{count} 件'},
  'job.readingToMove':{en:'Reading files to move: {count} of {total} · {file}','zh-Hans':'正在读取要移动的文件：{count}/{total} · {file}','zh-Hant':'正在讀取要移動的檔案：{count}/{total} · {file}',ja:'移動するファイルを読み取り中：{total} 件中 {count} 件 · {file}'},
  'job.checkingSourceOf':{en:'Checking source: {count} of {total} files · {file}','zh-Hans':'正在检查来源：{count}/{total} 个文件 · {file}','zh-Hant':'正在檢查來源：{count}/{total} 個檔案 · {file}',ja:'ソースを確認中：{total} ファイル中 {count} 件 · {file}'},

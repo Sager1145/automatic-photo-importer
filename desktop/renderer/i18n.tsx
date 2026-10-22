@@ -433,6 +433,7 @@ Your answer is remembered. Change it any time in Drives.|你的选择会被记�
 Select|选择|選取|選択
 Don't import this drive|不导入此驱动器|不匯入此磁碟|このドライブを読み込まない
 Pause|暂停|暫停|一時停止
+Resume|继续|繼續|再開
 Pause {name}|暂停 {name}|暫停 {name}|{name} を一時停止
 Paused|已暂停|已暫停|一時停止中
 Continue|继续|繼續|再開

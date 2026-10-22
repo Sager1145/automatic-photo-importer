@@ -617,6 +617,8 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const total = progressJobs.reduce((sum, job) => sum + (job.progress?.totalBytes ?? 0), 0);
   const speed = active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0);
   const idleSources = state.sources.filter(source => !jobs.some(job => job.source.id === source.id));
+  // Organizations read a drive or folder too: each one's latest run is a card, ahead of the drives.
+  const organizationCards = jobs.filter((job, index) => job.organization && jobs.findIndex(item => item.organization && item.source.id === job.source.id) === index);
   const configured = state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2);
   const scanning = (state.scanningSources?.length ?? 0) > 0;
   const reviewBusy = !!state.busyReview || !!state.review || active.length > 0 || scanning;
@@ -636,7 +638,8 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
     <div className="workbench-columns"><div className="source-workspace">
       <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions">{state.preferences.showDashboard === false && <Button kind="quiet" icon={Gauge} data-testid="show-dashboard-desk" aria-label={t("Show the import overview")} title={t("Show the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: true } })} />}<div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout ?? 'list') === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div><label className="parallel-source-control" title={t("Current copies finish before a lower limit takes effect.")}><span className="parallel-source-label">{t("Parallel sources")}</span><input id="parallel-source-limit" aria-label={t("Maximum parallel sources")} type="range" min={1} max={10} step={1} value={state.preferences.parallel} onChange={event => act({type:'preferences',patch:{parallel:Number(event.target.value)}})} /><output htmlFor="parallel-source-limit">{t("{count} of 10",{count:state.preferences.parallel})}</output></label><span className="connected-count">{t("{count} connected", { count: state.sources.length })}</span><Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scanSources' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button></div></div>
         <div ref={ledger} className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
-          {jobs.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
+          {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
+          {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
           {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => setSelectedJobId(job.id)} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
           <div className="source-footer"><Switch label={t("Enable media folder selection")} checked={state.preferences.allowFolderSource} disabled={active.length > 0 || !!state.review || !!state.busyReview} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folder…")}</Button></div>
         </div>
@@ -760,18 +763,27 @@ function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): s
   if (job.phase === 'error') return t("Needs attention");
   if (job.phase === 'queued') return t("Queued");
   if (job.phase === 'complete') return t("Complete");
-  if (job.phase === 'stopped') return t("Stopped");
+  if (job.phase === 'stopped') return job.paused ? t("Paused") : t("Stopped");
   if (job.phase === 'discovering' || job.progress?.step === 'listing') return t("Listing files");
   return job.progress?.phase === 'planning' ? t("Checking files") : t("Organizing");
 }
+/** An organization in Sources & queue: what it reads, the step it is on and its progress. */
+export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
+  const { t } = useTranslation();
+  return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
+    <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
+    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}</p>
+    <OrganizationProgress job={job} act={act} />
+  </article>;
+}
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
-  const progress = job.progress, running = activePhases.includes(job.phase) || job.phase === 'queued';
+  const progress = job.progress, running = activePhases.includes(job.phase) || job.phase === 'queued', paused = job.phase === 'stopped' && !!job.paused;
   const fraction = organizationFraction(job);
   const label = !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
   return <div className="organization-progress" data-testid="organization-progress">
-    <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} />{fraction !== undefined && <strong>{formatNumber(Math.floor(Math.min(1, fraction) * 100))}%</strong>}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
-    {running && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
+    <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} />{fraction !== undefined && <strong>{formatNumber(Math.floor(Math.min(1, fraction) * 100))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
+    {(running || paused) && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
