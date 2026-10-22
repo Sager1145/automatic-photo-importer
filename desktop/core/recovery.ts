@@ -21,7 +21,7 @@ export const RECOVERY_FOLDER='Photo Importer Recovery';
 /** Where versions before RECOVERY_FOLDER kept their journals and originals. */
 export const LEGACY_RECOVERY_FOLDER='.photo-importer-recovery';
 const storage=RECOVERY_FOLDER;
-const isRecoveryName=(name:string)=>[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].some(item=>item.toLowerCase()===name.toLowerCase());
+export const isRecoveryName=(name:string)=>[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].some(item=>item.toLowerCase()===name.toLowerCase());
 /** Move journals an earlier version kept in the hidden folder into the visible one, on the same volume. */
 async function adoptLegacyStorage(root:string):Promise<void>{
  const legacy=path.join(root,LEGACY_RECOVERY_FOLDER),visible=path.join(root,storage);
@@ -252,7 +252,13 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
 async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
  await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root);await syncDirectory(path.dirname(entry.destination));
  const staged=path.join(jobPath(m.root,m.id),`stage-${randomUUID()}.partial`);
- const output=await fs.open(staged,'wx',0o600);const source=await regularHandle(input);
+ const output=await fs.open(staged,'wx',0o600);
+ // Stages are expendable verified copies: a failed or stopped copy removes its own.
+ try{await copyThroughStage(staged,output,entry,index,m,input,signal,onBytes);}
+ catch(error){try{await contained(staged,m.root);await fs.unlink(staged);}catch{/* Already gone, or left for the residue cleanup. */}throw error;}
+}
+async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
+ let source:fs.FileHandle;try{source=await regularHandle(input);}catch(error){await output.close();throw error;}
  try {
   const before=await source.stat({bigint:true}),hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);
   for(;;){checkAbort(signal);const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to write recovery stage');offset+=bytesWritten;}onBytes?.(bytesRead);}
@@ -264,7 +270,7 @@ async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:Abo
  try{await fs.link(staged,entry.destination);}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
  if(!await targetMatches(entry,m,signal))throw new Error('Destination disappeared after publication');
- // Stages are expendable verified copies. Retained originals are never unlinked.
+ // Retained originals are never unlinked; only the stage is.
  await contained(staged,m.root);await fs.unlink(staged);await checkpoint(m,'published',index);
 }
 /** Only reviewed obsolete source parents can be removed, and only by nonrecursive rmdir.

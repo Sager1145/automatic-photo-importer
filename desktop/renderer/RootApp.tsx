@@ -474,6 +474,20 @@ const settingsCategories: SettingsCategory[] = ['importing', 'destinations', 'fo
 function savedCategory(): SettingsCategory {
   try { const value = sessionStorage.getItem('settings-category') as SettingsCategory | null; return value && settingsCategories.includes(value) ? value : 'importing'; } catch { return 'importing'; }
 }
+// Leftovers of interrupted runs on the connected destinations, removed automatically while nothing
+// runs; Clean up looks again now and also removes copies a re-import could continue.
+function LeftoverFiles({ state, act, busy }: { state: AppState; act: Dispatch; busy: boolean }) {
+  const { t, formatNumber, formatBytes } = useTranslation();
+  const residue = state.residue;
+  const files = (count: number) => count === 1 ? t("1 leftover file") : t("{count} leftover files", { count: formatNumber(count) });
+  const status = residue?.checking ? t("Looking for leftover files…") : !residue?.checkedAt ? t("Not checked yet.") : residue.files ? `${files(residue.files)} · ${formatBytes(residue.bytes)}` : t("No leftover files.");
+  return <div data-testid="residue-cleanup">
+    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
+    {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
+    {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
+    <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
+  </div>;
+}
 // Settings: a category list with live summaries, and the open category's controls beside it.
 export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:boolean}) {
   const p = state.preferences;
@@ -528,6 +542,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         <div className="segmented" role="group" aria-label={t("Check the backup folder")}>{(['off', 'ask', 'auto'] as const).map(mode => <button key={mode} type="button" aria-pressed={(p.autoOrganizeBackup ?? 'ask') === mode} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: mode } })}>{{ off: t("Off"), ask: t("Ask"), auto: t("Automatic") }[mode]}</button>)}</div>
         <p className="settings-row-note">{p.autoOrganizeBackup === 'auto' ? t("Misplaced files are moved into place after each import.") : p.autoOrganizeBackup === 'off' ? t("Not checked automatically.") : t("Checked after each import. You choose when to move files.")}</p>
       </SettingsSection>
+      <SettingsSection title={t("Leftover files")} icon={Trash2}><LeftoverFiles state={state} act={act} busy={busy} /></SettingsSection>
     </>,
     drives: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /></>,
     general: <>

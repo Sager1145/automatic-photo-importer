@@ -1,4 +1,4 @@
-import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme} from 'electron';
+import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme,powerMonitor} from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +17,8 @@ import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
-import {metadata,closeMetadata,primeRouting,routingEntries} from './platform/metadata';
+import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse} from './platform/metadata';
+import {findResidue,cleanResidue} from './core/residue';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker} from './scan-process';
 import {runCodexSmoke} from './qa/codex-smoke';
@@ -146,7 +147,7 @@ async function refresh(){
   const required=state.preferences.copyMode==='single'?1:2,ready=destinations.length>=required&&destinations.slice(0,required).every(info=>info.available);
   // Automatic import only takes drives the user selected (now or on a previous connection).
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
-  emit();pump();scheduleMisplacedCheck();
+  emit();pump();scheduleMisplacedCheck();scheduleResidueCheck();
   const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
   if(scope!==recoveryScope&&!recoveryRefresh){recoveryScope=scope;recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;});}
  }catch(error){state.error=toMessage(error);emit();}finally{refreshing=false;}
@@ -189,11 +190,12 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  // second request is still validating, making a later busy() check insufficient.
  resumingOrganizations.add(operation);
  try{
+ await stopResidueCheck();
  await validateDestination(location.destination,state.sources,{identity:location.volumeId});
  if(busy()||state.review||state.busyReview)throw new MessageError('error.busyResume');
  if(!location.folder&&!state.preferences.destinations.some((destination,index)=>destination===location.destination&&state.preferences.destinationIds?.[index]===location.volumeId))throw new MessageError('error.organizationDestination');
  const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=new AbortController();active.set(job.id,control);organizationJobIds.add(job.id);emit();
- void(async()=>{try{
+ void settle((async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.released',{count:released.removed,size:gigabytes(released.bytes)});addHistory(message('history.organization'),job.detail);}
@@ -201,7 +203,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
-  if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleMisplacedCheck(true);}})().finally(()=>{resumingOrganizations.delete(operation);});
+  if(!active.size&&!state.jobs.some(item=>item.phase==='queued')){scheduleMisplacedCheck(true);scheduleResidueCheck(true);}}})()).finally(()=>{resumingOrganizations.delete(operation);});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
 }
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */
@@ -219,16 +221,16 @@ function enqueue(source:Source,backup=false,automatic=false){
 function pump(){if(state.review||state.busyReview||organizationJobIds.size)return;while(active.size<state.preferences.parallel){
  const job=nextQueued(state.jobs,sourceOrder);if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
- organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);misplacedControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
+ organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);misplacedControl?.abort();residueControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skipErrors=skipErrorJobs.delete(job.id);
- void run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(skipErrors?{skipErrors}:{})}).finally(()=>{active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleMisplacedCheck(true);});
+ void settle(run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(skipErrors?{skipErrors}:{})})).finally(()=>{active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued')){scheduleMisplacedCheck(true);scheduleResidueCheck(true);}});
  if(organization)break;
 }}
 // Read-only check of each connected destination's backup folder for files outside the folder the
 // rules give them. It runs while nothing else does: after imports finish and when a destination connects.
 let misplacedControl:AbortController|undefined,misplacedScope='',organizeAfterImport=false;
 function scheduleMisplacedCheck(force=false){
- if(qa||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl)return;
+ if(qa||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
  const prefs=state.preferences,scope=JSON.stringify([prefs.destinations,prefs.destinationIds,prefs.basePath,prefs.template,prefs.mediaLayout,prefs.videoBasePath,prefs.videoTemplate,prefs.editedFolder,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===misplacedScope)return;
  misplacedScope=scope;const control=new AbortController();misplacedControl=control;const organize=organizeAfterImport;organizeAfterImport=false;
@@ -244,8 +246,48 @@ function scheduleMisplacedCheck(force=false){
    if(found.count&&organize&&state.preferences.autoOrganizeBackup==='auto')try{queueBackupOrganization(index,true);}catch{/* Another organization or a review comes first; the count stays visible. */}
   }
   for(const destination of Object.keys(state.misplacedFiles??{}))if(!checked.has(destination))delete state.misplacedFiles![destination];
- })().catch(error=>{if(!control.signal.aborted)state.error=message('error.backupFolderCheck',{error:toMessage(error)});}).finally(()=>{if(misplacedControl===control)misplacedControl=undefined;if(control.signal.aborted)misplacedScope='';emit();});
+ })().catch(error=>{if(!control.signal.aborted)state.error=message('error.backupFolderCheck',{error:toMessage(error)});}).finally(()=>{if(misplacedControl===control)misplacedControl=undefined;if(control.signal.aborted)misplacedScope='';emit();scheduleResidueCheck();});
 }
+// Leftovers of interrupted runs: staging files and receipts beside media, index and organization
+// scratch files, and camera and preview folders in the system temporary folder. Looked for while
+// nothing runs (after imports and organizations finish and when a destination connects) and
+// removed at once; copies a re-import could continue wait for Clean up.
+let residueControl:AbortController|undefined,residueTask:Promise<void>|undefined,residueScope='';
+/** The backup folders of connected destinations, and folders organized in place on connected drives. */
+async function residueRoots():Promise<string[]>{
+ const prefs=state.preferences,roots:string[]=[];
+ prefs.destinations.forEach((destination,index)=>{const status=state.destinationStatus?.find(item=>item.path===destination);if(status?.available&&status.volumeId===prefs.destinationIds?.[index])for(const folder of backupFolders(prefs)){const root=path.resolve(destination,folder);if(within(root,destination))roots.push(root);}});
+ for(const location of organizationLocations){const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):state.destinationStatus?.find(item=>item.path===location.destination);if(status?.available&&status.volumeId===location.volumeId)roots.push(location.root);}
+ // A folder inside another one is looked through with it.
+ return [...new Set(roots)].filter((root,_index,all)=>!all.some(other=>other!==root&&within(root,other)));
+}
+// The automatic check also waits for the backup folder check, which rewrites index files; Clean up does not.
+const residueIdle=(manual=false)=>!active.size&&!resumingOrganizations.size&&(manual||!misplacedControl)&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
+function scheduleResidueCheck(force=false){
+ if(qa)return;
+ // Something running now: look again once it is idle (any later refresh or finished job).
+ if(!residueIdle()||residueTask){residueScope='';return;}
+ const scope=JSON.stringify([state.preferences.destinations,state.preferences.destinationIds,backupFolders(state.preferences),organizationLocations,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
+ if(!force&&scope===residueScope)return;
+ residueScope=scope;void checkResidue(false);
+}
+/** Find leftovers and remove them; `all` also removes copies a re-import could continue. */
+function checkResidue(all:boolean):Promise<void>{
+ const control=new AbortController();residueControl=control;
+ state.residue={...state.residue??{files:0,bytes:0,resumable:{files:0,bytes:0}},checking:true};emit();
+ const task:Promise<void>=(async()=>{
+  const found=await findResidue(await residueRoots(),{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal});
+  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal}):{removed:{files:0,bytes:0},left:found};
+  const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
+  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,checkedAt:now,...(cleaned?{cleaned}:{})};
+ })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue)delete state.residue.checking;emit();});
+ residueTask=task;return task;
+}
+/** Anything about to write waits for a running cleanup to stop. */
+async function stopResidueCheck(){residueControl?.abort();await residueTask;}
+// Jobs still settling; quitting waits for them so a stopped job removes its staging files.
+const settling=new Set<Promise<unknown>>();
+function settle<T>(work:Promise<T>):Promise<T>{settling.add(work);work.finally(()=>settling.delete(work)).catch(()=>{});return work;}
 function assertOrganizationIdle(){
  if(state.review||state.busyReview)throw new MessageError('error.reviewOpen');
  if(state.jobs.some(job=>job.organization&&['queued','discovering','verifying','copying'].includes(job.phase)))throw new MessageError('error.organizationRunning');
@@ -321,7 +363,9 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  const saveReport=async(name:string,value:unknown)=>{if(!reportDirectory)return;const file=await fs.open(path.join(reportDirectory,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}};
  const signal=control.signal;
  try{
+  // A cleanup in progress stops first. The phase changes before this wait, so pump() never takes this job again.
   if('review' in input){
+   await stopResidueCheck();
    prepared=input;
    // A review can sit open while other jobs fill the disk; recheck before writing.
    const available=availableFor(job.id,await Promise.all(prepared.review.plans.map(item=>volumeInfo(item.root))));
@@ -330,6 +374,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   }
   else{
    job.phase='discovering';job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
+   await stopResidueCheck();
    prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
    // Mirror moves only run from a review the user applied.
    const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
@@ -378,7 +423,7 @@ async function previewSource(source:Source,backup:boolean,organizationDestinatio
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);
  const request:RunRequest={prefs,reorganize,sourceFolders:reorganize?state.organizationFolders?.[source.path]?.slice():undefined};
- misplacedControl?.abort();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
+ misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
  try{
   reviewed=await prepare(randomUUID(),source,backup,request,control.signal,()=>{},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();});
   state.review=reviewed.review;(state.sourceInventories??={})[source.id]=reviewed.inventory;
@@ -389,7 +434,7 @@ async function applyReview(){
  if(!reviewed||busy()||state.busyReview)return;const prepared=reviewed;reviewed=undefined;state.review=undefined;
  const job:Job={id:randomUUID(),source:prepared.review.source,phase:'verifying',detail:message('job.revalidating'),errors:[],backup:prepared.review.backup};state.jobs.unshift(job);const control=new AbortController();active.set(job.id,control);if(prepared.review.kind==='reorganize')organizationJobIds.add(job.id);
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
- void run(job,control,prepared).finally(()=>{active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);emit();pump();});
+ void settle(run(job,control,prepared)).finally(()=>{active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleResidueCheck(true);});
 }
 async function action(input:Action):Promise<void>{
  if(!input||typeof input.type!=='string')throw new Error('Invalid action');
@@ -398,6 +443,7 @@ async function action(input:Action):Promise<void>{
   case 'scanSource':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'refreshOrganization':await refreshOrganizations();break;
+  case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;
   case 'undoOrganization':await resumeOrganizationJob(input.root,input.id,'undo');break;
@@ -527,4 +573,12 @@ async function boot(){
 if(!qa&&!hardwareTest&&!app.requestSingleInstanceLock())app.quit();else app.whenReady().then(boot).catch(error=>{dialog.showErrorBox('Unable to start',errorText(error));app.quit();});
 app.on('second-instance',()=>{if(window?.isMinimized())window.restore();window?.focus();});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{if(timer)clearInterval(timer);for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();void closeMetadata();closeCameraBridge();});
+let quitting=false;
+// Holding a system shutdown or logout would cancel it; jobs are then stopped without waiting.
+app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch(()=>{});
+app.on('before-quit',event=>{
+ if(timer)clearInterval(timer);for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();residueControl?.abort();
+ // Stopped jobs and an open review remove their staging files and camera downloads first (at most 10 s).
+ if(!quitting&&(settling.size||reviewed?.stage)){event.preventDefault();quitting=true;void Promise.race([Promise.allSettled([...settling,discardReview()]),new Promise(resolve=>setTimeout(resolve,10000))]).finally(()=>app.quit());return;}
+ void closeMetadata();closeCameraBridge();
+});

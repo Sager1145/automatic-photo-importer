@@ -584,6 +584,16 @@ Backup folder is in order.|备份文件夹已整理好。|備份資料夾已整�
 Misplaced files are moved into place after each import.|每次导入后，放错位置的文件会自动移到正确位置。|每次匯入後，放錯位置的檔案會自動移到正確位置。|読み込みのたびに、場所違いのファイルを正しい場所へ移動します。
 Checked after each import. You choose when to move files.|每次导入后检查，由你决定何时移动文件。|每次匯入後檢查，由你決定何時移動檔案。|読み込みのたびに確認し、移動するタイミングは自分で選べます。
 Not checked automatically.|不自动检查。|不自動檢查。|自動では確認しません。
+Leftover files|残留文件|殘留檔案|残ったファイル
+1 leftover file|1 个残留文件|1 個殘留檔案|残ったファイル 1 個
+{count} leftover files|{count} 个残留文件|{count} 個殘留檔案|残ったファイル {count} 個
+Looking for leftover files…|正在查找残留文件…|正在尋找殘留檔案…|残ったファイルを確認中…
+Not checked yet.|尚未检查。|尚未檢查。|まだ確認していません。
+No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファイルはありません。
+Clean up|清理|清理|クリーンアップ
+{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
+Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
+Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
 {completed} of {total} files read|已读取 {completed}/{total} 个文件|已讀取 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを読み込み
 {time} elapsed|已用时 {time}|已用時 {time}|経過時間 {time}
