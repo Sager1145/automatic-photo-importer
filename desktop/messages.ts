@@ -131,6 +131,11 @@ export function filePath(value:Message|undefined):string|undefined {
  const path=value?.params?.path;
  return value&&(value.key==='error.sourceChanged'||value.key==='error.fileFailed')&&typeof path==='string'?path:undefined;
 }
+/** The file or folder an error is about, for Show in Finder. */
+export function errorPath(value:Message|undefined):string|undefined {
+ const path=value?.params?.path;
+ return value&&value.key!=='text'&&typeof path==='string'?path:undefined;
+}
 export function toMessage(error:unknown):Message {
  return error instanceof MessageError?message(error.key,error.params):text(error instanceof Error?error.message:String(error));
 }
