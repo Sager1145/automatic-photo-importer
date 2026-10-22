@@ -18,6 +18,8 @@ export const backendMessages={
  'job.listing':{en:'Listing files: {count} found','zh-Hans':'正在列出文件：已找到 {count} 个','zh-Hant':'正在列出檔案：已找到 {count} 個',ja:'ファイルを一覧中：{count} 件'},
  'job.readingToMove':{en:'Reading files to move: {count} of {total} · {file}','zh-Hans':'正在读取要移动的文件：{count}/{total} · {file}','zh-Hant':'正在讀取要移動的檔案：{count}/{total} · {file}',ja:'移動するファイルを読み取り中：{total} 件中 {count} 件 · {file}'},
  'job.checkingSourceOf':{en:'Checking source: {count} of {total} files · {file}','zh-Hans':'正在检查来源：{count}/{total} 个文件 · {file}','zh-Hant':'正在檢查來源：{count}/{total} 個檔案 · {file}',ja:'ソースを確認中：{total} ファイル中 {count} 件 · {file}'},
+ 'job.comparingDestination':{en:'Checking the destination for existing files: {count} of {total} · {file}','zh-Hans':'正在检查目标中的现有文件：{count}/{total} · {file}','zh-Hant':'正在檢查目的地中的現有檔案：{count}/{total} · {file}',ja:'保存先の既存ファイルを確認中：{total} 件中 {count} 件 · {file}'},
+ 'job.confirmingExisting':{en:'Confirming files already on the destination: {count} of {total} · {file}','zh-Hans':'正在确认目标中已有的文件：{count}/{total} · {file}','zh-Hant':'正在確認目的地中已有的檔案：{count}/{total} · {file}',ja:'保存先にあるファイルを確認中：{total} 件中 {count} 件 · {file}'},
  'job.readingMetadata':{en:'Reading source metadata and checking destination folders','zh-Hans':'正在读取来源元数据并检查目标文件夹','zh-Hant':'正在讀取來源中繼資料並檢查目的地資料夾',ja:'ソースのメタデータを読み取り、保存先フォルダーを確認中'},
  'job.destinationFile':{en:'Destination {index} of {count}: {file}','zh-Hans':'目标 {index}/{count}：{file}','zh-Hant':'目的地 {index}/{count}：{file}',ja:'保存先 {index}/{count}：{file}'},
  'job.revalidating':{en:'Revalidating reviewed paths','zh-Hans':'正在重新验证已审核的路径','zh-Hant':'正在重新驗證已審核的路徑',ja:'確認済みのパスを再検証中'},

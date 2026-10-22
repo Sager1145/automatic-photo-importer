@@ -35,7 +35,7 @@ test('all new files finish staging before any standalone content validation read
  const phases:string[]=[];
  const result=await execute(transfer,undefined,value=>{if(value.phase&&phases.at(-1)!==value.phase)phases.push(value.phase);if(value.phase==='verifying')assert.equal(value.bytes,6*1024*1024,'Verification starts only after all copy bytes');});
  t.mock.restoreAll();syncBuiltinESMExports();
- assert.deepEqual(result,{copied:3,skipped:0,errors:[]});assert.deepEqual(prematureReads,[],'Validation rereads must wait until every source file is staged');assert.ok(readbacks>0,'Copies must still be validated');assert.deepEqual(phases,['copying','verifying']);
+ assert.deepEqual(result,{copied:3,skipped:0,errors:[]});assert.deepEqual(prematureReads,[],'Validation rereads must wait until every source file is staged');assert.ok(readbacks>0,'Copies must still be validated');assert.deepEqual(phases,['planning','copying','verifying']);
  for(const [index,name] of names.entries()){assert.deepEqual(await fs.readFile(path.join(root,name)),Buffer.alloc(2*1024*1024,index+1));assert.deepEqual(await fs.readFile(path.join(source,name)),Buffer.alloc(2*1024*1024,index+1));}
 });
 

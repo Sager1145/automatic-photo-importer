@@ -138,8 +138,9 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
 /** Planning progress: `count` files of `detail.total` done. Every plan first checks each file
  * (metadata and identity, without reading contents); library organization then reads the files
  * that will move to checksum them. */
-/** step 'listing': files found so far (total 0, not yet known); 'checking': metadata of every file; 'reading': files organization moves. */
-export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading';total:number;bytes:number;totalBytes:number})=>void;
+/** step 'listing': files found so far (total 0, not yet known); 'checking': metadata of every file; 'reading': files organization moves;
+ * 'comparing': planned files compared with what each destination already holds. */
+export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing';total:number;bytes:number;totalBytes:number})=>void;
 async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
@@ -326,6 +327,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     return value;
   };
   // One plan per backup folder: the files routed to it, checked against what it already holds.
+  // Each file is compared once per destination; the count runs across all of them.
+  const comparingTotal=prepared.length*destinations.length,comparingBytes=prepared.reduce((sum,{entry})=>sum+entry.size,0)*destinations.length;
+  let compared=0,comparedBytes=0;
+  const comparing=(file:string)=>onProgress?.(compared,file,{step:'comparing',total:comparingTotal,bytes:comparedBytes,totalBytes:comparingBytes});
   async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity);
     // Drive backups land in the folder this drive owns on each destination.
@@ -342,6 +347,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     for(const family of groups(pending)) {
       const allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index,signal,mirror?.known));
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
+      compared+=family.length;comparedBytes+=family.reduce((sum,entry)=>sum+entry.size,0);comparing(path.relative(sourceRoot,family[0]!.source));
     }
     await flushIndex(index);
     await rootUnchanged(destinationRoot,rootIdentity);
@@ -354,7 +360,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
     return transfer;
   }
-  const plans:TransferPlan[]=[];
+  const plans:TransferPlan[]=[];comparing('');
   for(const destination of destinations){
     const transfer=await rootPlan(destination,'photos');
     if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
@@ -577,8 +583,12 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   try {
     // Setup per destination: mirror moves, then the duplicate preflight. A
     // reviewed skip is only a hint: a removed/replaced duplicate is staged again.
-    for(const run of runs) try {
+    for(const [position,run] of runs.entries()) try {
       const {transfer}=run;
+      // Before the first copy: which planned files the destination already holds, verified. Counts files; no bytes move.
+      let checked=0;
+      const existing=(file:string)=>onProgress?.(position,{phase:'planning',step:'existing',completed:checked,total:transfer.entries.length,bytes:0,totalBytes:0,speed:0,file});
+      existing('');
       checkAbort(signal); await rootUnchanged(transfer.root,transfer.rootIdentity);
       const removals=mirrorReviews.get(transfer);
       if(transfer.removals&&(!removals||!transfer.drive))throw new Error('Mirror changes require the reviewed backup plan.');
@@ -589,8 +599,10 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);
           if(!entry.digest || await exclusive(()=>existingMatches(entry.destination,entry.size,async()=>entry.digest!,transfer.root,run.index!,signal))!==true)run.pending.add(entry.id);
+          checked++;existing(path.basename(entry.source));
         }
       } catch(error) { if(isAbort(error))throw error; fail(run,batch,error); }
+      checked=transfer.entries.length;existing('');
       // Files already verified at their destination need no copy and count as done.
       for(const batch of run.batches)if(!batch.failed)for(const entry of batch.family)if(!run.pending.has(entry.id)){run.counted.add(entry.id);run.completed++;}
     } catch(error) { if(isAbort(error))throw error; run.error=toError(error); }
