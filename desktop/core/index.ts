@@ -194,7 +194,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const organizationOwned=(file:string)=>options.reorganize===true&&allRoots.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
   // With skipErrors a failing file is left out and reported; otherwise it fails the plan. A mirror
   // never skips: a file left out of it would read as removed from the drive and its copy moved away.
-  const skipping=options.skipErrors===true&&!options.drive?.mirror;
+  // An organization always skips: leaving a file where it is is safe, and one bad file must not stop the rest.
+  const skipping=options.reorganize===true||options.skipErrors===true&&!options.drive?.mirror;
   const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!skipping)throw error;failures.set(file,toError(error));};
   // A file is copied or moved with its whole family (RAW, JPG, sidecars), so a failure leaves the family out.
   const skipFamilies=<T>(items:T[],file:(item:T)=>string,family:(item:T)=>string|undefined)=>{

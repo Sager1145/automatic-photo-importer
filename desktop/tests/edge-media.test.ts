@@ -181,7 +181,8 @@ test('files with no, empty or garbage EXIF are read by ExifTool without failing 
  await put(path.join(source,'truncated.JPG'),Buffer.from([0xff,0xd8,0xff,0xe1,0x00,0x40,0x45,0x78,0x69,0x66,0,0,0x49,0x49,0x2a,0]));
  await put(path.join(source,'text.MP4'),'this is not a video');await put(path.join(source,'png-header.HEIC'),Buffer.from('89504e470d0a1a0a','hex'));
  const {inventory:scan,plans:[transfer]}=await plan(source,[photos],{...base,layout:'format'},file=>readMetadata(file,{preview:false,details:false}));
- assert.equal(transfer!.entries.length,6);
+ // The empty files are skipped (nothing to import); the unreadable ones still plan.
+ assert.equal(transfer!.entries.length,4);assert.equal(scan.empty,2);
  // Unreadable files fall back to Unknown Camera and their modified date; ExifTool's complaints are listed.
  for(const entry of transfer!.entries)assert.match(path.relative(photos,entry.destination),/^\d{4}\/\d{6}\/Unknown Camera\//);
  assert.ok((scan.issues??[]).length>0);

@@ -39,11 +39,11 @@ const misplaced=async(drive:string,photos:string,videos:string,layout:MediaLayou
 for(const strategy of ['rename','copy'] as const)test(`video-root organization in place (${strategy}) moves videos to videobackup and undo restores every file and date`,async t=>{
  const {drive,photos,videos,files}=await library(t);
  const before=await snapshot(drive);
- assert.equal(await misplaced(drive,photos,videos,'video-root'),Object.keys(files).length-1);
+ assert.equal(await misplaced(drive,photos,videos,'video-root'),Object.keys(files).length-2);
  const {results}=await organize(drive,photos,videos,'video-root',strategy);
  for(const result of results)assert.deepEqual(result.errors,[]);
  const camera='2026/202610/Nikon Z6III',pocket='2026/202610/DJI Osmo Pocket 3';
- for(const relative of [`photobackup/${camera}/DSC_0001.NEF`,`photobackup/${camera}/DSC_0001.xmp`,`photobackup/${camera}/IMG_0003.HEIC`,`photobackup/${camera}/IMG_0009.JPG`,`photobackup/${camera}/empty.JPG`,
+ for(const relative of [`photobackup/${camera}/DSC_0001.NEF`,`photobackup/${camera}/DSC_0001.xmp`,`photobackup/${camera}/IMG_0003.HEIC`,`photobackup/${camera}/IMG_0009.JPG`,
   `videobackup/${camera}/C0004.MP4`,`videobackup/${camera}/C0004M01.XML`,`videobackup/${pocket}/DJI_0005.MP4`,`videobackup/${pocket}/DJI_0005.LRF`])await fs.access(path.join(drive,relative));
  // The two DSC_0002.JPG keep both their bytes: one in the camera folder, one in a conflict folder.
  const organized=await tree(drive),twins=[...organized].filter(([relative])=>relative.endsWith('DSC_0002.JPG'));

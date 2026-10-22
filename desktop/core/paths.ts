@@ -129,11 +129,17 @@ export async function regularHandle(file:string) {
   } catch(error) { await handle.close().catch(()=>{}); throw error; }
   return handle;
 }
-export function sameStat(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStats):boolean {
-  return a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
+type Stat=import('node:fs').BigIntStats;
+/** exFAT gives a zero-length file no start cluster, so its inode is synthetic (2^63 and up, negative when
+ * read as signed) and changes whenever the vnode is recreated. Such an inode proves nothing either way. */
+export function unreliableIno(stat:Pick<Stat,'ino'|'size'>):boolean {return stat.size===0n || stat.ino<0n || stat.ino>=2n**63n;}
+/** The same file: dev, size and times, plus the inode - or the birth time where no inode can be trusted. */
+export function sameStat(a:Stat,b:Stat):boolean {
+  if(a.dev!==b.dev || a.size!==b.size || a.mtimeNs!==b.mtimeNs || a.ctimeNs!==b.ctimeNs) return false;
+  return unreliableIno(a)&&unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
 }
-/** dev:ino:size:mtimeNs:ctimeNs — the identity a plan, review or receipt binds a file to. */
-export function statKey(stat:import('node:fs').BigIntStats):string {return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
+/** dev:ino:size:mtimeNs:ctimeNs - the identity a plan, review or receipt binds a file to (birth time instead of ino when the inode is unreliable). */
+export function statKey(stat:Stat):string {return `${stat.dev}:${unreliableIno(stat)?`birth${stat.birthtimeNs}`:stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
 /** `onBytes` hears each chunk as it is read, so a long file shows progress before it is done. */
 export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<string> {
   checkAbort(signal);

@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { formatMessage, text, type Message } from '../messages';
+import { formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
@@ -1040,13 +1040,14 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     for (const file of inventory.files) if (file.system && !kinds.has(file.system.id)) kinds.set(file.system.id, { vendor: file.system.vendor, label: file.system.label, count: inventory.systemKinds?.[file.system.id] ?? inventory.files.filter(item => item.system?.id === file.system!.id).length });
     return [...kinds.values()].sort((a, b) => b.count - a.count);
   }, [inventory]);
-  const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system), [inventory]);
+  const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system && (file.included || file.size > 0)), [inventory]);
   const copied = unknown.filter(file => file.included).length, skipped = unknown.length - copied;
-  const system = inventory.system ?? 0;
-  if (!system && !unknown.length) return null;
+  const system = inventory.system ?? 0, empty = inventory.empty ?? 0;
+  if (!system && !unknown.length && !empty) return null;
   const names = systemKinds.slice(0, 2).map(kind => `${kind.vendor} ${kind.label}`).join(', ') + (systemKinds.length > 2 ? ', …' : '');
   const summary = [
     system > 0 && t("Skipped {count} camera system files ({names})", { count: formatNumber(system), names }),
+    empty > 0 && t(message('inventory.emptySkipped', { count: empty })),
     skipped > 0 && t("{count} unknown files skipped", { count: formatNumber(skipped) }),
     copied > 0 && t("{count} unknown files copied to other folders", { count: formatNumber(copied) }),
   ].filter(Boolean).join(' · ');
@@ -1054,6 +1055,7 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     <summary><Icon icon={Info} size={14} /><span>{summary}</span><Icon icon={ChevronDown} size={14} /></summary>
     <div className="skipped-files-content">
       {systemKinds.length > 0 && <div><h4>{t("Camera system files")}</h4><p>{t("Index files the camera writes. Not needed.")}</p><dl>{systemKinds.map(kind => <div key={`${kind.vendor}-${kind.label}`}><dt>{kind.label}<small>{kind.vendor}</small></dt><dd>{formatNumber(kind.count)}</dd></div>)}</dl></div>}
+      {empty > 0 && <div><h4>{t(message('inventory.emptyFile'))}</h4><dl>{(inventory.skipped ?? []).filter(item => item.reason === 'empty').slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
       {unknown.length > 0 && <div><h4>{t("Unknown files")}</h4><p>{t("Not photos or videos. Change this in Settings.")}</p><dl>{Object.entries(inventory.unknownExtensions).sort(([, a], [, b]) => b - a).map(([extension, count]) => <div key={extension}><dt className="extension-name">{extension ? `.${extension}` : t("No extension")}</dt><dd>{formatNumber(count)}</dd></div>)}</dl></div>}
     </div>
   </details>;
