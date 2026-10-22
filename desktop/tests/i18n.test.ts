@@ -385,7 +385,9 @@ test('completed organizations explain retained originals and confirm before rele
   const renamed = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(RetainedOriginals, { job: { ...job, retainedFiles: 0, retainedBytes: 0, finalizable: false }, act: () => {}, busy: false }) }));
   assert.ok(renamed.includes('Undo organization') && !renamed.includes('Release') && !renamed.includes('kept for undo'), 'Same-volume renames keep nothing but can be undone');
   const none = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(RetainedOriginals, { job: { ...job, retainedFiles: 0, undoable: false }, act: () => {}, busy: false }) }));
-  assert.equal(none, '', 'Nothing kept and nothing to undo shows no card');
+  assert.ok(none.includes('Delete recovery files') && !none.includes('Undo organization') && !none.includes('Release'), 'Nothing kept and nothing to undo leaves only Delete recovery files');
+  const pendingNone = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(RetainedOriginals, { job: { ...job, status: 'pending', retainedFiles: 0, undoable: false }, act: () => {}, busy: false }) }));
+  assert.equal(pendingNone, '', 'An unfinished organization with nothing kept and nothing to undo shows no card');
   const interrupted = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(RetainedOriginals, { job: { ...job, status: 'pending', completed: 900, retainedFiles: 0, finalizable: false }, act: () => {}, busy: false }) }));
   assert.ok(interrupted.includes('Undo organization'), 'A partly moved or interrupted undo can always be finished');
   const noUndo = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(RetainedOriginals, { job: { ...job, undoable: false }, act: () => {}, busy: false }) }));

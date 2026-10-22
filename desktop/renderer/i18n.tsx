@@ -443,6 +443,18 @@ Paused|已暂停|已暫停|一時停止中
 Continue|继续|繼續|再開
 {count} originals ({size}) are kept so this organization can be undone.|保留了 {count} 个原始文件（{size}），以便撤销此次整理。|保留了 {count} 個原始檔案（{size}），以便復原此次整理。|この整理を元に戻せるよう、元のファイル {count} 件（{size}）を保持しています。
 Undo organization|撤销整理|復原整理|整理を元に戻す
+Delete recovery files|删除恢复文件|刪除復原檔案|復元用ファイルを削除
+Finish or undo this organization before deleting its recovery files.|请先完成或撤销此整理，然后再删除其恢复文件。|請先完成或復原此整理，然後再刪除其復原檔案。|復元用ファイルを削除する前に、この整理を完了するか元に戻してください。
+Delete recovery files for this organization?|要删除此整理的恢复文件吗？|要刪除此整理的復原檔案嗎？|この整理の復元用ファイルを削除しますか？
+You will no longer be able to undo it.|之后将无法再撤销此整理。|之後將無法再復原此整理。|この整理は元に戻せなくなります。
+{size} will be freed.|将释放 {size}。|將釋放 {size}。|{size} が解放されます。
+Measuring recovery files…|正在计算恢复文件大小…|正在計算復原檔案大小…|復元用ファイルのサイズを計算中…
+Delete recovery files permanently?|要永久删除恢复文件吗？|要永久刪除復原檔案嗎？|復元用ファイルを完全に削除しますか？
+This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.|这将永久删除 {count} 个恢复数据文件（{size}）。此操作无法撤销。|這將永久刪除 {count} 個復原資料檔案（{size}）。此操作無法復原。|復元用データ {count} ファイル（{size}）を完全に削除します。この操作は取り消せません。
+Continue…|继续…|繼續…|続ける…
+Delete permanently|永久删除|永久刪除|完全に削除
+Replaced by a later organization|已被之后的整理取代|已被之後的整理取代|後の整理に置き換え済み
+Undone|已撤销|已復原|元に戻し済み
 Release {size}|释放 {size}|釋放 {size}|{size} を解放
 Release {size}?|要释放 {size} 吗？|要釋放 {size} 嗎？|{size} を解放しますか？
 The kept originals are permanently removed from this destination. After this, the organization can't be undone.|保留的原始文件将从此目标永久删除。之后将无法撤销此次整理。|保留的原始檔案將從此目的地永久刪除。之後將無法復原此次整理。|保持している元のファイルをこの保存先から完全に削除します。この後は整理を元に戻せません。
