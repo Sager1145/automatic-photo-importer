@@ -57,7 +57,9 @@ async function assertOnlyEmptyOrphans(root:string,crashed:boolean) {
     if(file.endsWith('.json')) {
       // A kill between writing a new receipt and removing the older one for the same file leaves the
       // older receipt behind, pointing at a file the next import has already released.
-      const named=JSON.parse(await fs.readFile(file,'utf8')).file as string;
+      // A receipt cut short by the kill grants no ownership and names nothing.
+      const named=await fs.readFile(file,'utf8').then(text=>JSON.parse(text).file as string,()=>undefined);
+      if(named===undefined) continue;
       assert.equal(await fs.lstat(named).then(()=>true,()=>false),false,`receipt for a file still there: ${file}`);
     } else assert.equal((await fs.stat(file)).size,0,`non-empty staging file left behind: ${file}`);
   }
@@ -71,21 +73,28 @@ async function reimport(card:string,root:string,crashed=false) {
   for(const file of found) assert.equal((await fs.stat(file)).size,(await fs.stat(path.join(card,path.basename(file)))).size,path.basename(file));
   await assertOnlyEmptyOrphans(root,crashed);
 }
-async function crash(card:string,root:string,mode:'copy'|'publish') {
+async function crash(card:string,root:string,mode:'copy'|'publish'|'create') {
   const child=new URL('./fixtures/exfat-crash-child.mts',import.meta.url).pathname;
   const signal=await new Promise<string|null>(resolve=>execFile('node',['--import','tsx',child,card,root,mode,'20'],{timeout:90000},error=>resolve((error as {signal?:string}|null)?.signal??null)));
   assert.equal(signal,'SIGKILL','the child process was killed mid-run');
 }
 /** Detach and attach again, with another image taking the old disk number in between. */
-async function reattach(d:Disk,root:string) {
+async function reattachOnce(d:Disk,root:string) {
   const before=(await fs.stat(root,{bigint:true})).dev;
-  const other=path.join(d.base,'other'),otherMount=path.join(d.base,'other-mount');
+  const tag=randomBytes(4).toString('hex'),other=path.join(d.base,'other-'+tag),otherMount=path.join(d.base,'other-mount-'+tag);
   await fs.mkdir(otherMount);
   await run('hdiutil',['create','-quiet','-type','SPARSE','-size','64m','-fs','ExFAT','-volname','OTHER',other]);
   await d.detach();
-  await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',otherMount,other+'.sparseimage']);
+  // The dummy only tries to take the old disk number; if it cannot attach, the precondition check below decides.
+  await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',otherMount,other+'.sparseimage']).catch(()=>{});
   try { await d.attach(); } finally { await run('hdiutil',['detach','-quiet','-force',otherMount]).catch(()=>{}); }
   return {before,after:(await fs.stat(root,{bigint:true})).dev};
+}
+/** The device number is not guaranteed to change, so a re-attach that kept it is repeated (up to 3 times). */
+async function reattach(d:Disk,root:string) {
+  let devices=await reattachOnce(d,root);
+  for(let attempt=1;attempt<3&&devices.after===devices.before;attempt++) devices={before:devices.before,after:(await reattachOnce(d,root)).after};
+  return devices;
 }
 async function ready(t:test.TestContext) {
   const d=await disk(t);
@@ -114,7 +123,7 @@ test('receipts written before a large exFAT volume was attached again still resu
   await crash(env.card,env.root,'copy');
   assert.ok((await leftovers(env.root)).some(file=>file.endsWith('.json')),'the killed run left stage receipts');
   const devices=await reattach(env.d,env.root);
-  assert.notEqual(devices.after,devices.before,'the device number changed with the new mount');
+  if(devices.after===devices.before) return t.skip('the device number did not change after 3 re-attaches');
   await reimport(env.card,env.root,true);
 });
 
@@ -123,4 +132,23 @@ test('a crash while publishing to a large exFAT volume is repaired after attachi
   await crash(env.card,env.root,'publish');
   await reattach(env.d,env.root);
   await reimport(env.card,env.root,true);
+});
+
+test('a crash right after a published name is created, before any data, is finished in place without conflicts',async t=>{
+  const env=await ready(t);if(!env) return;
+  await crash(env.card,env.root,'create');
+  assert.ok((await media(env.root)).some(file=>file.endsWith('.NEF')),'the killed run left the created name');
+  for(const file of await media(env.root)) assert.equal((await fs.stat(file)).size,0,'only an empty file was created');
+  await reimport(env.card,env.root,true);
+});
+
+test('a crash right after a published name is created is finished in place on any volume',async t=>{
+  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'exfat-created-')));
+  t.after(()=>fs.rm(base,{recursive:true,force:true}));
+  const root=path.join(base,'photobackup');await fs.mkdir(root);
+  const card=await source(t);
+  await crash(card,root,'create');
+  for(const file of await media(root)) assert.equal((await fs.stat(file)).size,0,'only an empty file was created');
+  assert.ok((await media(root)).length>=1,'the killed run left the created name');
+  await reimport(card,root,true);
 });

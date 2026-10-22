@@ -17,7 +17,7 @@ export { allocateDestinations } from './allocation';
 import { streams } from './devices';
 import { hasher } from './hasher';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
-import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError,toMessage} from '../messages';
 export { configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER } from './recovery';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
@@ -527,12 +527,13 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
 /** exFAT gives an empty file a temporary inode and assigns the real one (its first cluster)
  * when data is written, so the staging identity is re-read through the open descriptor,
  * which can only name this staging file. */
-async function settled(output:Awaited<ReturnType<typeof fs.open>>):Promise<import('node:fs').BigIntStats> {
+async function settle(output:Awaited<ReturnType<typeof fs.open>>):Promise<{stat:import('node:fs').BigIntStats;synced:boolean}> {
   const stat=await output.stat({bigint:true});
   // On larger exFAT volumes the real inode only arrives when the data is flushed.
-  if(stat.size===0n||(stat.ino>=0n&&stat.ino<2n**63n)) return stat;
-  await output.sync();return output.stat({bigint:true});
+  if(stat.size===0n||(stat.ino>=0n&&stat.ino<2n**63n)) return {stat,synced:false};
+  await output.sync();return {stat:await output.stat({bigint:true}),synced:true};
 }
+const settled=async(output:Awaited<ReturnType<typeof fs.open>>)=>(await settle(output)).stat;
 async function rebindStage(open:OpenStage):Promise<void> {
   const stat=await settled(open.output);
   open.staged.dev=stat.dev;open.staged.ino=stat.ino;open.staged.birthtime=stat.birthtimeNs;
@@ -541,10 +542,11 @@ async function rebindStage(open:OpenStage):Promise<void> {
  * is gone after the first write, and APFS may lower birthtime when an older date is applied, so
  * the receipt is rewritten for the file as it now is: a later run can then resume or release it. */
 async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.open>>,entry:PlanEntry,transfer:TransferPlan,recovery:RecoveryIndex):Promise<OwnedPartial> {
-  const now=await settled(output);
+  const {stat:now,synced}=await settle(output);
   if(now.dev===owned.stat.dev&&now.ino===owned.stat.ino&&now.birthtimeNs===owned.stat.birthtimeNs) return owned;
-  await output.sync();
-  const next=await recordPartial(owned.record.kind,owned.file,await output.stat({bigint:true}),entry,transfer,recovery);
+  // Settling already synced when it read the real inode; sync only when it did not.
+  if(!synced) await output.sync();
+  const next=await recordPartial(owned.record.kind,owned.file,synced?now:await output.stat({bigint:true}),entry,transfer,recovery);
   await clearPartialRecord(owned,transfer.root,recovery);
   return next;
 }
@@ -620,7 +622,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
 const toError=(error:unknown)=>error instanceof Error?error:new Error(String(error));
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 /** `sync:false`: the caller synchronizes the folder once after removing many stages. */
-async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string)=>void=text=>console.warn(text)):Promise<void> {
+export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string)=>void=text=>console.warn(text)):Promise<void> {
   claimedStages.delete(staged.file);
   try {
     await contained(staged.file,root);
@@ -689,9 +691,18 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   if(copy) {
     // Exclusive descriptors bind recovery permission to the created inode.
     // Neither COPYFILE_EXCL nor a path/hash intent alone proves ownership.
-    const output=owned?await openPartial(owned,transfer.root):await fs.open(destination,'wx',0o600);
+    // The receipt naming the destination is durable before the name exists, so a crash right after
+    // creating it leaves an empty file the next import owns; it is then rebound to the file's identity.
+    let creating:import('./import-recovery').Receipt|undefined=owned?.record.fileIdentity==='creating'?owned:undefined;
+    if(!owned||owned.absent) { creating??=await recordCreation(destination,publicationEntry,transfer,recovery); owned=undefined; }
+    let output;
+    try { output=owned?await openPartial(owned,transfer.root):await fs.open(destination,'wx',0o600); }
+    catch(error) { if(creating&&!owned) await clearPartialRecord(creating,transfer.root,recovery).catch(()=>{}); throw error; }
     try {
-      if(!owned){await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);}
+      if(!owned||creating){
+        await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);
+        // The creation receipt stays until the copy is complete (releaseCreations below); it no longer binds once data is written.
+      }
       await streams.run([staged.file,destination],async chunk=>{
       const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(chunk);let position=Number((await output.stat({bigint:true})).size);
       try {for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,position);if(!bytesRead)break;let offset=0;
@@ -714,6 +725,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   }
   await syncParents(destination,transfer.root);
   if(owned)await clearPartialRecord(owned,transfer.root,recovery);
+  await releaseCreations(publicationEntry,transfer.root,recovery);
   return bound;
 }
 export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];}
@@ -836,7 +848,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
