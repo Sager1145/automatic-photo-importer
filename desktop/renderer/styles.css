@@ -1085,7 +1085,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 
 /* ---------- Accessibility preferences ---------- */
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:0s!important;animation-iteration-count:1!important;transition-duration:0s!important;transition-delay:0s!important;scroll-behavior:auto!important}
+  *,*::before,*::after,::details-content{animation-duration:0s!important;animation-iteration-count:1!important;transition-duration:0s!important;transition-delay:0s!important;scroll-behavior:auto!important}
   ::view-transition-old(*),::view-transition-new(*),::view-transition-group(*){animation:none!important}
   .window-titlebar::after,.settings-section,.organization-action,.organization-recovery,.history-timeline article,.inventory-panel,.backup-action{animation:none!important}
   .progress-discovering>span{transform:none;width:100%!important;opacity:.45}
