@@ -617,6 +617,7 @@ Staging files from interrupted imports, organization scratch copies and camera d
 {time} elapsed|已用时 {time}|已用時 {time}|経過時間 {time}
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
 Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
+{count} files/s|{count} 个文件/秒|{count} 個檔案/秒|{count} ファイル/秒
 {time} left|剩余{time}|剩餘{time}|残り{time}
 {time} left in this step|此步骤剩余{time}|此步驟剩餘{time}|このステップの残り{time}
 {time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）
@@ -788,6 +789,23 @@ export function formatBytes(value = 0, language: Language = 'en'): string {
   // Large sizes always keep their decimals ("1.00 TB", "994.7 GB") so capacity differences stay visible.
   const digits = n === 4 ? 2 : n > 1 ? 1 : 0;
   return `${formatNumber(value / 1000 ** n, language, { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${units[n]}`;
+}
+/** 0 B/s, 1 KB/s, 2 MB/s, 3 GB/s: decimal units, like formatBytes. */
+export type SpeedUnit = 0 | 1 | 2 | 3;
+const speedUnits = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+/** The unit to show a speed in. Going up switches once 3 digits would round to 1000; going down only below 0.9
+ * of the shown unit, so a speed hovering near a boundary keeps its unit ("0.980 MB/s", not 980 KB/s then 1.01 MB/s). */
+export function speedUnit(value: number, previous?: SpeedUnit): SpeedUnit {
+  if (!Number.isFinite(value) || value < 0) return previous ?? 0;
+  let unit = 0;
+  while (unit < 3 && Number((value / 1000 ** unit).toPrecision(3)) >= 1000) unit++;
+  return (previous !== undefined && previous > unit && value >= .9 * 1000 ** previous ? previous : unit) as SpeedUnit;
+}
+/** A speed with 3 significant digits: "850 KB/s", "12.4 MB/s", "1.23 GB/s"; "—" when unknown. */
+export function formatSpeed(value: number | undefined, language: Language = 'en', unit: SpeedUnit = speedUnit(value ?? Number.NaN)): string {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return '—';
+  const options: Intl.NumberFormatOptions = unit === 0 ? { maximumFractionDigits: 0 } : { minimumSignificantDigits: 3, maximumSignificantDigits: 3 };
+  return `${formatNumber(value / 1000 ** unit, language, options)} ${speedUnits[unit]}`;
 }
 function translationValue(language: Language) {
   return { language, t: createTranslator(language), formatNumber: (value: number) => formatNumber(value, language), formatBytes: (value = 0) => formatBytes(value, language) };

@@ -40,15 +40,16 @@ test('an exFAT destination (no hard links) copies a mixed card exactly, and a se
  const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00',fields:{}});
  const destination=path.join(exfat,'photobackup');await fs.mkdir(destination);
  const {plans:[transfer]}=await plan(source,[destination],options,metadata);
- assert.deepEqual(await execute(transfer!),{copied:names.length,skipped:0,errors:[]});
+ // The empty file is left on the card, not copied.
+ assert.deepEqual(await execute(transfer!),{copied:names.length-1,skipped:0,errors:[]});
  await assertCopied(transfer!);assert.deepEqual(await leftovers(exfat),[]);
  const again=await plan(source,[destination],options,metadata);
  assert.ok(again.plans[0]!.entries.every(entry=>entry.skip));
- assert.deepEqual(await execute(again.plans[0]!),{copied:0,skipped:names.length,errors:[]});
+ assert.deepEqual(await execute(again.plans[0]!),{copied:0,skipped:names.length-1,errors:[]});
  // The journaled exclusive copy path is used on APFS too when asked for.
  const apfs=path.join(root,'apfs');await fs.mkdir(apfs);
  const {plans:[exclusive]}=await plan(source,[apfs],options,metadata);
- assert.deepEqual(await execute(exclusive!,undefined,undefined,{exclusiveCopy:true}),{copied:names.length,skipped:0,errors:[]});
+ assert.deepEqual(await execute(exclusive!,undefined,undefined,{exclusiveCopy:true}),{copied:names.length-1,skipped:0,errors:[]});
  await assertCopied(exclusive!);assert.deepEqual(await leftovers(apfs),[]);
 });
 

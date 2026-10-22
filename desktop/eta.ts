@@ -1,5 +1,5 @@
 /** Time-remaining estimates for every stage of a job and for the whole job. See docs/eta-estimates.md. */
-import type {AppState,Source} from './shared';
+import type {AppState,Progress,Source} from './shared';
 
 export interface EtaSample {files:number;bytes:number;totalFiles:number;totalBytes:number;}
 /** perFileBytes: the cost of one file in bytes, added to bytes (data stages); absent counts files only (metadata stages).
@@ -54,6 +54,21 @@ export class EtaEstimator {
  }
 }
 
+/** Bytes (or files) per second from successive totals: EWMA with a time-based alpha, so it follows a change within
+ * seconds and falls during a stall (the state is republished every few seconds). Undefined for the first second. */
+export class RateMeter {
+ private last?:{at:number;value:number};private ewma?:number;private span=0;
+ next(value:number,now:number):number|undefined{
+  if(!this.last||value<this.last.value){this.last={at:now,value};this.ewma=undefined;this.span=0;return undefined;}
+  const dt=now-this.last.at;
+  if(dt>=250){
+   const rate=(value-this.last.value)/(dt/1000),alpha=1-Math.exp(-dt/5000);
+   this.ewma=this.ewma===undefined?rate:alpha*rate+(1-alpha)*this.ewma;this.span+=dt;this.last={at:now,value};
+  }
+  return this.span>=1000?this.ewma:undefined;
+ }
+}
+
 /** A job's progress as the tracker needs it (the shape of Progress). */
 export interface EtaInput {phase?:string;step?:string;completed:number;total:number;bytes:number;totalBytes:number;}
 /** listingTotalBytes: the used space of the drive being listed, when known. */
@@ -82,6 +97,16 @@ interface Tracked {key:string;estimator:EtaEstimator;smoother:EtaSmoother;known:
 export class EtaTracker {
  private readonly jobs=new Map<string,Tracked>();
  private readonly rates=new Map<string,number>();
+ private readonly meters=new Map<string,{key:string;meter:RateMeter}>();
+ private readonly starts=new Map<string,string>();
+ /** Read speed of a job's step (or a scan's), measured from its running total; a new step measures afresh. */
+ measure(id:string,key:string,value:number,now:number):number|undefined{
+  let tracked=this.meters.get(id);
+  if(!tracked||tracked.key!==key){tracked={key,meter:new RateMeter()};this.meters.set(id,tracked);}
+  return tracked.meter.next(value,now);
+ }
+ /** ISO time something shown with progress (a review, a scan) was first seen; kept until it stops. */
+ since(id:string,now:number):string{let start=this.starts.get(id);if(!start){start=new Date(now).toISOString();this.starts.set(id,start);}return start;}
  private rate(key:string){return this.rates.get(key)??defaultRates[key];}
  private sample(key:string,progress:EtaInput,context:EtaContext):EtaSample{
   if(key==='planning:listing')return {files:0,bytes:progress.bytes,totalFiles:0,totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0};
@@ -134,7 +159,7 @@ export class EtaTracker {
   return step===undefined?{job}:{step,job:Math.max(job??0,step)};
  }
  /** Drop jobs no longer running; a resumed job starts measuring afresh. */
- forget(live:Iterable<string>){const keep=new Set(live);for(const id of this.jobs.keys())if(!keep.has(id))this.jobs.delete(id);}
+ forget(live:Iterable<string>){const keep=new Set(live);for(const map of [this.jobs,this.meters,this.starts])for(const id of map.keys())if(!keep.has(id))map.delete(id);}
 }
 
 /** Stamps estimates (seconds) on everything the interface shows progress for: each running job and its stage,
@@ -143,6 +168,16 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  const live:string[]=[],verify=state.preferences.verifyCopies!==false;
  const used=(source:Source)=>source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:undefined;
  const stepOnly=(id:string,progress:EtaInput,context:EtaContext)=>{live.push(id);return tracker.observe(id,progress,context,now).step;};
+ const since=(id:string)=>{live.push(id);return tracker.since(id,now);};
+ // Reading files (organization), comparing with the destination and verifying report no speed of their own;
+ // metadata checking reads only headers, so it counts files per second.
+ const speeds=(id:string,progress:Progress)=>{
+  const key=stageKey(progress);live.push(id);
+  if(key==='planning:reading'||key==='planning:comparing')progress.speed=tracker.measure(id,key,progress.bytes,now)??0;
+  else if(key==='verifying:'&&progress.total)progress.speed=tracker.measure(id,key,progress.totalBytes*Math.min(1,progress.completed/progress.total),now)??0;
+  else if(key==='planning:checking')progress.fileRate=tracker.measure(id,key,progress.completed,now);
+  else tracker.measure(id,key,0,now);
+ };
  for(const job of state.jobs){
   if(!['discovering','verifying','copying'].includes(job.phase)||!job.progress){delete job.eta;if(job.progress)delete job.progress.eta;continue;}
   live.push(job.id);
@@ -150,10 +185,16 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   const destinations=job.organization||state.preferences.copyMode==='single'?1:Math.max(1,state.preferences.destinations.length);
   const eta=tracker.observe(job.id,job.progress,{kind,destinations,verify,listingTotalBytes:job.organization?undefined:used(job.source)},now);
   job.progress.eta=eta.step;job.eta=eta.job;
+  if(job.progress.phase!=='copying')speeds('speed:'+job.id,job.progress);
  }
- if(state.reviewProgress)state.reviewProgress.eta=stepOnly('review',state.reviewProgress,{kind:'import',destinations:1,verify});
- for(const [destination,progress] of Object.entries(state.misplacedProgress??{}))progress.eta=stepOnly('misplaced:'+destination,progress,{kind:'organization',destinations:1,verify});
- for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});}
- for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))info.eta=info.status==='reading'?stepOnly('camera:'+id,{phase:'planning',step:'checking',completed:info.checked,total:info.total,bytes:0,totalBytes:0},{kind:'import',destinations:1,verify}):undefined;
+ if(state.reviewProgress){state.reviewProgress.eta=stepOnly('review',state.reviewProgress,{kind:'import',destinations:1,verify});state.reviewProgress.startedAt=since('start:review');speeds('speed:review',state.reviewProgress);}
+ for(const [destination,progress] of Object.entries(state.misplacedProgress??{})){progress.eta=stepOnly('misplaced:'+destination,progress,{kind:'organization',destinations:1,verify});progress.startedAt=since('start:misplaced:'+destination);speeds('speed:misplaced:'+destination,progress);}
+ // A scan lists the files, then reads their metadata: one clock for both.
+ for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);}
+ for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
+  if(info.status!=='reading'){info.eta=info.fileRate=info.startedAt=undefined;continue;}
+  info.eta=stepOnly('camera:'+id,{phase:'planning',step:'checking',completed:info.checked,total:info.total,bytes:0,totalBytes:0},{kind:'import',destinations:1,verify});
+  info.startedAt=since('start:scan:'+id);info.fileRate=tracker.measure('speed:camera:'+id,'camera',info.checked,now);live.push('speed:camera:'+id);
+ }
  tracker.forget(live);
 }

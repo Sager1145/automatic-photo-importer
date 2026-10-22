@@ -1,7 +1,7 @@
 import { flushSync } from 'react-dom';
 import {createStateReceiver} from '../state-channel';
 import {driveName,gatherErrors} from '../error-log';
-import { createTranslator, I18nProvider, useTranslation, localeNames } from './i18n';
+import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { formatMessage, text, type Message } from '../messages';
+import { formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
@@ -459,7 +459,9 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // Bytes count only once copying starts: planning measures the source, not the transfer.
   const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning');
   const transferred = transferring.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = transferring.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
-  const speed = active.reduce((sum,job) => sum + (job.progress?.speed ?? 0),0);
+  // Transfers only: planning reads the source, it moves nothing.
+  const speed = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.speed ?? 0),0);
+  const startedAt = active.map(job => job.startedAt).filter(Boolean).sort()[0];
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   const remaining = active.length && active.every(job => job.eta !== undefined) ? Math.max(...active.map(job => job.eta!)) : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
@@ -476,12 +478,12 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       <dl className="dashboard-metrics">
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
-        <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? `${bytes(speed)}/s` : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
+        <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
         <div><dt><Icon icon={CheckCheck} size={16}/>{t("Files checked")}</dt><dd>{latestJobs.reduce((sum,job)=>sum+(job.progress?.completed??0),0).toLocaleString(language)}</dd><small>{t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
       <div className="dashboard-total" data-testid="total-progress">
-        <div><strong>{t("Total progress")}</strong><span>{overall !== undefined ? `${formatNumber(shownPercent(overall, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : planningJob?.progress ? `${importStatus(planningJob, t)} · ${planningJob.source.name} · ${progressCount(planningJob.progress, t, formatNumber, false, bytes)}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small>{remaining !== undefined && <em className="progress-eta" data-testid="total-eta">{t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) })}</em>}</div>
+        <div><strong>{t("Total progress")}</strong><span>{overall !== undefined ? `${formatNumber(shownPercent(overall, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : planningJob?.progress ? `${importStatus(planningJob, t)} · ${planningJob.source.name} · ${progressCount(planningJob.progress, t, formatNumber, false, bytes)}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small><ProgressTiming startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined} etaTestId="total-eta" /></div>
         <ProgressBar value={overall ?? 0} indeterminate={active.length > 0 && overall === undefined} label={t("Combined copy progress")} />
       </div>
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
@@ -896,15 +898,23 @@ export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, sec = String(seconds % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
-// Ticks once a second only while running, so just this label re-renders.
-function Elapsed({ job }: { job: Job }) {
+/** Elapsed time and time left side by side: "12:03 elapsed · about 8 min left". Ticks once a second only while
+ * running, so just this label re-renders; endedAt shows the total time instead ("Took 1:02:05"). */
+export function ProgressTiming({ startedAt, endedAt, left, etaTestId = 'eta' }: { startedAt?: string; endedAt?: string; left?: string; etaTestId?: string }) {
+  const { t } = useTranslation();
+  const ticking = !!startedAt && !endedAt;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { if (!ticking) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [ticking]);
+  if (!startedAt && !left) return null;
+  const time = startedAt ? formatDuration((endedAt ? Date.parse(endedAt) : now) - Date.parse(startedAt)) : undefined;
+  return <span className="progress-elapsed" data-testid="timing"><Icon icon={Timer} size={12} />{time && <span data-testid="elapsed">{endedAt ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>}{time && left && ' · '}{left && <em className="progress-eta" data-testid={etaTestId}>{left}</em>}</span>;
+}
+/** A job's elapsed time with its time left, and its total time once it ends. */
+function JobTiming({ job }: { job: Job }) {
   const { t } = useTranslation();
   const running = activePhases.includes(job.phase), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { if (!running) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [running]);
-  if (!job.startedAt || (!running && !finished) || (finished && !job.phaseStartedAt)) return null;
-  const time = formatDuration((finished ? Date.parse(job.phaseStartedAt!) : now) - Date.parse(job.startedAt));
-  return <span className="progress-elapsed" data-testid="elapsed"><Icon icon={Timer} size={12} />{finished ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>;
+  const startedAt = running || (finished && job.phaseStartedAt) ? job.startedAt : undefined;
+  return <ProgressTiming startedAt={startedAt} endedAt={finished ? job.phaseStartedAt : undefined} left={running ? jobRemaining(job, t) : undefined} />;
 }
 /** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
 export function formatRemaining(seconds: number, t: ReturnType<typeof createTranslator>): string {
@@ -915,14 +925,28 @@ export function formatRemaining(seconds: number, t: ReturnType<typeof createTran
   return hours >= 10 ? t("about {hours} h", { hours: Math.round(rounded / 60) }) : rest ? t("about {hours} h {minutes} min", { hours, minutes: rest }) : t("about {hours} h", { hours });
 }
 /** Time left for a running job, and for its current step when that ends well before the job does. */
-function Remaining({ job }: { job: Job }) {
-  const { t } = useTranslation();
+function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>): string | undefined {
   const progress = job.progress;
-  if (!activePhases.includes(job.phase) || !progress) return null;
+  if (!progress) return undefined;
   const step = progress.eta, all = job.eta ?? step;
-  if (all === undefined) return progress.total > 0 ? <em className="progress-eta" data-testid="eta">{t("Estimating time left…")}</em> : null;
-  const text = t("{time} left", { time: formatRemaining(all, t) }) + (step !== undefined && all - step >= 60 ? ` · ${t("{time} left in this step", { time: formatRemaining(step, t) })}` : '');
-  return <em className="progress-eta" data-testid="eta">{text}</em>;
+  if (all === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
+  return t("{time} left", { time: formatRemaining(all, t) }) + (step !== undefined && all - step >= 60 ? ` · ${t("{time} left in this step", { time: formatRemaining(step, t) })}` : '');
+}
+/** A speed whose unit holds near a boundary while this display stays on screen (see speedUnit). */
+function Speed({ value }: { value: number }) {
+  const { language } = useTranslation();
+  const shown = useRef<SpeedUnit | undefined>(undefined);
+  const unit = speedUnit(value, shown.current);
+  useEffect(() => { shown.current = unit; });
+  return <>{formatSpeed(value, language, unit)}</>;
+}
+const hasSpeed = (progress: Progress) => progress.speed > 0 || (progress.fileRate ?? 0) > 0;
+/** How fast a step reads: bytes per second, or files per second while checking metadata. */
+function ProgressSpeed({ progress }: { progress: Pick<Progress, 'speed' | 'fileRate'> }) {
+  const { t, language } = useTranslation();
+  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed"><Speed value={progress.speed} /></span>;
+  if (!progress.fileRate || progress.fileRate <= 0) return null;
+  return <span className="progress-speed" data-testid="speed">{t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) })}</span>;
 }
 /** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */
 function organizationFraction(job: Job): number | undefined {
@@ -979,7 +1003,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const fraction = organizationFraction(job);
   const label = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
   return <div className="organization-progress" data-testid="organization-progress">
-    <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} /><Remaining job={job} />{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
+    <div className="organization-progress-line"><span>{label}</span><JobTiming job={job} />{activePhases.includes(job.phase) && progress?.phase === 'planning' && <ProgressSpeed progress={progress} />}{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
     {(running || paused) && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
@@ -995,15 +1019,15 @@ export function scanTotalBytes(source: Source, previous?: Inventory): number | u
 export function PlanningProgress({ progress, label }: { progress: Progress; label: string }) {
   const { t, formatNumber } = useTranslation();
   const fraction = progressFraction(progress);
-  return <div className="source-progress" data-testid="planning-progress"><ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={label} /><div><span>{progress.total ? progressCount(progress, t, formatNumber) : t("Listing files…")}</span>{progress.eta !== undefined && <em className="progress-eta" data-testid="eta">{t("{time} left", { time: formatRemaining(progress.eta, t) })}</em>}<strong>{filename(progress.file)}</strong></div></div>;
+  return <div className="source-progress" data-testid="planning-progress"><ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={label} /><div><span>{progress.total ? progressCount(progress, t, formatNumber) : t("Listing files…")}</span><ProgressTiming startedAt={progress.startedAt} left={progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 ? t("Estimating time left…") : undefined} /><ProgressSpeed progress={progress} /><strong>{filename(progress.file)}</strong></div></div>;
 }
 // Listing: share of the drive's used space already listed. Metadata: share of media files read.
 export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; usedBytes?: number }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const reading = cameraInfo?.status === 'reading';
+  const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
   const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : undefined;
   return <div className="source-scan-progress" data-testid="scan-progress" aria-live="polite">
-    <div><span>{reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : t("Listing files…")}{fraction !== undefined && <b className="scan-percent"> {t("{percent}% scanned", { percent: formatNumber(Math.floor(fraction * 100)) })}</b>}</span>{(reading ? cameraInfo.eta : listing?.eta) !== undefined && <em className="progress-eta" data-testid="eta">{t("{time} left", { time: formatRemaining((reading ? cameraInfo.eta : listing?.eta)!, t) })}</em>}{!reading && listing && <strong>{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong>}</div>
+    <div><span>{reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : t("Listing files…")}{fraction !== undefined && <b className="scan-percent"> {t("{percent}% scanned", { percent: formatNumber(Math.floor(fraction * 100)) })}</b>}</span><ProgressTiming startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined} />{reading && <ProgressSpeed progress={{ speed: 0, fileRate: cameraInfo.fileRate }} />}{!reading && listing && <strong>{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong>}</div>
     <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} scanning", { name: sourceName })} />
   </div>;
 }
@@ -1033,7 +1057,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {already && <div className="source-progress source-progress-calm" data-testid="already-imported"><ProgressBar value={1} label={t("{name} copy progress", { name: source.name })} /><div><span>{progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")}</span></div></div>}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
-    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}{job && <Remaining job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
+    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <JobTiming job={job} />}<strong>{hasSpeed(progress) && active ? <ProgressSpeed progress={progress} /> : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job?.phase === 'error' && !job.skipErrors && !mirrorReview && (!job.progress || job.progress.phase === 'planning') && job.errors.some(error => error.key === 'error.sourceChanged' || error.key === 'text') && <div className="source-choice" data-testid="skip-and-continue"><p><Icon icon={CircleAlert} size={14} />{t("A file error stopped this import.")}</p><div className="rule-actions"><Button kind="primary" icon={Play} title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip and continue")}</Button></div></div>}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
@@ -1082,13 +1106,14 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     for (const file of inventory.files) if (file.system && !kinds.has(file.system.id)) kinds.set(file.system.id, { vendor: file.system.vendor, label: file.system.label, count: inventory.systemKinds?.[file.system.id] ?? inventory.files.filter(item => item.system?.id === file.system!.id).length });
     return [...kinds.values()].sort((a, b) => b.count - a.count);
   }, [inventory]);
-  const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system), [inventory]);
+  const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system && (file.included || file.size > 0)), [inventory]);
   const copied = unknown.filter(file => file.included).length, skipped = unknown.length - copied;
-  const system = inventory.system ?? 0;
-  if (!system && !unknown.length) return null;
+  const system = inventory.system ?? 0, empty = inventory.empty ?? 0;
+  if (!system && !unknown.length && !empty) return null;
   const names = systemKinds.slice(0, 2).map(kind => `${kind.vendor} ${kind.label}`).join(', ') + (systemKinds.length > 2 ? ', …' : '');
   const summary = [
     system > 0 && t("Skipped {count} camera system files ({names})", { count: formatNumber(system), names }),
+    empty > 0 && t(message('inventory.emptySkipped', { count: empty })),
     skipped > 0 && t("{count} unknown files skipped", { count: formatNumber(skipped) }),
     copied > 0 && t("{count} unknown files copied to other folders", { count: formatNumber(copied) }),
   ].filter(Boolean).join(' · ');
@@ -1096,6 +1121,7 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     <summary><Icon icon={Info} size={14} /><span>{summary}</span><Icon icon={ChevronDown} size={14} /></summary>
     <div className="skipped-files-content">
       {systemKinds.length > 0 && <div><h4>{t("Camera system files")}</h4><p>{t("Index files the camera writes. Not needed.")}</p><dl>{systemKinds.map(kind => <div key={`${kind.vendor}-${kind.label}`}><dt>{kind.label}<small>{kind.vendor}</small></dt><dd>{formatNumber(kind.count)}</dd></div>)}</dl></div>}
+      {empty > 0 && <div><h4>{t(message('inventory.emptyFile'))}</h4><dl>{(inventory.skipped ?? []).filter(item => item.reason === 'empty').slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
       {unknown.length > 0 && <div><h4>{t("Unknown files")}</h4><p>{t("Not photos or videos. Change this in Settings.")}</p><dl>{Object.entries(inventory.unknownExtensions).sort(([, a], [, b]) => b - a).map(([extension, count]) => <div key={extension}><dt className="extension-name">{extension ? `.${extension}` : t("No extension")}</dt><dd>{formatNumber(count)}</dd></div>)}</dl></div>}
     </div>
   </details>;

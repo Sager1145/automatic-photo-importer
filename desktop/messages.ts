@@ -103,6 +103,8 @@ export const backendMessages={
  'error.destinationUnavailable':{en:'The destination is unavailable.','zh-Hans':'目标不可用。','zh-Hant':'目的地無法使用。',ja:'保存先を利用できません。'},
  'error.destinationChanged':{en:'The selected destination disk changed or cannot be identified. Choose it again before copying.','zh-Hans':'所选目标磁盘已更改或无法识别。请在复制前重新选择。','zh-Hant':'所選目的地磁碟已變更或無法識別。請在複製前重新選擇。',ja:'選択した保存先のディスクが変更されたか、識別できません。コピーする前にもう一度選択してください。'},
  'error.backupFolderCheck':{en:'Backup folder check: {error}','zh-Hans':'备份文件夹检查：{error}','zh-Hant':'備份資料夾檢查：{error}',ja:'バックアップフォルダーの確認：{error}'},
+ 'inventory.emptyFile':{en:'empty file (0 bytes)','zh-Hans':'空文件（0 字节）','zh-Hant':'空檔案（0 位元組）',ja:'空のファイル（0 バイト）'},
+ 'inventory.emptySkipped':{en:'{count} skipped: empty file (0 bytes)','zh-Hans':'已跳过 {count} 个：空文件（0 字节）','zh-Hant':'已略過 {count} 個：空檔案（0 位元組）',ja:'{count} 件をスキップ：空のファイル（0 バイト）'},
  'error.fileSkipped':{en:'Skipped {path}: {error}','zh-Hans':'已跳过 {path}：{error}','zh-Hant':'已略過 {path}：{error}',ja:'スキップしました {path}：{error}'},
  'error.residueCleanup':{en:'Leftover file cleanup: {error}','zh-Hans':'残留文件清理：{error}','zh-Hant':'殘留檔案清理：{error}',ja:'残ったファイルのクリーンアップ：{error}'},
  'error.folderCleanup':{en:'Folder cleanup: {error}','zh-Hans':'文件夹清理：{error}','zh-Hant':'資料夾清理：{error}',ja:'フォルダーの整理：{error}'},
