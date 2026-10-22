@@ -64,11 +64,11 @@ test('mirror review lists extra and changed files, then moves them to a dated ho
  assert.deepEqual(await execute(review),{copied:1,skipped:1,removed:2,errors:[]});
  assert.deepEqual((await files(folder)).filter(file=>!file.startsWith('.photo-importer-drive')),['DCIM/changed.txt','same.txt']);
  assert.equal(await fs.readFile(path.join(folder,'DCIM/changed.txt'),'utf8'),'version 2');
- const held=await files(path.join(root,'Drive backups/.mirror-removed'));
+ const held=await files(path.join(root,'Drive backups/Removed by mirror'));
  assert.equal(held.length,2);
  assert.ok(held.every(file=>file.split(path.sep)[1]==='Card'));
- assert.equal(await fs.readFile(path.join(root,'Drive backups/.mirror-removed',held.find(file=>file.endsWith('gone.JPG'))!),'utf8'),'gone bytes');
- assert.equal(await fs.readFile(path.join(root,'Drive backups/.mirror-removed',held.find(file=>file.endsWith('changed.txt'))!),'utf8'),'version 1');
+ assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('gone.JPG'))!),'utf8'),'gone bytes');
+ assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('changed.txt'))!),'utf8'),'version 1');
 });
 
 test('mirror refuses to move a destination file that changed after review',async t=>{

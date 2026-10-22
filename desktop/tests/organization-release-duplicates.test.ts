@@ -63,3 +63,23 @@ test('releasing duplicates after organizing is on by default and can be turned o
  assert.equal(normalizePreferences({}).releaseDuplicatesAfterOrganizing,true);
  assert.equal(normalizePreferences({releaseDuplicatesAfterOrganizing:false}).releaseDuplicatesAfterOrganizing,false);
 });
+
+const hiddenFolders=async(root:string)=>{const found:string[]=[];const walk=async(folder:string)=>{for(const entry of await fs.readdir(folder,{withFileTypes:true}))if(entry.isDirectory()){const child=path.join(folder,entry.name);if(entry.name.startsWith('.'))found.push(path.relative(root,child));await walk(child);}};await walk(root);return found;};
+
+test('organization never creates hidden folders; its recovery folder is visible',async t=>{
+ const f=await fixture(t);
+ await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false});
+ assert.deepEqual(await hiddenFolders(f.root),[]);
+ assert.ok((await fs.stat(path.join(f.root,'Photo Importer Recovery'))).isDirectory());
+ assert.equal((await core.findMisplaced(f.root,f.root,options,metadata)).count,0,'the recovery folder is never organized');
+});
+
+test('a recovery folder left hidden by an earlier version is made visible and still works',async t=>{
+ const f=await fixture(t);
+ await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false});
+ await fs.rename(path.join(f.root,'Photo Importer Recovery'),path.join(f.root,'.photo-importer-recovery'));
+ const [job]=await core.getOrganizationRecovery(f.root);
+ assert.equal(job!.retainedFiles,1);
+ assert.deepEqual(await hiddenFolders(f.root),[]);
+ assert.equal((await core.finalizeOrganization(f.root,job!.id)).removed,1);
+});

@@ -20,6 +20,7 @@ const volumeId = hardwareDestination.volumeId;
 const hour = 36e5;
 const serviceNames = /* @__PURE__ */ new Set([
 	".photo-importer-recovery",
+	"photo importer recovery",
 	".ds_store",
 	".fseventsd",
 	".spotlight-v100",

@@ -1129,8 +1129,8 @@ export function MirrorRemovals({ review }: { review: NonNullable<AppState['revie
   if (!plans.length) return null;
   const all = plans.flatMap(item => item.removals);
   return <section className="mirror-removals" data-testid="mirror-removals" aria-labelledby="mirror-removals-heading">
-    <div className="mirror-removals-heading"><h3 id="mirror-removals-heading">{t("{count} files will be moved to .mirror-removed", { count: formatNumber(all.length) })}</h3><span>{bytes(all.reduce((sum, item) => sum + item.size, 0))}</span></div>
-    <p>{t("Nothing is deleted; files go to .mirror-removed.")}</p>
+    <div className="mirror-removals-heading"><h3 id="mirror-removals-heading">{t("{count} files will be moved to Removed by mirror", { count: formatNumber(all.length) })}</h3><span>{bytes(all.reduce((sum, item) => sum + item.size, 0))}</span></div>
+    <p>{t("Nothing is deleted; files go to Removed by mirror.")}</p>
     {plans.map(({ plan, index, removals }) => <div key={`${index}-${plan.root}`} className="mirror-removals-plan">
       {(review.plans.length > 1 || plan.drive) && <h4>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{plan.drive ? t("Drive folder: {folder}", { folder: plan.drive.folder }) : plan.root}</h4>}
       <div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{t("File")}</th><th scope="col">{t("Reason")}</th><th scope="col">{t("Size")}</th></tr></thead><tbody>{removals.map(removal => <tr key={removal.path}><td><span className="review-destination-path">{removal.path}</span></td><td><span className={`removal-reason removal-${removal.reason}`}>{removal.reason === 'missing' ? t("No longer on the drive") : t("Replaced by a newer version")}</span></td><td>{bytes(removal.size)}</td></tr>)}</tbody></table></div>

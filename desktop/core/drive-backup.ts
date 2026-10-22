@@ -7,7 +7,7 @@ import type { DestinationIndex } from './destination-index';
 import { beneath, checkAbort, code, contained, makeParent, pathKey, safeComponent, statKey, syncDirectory, syncParents } from './paths';
 
 export const DRIVE_BACKUPS='Drive backups';
-const marker='.photo-importer-drive.json', holding='.mirror-removed';
+const marker='.photo-importer-drive.json', holding='Removed by mirror';
 export interface Drive {name:string;identity:string;mirror:boolean;}
 /** A removal is bound to the exact inode and timestamps seen during review. */
 export interface ReviewedRemoval extends MirrorRemoval {stat:string;}
@@ -83,6 +83,9 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
     const stat=await fs.lstat(removal.path,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
     if(!beneath(removal.path,base) || !stat?.isFile() || statKey(stat)!==removal.stat) throw new Error(`Destination file changed after review; review again: ${removal.path}`);
   }
+  // Earlier versions held removals in a hidden folder; make it visible before adding to it.
+  const legacy=path.join(root,DRIVE_BACKUPS,'.mirror-removed'),visible=path.join(root,DRIVE_BACKUPS,holding);
+  if(await fs.lstat(legacy).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink(),error=>{if(code(error)==='ENOENT')return false;throw error;})&&!await fs.lstat(visible).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})){await contained(legacy,root);await fs.rename(legacy,visible);await syncDirectory(path.dirname(visible));}
   const held=path.join(root,DRIVE_BACKUPS,holding,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,8)}`,drive.folder),parents=new Set<string>();
   for(const removal of removals) {
     checkAbort(signal);

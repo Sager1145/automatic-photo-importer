@@ -14,7 +14,7 @@ const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 /** What a journal looks like after the drive is mounted again: macOS gives the volume a new
  * device number, so every recorded dev:ino and stat.dev carries the old one. */
 async function remount(root:string,id:string,dev:string,manifestToo=true){
- const job=path.join(root,'.photo-importer-recovery',id);
+ const job=path.join(root,'Photo Importer Recovery',id);
  const seal=(value:Record<string,unknown>)=>{delete value.seal;value.seal=createHmac('sha256',Buffer.from(secret,'utf8')).update(JSON.stringify(value)).digest('hex');return value;};
  const swap=(identity:string)=>identity.replace(/^\d+:/,`${dev}:`);
  const event=(value:Record<string,unknown>)=>{const stat=value.stat as {dev?:string}|undefined;if(stat?.dev)stat.dev=dev;return seal(value);};
@@ -49,7 +49,7 @@ test('a journal for a different directory is still refused after a remount',asyn
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'recovery-remount-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original),{recursive:true});await fs.writeFile(original,'precious original');
  const p=(await core.plan(root,[root],options,metadata)).plans[0]!;await core.executeReorganization(p);
- const [job]=await core.getOrganizationRecovery(root),manifestFile=path.join(root,'.photo-importer-recovery',job!.id,'manifest.json');
+ const [job]=await core.getOrganizationRecovery(root),manifestFile=path.join(root,'Photo Importer Recovery',job!.id,'manifest.json');
  const manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'));
  // Another folder's inode under the old device number: not this directory, whatever the mount.
  manifest.rootIdentity=manifest.rootIdentity.replace(/:\d+$/,':1');delete manifest.seal;

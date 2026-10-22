@@ -18,7 +18,7 @@ test('choosing the whole backup drive as a source leaves the backup folder out a
  const d=await drive(t);
  await d.put('DCIM/100CAMERA/NEW.JPG');
  await d.put('photobackup/2024/202402/Camera/OLD.JPG');
- await d.put('photobackup/.photo-importer-recovery/x/originals/0/a/KEPT.JPG');
+ await d.put('photobackup/Photo Importer Recovery/x/originals/0/a/KEPT.JPG');
  const {plans:[transfer],inventory}=await plan(d.base,[d.root],options,metadata);
  assert.deepEqual(transfer!.entries.map(entry=>path.basename(entry.source)),['NEW.JPG']);
  assert.ok(inventory.files.every(file=>!file.relative.startsWith('photobackup')),'nothing inside the backup is even listed');

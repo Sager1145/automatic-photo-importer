@@ -17,13 +17,13 @@ async function fixture(t:test.TestContext){
 }
 async function plan(root:string,folder:string){return (await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat' as const,unknownRules:{}},metadata)).plans[0]!;}
 async function saved(root:string,id:string){
- const directory=path.join(root,'.photo-importer-recovery',id,'originals','0');
+ const directory=path.join(root,'Photo Importer Recovery',id,'originals','0');
  const [slot]=await fs.readdir(directory);return path.join(directory,slot!,'A.JPG');
 }
 async function writeEvent(root:string,id:string,extra:Record<string,unknown>,seal=true){
  const record={id,root,event:'superseded',...extra};
  const value=seal?{...record,seal:createHmac('sha256',secret).update(JSON.stringify(record)).digest('hex')}:record;
- const file=path.join(root,'.photo-importer-recovery',id,`event-${randomUUID()}.json`);await fs.writeFile(file,JSON.stringify(value));return file;
+ const file=path.join(root,'Photo Importer Recovery',id,`event-${randomUUID()}.json`);await fs.writeFile(file,JSON.stringify(value));return file;
 }
 
 test('successive layouts retain all prior originals and list only the latest recovery job',async t=>{
