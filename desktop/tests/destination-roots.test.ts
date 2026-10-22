@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {destinationRoots,sourceInsideBackup} from '../platform/destination-roots';
+import {backupFolders,destinationRoots,sourceInsideBackup} from '../platform/destination-roots';
 import {volumeInfo} from '../platform/volumes';
 import type {Preferences,Source} from '../shared';
 
@@ -42,9 +42,32 @@ test('a backup folder beside the source is created as before',async t=>{
 
 test('only a source inside a backup folder is refused when chosen; one that contains it is allowed',()=>{
  const destinations=['/Volumes/A006'];
- assert.match(sourceInsideBackup('/Volumes/A006/photobackup',destinations,'photobackup')??'',/already in your backup/i);
- assert.match(sourceInsideBackup('/Volumes/A006/photobackup/2025',destinations,'photobackup')??'',/already in your backup/i);
- assert.equal(sourceInsideBackup('/Volumes/A006',destinations,'photobackup'),undefined,'the backup folder is left out instead');
- assert.equal(sourceInsideBackup('/Volumes/A006/2024',destinations,'photobackup'),undefined);
- assert.equal(sourceInsideBackup('/Volumes/A006/photobackup-old',destinations,'photobackup'),undefined);
+ assert.match(sourceInsideBackup('/Volumes/A006/photobackup',destinations,['photobackup'])??'',/already in your backup/i);
+ assert.match(sourceInsideBackup('/Volumes/A006/photobackup/2025',destinations,['photobackup'])??'',/already in your backup/i);
+ assert.equal(sourceInsideBackup('/Volumes/A006',destinations,['photobackup']),undefined,'the backup folder is left out instead');
+ assert.equal(sourceInsideBackup('/Volumes/A006/2024',destinations,['photobackup']),undefined);
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup-old',destinations,['photobackup']),undefined);
+});
+
+test('the video layout keeps a second backup folder on every destination',async t=>{
+ const {destination,card,prefs}=await fixture(t);
+ const video={...prefs('photobackup'),mediaLayout:'video-root',videoBasePath:'videobackup'} as Preferences;
+ assert.deepEqual(backupFolders(video),['photobackup','videobackup']);
+ assert.deepEqual(backupFolders({...video,mediaLayout:'format'}),['photobackup'],'other layouts keep one backup folder');
+ const {roots,videoRoots}=await destinationRoots(video,[card],card);
+ assert.deepEqual(roots,[path.join(destination,'photobackup')]);
+ assert.deepEqual(videoRoots,[path.join(destination,'videobackup')]);
+ assert.ok((await fs.stat(videoRoots![0]!)).isDirectory());
+ assert.equal((await destinationRoots(prefs('photobackup'),[card],card)).videoRoots,undefined);
+});
+
+test('a source inside the video backup folder is refused, and the folders must differ',async t=>{
+ const {destination,prefs}=await fixture(t);
+ const video={...prefs('photobackup'),mediaLayout:'video-root',videoBasePath:'videobackup'} as Preferences;
+ const inside:Source={id:'folder:inside',name:'Inside',path:path.join(destination,'videobackup','2025'),transport:'folder'};
+ await fs.mkdir(inside.path,{recursive:true});
+ await assert.rejects(destinationRoots(video,[inside],inside),/already in your backup/i);
+ assert.match(sourceInsideBackup(inside.path,[destination],backupFolders(video))??'',/already in your backup/i);
+ const card:Source={id:'folder:card',name:'Card',path:path.join(destination,'Card'),transport:'folder'};
+ for(const videoBasePath of ['photobackup','photobackup/videos','','../videos'])await assert.rejects(destinationRoots({...video,videoBasePath},[card],card),/video backup folder/i,videoBasePath);
 });

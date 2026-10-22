@@ -81,3 +81,14 @@ test('organizing on one drive needs room for one fallback copy, not the whole li
  assert.equal(requiredOrganizationSpace(library),80e9,'stage and publish of the largest file');
  assert.equal(requiredOrganizationSpace({...library,entries:[]}),0);
 });
+
+test('a destination video folder counts toward that destination and follows sequential splits',()=>{
+ const withVideos=(root:string)=>({...plan([entry('A',6),entry('B',4)],root+'/photos'),videos:plan([entry('V1',5),entry('V2',3)],root+'/videos')});
+ const single=withVideos('/one');
+ assert.deepEqual(allocateDestinations([single],[6+4+5+3+6],'single'),[24],'all pending bytes plus the largest family');
+ assert.throws(()=>allocateDestinations([withVideos('/one')],[23],'single'),/Destination 1/);
+ const plans=[withVideos('/one'),withVideos('/two')];
+ allocateDestinations(plans,[16,20],'sequential');
+ assert.deepEqual([plans[0].entries,plans[0].videos!.entries,plans[1].entries,plans[1].videos!.entries].map(list=>list.map(item=>item.source)),[['A','B'],[],[],['V1','V2']]);
+ assert.equal(requiredOrganizationSpace(withVideos('/one')),12,'twice the largest file in either folder');
+});

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan} from '../core/index';
 import {executeDestinations} from '../core/destinations';
+import {requiredTransferSpace} from '../core/allocation';
 import type {Progress} from '../shared';
 
 async function fixture(t:test.TestContext){
@@ -13,7 +14,7 @@ async function fixture(t:test.TestContext){
  const source=path.join(base,'source'),roots=[path.join(base,'one'),path.join(base,'two')];
  for(const folder of [source,...roots])await fs.mkdir(folder);
  await fs.writeFile(path.join(source,'original.txt'),'preserve this original');
- const {plans}=await plan(source,roots,{backup:true,template:'{year}',separateMedia:false,unknownRules:{}},async()=>({fields:{}}));
+ const {plans}=await plan(source,roots,{backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
  return {source,roots,plans};
 }
 
@@ -55,7 +56,7 @@ test('successful copies aggregate actual completed work and repeat verification 
  const hooks={signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index:number,value:Progress)=>{latest=value;},settled:()=>{}};
  assert.equal((await executeDestinations(plans,hooks)).copied,2);
  assert.equal(latest?.completed,2);assert.equal(latest?.bytes,44);
- const repeated=await plan(source,roots,{backup:true,template:'{year}',separateMedia:false,unknownRules:{}},async()=>({fields:{}}));
+ const repeated=await plan(source,roots,{backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
  assert.deepEqual(await executeDestinations(repeated.plans,hooks),{copied:0,skipped:2,moved:0,retained:0,retainedBytes:0,removed:0,errors:[],notes:[]});
  assert.equal(latest?.completed,2);assert.equal(latest?.bytes,0);assert.equal(latest?.totalBytes,0);
 });
@@ -65,7 +66,7 @@ test('a reviewed duplicate removed before Apply grows actual work totals when re
  const {source,roots,plans}=await fixture(t);
  const hooks={signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:()=>{},settled:()=>{}};
  await executeDestinations(plans,hooks);
- const reviewed=await plan(source,roots,{backup:true,template:'{year}',separateMedia:false,unknownRules:{}},async()=>({fields:{}}));
+ const reviewed=await plan(source,roots,{backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
  assert.ok(reviewed.plans.every(plan=>plan.entries.every(entry=>entry.skip)));
  await fs.unlink(path.join(roots[0],'original.txt'));const progress:Progress[]=[];
  const result=await executeDestinations(reviewed.plans,{...hooks,progress:(_index,value)=>progress.push(value)});
@@ -80,4 +81,19 @@ test('publication workspace stays reserved after source copying until the destin
  const result=await executeDestinations([plans[0]],{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index,value,pending)=>reservations.push({phase:value.phase,pending}),settled:index=>settled.push(index)});
  assert.equal(result.copied,1);assert.deepEqual(settled,[0]);
  const validating=reservations.filter(value=>value.phase==='verifying');assert.ok(validating.length>0);assert.ok(validating.every(value=>value.pending>=22),'One whole related family must remain reserved through publication');
+});
+
+test('a destination video folder is executed with its destination and reported under its number',async t=>{
+ const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-destinations-video-')));
+ t.after(()=>fs.rm(base,{recursive:true,force:true}));
+ const source=path.join(base,'source'),photos=path.join(base,'drive/photobackup'),videos=path.join(base,'drive/videobackup');
+ for(const folder of [source,photos,videos])await fs.mkdir(folder,{recursive:true});
+ await fs.writeFile(path.join(source,'A.JPG'),'photo');await fs.writeFile(path.join(source,'C.MOV'),'video');
+ const {plans}=await plan(source,[photos],{backup:false,template:'{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{}},async()=>({camera:'Cam',fields:{}}));
+ const indexes=new Set<number>(),settled:number[]=[],validated:number[]=[],reserved=requiredTransferSpace(plans[0]!);
+ const result=await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async index=>{validated.push(index);},progress:(index,value,pendingBytes)=>{indexes.add(index);assert.equal(value.total,2);assert.ok(pendingBytes<=reserved,`${pendingBytes} > ${reserved}`);},settled:index=>settled.push(index)});
+ assert.equal(result.copied,2);assert.deepEqual(result.errors,[]);
+ assert.deepEqual([...indexes],[0]);assert.deepEqual(validated,[0]);assert.deepEqual(settled,[0]);
+ assert.equal(await fs.readFile(path.join(photos,'Cam/A.JPG'),'utf8'),'photo');
+ assert.equal(await fs.readFile(path.join(videos,'Cam/C.MOV'),'utf8'),'video');
 });
