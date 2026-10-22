@@ -153,7 +153,7 @@ async function refresh(){
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
   emit();pump();scheduleMisplacedCheck();scheduleResidueCheck();
   const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
-  if(scope!==recoveryScope&&!recoveryRefresh){recoveryScope=scope;recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;});}
+  if(scope!==recoveryScope&&!recoveryRefresh){recoveryScope=scope;recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;void releaseIfIdle();});}
  }catch(error){state.error=toMessage(error);emit();}finally{refreshing=false;}
 }
 async function scanSource(source:Source){
@@ -234,9 +234,10 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size)retur
 // hashing threads start again on demand. Closed only while no job, scan, review, organization or check
 // could use them; the idle test and the closing calls run in the same turn, so nothing starts in between.
 let inspecting=0,releasing:Promise<void>|undefined;
-const idle=()=>!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting;
+const idle=()=>!hardwareTest&&!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting;
 function releaseIfIdle():Promise<void>{
  if(releasing||!idle())return releasing??Promise.resolve();
+ if(checksPending){scheduleAutomaticChecks();return Promise.resolve();}
  const work=Promise.allSettled([closeMetadata(),terminateHasher()]).then(()=>{});
  releasing=work.finally(()=>{releasing=undefined;});
  return releasing;
@@ -244,10 +245,10 @@ function releaseIfIdle():Promise<void>{
 // Checks that read the whole library wait a while after the last job, scan or review ends, and
 // never start once something new has begun.
 const AUTOMATIC_CHECK_DELAY=30000;
-let checkTimer:NodeJS.Timeout|undefined;
-function cancelAutomaticChecks(){if(checkTimer)clearTimeout(checkTimer);checkTimer=undefined;}
+let checkTimer:NodeJS.Timeout|undefined,checksPending=false;
+function cancelAutomaticChecks(){if(checkTimer){clearTimeout(checkTimer);checksPending=true;}checkTimer=undefined;}
 function scheduleAutomaticChecks(){
- if(qa||quitting)return;cancelAutomaticChecks();
+ if(qa||quitting)return;cancelAutomaticChecks();checksPending=false;
  checkTimer=setTimeout(()=>{checkTimer=undefined;scheduleMisplacedCheck(true);scheduleResidueCheck(true);},AUTOMATIC_CHECK_DELAY);checkTimer.unref();
 }
 // A check reading a drive that was unplugged stops; mounts in the last refresh are remembered.
@@ -264,7 +265,7 @@ function releaseMissingVolumes(volumes:MountedVolume[]){
 // rules give them. It runs while nothing else does: after imports finish and when a destination connects.
 let misplacedControl:AbortController|undefined,misplacedTask:Promise<void>|undefined,misplacedScope='',organizeAfterImport=false,misplacedPaths:string[]=[];
 function scheduleMisplacedCheck(force=false){
- if(qa||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
+ if(qa||(!force&&checkTimer)||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
  const prefs=state.preferences,scope=JSON.stringify([prefs.destinations,prefs.destinationIds,prefs.basePath,prefs.template,prefs.mediaLayout,prefs.videoBasePath,prefs.videoTemplate,prefs.editedFolder,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===misplacedScope)return;
  misplacedScope=scope;const control=new AbortController();misplacedControl=control;misplacedPaths=prefs.destinations.slice(0,2);const organize=organizeAfterImport;organizeAfterImport=false;
@@ -299,7 +300,7 @@ async function residueRoots():Promise<string[]>{
 // The automatic check also waits for the backup folder check, which rewrites index files; Clean up does not.
 const residueIdle=(manual=false)=>!active.size&&!resumingOrganizations.size&&(manual||!misplacedControl)&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
 function scheduleResidueCheck(force=false){
- if(qa)return;
+ if(qa||(!force&&checkTimer))return;
  // Something running now: look again once it is idle (any later refresh or finished job).
  if(!residueIdle()||residueTask){residueScope='';return;}
  const scope=JSON.stringify([state.preferences.destinations,state.preferences.destinationIds,backupFolders(state.preferences),organizationLocations,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
@@ -451,7 +452,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,job.errors.length),failed.length>0&&message('job.skippedErrors',{count:failed.length}),!!released&&message('job.releasedDuplicates',{count:released,size:gigabytes(releasedBytes??0)}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),notes.length>0&&text(notes[0]!)):job.alreadyImported?message('job.alreadyImported',{count:entries}):joined(message('job.copied',{copied,skipped}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),removed&&message('job.mirrorRemoved',{count:removed}),message('job.errors',{count:job.errors.length}),prefs.copyMode==='mirror'&&message(job.errors.length?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail);
  }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)job.errors.push(job.detail);addHistory(text(job.source.name),job.detail);}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
- if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;});emit();
+ if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;void releaseIfIdle();});emit();
 }
 async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number){
@@ -615,7 +616,8 @@ app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch
 app.on('before-quit',event=>{
  if(timer)clearInterval(timer);cancelAutomaticChecks();
  for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();reviewControl?.abort();
- if(closing){event.preventDefault();return;}
+ // A quit the closing step started, or a system shutdown, goes through; another quit meanwhile waits for it.
+ if(!quitting&&closing){event.preventDefault();return;}
  if(!quitting){
   // Stopped jobs, scans and an open review remove their staging files and camera downloads first, then
   // everything that holds a drive is closed (all within 10 s).
