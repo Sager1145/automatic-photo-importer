@@ -683,6 +683,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .settings-row{display:grid;grid-template-columns:minmax(7rem,11rem) minmax(0,1fr);align-items:center;gap:1rem;padding:.55rem 0;border-bottom:1px solid var(--separator);font-weight:500}
 .settings-row:last-child{border-bottom:0}
 .settings-row .select-wrap{max-width:20rem}
+/* A button keeps its label's width; the grid cell would otherwise stretch it across the row. */
+.settings-row>.button{justify-self:start}
 .text-size-control{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;min-width:0}
 .settings-row-note{grid-column:2;font-size:var(--text-caption);color:var(--label-secondary)}
 .text-size-control input{flex:1 1 6rem;min-width:6rem}
@@ -860,8 +862,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .section-heading h2{font-size:var(--text-title-3);font-weight:700}
 .page-toolbar{display:flex;justify-content:flex-end}
 /* Paired buttons under the destination inspector */
-.bay-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.5rem}
-.bay-actions .button{width:100%;min-width:0;padding:0 .75rem}
+.bay-actions{display:flex;flex-wrap:wrap;gap:.5rem}
+.bay-actions .button{min-width:0;padding:0 .75rem}
 
 /* ---------- Layout constraints ----------
    Guarantees that no content can push its container wider or overlap a neighbour:
@@ -942,11 +944,10 @@ button.sidebar-item:hover{background:var(--fill-3)}
 }
 @container titlebar (max-width:36rem){.titlebar-actions [data-testid=global-start]{font-size:0;gap:0;padding:0;width:var(--control-height)}}
 
-/* Drive cards: labelled actions → round icons → actions below with a full-width main button. */
+/* Drive cards: labelled actions → round icons → actions below, still sized to their labels. */
 @container source-card (max-width:34rem){
   .source-row-top{grid-template-columns:auto minmax(0,1fr)}
-  .source-row-actions{grid-column:1/-1;justify-content:stretch}
-  .source-row-actions>.button:not(.button-quiet){flex:1 1 auto}
+  .source-row-actions{grid-column:1/-1;justify-content:flex-end}
 }
 @container source-card (min-width:60rem){.source-row-actions{gap:.45rem}}
 
