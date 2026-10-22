@@ -39,8 +39,10 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
 
 /** A leftover receipt, authenticated with this host's key (it throws otherwise): whether its file
  * is still there, whether the receipt still binds it, and for a stage, whether that copy could
- * continue from its unchanged source (or a card not connected now). */
-export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean}>{
+ * continue from its unchanged source (or a card not connected now). owned: it names a file in its
+ * own folder. stale: the recorded source card is present and the source is missing or changed
+ * (size or mtime), so the copy cannot continue; a card not connected proves nothing. */
+export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean}>{
  const {record}=await readRecord(journal,root);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
@@ -49,7 +51,8 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  // unchanged; only the same card holding a changed or removed file ends the copy's use.
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
- return {kind:record.kind,file,present:!!stat,bound,resumable};
+ const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
+ return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale};
 }
 
 /** Record exclusive creation durably before the first byte is written. */

@@ -453,6 +453,12 @@ export async function pointerLeftover(folder:string,name:string):Promise<boolean
   return !!state.superseded||!unfinished(state);
  }catch{return false;}
 }
+/** For residue cleanup: whether journal `id` in `root`'s recovery folder is in a terminal state
+ * (complete and finalized, undone or superseded). A journal that cannot be read, or is still
+ * pending, is not. */
+export async function journalTerminal(root:string,id:string):Promise<boolean>{
+ try{return finished(await readEvents(await readManifest(root,id),undefined,undefined,false));}catch{return false;}
+}
 /** Signals a pointer file that cannot be read or trusted; the scan then looks for its journal. */
 class DamagedPointer extends Error{constructor(readonly file:string,readonly id:string,reason:string){super(`Damaged sibling journal pointer ${file} (${reason})`);}}
 /** The journal folder a pointer in `root`'s recovery folder names. Undefined for any other entry,
