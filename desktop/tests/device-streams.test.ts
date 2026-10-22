@@ -108,7 +108,7 @@ test('independent files are published side by side, each still verified and sync
  assert.deepEqual(result,{copied:6,skipped:0,errors:[]});
  assert.ok(most>1,`publications at once: ${most}`);
  for(let index=0;index<6;index++)assert.deepEqual(await fs.readFile(path.join(root,`IMG_${index}.JPG`)),Buffer.alloc(256*1024,index+1));
- assert.deepEqual((await fs.readdir(root)).filter(name=>name.startsWith('.import-')),[]);
+ assert.deepEqual((await fs.readdir(root)).filter(name=>/^photo-importer-(?!index)/.test(name)),[]);
 });
 
 test('two files claiming one destination name at once never overwrite each other',async t=>{
@@ -154,6 +154,6 @@ test('stopping during verification removes every staged copy and syncs their fol
  await assert.rejects(execute(reviewed,control.signal,progress=>{if(progress.phase==='verifying'&&!stopped){stopped=true;control.abort();}}),{name:'AbortError'});
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.ok(stopped);
- assert.deepEqual((await fs.readdir(root)).filter(name=>name.startsWith('.import-')),[],'no staged copy or receipt is left behind');
+ assert.deepEqual((await fs.readdir(root)).filter(name=>/^photo-importer-(?!index)/.test(name)),[],'no staged copy or receipt is left behind');
  assert.ok(syncsAfterStop<=2,`folder synced ${syncsAfterStop} times while stopping`);
 });

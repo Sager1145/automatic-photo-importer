@@ -10,7 +10,7 @@ import {normalizePreferences,defaultPreferences} from '../preferences';
 /** Destination files without the checksum index and staging/receipt files. */
 async function published(root:string):Promise<string[]>{
  const found:string[]=[];
- async function walk(folder:string){for(const item of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,item.name);if(item.isDirectory())await walk(file);else if(!item.name.startsWith('.photo-importer-index'))found.push(path.relative(root,file));}}
+ async function walk(folder:string){for(const item of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,item.name);if(item.isDirectory())await walk(file);else if(!item.name.startsWith('photo-importer-index'))found.push(path.relative(root,file));}}
  await walk(root);return found.sort();
 }
 async function fixture(t:test.TestContext,names:string[]){

@@ -35,7 +35,7 @@ async function receiptNames(folder:string,root:string,index:RecoveryIndex):Promi
 const snapshot=(s:BigIntStats):Snapshot=>({dev:String(s.dev),ino:String(s.ino),size:String(s.size),mtime:String(s.mtimeNs),ctime:String(s.ctimeNs)});
 const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JSON.stringify(r);
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
-const recordPattern=/^\.import-(?:stage|intent)-[a-f0-9-]+\.json$/;
+const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.json$/;
 
 /** A leftover receipt, authenticated with this host's key (it throws otherwise): whether its file
  * is still there, whether the receipt still binds it, and for a stage, whether that copy could
@@ -58,7 +58,7 @@ export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry
  const sourceStat=await fs.lstat(entry.source,{bigint:true});
  if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
  const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileIdentity(stat)};
- const journal=path.join(path.dirname(file),`.import-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
+ const journal=path.join(path.dirname(file),`photo-importer-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;
  try {await handle.writeFile(JSON.stringify(sealImportRecord({...record})));await handle.sync();journalStat=await handle.stat({bigint:true});}finally{await handle.close();}
  await syncParents(journal,transfer.root);
@@ -91,7 +91,7 @@ export async function findPartial(kind:Kind,entry:PlanEntry,root:string,index:Re
   try {
    const {record,journalStat}=await readRecord(journal,root);
    if(record.version!==1||record.kind!==kind||record.root!==root||record.source!==entry.source||record.destination!==entry.destination||(kind==='stage'?!stageMatch(record):record.sha256!==(entry.digest??''))||!record.sourceStat||typeof record.file!=='string'||path.dirname(record.file)!==folder)continue;
-   if(kind==='publication'?record.file!==entry.destination:!/^\.import-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
+   if(kind==='publication'?record.file!==entry.destination:!/^(?:\.import|photo-importer)-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
    await rootUnchanged(root,record.rootIdentity);await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);await contained(record.file,root);
    if(await identity(folder)!==record.parentIdentity)continue;
    const source=await fs.lstat(entry.source,{bigint:true}),stat=await fs.lstat(record.file,{bigint:true});

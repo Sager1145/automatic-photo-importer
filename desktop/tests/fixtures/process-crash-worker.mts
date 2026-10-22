@@ -46,7 +46,7 @@ async function run() {
   if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'organization-exclusive') {
     fs.open = async(...args:Parameters<typeof fs.open>)=>{
       const handle = await open(...args), file = String(args[0]);
-      if (args[1] === 'wx' && (mode === 'import-stage' ? path.basename(file).startsWith('.import-') && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) shortWrite(handle,file);
+      if (args[1] === 'wx' && (mode === 'import-stage' ? path.basename(file).startsWith('photo-importer-') && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) shortWrite(handle,file);
       return handle;
     };
   }

@@ -8,7 +8,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
 import {plan,execute} from '../core';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
-const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('.photo-importer-index'));
+const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
 
 
 const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -103,7 +103,7 @@ test('corruption during exclusive publication is reported with its intent retain
  const result=await execute(prepared,undefined,undefined,{exclusiveCopy:true});restoreHandles();restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/Destination verification failed/);
  const corrupted=await fs.readFile(destination);assert.equal(corrupted.length,f.data.length);assert.equal(corrupted[0],66);assert.notDeepEqual(corrupted,f.data);await f.unchanged();
- const names=await visible(f.root),intentName=names.find(name=>name.startsWith('.import-intent-'));assert.ok(intentName);assert.equal(names.some(name=>name.endsWith('.partial')),false);
+ const names=await visible(f.root),intentName=names.find(name=>name.startsWith('photo-importer-intent-'));assert.ok(intentName);assert.equal(names.some(name=>name.endsWith('.partial')),false);
  const intentBytes=await fs.readFile(path.join(f.root,intentName));const intent=JSON.parse(intentBytes.toString());assert.equal(intent.source,f.original);assert.equal(intent.destination,destination);assert.equal(intent.sha256,createHash('sha256').update(f.data).digest('hex'));
  const retry=await f.prepare();assert.notEqual(retry.entries[0].destination,destination);assert.deepEqual(await execute(retry,undefined,undefined,{exclusiveCopy:true}),{copied:1,skipped:0,errors:[]});
  assert.deepEqual(await fs.readFile(retry.entries[0].destination),f.data);assert.deepEqual(await fs.readFile(destination),corrupted);assert.deepEqual(await fs.readFile(path.join(f.root,intentName)),intentBytes);await f.unchanged();
@@ -151,7 +151,7 @@ test('exclusive publication durably records intent before copying and releases i
  const restore=handles(t,(file,_flags,handle)=>{if(expected.includes(file)){const sync=handle.sync.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();synced.add(file);if(file===path.dirname(prepared.entries[0].destination))directorySyncs++;});}});
  const open=fs.open.bind(fs),unlink=fs.unlink.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{const handle=await open(...args);if(String(args[0])===prepared.entries[0].destination&&args[1]==='wx'){const write=handle.write.bind(handle);t.mock.method(handle,'write',async(...writeArgs:Parameters<typeof handle.write>)=>{assert.ok(expected.every(folder=>synced.has(folder)),'Intent and all new ancestor bindings must be synchronized before copying');assert.ok(directorySyncs>=1);started=true;return write(...writeArgs);});}return handle;});
- t.mock.method(fs,'unlink',async(file:Parameters<typeof fs.unlink>[0])=>{if(String(file).includes('.import-intent-')){assert.ok(directorySyncs>=2,'Published destination must be synchronized before intent removal');assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);released=true;}await unlink(file);});syncBuiltinESMExports();
+ t.mock.method(fs,'unlink',async(file:Parameters<typeof fs.unlink>[0])=>{if(String(file).includes('photo-importer-intent-')){assert.ok(directorySyncs>=2,'Published destination must be synchronized before intent removal');assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);released=true;}await unlink(file);});syncBuiltinESMExports();
  const result=await execute(prepared,undefined,undefined,{exclusiveCopy:true});restore();
  assert.equal(started,true);assert.equal(released,true);assert.ok(directorySyncs>=3,'Intent removal directory entry must also be synchronized');assert.deepEqual(result,{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(path.join(f.source,'photo.JPG')),f.data);assert.equal(await fs.readFile(path.join(f.root,'keep.txt'),'utf8'),'pre-existing destination');
 });
