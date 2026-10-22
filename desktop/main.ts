@@ -21,6 +21,7 @@ import {scanSourceInWorker} from './scan-process';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
+import {ErrorLog,clearErrors,gatherErrors} from './error-log';
 import {normalizePreferences} from './preferences';
 import {joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 
@@ -101,7 +102,9 @@ function stampJobs(){
 }
 // Drives moved to the top (this session): their cards come first and their queued jobs start first.
 let sourceOrder:string[]=[];
-const emit=()=>{stampJobs();state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+// When each error appeared and which ones the user cleared; clearing never touches the jobs.
+const errorLog=new ErrorLog();
+const emit=()=>{stampJobs();state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 function progressEmit(){const now=Date.now();if(now-lastEmit>100){lastEmit=now;emit();}}
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
@@ -405,7 +408,8 @@ async function action(input:Action):Promise<void>{
   case 'applyReview':await applyReview();break;
   case 'discardReview':await discardReview();pump();break;
   case 'window': if(input.command==='minimize')window?.minimize();else if(input.command==='maximize'){if(window?.isMaximized())window.unmaximize();else window?.maximize();}else if(input.command==='close')window?.close();break;
-  case 'clearError':state.error=undefined;break;
+  case 'clearError':if(typeof input.id==='string')clearErrors(errorLog,state,input.id);else state.error=undefined;break;
+  case 'clearErrors':clearErrors(errorLog,state);break;
   case 'refresh':await refresh();break;
   case 'preferences':{
    const patch=input.patch;
