@@ -23,7 +23,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  // capturePage cannot draw a View Transition mid-flight, so screenshots wait for the interface to settle.
  const shot=async(name:string)=>{await new Promise(r=>setTimeout(r,100));await settle();await fs.writeFile(path.join(report,name+'.png'),(await window.webContents.capturePage()).toPNG());};
  // An error toast suspends transitions (errors stay on top), so motion checks clear it first.
- const clearToast=async()=>{await js("document.querySelector('[data-testid=error-toast] button[aria-label=Dismiss]')?.click();true");await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast]')===null"),'error toast dismissed');};
+ const clearToast=async()=>{await js("document.querySelector('[data-testid=error-toast] button[aria-label=Dismiss],[data-testid=warning-toast] button[aria-label=Dismiss]')?.click();true");await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast],[data-testid=warning-toast]')===null"),'error toast dismissed');};
  // Settings shows one category panel at a time; open the one a check needs.
  const settingsTab=async(id:string)=>{await js(`document.querySelector('#settings-tab-${id}').click()`);await wait(()=>js<boolean>(`document.querySelector('#settings-tab-${id}')?.getAttribute('aria-selected')==='true'`),`settings category ${id}`);};
  const check=async(name:string,run:()=>Promise<void>)=>{try{await run();checks.push({name,passed:true});console.log(`QA PASS: ${name}`);}catch(e){console.error(e);checks.push({name,passed:false,error:String(e)});throw e;}};
