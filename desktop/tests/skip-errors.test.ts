@@ -99,3 +99,12 @@ test('skipping errors is a saved setting that is off by default',()=>{
  assert.equal(normalizePreferences({skipErrors:'yes'},{...defaultPreferences,skipErrors:true}).skipErrors,true);
  assert.equal(normalizePreferences({}).skipErrors,false);
 });
+
+test('a skipped file takes its whole family with it, so a sidecar never lands without its photo',async t=>{
+ const f=await fixture(t,['a.jpg','a.xmp','c.jpg']);
+ const changingA=async(file:string)=>{if(path.basename(file)==='a.jpg')await fs.appendFile(path.join(f.source,'a.jpg'),'more');return {fields:{},camera:'Cam',date:'2024-05-06T07:08:09'};};
+ const {plans:[transfer],failures}=await plan(f.source,[f.root],{...photos,skipErrors:true},changingA);
+ assert.deepEqual(failures.map(item=>path.basename(item.path)).sort(),['a.jpg','a.xmp']);
+ assert.deepEqual(await execute(transfer!),{copied:1,skipped:0,errors:[]});
+ assert.deepEqual(await published(f.root),['2024/c.jpg']);
+});

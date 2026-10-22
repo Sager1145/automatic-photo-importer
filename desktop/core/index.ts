@@ -177,10 +177,17 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   if(options.reorganize) excludedRoots.push(...allRoots.map(({root})=>path.join(root,DRIVE_BACKUPS)));
   const organizationOwned=(file:string)=>options.reorganize===true&&allRoots.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
-  // With skipErrors a failing file is left out and reported; otherwise it fails the plan.
-  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!options.skipErrors)throw error;failures.set(file,toError(error));};
-  const scan=await inventory(sourceRoot,{...(options.skipErrors?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes)=>onProgress?.(found,'',{step:'listing',total:0,bytes,totalBytes:0})},signal);
-  let files=scan.files.filter(f=>f.included&&!organizationOwned(f.path)&&!failures.has(f.path));
+  // With skipErrors a failing file is left out and reported; otherwise it fails the plan. A mirror
+  // never skips: a file left out of it would read as removed from the drive and its copy moved away.
+  const skipping=options.skipErrors===true&&!options.drive?.mirror;
+  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!skipping)throw error;failures.set(file,toError(error));};
+  // A file is copied or moved with its whole family (RAW, JPG, sidecars), so a failure leaves the family out.
+  const skipFamilies=<T>(items:T[],file:(item:T)=>string,family:(item:T)=>string|undefined)=>{
+    const failed=new Map<string,Error>();for(const item of items){const error=failures.get(file(item)),key=family(item);if(error&&key!==undefined&&!failed.has(key))failed.set(key,error);}
+    for(const item of items){const key=family(item);if(key!==undefined&&failed.has(key)&&!failures.has(file(item)))failures.set(file(item),failed.get(key)!);}
+  };
+  const scan=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes)=>onProgress?.(found,'',{step:'listing',total:0,bytes,totalBytes:0})},signal);
+  let files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
   const listedBytes=files.reduce((sum,file)=>sum+file.size,0);let checkedBytes=0;
   const infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for
@@ -206,7 +213,6 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
   }));
   if(failure!==undefined) throw failure;
-  if(failures.size) files=files.filter(file=>!failures.has(file.path));
   for(const found of issues) if(found.length) (scan.issues??=[]).push(...found);
   const stems=new Map<string,InventoryFile[]>();
   for(const file of files) {const key=stem(file.path); stems.set(key,[...(stems.get(key)??[]),file]);}
@@ -244,6 +250,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
     for(const file of files) if(file.companionOf&&chapterLead.has(file.companionOf)) {chapterLead.set(file.path,chapterLead.get(file.companionOf)!);familyFor.set(file.path,familyFor.get(file.companionOf)!);}
   }
+  if(failures.size) {skipFamilies(files,file=>file.path,file=>familyFor.get(file.path));files=files.filter(file=>!failures.has(file.path));}
   // Each ancestor describes only media within its own subtree. Stop at the
   // nearest evidence, including mixed-camera evidence, rather than guessing
   // from another camera elsewhere on the card.
@@ -322,6 +329,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       }
     }));
     // A file that could not be read is not moved: it stays where it is, outside the reviewed batch.
+    skipFamilies(prepared,item=>item.entry.source,item=>item.entry.family);
     for(let index=prepared.length-1;index>=0;index--) if(failures.has(prepared[index]!.entry.source)) prepared.splice(index,1);
     for(const {entry} of prepared) entry.digest=hashes.get(entry.source)!;
   }
@@ -370,11 +378,17 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
     return transfer;
   }
-  const plans:TransferPlan[]=[];
-  for(const destination of destinations){
-    const transfer=await rootPlan(destination,'photos');
-    if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
-    plans.push(transfer);
+  let plans:TransferPlan[]=[];
+  // A family that fails on a later destination was already reserved on earlier ones, where it could
+  // send another family to a conflict folder; those destinations are planned again without it.
+  for(let known=-1;known!==failures.size;) {
+    known=failures.size;plans=[];
+    for(const destination of destinations){
+      const transfer=await rootPlan(destination,'photos');
+      if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
+      plans.push(transfer);
+    }
+    if(destinations.length<2) break;
   }
   // A file that failed for one destination is left out of every destination, so each holds the same files.
   if(failures.size&&!options.reorganize)for(const transfer of plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])]))transfer.entries=transfer.entries.filter(entry=>!failures.has(entry.source));

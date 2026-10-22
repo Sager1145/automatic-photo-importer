@@ -439,6 +439,7 @@ async function action(input:Action):Promise<void>{
   case 'skipAndContinue':{
    // Runs a job that stopped on a file error again, skipping files that fail. Verified copies are recognised, not copied again.
    const failed=state.jobs.find(job=>job.id===input.jobId&&!job.organization&&(job.phase==='error'||job.phase==='stopped')&&!active.has(job.id));if(!failed)break;
+   for(const id of skipErrorJobs)if(!state.jobs.some(job=>job.id===id&&job.phase==='queued'))skipErrorJobs.delete(id);
    enqueue(failed.source,failed.backup);const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued)skipErrorJobs.add(queued.id);pump();break;
   }
   case 'pause':{
