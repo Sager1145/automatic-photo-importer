@@ -11,6 +11,8 @@ Verifying copied files|正在验证已复制文件|正在驗證已複製檔案|�
 Drive path|存储位置|儲存位置|保存場所
 
 Drive details|详细信息|詳細資訊|詳細情報
+Needs {needed} of {free} free|需要 {needed}，可用 {free}|需要 {needed}，可用 {free}|必要 {needed}／空き {free}
+Needs {needed} of {free} free ({existing} already on the destination)|需要 {needed}，可用 {free}（{existing} 已在目标中）|需要 {needed}，可用 {free}（{existing} 已在目的地中）|必要 {needed}／空き {free}（{existing} は保存先にあります）
 
 Capture information|拍摄信息|拍攝資訊|撮影情報
 Capture date|拍摄日期|拍攝日期|撮影日

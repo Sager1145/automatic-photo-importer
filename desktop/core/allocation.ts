@@ -1,4 +1,4 @@
-import type {PlanEntry,Preferences,TransferPlan} from '../shared';
+import type {DestinationSpace,PlanEntry,Preferences,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
 
 /** A destination's plans: its backup folder and, in the video-root layout, its video folder. */
@@ -14,6 +14,15 @@ export function requiredTransferSpace(plan:TransferPlan):number{
  let bytes=0,largest=0;const families=new Map<string,number>();
  for(const entry of destinationEntries(plan)){const size=entry.skip?0:entry.size;bytes+=size;const family=(families.get(entry.family)??0)+size;families.set(entry.family,family);largest=Math.max(largest,family);}
  return bytes+largest;
+}
+
+/** Sizes in space errors; the renderer formats the same figures for display. */
+const size=(bytes:number)=>bytes>=1e9?`${(bytes/1e9).toFixed(1)} GB`:bytes>=1e6?`${(bytes/1e6).toFixed(1)} MB`:bytes>=1e3?`${(bytes/1e3).toFixed(1)} KB`:`${bytes} B`;
+/** What an import needs on one destination once duplicates are known: only files the plan writes count. */
+export function destinationSpace(plan:TransferPlan,free:number):DestinationSpace{
+ let existing=0,existingFiles=0,newFiles=0;
+ for(const entry of destinationEntries(plan)){if(entry.skip){existing+=entry.size;existingFiles++;}else newFiles++;}
+ return {needed:requiredTransferSpace(plan),free,existing,existingFiles,newFiles};
 }
 
 /** Allocate against free space after other jobs' reservations. Sequential mode
@@ -38,9 +47,9 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
   plans.forEach((plan,index)=>{for(const part of destinationParts(plan))part.entries=part.entries.filter(entry=>assignments[index].has(entry.source));});
  }
  return plans.map((plan,index)=>{
-  const bytes=requiredTransferSpace(plan);
-  if(bytes>available[index])throw new MessageError('error.destinationNeedsSpace',{index:index+1});
-  return bytes;
+  const space=destinationSpace(plan,available[index]);
+  if(space.needed>space.free)throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:size(space.needed),free:size(space.free),existing:size(space.existing)});
+  return space.needed;
  });
 }
 

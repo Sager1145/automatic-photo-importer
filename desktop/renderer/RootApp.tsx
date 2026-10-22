@@ -11,7 +11,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { formatMessage, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
@@ -846,6 +846,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
+    {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressBar value={0} indeterminate label={t("{name} scanning", { name: source.name })} />}
     {job?.detail && active && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
@@ -861,6 +862,12 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
       </div>
     </details>
   </article>;
+}
+
+/** Space an import needs on each destination once its plan exists: files already there are skipped and not counted. */
+export function SourceSpace({ space }: { space: DestinationSpace[] }) {
+  const { t, formatBytes: bytes } = useTranslation();
+  return <>{space.map((item, index) => <p key={index} className="source-quiet-note" data-testid="source-space"><Icon icon={HardDrive} size={13} />{space.length > 1 ? `${index + 1} · ` : ''}{item.existing > 0 ? t("Needs {needed} of {free} free ({existing} already on the destination)", { needed: bytes(item.needed), free: bytes(item.free), existing: bytes(item.existing) }) : t("Needs {needed} of {free} free", { needed: bytes(item.needed), free: bytes(item.free) })}</p>)}</>;
 }
 
 export function SourceCameraInformation({ sourceId, info }: { sourceId: string; info: SourceCameraInfo }) {
