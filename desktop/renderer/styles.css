@@ -57,11 +57,11 @@
   --button-highlight:inset 0 1px 0 rgba(255,255,255,.22);
   --backdrop:rgba(28,28,32,.26);
 
-  /* Motion */
+  /* Motion: the only durations and curves in the app (JavaScript reads them too). Exits use --quick, entrances --base, page slides --slow. */
   --ease-out:cubic-bezier(.23,1,.32,1);--ease-ios:cubic-bezier(.32,.72,0,1);--ease-snappy:cubic-bezier(.4,0,.2,1);
   /* Critically damped-ish spring (bounce ≈ 0.15) sampled for CSS */
   --spring:linear(0,.006,.025 2.8%,.101 6.1%,.539 18.9%,.721 25.3%,.849 31.5%,.937 38.1%,.968 41.8%,.991 45.7%,1.006 50.1%,1.015 55%,1.017 63.9%,1.001 85.9%,1);
-  --press:120ms;--quick:180ms;--base:260ms;--slow:420ms;--spring-duration:520ms;
+  --press:120ms;--quick:180ms;--base:240ms;--slow:300ms;--spring-duration:520ms;
 }
 
 /* ---------- Tokens: dark ---------- */
@@ -1017,15 +1017,31 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 ::view-transition-group(activity-sheet),::view-transition-group(metadata-sheet){animation-duration:0s}
 ::view-transition-group(nav-indicator){animation-duration:var(--spring-duration);animation-timing-function:var(--spring);mix-blend-mode:darken}
 :root[data-theme=dark]::view-transition-group(nav-indicator){mix-blend-mode:lighten}
-/* Interface swaps that are not page changes (grid/list) dissolve without ghosting */
-:root[data-transition=fade]::view-transition-old(page){animation:interface-out 110ms var(--ease-out) both}
-:root[data-transition=fade]::view-transition-new(page){animation:interface-in 280ms var(--ease-out) 60ms both}
+/* Every other group crossfades or morphs on the same timing */
+::view-transition-group(*){animation-duration:var(--base);animation-timing-function:var(--ease-ios)}
+/* Transitions never swallow a click: it reaches the live interface underneath */
+::view-transition{pointer-events:none}
+/* Layout changes: cards and rows morph to their new place; ones that arrive or leave fade where they are */
+:root[data-transition=layout] :is(.source-row,.sidebar-drive,.drive-list li,.destination-slot,.import-dashboard,.review-panel){view-transition-name:match-element;view-transition-class:item}
+/* Settings categories: the panel rises (next) or falls (previous) while the selection glides */
+:root[data-transition^=category] .settings-panels{view-transition-name:settings-panel}
+:root[data-transition^=category] .settings-indicator{view-transition-name:settings-indicator}
+::view-transition-group(settings-indicator){animation-duration:var(--spring-duration);animation-timing-function:var(--spring)}
+:root[data-transition=category-forward]::view-transition-old(settings-panel){animation:panel-out-up var(--quick) var(--ease-out) both}
+:root[data-transition=category-forward]::view-transition-new(settings-panel){animation:panel-in-up var(--base) var(--ease-ios) both}
+:root[data-transition=category-back]::view-transition-old(settings-panel){animation:panel-out-down var(--quick) var(--ease-out) both}
+:root[data-transition=category-back]::view-transition-new(settings-panel){animation:panel-in-down var(--base) var(--ease-ios) both}
+::view-transition-old(settings-panel),::view-transition-new(settings-panel){height:auto}
+@keyframes panel-out-up{to{opacity:0;transform:translateY(-8px)}}
+@keyframes panel-in-up{from{opacity:0;transform:translateY(12px)}}
+@keyframes panel-out-down{to{opacity:0;transform:translateY(8px)}}
+@keyframes panel-in-down{from{opacity:0;transform:translateY(-12px)}}
 ::view-transition-group(page),::view-transition-group(page-title){animation-duration:var(--slow);animation-timing-function:var(--ease-ios)}
-:root[data-transition=forward]::view-transition-old(page){animation:page-out-forward 200ms var(--ease-out) both}
+:root[data-transition=forward]::view-transition-old(page){animation:page-out-forward var(--quick) var(--ease-out) both}
 :root[data-transition=forward]::view-transition-new(page){animation:page-in-forward var(--slow) var(--ease-ios) both}
-:root[data-transition=back]::view-transition-old(page){animation:page-out-back 200ms var(--ease-out) both}
+:root[data-transition=back]::view-transition-old(page){animation:page-out-back var(--quick) var(--ease-out) both}
 :root[data-transition=back]::view-transition-new(page){animation:page-in-back var(--slow) var(--ease-ios) both}
-:root[data-transition=forward]::view-transition-old(page-title),:root[data-transition=back]::view-transition-old(page-title){animation:title-out 160ms var(--ease-out) both}
+:root[data-transition=forward]::view-transition-old(page-title),:root[data-transition=back]::view-transition-old(page-title){animation:title-out var(--quick) var(--ease-out) both}
 :root[data-transition=forward]::view-transition-new(page-title),:root[data-transition=back]::view-transition-new(page-title){animation:title-in var(--slow) var(--ease-ios) both}
 ::view-transition-old(page-title),::view-transition-new(page-title){height:100%;object-fit:none;object-position:left center}
 @keyframes page-out-forward{to{opacity:0;transform:translateX(-28px)}}
@@ -1043,13 +1059,19 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 @starting-style{.review-panel,.rule-editor,.unknown-rules,.source-expanded-details{opacity:0;transform:translateY(6px)}}
 @supports (interpolate-size:allow-keywords){
   :root{interpolate-size:allow-keywords}
-  .source-disclosure::details-content,.metadata-details::details-content,.unknown-explanation::details-content,.skipped-files::details-content{block-size:0;overflow:clip;transition:block-size var(--base) var(--ease-ios),content-visibility var(--base) allow-discrete}
-  .source-disclosure[open]::details-content,.metadata-details[open]::details-content,.unknown-explanation[open]::details-content,.skipped-files[open]::details-content{block-size:auto}
+  details::details-content{block-size:0;overflow:clip;transition:block-size var(--base) var(--ease-ios),content-visibility var(--base) allow-discrete}
+  details[open]::details-content{block-size:auto}
 }
-::view-transition-old(root){animation:interface-out 140ms var(--ease-out) both}
-::view-transition-new(root){animation:interface-in 220ms var(--ease-out) both}
-@keyframes interface-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@keyframes interface-out{from{opacity:1}to{opacity:0}}
+/* Things that change inside a card: status text fades up in place, swapped icons pop, dimmed parts crossfade */
+.source-status-text{transition:opacity var(--base) var(--ease-out),translate var(--base) var(--ease-ios)}
+@starting-style{.source-status-text{opacity:0;translate:0 3px}}
+:is([data-testid=global-start],[data-testid=global-automatic],.organization-progress .button,.source-row-actions .button,.selection-chip)>svg,.accent-button svg,.preset-radio>span{transition:transform var(--spring-duration) var(--spring),scale var(--spring-duration) var(--spring),opacity var(--quick) var(--ease-out)}
+@starting-style{:is([data-testid=global-start],[data-testid=global-automatic],.organization-progress .button,.source-row-actions .button,.selection-chip)>svg,.accent-button svg,.preset-radio>span{scale:.5;opacity:0}}
+.source-row{transition-property:opacity,translate,box-shadow,border-color,background-color}
+.source-row :is(.source-device,.source-identity h3,.source-disclosure){transition:opacity var(--base) var(--ease-out)}
+/* Options that appear when a setting turns on */
+.path-level-options,.path-builder,.path-builder-heading,.history-empty,.organization-scope li{transition:opacity var(--base) var(--ease-out),translate var(--base) var(--ease-ios)}
+@starting-style{.path-level-options,.path-builder,.path-builder-heading,.history-empty,.organization-scope li{opacity:0;translate:0 6px}}
 
 /* ---------- Responsive ---------- */
 @media (max-width:1100px){
@@ -1174,9 +1196,10 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .settings-page.settings-layout{columns:auto;display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.25rem;container:settings/inline-size}
 .settings-nav{flex:1 1 15rem;max-width:18rem;position:sticky;top:calc(var(--titlebar-height) + 1rem);min-width:0}
 .settings-nav [role=tablist]{display:grid;gap:.2rem;padding:.35rem;border-radius:var(--radius-xl);background:var(--surface);box-shadow:0 0 0 1px var(--separator),var(--shadow-1)}
-.settings-nav [role=tab]{display:flex;align-items:center;gap:.7rem;width:100%;min-width:0;padding:.55rem .65rem;border-radius:var(--radius-lg);text-align:start;color:var(--label);transition:background-color var(--base) var(--ease-out),box-shadow var(--base) var(--ease-out)}
+.settings-nav [role=tab]{position:relative;isolation:isolate;display:flex;align-items:center;gap:.7rem;width:100%;min-width:0;padding:.55rem .65rem;border-radius:var(--radius-lg);text-align:start;color:var(--label);transition:background-color var(--base) var(--ease-out),box-shadow var(--base) var(--ease-out)}
 .settings-nav [role=tab]:hover{background:var(--fill-4)}
-.settings-nav [role=tab][aria-selected=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
+.settings-nav [role=tab][aria-selected=true]:hover{background:none}
+.settings-indicator{position:absolute;inset:0;z-index:-1;border-radius:inherit;background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .settings-nav [role=tab]:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
 .settings-nav-icon{display:inline-grid;place-items:center;flex:none;width:1.9rem;height:1.9rem;border-radius:var(--radius-md);background:var(--fill-3);color:var(--label-secondary);transition:background-color var(--base) var(--ease-out),color var(--base) var(--ease-out)}
 .settings-nav [aria-selected=true] .settings-nav-icon{background:var(--accent-fill);color:var(--on-accent)}
@@ -1186,7 +1209,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .settings-panels{flex:999 1 30rem;min-width:0;max-width:56rem}
 .settings-panel{display:grid;gap:1rem;min-width:0}
 .settings-panel[hidden]{display:none}
-.settings-panel:not([hidden]){animation:interface-in var(--base) var(--ease-out)}
 .settings-panel-title{font-size:var(--text-title-2);font-weight:700;letter-spacing:var(--tracking-tight)}
 .settings-panel .settings-section{margin-bottom:0}
 .settings-panel>.settings-fieldset{display:grid;gap:1rem;min-width:0;margin:0;padding:0;border:0}

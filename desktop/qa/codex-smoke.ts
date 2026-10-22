@@ -18,7 +18,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const action=async(value:Action)=>{await js<void>(`window.importer.action(${JSON.stringify(value)})`);return state();};
  const wait=async(test:()=>Promise<boolean>,label:string)=>{const end=Date.now()+60000;while(Date.now()<end){if(await test())return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Timed out: ${label}`);};
  const theme=async(want:string)=>wait(()=>js<boolean>(`document.documentElement.dataset.theme===${JSON.stringify(want)}`),`theme ${want}`);
- const shot=async(name:string)=>{await new Promise(r=>setTimeout(r,150));await fs.writeFile(path.join(report,name+'.png'),(await window.webContents.capturePage()).toPNG());};
+ // capturePage cannot draw a View Transition mid-flight, so screenshots wait for the interface to settle.
+ const shot=async(name:string)=>{await new Promise(r=>setTimeout(r,150));await wait(()=>js<boolean>('!document.documentElement.dataset.transition'),'interface transition settled');await fs.writeFile(path.join(report,name+'.png'),(await window.webContents.capturePage()).toPNG());};
  // Settings shows one category panel at a time; open the one a check needs.
  const settingsTab=async(id:string)=>{await js(`document.querySelector('#settings-tab-${id}').click()`);await wait(()=>js<boolean>(`document.querySelector('#settings-tab-${id}')?.getAttribute('aria-selected')==='true'`),`settings category ${id}`);};
  const check=async(name:string,run:()=>Promise<void>)=>{try{await run();checks.push({name,passed:true});console.log(`QA PASS: ${name}`);}catch(e){console.error(e);checks.push({name,passed:false,error:String(e)});throw e;}};
@@ -140,6 +141,24 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    if(process.argv.includes('--force-prefers-reduced-motion'))assert.equal(reduced,true);
    const durations=await js<string>("getComputedStyle(document.querySelector('[data-testid=global-start]')).transitionDuration");
    assert.equal(durations.split(',').some(value=>parseFloat(value)>0),!reduced);
+  });
+  await check('Every page and Settings category switch animates through the motion helper, and reduced motion skips it',async()=>{
+   const reduced=await js<boolean>("matchMedia('(prefers-reduced-motion: reduce)').matches");
+   // Record the kind of each View Transition the renderer starts.
+   await js("window.qaTransitions=[];window.qaStartViewTransition=document.startViewTransition;document.startViewTransition=function(update){window.qaTransitions.push(document.documentElement.dataset.transition);return window.qaStartViewTransition.call(document,update);};true");
+   const go=async(label:string,title=label)=>{await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click()`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(title)}`),`page ${label}`);};
+   const categories=['importing','destinations','folders','organization','drives','general'];
+   let seen:string[];
+   try{
+    await go('Import desk');await js('window.qaTransitions=[]');
+    for(const [label,title] of [['Drives','Drives'],['Organization','Organization'],['History','Import history'],['Settings','Settings']])await go(label,title);
+    await settingsTab('importing');
+    for(const id of [...categories.slice(1),...categories.slice(0,-1).reverse()])await settingsTab(id);
+    assert.equal(await js<boolean>("document.querySelectorAll('.settings-indicator').length===1&&document.querySelector('[aria-selected=true] .settings-indicator')!==null"),true,'One selection indicator, on the open category');
+    await go('Import desk');
+    seen=(await js<string[]>('window.qaTransitions')).filter(kind=>/^(forward|back|category-)/.test(kind));
+   }finally{await js('document.startViewTransition=window.qaStartViewTransition;true');}
+   assert.deepEqual(seen,reduced?[]:['forward','forward','forward','forward',...Array(5).fill('category-forward'),...Array(5).fill('category-back'),'back']);
   });
   await check('Settings provides live, persistent text sizing with a readable default',async()=>{
    await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Settings').click()`);await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Settings'"),'navigation committed');
