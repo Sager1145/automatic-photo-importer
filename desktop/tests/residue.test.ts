@@ -7,6 +7,7 @@ import os from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {plan,execute,executeReorganization,configureOrganizationRecovery} from '../core/index';
 import {recordPartial} from '../core/import-recovery';
+import {sealImportRecord} from '../core/recovery';
 import {findResidue,cleanResidue} from '../core/residue';
 import type {Metadata} from '../shared';
 
@@ -88,14 +89,14 @@ test('residue lists only the app\'s own leftovers, with resumable copies apart',
   const found=await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]});
   const listed=new Map(found.items.map(item=>[item.path,item.kind]));
   assert.equal(listed.get(f.resumable),'resumable');assert.equal(listed.get(f.resumableReceipt),'resumable');
-  assert.equal(listed.get(f.orphan),'partial');assert.equal(listed.get(f.goneReceipt),'receipt');assert.equal(listed.get(f.vanishedReceipt),'receipt');
+  assert.equal(listed.get(f.orphan),'kept');assert.equal(listed.get(f.goneReceipt),'receipt');assert.equal(listed.get(f.vanishedReceipt),'receipt');
   assert.equal(listed.get(f.indexTemp),'index');assert.equal(listed.get(f.visibleIndexTemp),'index');
   assert.equal(listed.get(f.organizationStage),'organization');assert.equal(listed.get(f.incomplete),'organization');
   assert.equal(listed.get(f.camera1),'temporary');assert.equal(listed.get(f.preview),'temporary');
-  assert.ok([...listed.keys()].some(item=>item.startsWith(f.emptySlot+path.sep)),'an emptied original slot is listed');
+  assert.ok(![...listed.keys()].some(item=>item.startsWith(f.emptySlot)),'empty slots of an unreadable or pending journal are not listed');
   for(const kept of [f.bound,f.second.destination,f.foreign,f.kept,f.inUse,f.hidden,...f.user])assert.ok(!listed.has(kept),`not residue: ${kept}`);
   assert.ok(![...listed.keys()].some(item=>f.kept.startsWith(item+path.sep)),'no folder holding a kept original is listed');
-  assert.deepEqual(found.resumable,{files:2,bytes:found.items.filter(item=>item.kind==='resumable').reduce((sum,item)=>sum+item.bytes,0)});
+  assert.deepEqual(found.resumable,{files:3,bytes:found.items.filter(item=>item.kind==='resumable'||item.kind==='kept').reduce((sum,item)=>sum+item.bytes,0)});
   assert.equal(found.files,found.items.length);assert.equal(found.bytes,found.items.reduce((sum,item)=>sum+item.bytes,0));
   assert.ok(found.bytes>=1000+2500+3000+700+1200);
 });
@@ -104,13 +105,13 @@ test('cleaning removes the residue and nothing else; automatic cleaning keeps re
   const f=await littered(t);
   const automatic=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]}),{keepResumable:true});
   assert.ok(automatic.removed.files>0);
-  assert.deepEqual(automatic.left.items.map(item=>item.kind),['resumable','resumable']);
-  await fs.lstat(f.resumable);await fs.lstat(f.resumableReceipt);
-  for(const removed of [f.orphan,f.goneReceipt,f.vanishedReceipt,f.indexTemp,f.visibleIndexTemp,f.organizationStage,f.incomplete,f.camera1,f.preview,f.emptySlot])await assert.rejects(fs.lstat(removed),{code:'ENOENT'},removed);
+  assert.deepEqual(automatic.left.items.map(item=>item.kind).sort(),['kept','resumable','resumable']);
+  await fs.lstat(f.resumable);await fs.lstat(f.resumableReceipt);await fs.lstat(f.orphan);
+  for(const removed of [f.goneReceipt,f.vanishedReceipt,f.indexTemp,f.visibleIndexTemp,f.organizationStage,f.incomplete,f.camera1,f.preview])await assert.rejects(fs.lstat(removed),{code:'ENOENT'},removed);
   const left=await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]});
-  assert.deepEqual(left.items.map(item=>item.kind),['resumable','resumable']);
+  assert.deepEqual(left.items.map(item=>item.kind).sort(),['kept','resumable','resumable']);
   const manual=await cleanResidue(left);
-  assert.deepEqual(manual.removed,{files:2,bytes:left.bytes});assert.equal(manual.left.files,0);
+  assert.deepEqual(manual.removed,{files:3,bytes:left.bytes});assert.equal(manual.left.files,0);
   assert.equal((await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]})).files,0);
   for(const kept of [f.bound,f.second.destination,f.foreign,f.kept,f.inUse,f.hidden,...f.user])await fs.lstat(kept);
   assert.equal(await fs.readFile(f.kept,'utf8'),'kept for undo');
@@ -159,6 +160,7 @@ test('a staged copy whose card is not connected is kept as resumable; one whose 
   await fs.rename(card+'-ejected',card);await fs.appendFile(path.join(card,'DSC_0001.NEF'),'edited');
   found=await findResidue([f.root]);
   assert.equal(found.items.find(item=>item.path===f.resumable)?.kind,'partial');
+  assert.equal(found.items.find(item=>item.path===f.resumableReceipt)?.kind,'receipt');
 });
 
 test('a preview folder that starts being used after the listing is not removed',async t=>{
@@ -167,4 +169,86 @@ test('a preview folder that starts being used after the listing is not removed',
   inUse.push(f.preview);
   await cleanResidue(found,{inUse:()=>inUse});
   await fs.lstat(f.preview);await assert.rejects(fs.lstat(f.camera1),{code:'ENOENT'});
+});
+
+/** One staged copy with a signed receipt, on plain folders. */
+async function staged(t:test.TestContext,seal:(record:Record<string,unknown>)=>Record<string,unknown>|undefined=record=>record) {
+  const folder=await base(t,'residue-keep-');
+  const card=path.join(folder,'card'),root=path.join(folder,'backup');
+  await fs.mkdir(card);await fs.mkdir(root);
+  const source=path.join(card,'DSC_0001.NEF');await fs.writeFile(source,Buffer.alloc(4000,1));
+  const reviewed=(await plan(card,[root],options,metadata)).plans[0]!,entry=reviewed.entries[0]!;
+  await fs.mkdir(path.dirname(entry.destination),{recursive:true});
+  const copy=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);await fs.writeFile(copy,Buffer.alloc(1000,1));
+  const receipt=(await recordPartial('stage',copy,await fs.lstat(copy,{bigint:true}),entry,reviewed,new Map())).journal;
+  const changed=seal(JSON.parse(await fs.readFile(receipt,'utf8')));
+  if(changed) await fs.writeFile(receipt,JSON.stringify(changed));
+  return {root,source,copy,receipt};
+}
+const reseal=(change:Record<string,unknown>)=>(record:Record<string,unknown>)=>{const {seal:_seal,...data}=record;void _seal;return sealImportRecord({...data,...change});};
+const automatic=(root:string)=>findResidue([root]).then(found=>cleanResidue(found,{keepResumable:true}));
+const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
+
+test('a staged copy whose receipt shows identity drift is kept by the automatic check and removed by Clean up',async t=>{
+  const f=await staged(t,reseal({fileIdentity:'1:2:3'}));
+  const found=await findResidue([f.root]);
+  assert.equal(found.items.find(item=>item.path===f.copy)?.kind,'kept');assert.equal(found.items.find(item=>item.path===f.receipt)?.kind,'kept');
+  const result=await cleanResidue(found,{keepResumable:true});
+  assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));assert.ok(await exists(f.receipt));
+  assert.equal(result.left.resumable.files,2);
+  const manual=await cleanResidue(await findResidue([f.root]));
+  assert.equal(manual.removed.files,2);assert.ok(!await exists(f.copy));assert.ok(!await exists(f.receipt));
+});
+
+test('a staged copy whose source on a present card changed or went is removed automatically',async t=>{
+  for(const change of ['size','mtime','missing']) {
+    const f=await staged(t,reseal({fileIdentity:'1:2:3'}));
+    if(change==='size') await fs.appendFile(f.source,'more');
+    else if(change==='mtime') await fs.utimes(f.source,new Date(1e12),new Date(1e12));
+    else await fs.unlink(f.source);
+    const result=await automatic(f.root);
+    assert.equal(result.removed.files,2,change);assert.ok(!await exists(f.copy),change);assert.ok(!await exists(f.receipt),change);
+  }
+});
+
+test('a staged copy whose card is absent is kept automatically',async t=>{
+  const f=await staged(t);
+  await fs.rename(path.dirname(f.source),path.dirname(f.source)+'-ejected');
+  const result=await automatic(f.root);
+  assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));
+});
+
+test('a staged copy with no receipt is kept automatically and removed by Clean up',async t=>{
+  const f=await staged(t,()=>undefined);
+  await fs.unlink(f.receipt);
+  const result=await automatic(f.root);
+  assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));
+  const manual=await cleanResidue(await findResidue([f.root]));
+  assert.equal(manual.removed.files,1);assert.ok(!await exists(f.copy));
+});
+
+test('a staged copy named by an unauthenticated receipt is kept even when its source is gone',async t=>{
+  const f=await staged(t,record=>({...record,seal:'0'.repeat(64)}));
+  await fs.unlink(f.source);
+  const result=await automatic(f.root);
+  assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));assert.ok(await exists(f.receipt));
+});
+
+test('empty original slots are leftovers only in a finished journal, not a pending one',async t=>{
+  for(const finished of [false,true]) {
+    const root=await base(t,'residue-slots-');
+    const original=path.join(root,'incoming','DSC_0001.NEF');
+    await fs.mkdir(path.dirname(original));await fs.writeFile(original,Buffer.alloc(3*1024*1024,5));
+    const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
+    const storage=path.join(root,'Photo Importer Recovery');
+    const stagedNow=()=>readdirSync(storage).flatMap(id=>{try{return readdirSync(path.join(storage,id)).filter(name=>name.startsWith('stage-'));}catch{return [];}});
+    if(finished) await executeReorganization(reviewed,undefined,undefined,{strategy:'rename'});
+    else await assert.rejects(executeReorganization(reviewed,stopWhen(()=>stagedNow().length>0),undefined,{strategy:'copy'}),{name:'AbortError'});
+    const job=path.join(storage,readdirSync(storage).find(name=>/^[0-9a-f-]{36}$/.test(name))!);
+    const slot=path.join(job,'originals','0',randomUUID());await fs.mkdir(slot,{recursive:true});
+    const found=await findResidue([root]);
+    assert.equal(found.items.some(item=>item.path===slot),finished,finished?'finished':'pending');
+    await cleanResidue(found,{keepResumable:true});
+    assert.equal(await exists(slot),!finished,finished?'finished':'pending');
+  }
 });
