@@ -668,6 +668,9 @@ Files {start}–{end} of {total}|文件 {start}–{end}，共 {total} 个|檔案
 {count} sources connected. Choose two backup destinations to enable imports.|已连接 {count} 个来源。选择两个备份目标以启用导入。|已連接 {count} 個來源。選擇兩個備份目的地以啟用匯入。|{count} 件接続中です。2つのバックアップ先を選ぶとインポートできます。
 
 Import controls|导入控制|匯入控制|インポート操作
+Drive controls|驱动器控制|磁碟控制|ドライブ操作
+Organization controls|整理控制|整理控制|整理操作
+Refresh drives|刷新驱动器|重新整理磁碟|ドライブを更新
 Scan all|扫描全部|掃描全部|すべてスキャン
 Scanning…|正在扫描…|正在掃描…|スキャン中…
 Scan to see formats and counts|扫描以查看格式和数量|掃描以檢視格式與數量|スキャンで形式と件数を表示

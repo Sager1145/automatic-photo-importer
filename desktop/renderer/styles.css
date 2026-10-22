@@ -203,7 +203,7 @@ input[type=range]:focus-visible{outline:2.5px solid var(--accent-fill);outline-o
 .titlebar-actions{flex:none;display:flex;align-items:center;gap:.4rem;-webkit-app-region:no-drag}
 .titlebar-actions .button{padding:0 .9rem;gap:.42rem}
 .titlebar-actions .button-icon-only{padding:0}
-.titlebar-actions [data-testid=global-start]{padding:0 1.1rem}
+.titlebar-actions :is([data-testid=global-start],[data-testid=titlebar-organize]){padding:0 1.1rem}
 .automatic-button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-border)}
 :root[data-theme=dark] .automatic-button[aria-pressed=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .automatic-button[aria-pressed=true]:hover{background:var(--accent-soft)}
@@ -940,9 +940,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 @container titlebar (max-width:58rem){.titlebar-label{display:none}.titlebar-actions [data-testid=show-errors]{padding:0 .7rem}}
 @container titlebar (max-width:48rem){
   .titlebar-actions{gap:.3rem}
-  .titlebar-actions :is([data-testid=global-stop],[data-testid=global-automatic]){font-size:0;gap:0;padding:0;width:var(--control-height)}
+  .titlebar-actions :is([data-testid=global-stop],[data-testid=global-automatic],[data-testid=titlebar-review-organization]){font-size:0;gap:0;padding:0;width:var(--control-height)}
 }
-@container titlebar (max-width:36rem){.titlebar-actions [data-testid=global-start]{font-size:0;gap:0;padding:0;width:var(--control-height)}}
+@container titlebar (max-width:36rem){.titlebar-actions :is([data-testid=global-start],[data-testid=titlebar-organize]){font-size:0;gap:0;padding:0;width:var(--control-height)}}
 
 /* Drive cards: labelled actions → round icons → actions below, still sized to their labels. */
 @container source-card (max-width:34rem){
