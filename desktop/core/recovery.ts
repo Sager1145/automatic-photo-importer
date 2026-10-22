@@ -5,7 +5,7 @@ import { randomUUID, createHash, createHmac, timingSafeEqual } from 'node:crypto
 import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
-import { beneath, checkAbort, code, contained, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -62,7 +62,7 @@ function authenticated(value:unknown):Record<string,unknown> {
 export function importRecoveryAvailable():boolean {return !!hostKey;}
 export function sealImportRecord(value:Record<string,unknown>):Record<string,unknown> {return hostKey?signed(value):value;}
 export function authenticateImportRecord(value:unknown):Record<string,unknown> {return authenticated(value);}
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UUID_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',uuid=new RegExp(`^${UUID_PATTERN}$`);
 const locks=new Map<string,Promise<unknown>>();
 async function locked<T>(key:string,work:()=>Promise<T>):Promise<T> {
  const previous=locks.get(key)??Promise.resolve();let release!:()=>void;const next=new Promise<void>(r=>{release=r;});locks.set(key,next);
@@ -88,8 +88,9 @@ interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIden
  renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
 /** `onRead`: records read so far out of the journal's files, for journals written one file per event.
- * `follow` false reads only this journal's own signed events, without checking its successor. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true):Promise<JournalState> {
+ * `follow` false reads only this journal's own signed events, without checking its successor.
+ * `folder`: where the journal's folder is now, when it differs from its recorded root only by case. */
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true,folder=m.root):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false};
  const apply=(record:Record<string,unknown>)=>{
@@ -118,17 +119,17 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  // Identities recorded under an earlier mount are read as this mount's, like the manifest's.
  const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
- const names=await fs.readdir(jobPath(m.root,m.id));let read=0;
+ const names=await fs.readdir(jobPath(folder,m.id));let read=0;
  for(const name of names) {
   onRead?.(++read,names.length);
-  const file=path.join(jobPath(m.root,m.id),name);
+  const file=path.join(jobPath(folder,m.id),name);
   if(name===eventLog){
-   await contained(file,m.root);const handle=await regularHandle(file);
+   await contained(file,folder);const handle=await regularHandle(file);
    try{if((await handle.stat()).size>maxEventLog)throw new Error('Recovery journal is too large');for(const line of (await handle.readFile('utf8')).split('\n')){if(line.length>2048)throw new Error('Invalid recovery event');if(line)parse(line);}}finally{await handle.close();}
    continue;
   }
   if(!/^event-[a-f0-9-]+\.json$/.test(name))continue;
-  await contained(file,m.root);const handle=await regularHandle(file);
+  await contained(file,folder);const handle=await regularHandle(file);
   try{if((await handle.stat()).size>2048)throw new Error('Invalid recovery event');parse(await handle.readFile('utf8'));}finally{await handle.close();}
  }
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
@@ -292,37 +293,118 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
   try{await fs.rmdir(folder);await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
  }
 }
-const pointerName=/^journal-(.+)\.json$/;
-/** In each sibling backup folder a journal lists, a signed pointer naming the journal and its
- * folder, written before anything moves, so an organization of that sibling (which may list no
- * other folder and hold no journal of its own) finds and checks this journal. A pointer to a
- * finished or undone journal is harmless: the scan reads the journal and finds nothing it owns. */
+const pointerName=/^journal-(.+)\.json$/,pointerTemporary=new RegExp(`^\\.?journal-${UUID_PATTERN}-${UUID_PATTERN}\\.tmp$`);
+/** The folders a journal leaves a pointer in: the sibling backup folders it lists, and the top-level
+ * folders (beneath its source) that its files move out of when they lie outside its own folder. */
+function pointerFolders(m:Manifest):string[]{
+ const found=new Set(m.libraries??[]);
+ if(m.source!==m.root)for(const entry of m.entries){
+  if(within(entry.source,m.root))continue;
+  const parts=path.relative(m.source,entry.source).split(path.sep);if(parts.length<2)continue;
+  const top=path.join(m.source,parts[0]!);if(!within(m.root,top))found.add(top);
+ }
+ return [...found];
+}
+/** Write this journal's signed pointer into `folder`: aside, then renamed into place, so a full disk
+ * or power cut never leaves a torn one. */
+async function writePointer(folder:string,m:Pick<Manifest,'root'|'id'>):Promise<void>{
+ const storageFolder=path.join(folder,storage);await ensureDirectory(storageFolder,folder);
+ const temporary=path.join(storageFolder,`journal-${m.id}-${randomUUID()}.tmp`);
+ await jsonFile(temporary,signed({kind:'sibling-journal',library:folder,root:m.root,id:m.id}));
+ await fs.rename(temporary,path.join(storageFolder,`journal-${m.id}.json`));await syncDirectory(storageFolder);
+}
+/** In each pointer folder, a signed pointer naming the journal and its folder, written before
+ * anything moves, so an organization of that folder (which may list no other folder and hold no
+ * journal of its own) finds and checks this journal. Removed when the journal finishes or is undone. */
 async function writeSiblingPointers(m:Manifest):Promise<void>{
- for(const library of m.libraries??[]){
-  // A sibling that is gone or now resolves elsewhere gets no pointer; the scan refuses the latter.
-  if(await fs.realpath(library).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;})!==library)continue;
-  const folder=path.join(library,storage),file=path.join(folder,`journal-${m.id}.json`);
-  await ensureDirectory(folder,library);
+ for(const folder of pointerFolders(m)){
+  // A folder that is gone or now resolves elsewhere gets no pointer; the scan refuses the latter.
+  if(await fs.realpath(folder).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;})!==folder)continue;
   // Kept only when it is exactly this journal's signed pointer; a torn or wrong one is replaced.
-  if(await siblingPointer(library,path.basename(file)).then(root=>root===m.root,()=>false))continue;
-  // Written aside and renamed into place, so a full disk or power cut never leaves a torn pointer.
-  const temporary=path.join(folder,`.journal-${m.id}-${randomUUID()}.tmp`);
-  await jsonFile(temporary,signed({kind:'sibling-journal',library,root:m.root,id:m.id}));
-  await fs.rename(temporary,file);await syncDirectory(folder);
+  if(await siblingPointer(folder,`journal-${m.id}.json`).then(root=>root===m.root,()=>false))continue;
+  await writePointer(folder,m);
  }
 }
-/** The journal folder a pointer in `root`'s recovery folder names, or undefined for any other entry. */
+/** Best effort once a journal owns nothing more: its pointers, and the recovery folder each was the
+ * last thing in, so the folders its files came from can be removed as empty. */
+async function removeSiblingPointers(m:Manifest):Promise<void>{
+ for(const folder of pointerFolders(m))try{
+  const storageFolder=path.join(folder,storage),file=path.join(storageFolder,`journal-${m.id}.json`);
+  await contained(file,folder);const stat=await maybeStat(file);if(!stat?.isFile())continue;
+  await fs.unlink(file);await syncDirectory(storageFolder);
+  await fs.rmdir(storageFolder).then(()=>syncDirectory(folder),()=>{});
+ }catch{/* Left as an inert pointer; residue cleanup removes it. */}
+}
+/** For residue cleanup: a pointer temp file left by a crash, a pointer that belongs to another
+ * folder, or one whose journal is gone, finished, undone or superseded. A damaged pointer, or one
+ * whose journal cannot be read, is kept. */
+export async function pointerLeftover(folder:string,name:string):Promise<boolean>{
+ if(pointerTemporary.test(name))return true;
+ const id=name.match(pointerName)?.[1];if(id===undefined)return false;
+ try{
+  const root=await siblingPointer(folder,name);if(root===undefined)return true;
+  if(!await maybeStat(path.join(root,storage,id)))return true;
+  const state=await readEvents(await readManifest(root,id),undefined,undefined,false);
+  return !!state.superseded||!unfinished(state);
+ }catch{return false;}
+}
+/** Signals a pointer file that cannot be read or trusted; the scan then looks for its journal. */
+class DamagedPointer extends Error{constructor(readonly file:string,readonly id:string,reason:string){super(`Damaged sibling journal pointer ${file} (${reason})`);}}
+/** The journal folder a pointer in `root`'s recovery folder names. Undefined for any other entry,
+ * and for a valid pointer that belongs to another folder (copied here), which is inert. */
 async function siblingPointer(root:string,name:string):Promise<string|undefined>{
  const id=name.match(pointerName)?.[1];if(id===undefined)return undefined;
  const file=path.join(root,storage,name);
- // Unreadable or unauthenticated stops the organization; resuming the journal it names rewrites it.
- const damaged=(reason:string)=>new Error(`Damaged sibling journal pointer ${file} (${reason}): resume organization ${id} to repair it`);
- if(!uuid.test(id))throw damaged('name');
+ if(!uuid.test(id))throw new DamagedPointer(file,id,'name');
  await contained(file,root);const handle=await regularHandle(file);let value:unknown;
- try{if((await handle.stat()).size>4096)throw damaged('size');try{value=JSON.parse(await handle.readFile('utf8'));}catch(error){if(error instanceof SyntaxError)throw damaged('unreadable');throw error;}}finally{await handle.close();}
- const pointer=authenticated(value);
- if(pointer.kind!=='sibling-journal'||pointer.library!==root||pointer.id!==id||typeof pointer.root!=='string'||path.resolve(pointer.root)!==pointer.root||pointer.root===root)throw damaged('contents');
+ try{if((await handle.stat()).size>4096)throw new DamagedPointer(file,id,'size');try{value=JSON.parse(await handle.readFile('utf8'));}catch(error){if(error instanceof SyntaxError)throw new DamagedPointer(file,id,'unreadable');throw error;}}finally{await handle.close();}
+ let pointer:Record<string,unknown>;try{pointer=authenticated(value);}catch{throw new DamagedPointer(file,id,'authentication failed');}
+ if(pointer.kind!=='sibling-journal'||pointer.id!==id||typeof pointer.library!=='string'||typeof pointer.root!=='string'||path.resolve(pointer.root)!==pointer.root)throw new DamagedPointer(file,id,'contents');
+ // Copied from another folder: inert. A folder renamed only by case keeps its pointers.
+ if(pathKey(pointer.library)!==pathKey(root))return undefined;
+ if(pointer.root===root)throw new DamagedPointer(file,id,'contents');
  return pointer.root;
+}
+/** For a damaged pointer in `root`: the folder of the journal it names, found among `known` folders
+ * and `root`'s neighbours, when that journal's own manifest puts a pointer in `root`. The pointer is
+ * then rewritten. Otherwise the organization stops, naming the file. */
+async function repairPointer(root:string,damaged:DamagedPointer,known:string[]):Promise<string>{
+ const parent=path.dirname(root);
+ const neighbours=(await fs.readdir(parent,{withFileTypes:true}).catch(()=>[])).filter(entry=>entry.isDirectory()&&!entry.name.startsWith('.')).map(entry=>path.join(parent,entry.name));
+ for(const candidate of new Set([...known,...neighbours])){
+  if(candidate===root||!uuid.test(damaged.id))continue;
+  // A neighbour that cannot be read, or holds a copy of the journal, is not where it lives.
+  const journal=await (async()=>{if(!await maybeStat(path.join(candidate,storage,damaged.id,'manifest.json')))return undefined;return readManifest(candidate,damaged.id);})().catch(()=>undefined);
+  if(!journal||!pointerFolders(journal).includes(root))continue;
+  await writePointer(root,journal);return candidate;
+ }
+ throw new Error(`${damaged.message}: organization ${damaged.id} was not found beside it. If that organization is finished or no longer needed, delete this file; otherwise Resume or Recheck it first.`);
+}
+/** For a folder renamed only by case: the id of an unfinished journal in it, if any. Its journals
+ * record the old name, so they are read here without the exact-path check. */
+async function unfinishedAfterCaseRename(real:string,recorded:string):Promise<string|undefined>{
+ const folder=path.join(real,storage);
+ for(const id of await fs.readdir(folder).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;})){
+  if(pointerTemporary.test(id))continue;
+  // A pointer here names a journal in another folder: unfinished there means this folder is in use.
+  if(pointerName.test(id)){
+   try{
+    const root=await siblingPointer(real,id);if(root===undefined)continue;
+    const named=id.match(pointerName)![1]!;if(!await maybeStat(path.join(root,storage,named)))continue;
+    const state=await readEvents(await readManifest(root,named),undefined,undefined,false);
+    if(!state.superseded&&unfinished(state))return named;
+   }catch{return id;}
+   continue;
+  }
+  if(!uuid.test(id))continue;
+  try{
+   const handle=await regularHandle(path.join(folder,id,'manifest.json'));let value:unknown;
+   try{value=JSON.parse(await handle.readFile('utf8'));}finally{await handle.close();}
+   const claimed=(value as {root?:unknown})?.root;if(typeof claimed!=='string'||pathKey(claimed)!==pathKey(recorded))return id;
+   const m=validateManifest(authenticated(value),claimed,id),state=await readEvents(m,undefined,undefined,false,real);
+   if(!state.superseded&&unfinished(state))return id;
+  }catch{return id;}
+ }
 }
 /** Work a journal still owns: not finished, a finalize not completed, or an undo stopped part-way.
  * A fully undone journal owns nothing: its files are back where it found them. */
@@ -339,22 +421,27 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  // Earlier journals in this backup folder, in the sibling backup folders this manifest lists
  // (the video-root layout moves files between them), and in any folder a journal found here
  // was superseded into, so an unfinished successor there is seen even when this plan lists none.
- const listed=[m.root,...m.libraries??[]],folders=[...listed],scanned=new Set<string>();
+ const listed=[m.root,...pointerFolders(m)],folders=[...listed],scanned=new Set<string>();
  for(let position=0;position<folders.length;position++){
   const root=folders[position]!;if(scanned.has(root))continue;scanned.add(root);
   if(root!==m.root){
    // A folder that is gone has no journals. A listed sibling that now resolves elsewhere is
    // refused; a folder known only as an earlier successor's is then skipped like a gone one.
-   // Renamed only by case, it still holds those journals, so it is refused too.
    const real=await fs.realpath(root).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
-   if(real!==root&&real!==undefined&&(listed.includes(root)||pathKey(real)===pathKey(root)))throw new Error(`Unsafe sibling backup folder: ${root}`);
+   if(real!==undefined&&real!==root){
+    // Renamed only by case, its journals are still there under their old name: refused while one is unfinished.
+    if(pathKey(real)===pathKey(root)){const live=await unfinishedAfterCaseRename(real,root);if(live)throw new Error(`Unsafe sibling backup folder: ${root} was renamed to ${path.basename(real)} while organization ${live} is unfinished; rename it back`);}
+    else if(listed.includes(root))throw new Error(`Unsafe sibling backup folder: ${root}`);
+   }
    if(real!==root)continue;
    await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);
   }
   for(const id of await fs.readdir(path.join(root,storage))){
    checkAbort(signal);
    // A pointer to a journal kept in another backup folder that lists this one: check it there too.
-   const pointed=await siblingPointer(root,id);if(pointed!==undefined){if(pointed!==m.root)folders.push(pointed);continue;}
+   if(pointerTemporary.test(id))continue;
+   const pointed=await siblingPointer(root,id).catch(async error=>{if(error instanceof DamagedPointer)return repairPointer(root,error,folders);throw error;});
+   if(pointed!==undefined){if(pointed!==m.root)folders.push(pointed);continue;}
    if(id===m.id||!uuid.test(id))continue;
    // A journal its own signed log already hands to a successor is never written again, and it
    // already refuses resume, undo and finalize, so its successor is not read here: a successor's
@@ -542,6 +629,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   }
   await checkpoint(m,'complete');
   // The user can keep emptied source folders; the choice is part of the signed journal.
+  await removeSiblingPointers(m);
   if(!m.keepFolders)await removeEmptySourceFolders(m,state.finalized,signal);
  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
  if(undated.length)result.notes=[`${undated.length} moved files kept their original dates because the drive could not store their capture dates.`,...undated.slice(0,20)];
@@ -629,6 +717,8 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
+  // A finalize in progress still owns its files: its pointers stay until it finishes.
+  await writeSiblingPointers(m);
   // Check every entry before authorizing the first deletion, including entries
   // that stay at their original paths and previously finalized destinations.
   for(const [index,entry]of m.entries.entries()){
@@ -671,6 +761,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    if(!state.finalized.has(index)){await checkpoint(m,'finalized',index);state.finalized.add(index);}
    result.finalized++;
   }
+  await removeSiblingPointers(m);
   return result;
  });
 }
@@ -689,6 +780,8 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   if(state.finalizing.size||state.finalized.size)throw new Error('Kept originals were already released, so this organization cannot be undone');
   const result:OrganizationUndo={restored:0,removed:0};
   if(state.undoComplete)return result;
+  // Until the undo completes, the folders it restores into must be found by other organizations.
+  await writeSiblingPointers(m);
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
   const restore=async(from:string,to:string)=>{
    await makeParent(to,m.source,m.sourceIdentity);
@@ -755,7 +848,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    }
    await checkpoint(m,'undone',index);state.undone.add(index);
   }
-  await checkpoint(m,'undo-complete');
+  await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
   return result;
  });
 }
