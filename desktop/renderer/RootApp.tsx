@@ -11,7 +11,8 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, Trash2, Usb, X,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, BackupMode, CopyMode, Inventory, InventoryFile, Job, Metadata, Preferences, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, BackupMode, CopyMode, Inventory, InventoryFile, Job, Language, Metadata, Preferences, Source, SourceCameraInfo } from '../shared';
+import { formatMessage, text, type Message } from '../messages';
 import { mediaKindForPath } from '../media-formats';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 
@@ -277,36 +278,37 @@ function sourceInventories(state: AppState) {
   });
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
-type DisplayError = {source: string; message: string; kind: ErrorKind; sourceId?: string; formatSourceId?: string};
+type DisplayError = {source: string; message: Message; kind: ErrorKind; sourceId?: string; formatSourceId?: string};
 type ErrorExplanation = { title: string; hint?: string; severity: 'error' | 'warning' };
 // Turns a raw technical message into a plain title, a next step and a severity. Keys are translated at render time.
-export function explainError(message: string, kind: ErrorKind = 'app'): ErrorExplanation {
-  const text = message.toLowerCase();
+export function explainError(message: Message, kind: ErrorKind = 'app', language: Language = 'en'): ErrorExplanation {
+  const text = formatMessage(message, 'en').toLowerCase();
   if (kind === 'format') return { title: "Unknown file formats", severity: 'warning' };
   if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination.", severity: 'error' };
   if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security.", severity: 'error' };
   if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import.", severity: 'error' };
   if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept.", severity: 'error' };
-  if (/mirror backup would move/.test(text)) return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive.", severity: 'warning' };
+  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive.", severity: 'warning' };
   if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again.", severity: 'error' };
   if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader.", severity: 'error' };
   if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this.", severity: 'error' };
   if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead.", severity: 'warning' };
-  return { title: message.split(/(?<=\.)\s/)[0]!, severity: 'error' };
+  return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]!, severity: 'error' };
 }
 export function collectErrors(state: AppState, extra: (string | undefined)[] = []): DisplayError[] {
   const result: DisplayError[] = [];
-  const add = (source: string, message?: string, kind: ErrorKind = 'app', sourceId?: string) => { if (message && !result.some(item => item.message === message && item.source === source)) result.push({source, message, kind, ...(sourceId ? { sourceId } : {})}); };
-  for (const error of [state.error, ...extra]) add('', error);
-  for (const job of state.jobs) { const kind: ErrorKind = job.organization ? 'organization' : 'source', id = job.organization ? undefined : job.source.id; for (const error of job.errors) add(job.source.name, error, kind, id); for (const issue of job.inventory?.issues ?? []) add(job.source.name, `${issue.path}: ${issue.message}`, 'metadata', id); if (job.phase === 'error' && !job.errors.length) add(job.source.name, job.detail, kind, id); }
-  for (const [id, info] of Object.entries(state.sourceCameraInfo ?? {})) { const source=state.sources.find(source => source.id === id)?.name ?? id; if(info.issues?.length)for(const issue of info.issues)add(source, `${issue.path}: ${issue.message}`, 'metadata', id);else add(source,info.error,'metadata',id); }
-  for (const job of state.organizationRecovery ?? []) add(job.root, job.error, 'organization');
-  for (const destination of state.destinationStatus ?? []) add(destination.path, destination.detail, 'destination');
+  const add = (source: string, message?: Message, kind: ErrorKind = 'app', sourceId?: string) => { if (message && !result.some(item => JSON.stringify(item.message) === JSON.stringify(message) && item.source === source)) result.push({source, message, kind, ...(sourceId ? { sourceId } : {})}); };
+  const raw = (value?: string) => value ? text(value) : undefined;
+  for (const error of [state.error, ...extra.map(raw)]) add('', error);
+  for (const job of state.jobs) { const kind: ErrorKind = job.organization ? 'organization' : 'source', id = job.organization ? undefined : job.source.id; for (const error of job.errors) add(job.source.name, error, kind, id); for (const issue of job.inventory?.issues ?? []) add(job.source.name, text(`${issue.path}: ${issue.message}`), 'metadata', id); if (job.phase === 'error' && !job.errors.length) add(job.source.name, job.detail, kind, id); }
+  for (const [id, info] of Object.entries(state.sourceCameraInfo ?? {})) { const source=state.sources.find(source => source.id === id)?.name ?? id; if(info.issues?.length)for(const issue of info.issues)add(source, text(`${issue.path}: ${issue.message}`), 'metadata', id);else add(source,raw(info.error),'metadata',id); }
+  for (const job of state.organizationRecovery ?? []) add(job.root, raw(job.error), 'organization');
+  for (const destination of state.destinationStatus ?? []) add(destination.path, raw(destination.detail), 'destination');
   const t = createTranslator(state.preferences.language);
   for (const {source,inventory,backup} of sourceInventories(state)) {
-    for (const issue of inventory.issues ?? []) add(source.name, `${issue.path}: ${issue.message}`, 'metadata', source.id);
+    for (const issue of inventory.issues ?? []) add(source.name, text(`${issue.path}: ${issue.message}`), 'metadata', source.id);
     if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
-      result.push({source:source.name,message:t("Unknown file formats"),kind:'format',sourceId:source.id,formatSourceId:source.id});
+      result.push({source:source.name,message:text(t("Unknown file formats")),kind:'format',sourceId:source.id,formatSourceId:source.id});
     }
   }
   return result;
@@ -314,11 +316,11 @@ export function collectErrors(state: AppState, extra: (string | undefined)[] = [
 
 // A short notice when new problems appear while the error sheet is closed.
 function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden: boolean; onView: () => void }) {
-  const { t, formatNumber } = useTranslation();
+  const { t, formatNumber, language } = useTranslation();
   const known = useRef<Set<string> | null>(null);
   const [fresh, setFresh] = useState<DisplayError[]>([]);
   useEffect(() => {
-    const keys = errors.map(error => `${error.source}|${error.message}`);
+    const keys = errors.map(error => `${error.source}|${JSON.stringify(error.message)}`);
     if (known.current === null) { known.current = new Set(keys); return; }
     const added = errors.filter((error, index) => !known.current!.has(keys[index]!));
     known.current = new Set(keys);
@@ -326,7 +328,7 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   }, [errors, hidden]);
   useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(() => setFresh([]), 7000); return () => window.clearTimeout(timer); }, [fresh]);
   if (!fresh.length || hidden) return null;
-  const first = explainError(fresh[0]!.message, fresh[0]!.kind);
+  const first = explainError(fresh[0]!.message, fresh[0]!.kind, language);
   return <div className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={() => setFresh([])} /></div>;
 }
 
@@ -341,23 +343,23 @@ export function TitlebarControls({state, act, errorCount, onErrors, errorLevel}:
 }
 
 export function ActivityPanel({state, errors, act, onClose, onOpenSource}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void}) {
-  const { t, formatNumber } = useTranslation();
+  const { t, formatNumber, language } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useDialogClose(dialog,onClose);
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   const groups = useMemo(() => { const map = new Map<string, DisplayError[]>(); for (const error of errors) map.set(error.source, [...(map.get(error.source) ?? []), error]); return [...map]; }, [errors]);
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
-  const report = () => errors.map(error => `${error.source || t("App")}: ${error.message}`).join('\n');
+  const report = () => errors.map(error => `${error.source || t("App")}: ${t(error.message)}`).join('\n');
   return <dialog className="activity-dialog" ref={dialog} aria-labelledby="activity-heading" data-testid="activity-panel" onCancel={event => {event.preventDefault();close();}}>
     <div className="dialog-heading"><h2 id="activity-heading">{t("All errors")}</h2><div className="card-actions">{errors.length > 0 && <Button kind="quiet" icon={Copy} onClick={() => copy(report())}>{t("Copy all details")}</Button>}<Button kind="quiet" icon={X} data-testid="activity-close" aria-label={t("Close panel")} onClick={close} /></div></div>
     <div className="activity-content">{errors.length ? <div className="error-groups">{groups.map(([source, items]) => <section key={source || 'app'} className="error-group">
       <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(items.length) })}</span>{items[0]!.sourceId && onOpenSource && !items[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(items[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}</div>
       <ul className="all-errors">{items.map((error, index) => {
         if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
-        const explained = explainError(error.message, error.kind);
+        const explained = explainError(error.message, error.kind, language);
         return <li key={index} className={`error-item is-${explained.severity}`} data-severity={explained.severity}>
           <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.kind === 'app' && !error.source && <Button kind="quiet" icon={X} aria-label={t("Dismiss")} title={t("Dismiss")} onClick={() => act({ type: 'clearError' })} />}</div>
-          <details className="error-details"><summary>{t("Details")}</summary><div><p>{error.message}</p><Button kind="quiet" icon={Copy} onClick={() => copy(error.message)}>{t("Copy")}</Button></div></details>
+          <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
         </li>;
       })}</ul>
     </section>)}</div> : <p className="error-empty"><Icon icon={CheckCircle2} size={16} />{t("No errors to show.")}</p>}</div>
@@ -623,7 +625,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   return <div className="organization-progress" data-testid="organization-progress">
     <div className="organization-progress-line"><span>{label}</span>{fraction !== undefined && <strong>{formatNumber(Math.floor(Math.min(1, fraction) * 100))}%</strong>}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
     {running && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
-    {job.detail && <small>{job.detail}</small>}
+    {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
 
@@ -654,7 +656,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
   const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
   const paused = job?.phase === 'stopped' && !!job.paused;
   const already = job?.phase === 'complete' && !!job.alreadyImported;
-  const mirrorReview = job?.phase === 'error' && job.errors.some(error => error.startsWith('Mirror backup would move'));
+  const mirrorReview = job?.phase === 'error' && job.errors.some(error => error.key === 'error.mirrorReview');
   const statusIcon = job?.phase === 'error' ? CircleAlert : job?.phase === 'complete' ? CheckCircle2 : queued ? Clock3 : active ? ArrowDownToLine : CheckCircle2;
   const included = sourceSelected(source), excluded = !included && !job;
   return <article data-source-id={source.id} className={`source-row ${selected ? 'source-selected' : ''} ${job?.phase === 'error' ? 'source-error' : ''} ${excluded ? 'source-unselected' : selectionKnown(source) ? 'source-included' : ''} ${already ? 'source-already' : ''} ${needsChoice ? 'source-needs-choice' : ''}`}>
@@ -667,12 +669,12 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={source.total !== undefined && source.free !== undefined ? source.total - source.free : undefined} />}
     {active && !progress && <ProgressBar value={0} indeterminate label={t("{name} scanning", { name: source.name })} />}
-    {job?.detail && active && <p className="source-detail" title={job.detail}>{job.detail}</p>}
+    {job?.detail && active && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <details className="source-disclosure">
       <summary aria-label={t("Drive details")}><div className="source-compact-capacity"><CapacityBar total={source.total} free={source.free} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
       <div className="source-expanded-details">
         <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}</dd></div></dl>
-        {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{job.detail}</p>}
+        {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
         <SourceMediaSummary source={source} inventory={inventory} scanning={scanning} />
         {inventory && <SkippedFilesNotice inventory={inventory} />}
         {cameraInfo && <SourceCameraInformation sourceId={source.id} info={cameraInfo} />}
@@ -853,10 +855,11 @@ function FolderSettings({ state, act, busy }: { state: AppState; act: Dispatch; 
 function HistoryPage({ state, onDesk }: { state: AppState; onDesk: () => void }) {
   const { t, language } = useTranslation();
   return <div className="history-page"><div className="page-toolbar"><span className="session-count">{t("{count} sessions", { count: state.history.length })}</span></div>{state.history.length === 0 ? <div className="history-empty"><div><Icon icon={History} size={38} /></div><h3>{t("Your collection starts here.")}</h3><p>{t("Finished imports appear here.")}</p><Button kind="primary" icon={ArrowDownToLine} onClick={onDesk}>{t("Go to import desk")}</Button></div> : <ol className="history-timeline">{state.history.map(record => {
-    const attention = /attention|error|fail/i.test(record.title) || /\b[1-9]\d* errors?\b/i.test(record.detail);
-    const stopped = /stop|cancel/i.test(record.title + ' ' + record.detail);
+    const title = formatMessage(record.title, 'en'), detail = formatMessage(record.detail, 'en');
+    const attention = /attention|error|fail/i.test(title) || /\b[1-9][\d,]* errors?\b/i.test(detail);
+    const stopped = /stop|cancel/i.test(title + ' ' + detail);
     const date = new Date(record.date);
-    return <li key={record.id} className={attention ? 'history-attention' : stopped ? 'history-stopped' : ''}><span className="timeline-glyph"><Icon icon={attention ? CircleAlert : stopped ? Pause : CheckCircle2} size={21} /></span><article><div className="history-record-heading"><h3>{record.title}</h3><time dateTime={record.date}>{Number.isNaN(date.valueOf()) ? record.date : new Intl.DateTimeFormat(language, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)}</time></div><p>{record.detail}</p><span className="history-record-state"><Icon icon={attention ? CircleAlert : stopped ? Pause : ShieldCheck} size={13} />{attention ? t("Needs attention") : stopped ? t("Stopped by user") : t("Session recorded")}</span></article></li>;
+    return <li key={record.id} className={attention ? 'history-attention' : stopped ? 'history-stopped' : ''}><span className="timeline-glyph"><Icon icon={attention ? CircleAlert : stopped ? Pause : CheckCircle2} size={21} /></span><article><div className="history-record-heading"><h3>{t(record.title)}</h3><time dateTime={record.date}>{Number.isNaN(date.valueOf()) ? record.date : new Intl.DateTimeFormat(language, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)}</time></div><p>{t(record.detail)}</p><span className="history-record-state"><Icon icon={attention ? CircleAlert : stopped ? Pause : ShieldCheck} size={13} />{attention ? t("Needs attention") : stopped ? t("Stopped by user") : t("Session recorded")}</span></article></li>;
   })}</ol>}</div>;
 }
 
