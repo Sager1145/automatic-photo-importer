@@ -73,10 +73,12 @@ function recordedCamera(entries:TagEntries):string|undefined {
   // Older drones write a codec name there ("Dji AVC Encoder"), and other software (Lavf) is never a camera.
   for(const [key,value] of entries)if(['ItemList','UserData'].includes(tagGroup(key))&&tagName(key)==='Encoder'&&typeof value==='string'&&/^DJI\b/i.test(value.trim())&&!/encoder|\b(?:avc|hevc|h\.?26[45])\b/i.test(value))return value.trim().replace(/\s+/g,' ');
 }
-/** A DJI photo's hardware code and its videos' encoder name become the product's one folder name. */
-function cameraModel(entries:TagEntries):string|undefined {
+/** A DJI photo's camera code and its videos' encoder name become the product's one folder name.
+ * Insta360 keeps its model in a trailer that routing does not read, so its files fall back to the brand. */
+function cameraModel(entries:TagEntries,file?:string):string|undefined {
   const model=recordedCamera(entries),make=find(entries,['Make']);
-  return model&&(/^DJI\b/i.test(model)||/^DJI\b/i.test(String(make??'').trim()))?djiProduct(model)??model:model;
+  if(model)return djiProduct(model,/^DJI\b/i.test(model)||/^DJI\b/i.test(String(make??'').trim()))??model;
+  if(file&&/\.ins[vp]$/i.test(file))return 'Insta360';
 }
 /** DJI names files DJI_<camera-local yyyyMMddhhmmss>_…, while its QuickTime CreateDate has no
  * offset and is usually UTC (some firmware records the clip's end instead). Such a name is the
@@ -162,7 +164,7 @@ function editorProvenance(entries:TagEntries):boolean {
 /** `file` (its name only) lets DJI clips take their local capture time from the name. */
 export function metadataFromTags(tags:Record<string,unknown>, options:{details?:boolean;file?:string}={}):Metadata {
   const entries=Object.entries(tags);
-  const camera=cameraModel(entries),date=djiLocalDate(options.file,entries,recordedDate(entries));
+  const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries));
   const fields:Record<string,unknown>={};
   const result:Metadata={camera,date,fields};
   if(editorProvenance(entries))result.edited=true;

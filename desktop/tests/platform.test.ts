@@ -78,7 +78,9 @@ test('blank and invalid grouped values do not hide valid camera models or captur
   assert.equal(metadataFromTags({'IFD0:Model':'unknown','XML:DeviceModelName':' ILCE-6700 '}).camera,'ILCE-6700');
 });
 test('standard decoded model tags support camera brands without treating makers or camera-type codes as models', () => {
-  for(const model of ['NIKON Z f','Canon EOS R5','X100VI','DC-S5M2','OM-1','PENTAX K-1','FC3582','HERO12 Black'])assert.equal(metadataFromTags({'IFD0:Model':` ${model} `}).camera,model);
+  for(const model of ['NIKON Z f','Canon EOS R5','X100VI','DC-S5M2','OM-1','PENTAX K-1','HERO12 Black'])assert.equal(metadataFromTags({'IFD0:Model':` ${model} `}).camera,model);
+  // DJI camera codes become the product name (desktop/platform/dji-models.ts).
+  assert.equal(metadataFromTags({'IFD0:Model':' FC3582 '}).camera,'DJI Mini 3 Pro');
   assert.equal(metadataFromTags({'IFD0:Make':'Canon','Canon:CameraType':248,'GoPro:DeviceName':'Global Settings','QuickTime:Encoder':'Lavf60'}).camera,undefined);
 });
 test('primary standard camera model wins over preview and edited metadata regardless of object order', () => {

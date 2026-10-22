@@ -68,9 +68,8 @@ test('DJI encoder spellings of a known product reach its one name; unknown produ
 });
 
 test('unknown DJI codes and other makers keep their recorded model',()=>{
- // FC6510 is a Zenmuse camera with no published product mapping.
- assert.equal(routing({'IFD0:Make':'DJI','IFD0:Model':'FC6510'},'DJI_0001.JPG').camera,'FC6510');
- assert.equal(routing({'IFD0:Make':'Acme','IFD0:Model':'PP-101'},'IMG_0001.JPG').camera,'PP-101');
+ // A code missing from the published table keeps its recorded value.
+ assert.equal(routing({'IFD0:Make':'DJI','IFD0:Model':'FC9999'},'DJI_0001.JPG').camera,'FC9999');
 });
 
 test('major DJI drones and handhelds reach their product name from real photo EXIF codes',()=>{
@@ -86,6 +85,23 @@ test('major DJI drones and handhelds reach their product name from real photo EX
  assert.equal(routing({'ItemList:Encoder':'DJI OsmoAction4'},'clip.MP4').camera,'DJI Osmo Action 4');
 });
 
-test('codes shared by two products keep the recorded value rather than guessing',()=>{
- for(const code of ['AC003','FC7203','DJI Pocket'])assert.equal(routing({'IFD0:Make':'DJI','IFD0:Model':code},'DJI_0001.JPG').camera,code);
+test('every coded row of the Wikimedia "DJI camera model names" table reaches its product',()=>{
+ for(const [code,name] of [['FC230','DJI Mavic Air'],['OQ001E','DJI Avata 360'],['FC350','DJI Inspire 1'],['FC550RAW','DJI Inspire 1'],['FC6540','DJI Inspire 2'],['FC4280','DJI Inspire 3'],
+  ['FC9670','DJI Lito 1'],['FC9589','DJI Lito X1'],['FC2220','DJI Mavic 2 Zoom'],['FC2204','DJI Mavic 2 Enterprise'],['FC2403','DJI Mavic 2 Enterprise Dual'],
+  ['MAVIC2-ENTERPRISE-ADVANCED','DJI Mavic 2 Enterprise Advanced'],['L2D-20c','DJI Mavic 3'],['FC4170','DJI Mavic 3'],['FC4382','DJI Mavic 3 Pro'],['M3E','DJI Mavic 3 Enterprise'],
+  ['M3M','DJI Mavic 3 Multispectral'],['M3T','DJI Mavic 3 Thermal'],['L3D-100c','DJI Mavic 4 Pro'],['FC7203','DJI Mavic Mini'],['FC8671','DJI Neo'],['FC9470','DJI Neo 2'],
+  ['PHANTOM VISION FC200','DJI Phantom 2 Vision'],['FC300S','DJI Phantom 3 Advanced'],['FC300X','DJI Phantom 3 Professional'],['FC300C','DJI Phantom 3 Standard'],['FC300XW','DJI Phantom 3 4K'],
+  ['FC300SE','DJI Phantom 3 SE'],['FC6310','DJI Phantom 4 Pro (Advanced)'],['FC6310S','DJI Phantom 4 Pro V2.0'],['FC6310R','DJI Phantom 4 RTK'],['FC6360','DJI P4 Multispectral'],
+  ['FC1102','DJI Spark'],['RZ001','DJI Ryze Tello'],['AC002','DJI Osmo Action 3'],['AC003','DJI Osmo Action 4'],['Osmo Pocket','DJI Osmo Pocket'],['DJI Pocket','DJI Pocket 2']])
+  assert.equal(routing({'IFD0:Make':'DJI','IFD0:Model':code},'DJI_0001.JPG').camera,name,code);
+});
+
+test('Mavic 2 Pro and Mavic 3 photos made by the Hasselblad camera still reach the DJI product',()=>{
+ assert.equal(routing({'IFD0:Make':'Hasselblad','IFD0:Model':'L1D-20c'},'DJI_0001.JPG').camera,'DJI Mavic 2 Pro');
+ assert.equal(routing({'IFD0:Make':'Hasselblad','IFD0:Model':'L2D-20c'},'DJI_0001.JPG').camera,'DJI Mavic 3');
+});
+
+test('a product name matches only in a DJI context, never another maker\'s model',()=>{
+ assert.equal(routing({'IFD0:Make':'Acme','IFD0:Model':'Flip'},'IMG_0001.JPG').camera,'Flip');
+ assert.equal(routing({'IFD0:Make':'DJI','IFD0:Model':'Flip'},'DJI_0001.JPG').camera,'DJI Flip');
 });
