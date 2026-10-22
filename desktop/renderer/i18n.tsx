@@ -515,6 +515,11 @@ Listing files|正在列出文件|正在列出檔案|ファイルを一覧中
 Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
 {completed} files found|已找到 {completed} 个文件|已找到 {completed} 個檔案|{completed} 件見つかりました
 {completed} files found · {size}|已找到 {completed} 个文件 · {size}|已找到 {completed} 個檔案 · {size}|{completed} 件見つかりました · {size}
+{completed} of {total} files read · {size} of {totalSize}|已读取 {completed}/{total} 个文件 · {size}/{totalSize}|已讀取 {completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件を読み込み · {totalSize} 中 {size}
+Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
+Confirming files before moving: {completed} of {total}|移动前确认文件：{completed}/{total}|移動前確認檔案：{completed}/{total}|移動前にファイルを確認中：{total} 件中 {completed} 件
+Confirming|正在确认|正在確認|確認中
+Reading files|正在读取文件|正在讀取檔案|ファイルを読み込み中
 Reconnect it to choose.|重新连接后即可选择。|重新連接後即可選擇。|再接続すると選べます。
 Unplugged|已拔出|已拔出|取り外し済み
 {completed} of {total} files organized|已整理 {completed}/{total} 个文件|已整理 {completed}/{total} 個檔案|{total} 件中 {completed} 件を整理済み

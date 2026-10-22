@@ -65,7 +65,8 @@ function jobPath(root:string,id:string):string {if(!uuid.test(id))throw new Erro
 interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;
  renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
-async function readEvents(m:Manifest,chain=new Set<string>()):Promise<JournalState> {
+/** `onRead`: records read so far out of the journal's files, for journals written one file per event. */
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false};
  const apply=(record:Record<string,unknown>)=>{
@@ -92,7 +93,9 @@ async function readEvents(m:Manifest,chain=new Set<string>()):Promise<JournalSta
  // Identities recorded under an earlier mount are read as this mount's, like the manifest's.
  const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
- for(const name of await fs.readdir(jobPath(m.root,m.id))) {
+ const names=await fs.readdir(jobPath(m.root,m.id));let read=0;
+ for(const name of names) {
+  onRead?.(++read,names.length);
   const file=path.join(jobPath(m.root,m.id),name);
   if(name===eventLog){
    await contained(file,m.root);const handle=await regularHandle(file);
@@ -258,13 +261,13 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
 /** Publish successor links before touching media. Repeating this preflight after
  * a crash finishes any links not yet written alongside the durable new manifest.
  */
-async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal):Promise<void>{
+async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<void>{
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
  const predecessors:Manifest[]=[];
  for(const id of await fs.readdir(path.join(m.root,storage))){
   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
-  const prior=await readManifest(m.root,id),state=await readEvents(prior);
+  const prior=await readManifest(m.root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}));
   if(state.superseded)continue;
   if(!prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination))))continue;
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error(`Finish organization ${id} before starting an overlapping organization`);
@@ -376,14 +379,15 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
  if(state.undoComplete||state.undone.size)throw new Error(`Organization ${m.id} was undone`);
  const result:ReorganizationResult={copied:0,skipped:0,errors:[],moved:0,retained:0,retainedBytes:0};const undated:string[]=[];let completed=0,bytes=0;const started=performance.now(),totalBytes=m.entries.reduce((n,e)=>n+e.size,0);
- const progress=(file:string)=>onProgress?.({completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file});
+ const progress=(file:string)=>onProgress?.({step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
-  await roots(m);await supersedePriorOrganizations(m,signal);
+  await roots(m);await supersedePriorOrganizations(m,signal,onProgress);
   // Moves cannot wait for a later check: confirm every file that will move, by stat
   // only, before the first one does. Any change stops the run with nothing moved.
   if(m.strategy==='rename')for(const [index,entry] of m.entries.entries()){
    checkAbort(signal);
+   onProgress?.({phase:'verifying',step:'confirming',completed:index+1,total:m.entries.length,bytes:0,totalBytes:0,speed:0,file:path.basename(entry.source)});
    if(!entry.move||state.renamed.has(index)||state.renameIntent.has(index)||state.fallback.has(index)||state.finalizing.has(index)||state.slots.get(index)?.length)continue;
    await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
   }

@@ -113,7 +113,8 @@ export function sameStat(a:import('node:fs').BigIntStats,b:import('node:fs').Big
 }
 /** dev:ino:size:mtimeNs:ctimeNs — the identity a plan, review or receipt binds a file to. */
 export function statKey(stat:import('node:fs').BigIntStats):string {return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
-export async function digest(file:string,signal?:AbortSignal):Promise<string> {
+/** `onBytes` hears each chunk as it is read, so a long file shows progress before it is done. */
+export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<string> {
   checkAbort(signal);
   const handle=await regularHandle(file);
   try {
@@ -123,7 +124,7 @@ export async function digest(file:string,signal?:AbortSignal):Promise<string> {
       checkAbort(signal);
       const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
       if(!bytesRead) break;
-      hash.update(buffer.subarray(0,bytesRead));
+      hash.update(buffer.subarray(0,bytesRead));onBytes?.(bytesRead);
     }
     const after=await handle.stat({bigint:true});
     const pathname=await fs.lstat(file,{bigint:true});

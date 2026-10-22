@@ -60,3 +60,11 @@ test('with verification after copy turned off, staged bytes are not read again',
  assert.deepEqual(read,{source:f.data.length,stage:0,target:0});
  assert.deepEqual(await fs.readFile(path.join(f.root,'original.bin')),f.data);
 });
+
+test('reading a file reports its bytes as they are read, before the file is done',async t=>{
+ const {digest}=await import('../core/paths');
+ const folder=await (await import('node:fs/promises')).mkdtemp((await import('node:path')).join((await import('node:os')).tmpdir(),'digest-bytes-'));t.after(()=>import('node:fs/promises').then(fs=>fs.rm(folder,{recursive:true,force:true})));
+ const file=(await import('node:path')).join(folder,'big.bin');await (await import('node:fs/promises')).writeFile(file,Buffer.alloc(3*1024*1024+5,7));
+ const chunks:number[]=[];await digest(file,undefined,bytes=>chunks.push(bytes));
+ assert.ok(chunks.length>=4,'several chunks for a multi-megabyte file');assert.equal(chunks.reduce((a,b)=>a+b,0),3*1024*1024+5);
+});

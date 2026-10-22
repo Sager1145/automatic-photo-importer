@@ -616,7 +616,7 @@ test('planning shows files checked or read with a percentage, and jobs show elap
     assert.ok(done.includes(t('Took {time}', { time: '1:02:05' })), `${language}: total time when finished`);
     const organizing: Job = { id: 'o', source: { id: 'l', name: 'Backup organization', path: '/b', transport: 'folder' }, phase: 'verifying', organization: true, errors: [], backup: false, startedAt: start, progress: { phase: 'planning', step: 'reading', completed: 3, total: 10, bytes: 30, totalBytes: 40, speed: 0, file: 'x' } };
     const reading = render(createElement(OrganizationProgress, { job: organizing }));
-    assert.ok(reading.includes(t('{completed} of {total} files read', { completed: '3', total: '10' })) && reading.includes('75%'), `${language}: reading uses bytes for %`);
+    assert.ok(reading.includes(t('{completed} of {total} files read · {size} of {totalSize}', { completed: '3', total: '10', size: formatBytes(30, language), totalSize: formatBytes(40, language) })) && reading.includes('75%'), `${language}: reading shows bytes and uses them for %`);
     const checking = render(createElement(OrganizationProgress, { job: { ...organizing, progress: { ...organizing.progress!, step: 'checking' } } }));
     assert.ok(checking.includes(t('{completed} of {total} files checked', { completed: '3', total: '10' })) && checking.includes('30%'), `${language}: checking uses files for %`);
   }

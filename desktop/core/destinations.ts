@@ -24,6 +24,8 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0}));
  const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]};
  const report=(slot:number,value:Progress)=>{
+  // Checks before an organization moves anything count journal records or files, not the plan's work.
+  if(value.step==='earlier'||value.step==='confirming'){const index=slots[slot].index;options.progress(index,value,slots.reduce((rest,item,other)=>item.index===index?rest+Math.max(0,pending[other]-latest[other].bytes):rest,0)+workspace[index]);return;}
   const required=Math.max(pending[slot],value.totalBytes,value.bytes);pending[slot]=required;latest[slot]={bytes:value.bytes,completed:value.completed};
   const sum=(key:'bytes'|'completed')=>latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
   const grown=own.some(other=>pending[other]>initialPending[other]);

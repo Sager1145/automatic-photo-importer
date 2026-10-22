@@ -62,7 +62,7 @@ test('organization planning reports files checked and files read out of their to
   assert.deepEqual(checking.map(item=>item.total),[3,3,3]);
   assert.deepEqual(checking.map(item=>item.count).sort(),[1,2,3]);
   assert.equal(checking.at(-1)!.bytes,checking.at(-1)!.totalBytes);
-  // Only the two misplaced files are read, and progress ends at their full size.
-  assert.deepEqual(reading.map(item=>item.total),[2,2]);
+  // Only the two misplaced files are read; bytes are reported as they stream, and progress ends at their full size.
+  assert.ok(reading.every(item=>item.total===2));assert.deepEqual([...new Set(reading.map(item=>item.count))].sort(),[0,1,2]);
   assert.equal(reading.at(-1)!.count,2);assert.equal(reading.at(-1)!.bytes,reading.at(-1)!.totalBytes);
 });

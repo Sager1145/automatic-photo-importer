@@ -304,8 +304,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     await Promise.all(Array.from({length:Math.min(prepared.length,PLAN_CONCURRENCY)},async()=>{
       while(position<prepared.length) {
         const {entry}=prepared[position++]!;checkAbort(signal);
-        hashes.set(entry.source,await digest(entry.source,signal));
-        hashedBytes+=entry.size;onProgress?.(++hashed,path.relative(sourceRoot,entry.source),{step:'reading',total:prepared.length,bytes:hashedBytes,totalBytes:movingBytes});
+        // Bytes count as they are read, so a long video moves the bar; the file count rises when it is done.
+        const name=path.relative(sourceRoot,entry.source);
+        hashes.set(entry.source,await digest(entry.source,signal,bytes=>{hashedBytes+=bytes;onProgress?.(hashed,name,{step:'reading',total:prepared.length,bytes:hashedBytes,totalBytes:movingBytes});}));
+        onProgress?.(++hashed,name,{step:'reading',total:prepared.length,bytes:hashedBytes,totalBytes:movingBytes});
         if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       }
     }));

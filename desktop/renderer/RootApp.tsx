@@ -414,7 +414,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
       <div className="dashboard-total" data-testid="total-progress">
-        <div><strong>{t("Total progress")}</strong><span>{total > 0 ? `${formatNumber(Math.floor(Math.min(1, transferred / total) * 100))}%` : organized !== undefined ? `${formatNumber(Math.floor(Math.min(1, organized) * 100))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small></div>
+        <div><strong>{t("Total progress")}</strong><span>{total > 0 ? `${formatNumber(shownPercent(transferred / total, !active.length && latestJobs.every(job => job.phase === 'complete')))}%` : organized !== undefined ? `${formatNumber(shownPercent(organized, false))}%` : '—'}</span><small>{total > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : runningOrganization ? `${organizationStatus(runningOrganization, t)} · ${organizationPlace(runningOrganization)}${runningOrganization.progress ? ` · ${progressCount(runningOrganization.progress, t, formatNumber, true, bytes)}` : ''}` : t("No transfer planned")}</small></div>
         <ProgressBar value={total > 0 ? transferred / total : organized ?? 0} indeterminate={active.length > 0 && !total && organized === undefined} label={t("Combined copy progress")} />
       </div>
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
@@ -722,6 +722,10 @@ export function SourceSteps({ job, inventory, scanning, verifyOff }: { job?: Job
 // A scan first lists the card's files, then reads camera metadata from each media file.
 // A library organization: planning first (files checked), then moving and verifying, with n of x and %.
 // Share done: planning reads use bytes, planning checks and verification use files, copying uses bytes.
+/** 100% only once the work is finished: the last file can still be in progress at 99.9%. */
+export function shownPercent(fraction: number, finished: boolean): number {
+  return finished ? 100 : Math.min(99, Math.floor(Math.max(0, fraction) * 100));
+}
 function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
   const files = progress.total ? progress.completed / progress.total : undefined, data = progress.totalBytes ? progress.bytes / progress.totalBytes : undefined;
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
@@ -731,6 +735,9 @@ function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typ
   const counts = { completed: formatNumber(progress.completed), total: formatNumber(progress.total) };
   // While listing, the size found so far is the only other measure.
   if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
+  if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
+  if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
+  if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
@@ -765,7 +772,8 @@ function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): s
   if (job.phase === 'complete') return t("Complete");
   if (job.phase === 'stopped') return job.paused ? t("Paused") : t("Stopped");
   if (job.phase === 'discovering' || job.progress?.step === 'listing') return t("Listing files");
-  return job.progress?.phase === 'planning' ? t("Checking files") : t("Organizing");
+  if (job.progress?.step === 'earlier' || job.progress?.step === 'confirming') return t("Confirming");
+  return job.progress?.phase === 'planning' ? (job.progress.step === 'reading' ? t("Reading files") : t("Checking files")) : t("Organizing");
 }
 /** An organization in Sources & queue: what it reads, the step it is on and its progress. */
 export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
@@ -782,7 +790,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const fraction = organizationFraction(job);
   const label = !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
   return <div className="organization-progress" data-testid="organization-progress">
-    <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} />{fraction !== undefined && <strong>{formatNumber(Math.floor(Math.min(1, fraction) * 100))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
+    <div className="organization-progress-line"><span>{label}</span><Elapsed job={job} />{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
     {(running || paused) && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
