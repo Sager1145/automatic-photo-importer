@@ -19,6 +19,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const wait=async(test:()=>Promise<boolean>,label:string)=>{const end=Date.now()+60000;while(Date.now()<end){if(await test())return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Timed out: ${label}`);};
  const theme=async(want:string)=>wait(()=>js<boolean>(`document.documentElement.dataset.theme===${JSON.stringify(want)}`),`theme ${want}`);
  const shot=async(name:string)=>{await new Promise(r=>setTimeout(r,150));await fs.writeFile(path.join(report,name+'.png'),(await window.webContents.capturePage()).toPNG());};
+ // Settings shows one category panel at a time; open the one a check needs.
+ const settingsTab=async(id:string)=>{await js(`document.querySelector('#settings-tab-${id}').click()`);await wait(()=>js<boolean>(`document.querySelector('#settings-tab-${id}')?.getAttribute('aria-selected')==='true'`),`settings category ${id}`);};
  const check=async(name:string,run:()=>Promise<void>)=>{try{await run();checks.push({name,passed:true});console.log(`QA PASS: ${name}`);}catch(e){console.error(e);checks.push({name,passed:false,error:String(e)});throw e;}};
  const digest=async(file:string)=>createHash('sha256').update(await fs.readFile(file)).digest('hex');
  const originals=new Map<string,string>();
@@ -141,8 +143,12 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   });
   await check('Settings provides live, persistent text sizing with a readable default',async()=>{
    await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Settings').click()`);await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Settings'"),'navigation committed');
-   await wait(()=>js<boolean>("document.querySelector('input[aria-label=\"Text size\"]')!==null"),'settings page');
-   assert.equal(await js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings] input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Folder paths and copy policy live in Settings');
+   await settingsTab('destinations');
+   assert.equal(await js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Destinations');
+   await settingsTab('folders');
+   assert.equal(await js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings]')!==null"),true,'Folder paths live in Settings → Folders');
+   await settingsTab('general');
+   await wait(()=>js<boolean>("document.querySelector('input[aria-label=\"Text size\"]')!==null"),'text size in Settings → General');
    assert.equal((await state()).preferences.textScale,1.25);
    const original=await js<number>("parseFloat(getComputedStyle(document.querySelector('.settings-page .settings-section h3')).fontSize)");
    await js(`{const slider=document.querySelector('input[aria-label="Text size"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'150');slider.dispatchEvent(new Event('input',{bubbles:true}));}`);
@@ -158,6 +164,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('Edited exports folder edits persist, update the preview and reject unsafe names',async()=>{
    await action({type:'stop'});await wait(async()=>!(await state()).scanningSources?.length,'finish read-only scans before editing organization settings');
    await js("Array.from(document.querySelectorAll('.nav-item')).find(button=>button.textContent.trim()==='Settings').click()");await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Settings'"),'navigation committed');
+   await settingsTab('folders');
    await wait(()=>js<boolean>("document.querySelector('input[placeholder=\"editied\"]')?.value==='editied'"),'default edited exports folder');
    assert.equal((await state()).preferences.editedFolder,'editied');
    let editedFolderFailure:unknown;
