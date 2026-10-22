@@ -16,7 +16,9 @@ test('every folder chosen in one dialog becomes its own source',async t=>{
  const d=await drive(t);
  const a=await d.dir('Trip A'),b=await d.dir('Trip B');
  const {sources,rejected}=await resolveFolderSources([a,b],{sources:[],registered:new Map(),destinations:[],backupFolders:['photobackup'],backup:false});
- assert.deepEqual(sources,[{id:`folder:${a}`,name:'Trip A',path:a,transport:'folder'},{id:`folder:${b}`,name:'Trip B',path:b,transport:'folder'}]);
+ assert.deepEqual(sources.map(({total,free,...source})=>source),[{id:`folder:${a}`,name:'Trip A',path:a,transport:'folder'},{id:`folder:${b}`,name:'Trip B',path:b,transport:'folder'}]);
+ // Each new folder source carries the capacity of the volume it is on.
+ assert.ok(sources.every(source=>typeof source.total==='number'&&typeof source.free==='number'));
  assert.deepEqual(rejected,[]);
 });
 

@@ -30,7 +30,7 @@ test('Stop while organization copies a file leaves no staged copy in the journal
   const original=path.join(root,'incoming','DSC_0001.NEF');
   await fs.mkdir(path.dirname(original));await fs.writeFile(original,Buffer.alloc(3*1024*1024,5));
   const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
-  const storage=path.join(root,'.photo-importer-recovery');
+  const storage=path.join(root,'Photo Importer Recovery');
   const staged=()=>readdirSync(storage).flatMap(id=>{try{return readdirSync(path.join(storage,id)).filter(name=>name.startsWith('stage-')).map(name=>path.join(storage,id,name));}catch{return [];}});
   await assert.rejects(executeReorganization(reviewed,stopWhen(()=>staged().some(file=>statSync(file).size>0)),undefined,{strategy:'copy'}),{name:'AbortError'});
   assert.deepEqual(staged(),[]);
