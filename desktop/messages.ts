@@ -36,6 +36,8 @@ export const backendMessages={
  'job.alreadyImported':{en:'Already imported · all {count} files are in the backup and verified','zh-Hans':'已导入 · 全部 {count} 个文件均已在备份中并通过验证','zh-Hant':'已匯入 · 全部 {count} 個檔案均已在備份中並通過驗證',ja:'読み込み済み · {count} ファイルすべてがバックアップにあり検証済みです'},
  'job.moved':{en:'{count} moved','zh-Hans':'已移动 {count} 个','zh-Hant':'已移動 {count} 個',ja:'{count} 件移動'},
  'job.retained':{en:'{count} originals kept for undo ({size})','zh-Hans':'保留 {count} 个原文件以便撤销（{size}）','zh-Hant':'保留 {count} 個原始檔案以便復原（{size}）',ja:'取り消し用に元のファイル {count} 件を保持（{size}）'},
+ 'job.problemsCollected':{en:'{count} problem files collected into Problem files','zh-Hans':'已将 {count} 个问题文件收集到“Problem files”','zh-Hant':'已將 {count} 個問題檔案收集到「Problem files」',ja:'問題のあるファイル {count} 件を「Problem files」に集めました'},
+ 'job.problemsSkipped':{en:'{count} problem files not copied or moved','zh-Hans':'{count} 个问题文件未复制或移动','zh-Hant':'{count} 個問題檔案未複製或移動',ja:'問題のあるファイル {count} 件はコピー・移動していません'},
  'job.foldersRemoved':{en:'{count} empty folders removed','zh-Hans':'已删除 {count} 个空文件夹','zh-Hant':'已刪除 {count} 個空資料夾',ja:'空のフォルダー {count} 件を削除'},
  'job.paused':{en:'Paused. Verified copies are kept; Start continues with the remaining files.','zh-Hans':'已暂停。已验证的副本会保留；点击“开始”继续处理剩余文件。','zh-Hant':'已暫停。已驗證的副本會保留；點選「開始」繼續處理剩餘檔案。',ja:'一時停止しました。検証済みのコピーは保持され、「開始」で残りのファイルを続行します。'},
  'job.pausedQueued':{en:'Paused before copying. Start continues.','zh-Hans':'已在复制前暂停。点击“开始”继续。','zh-Hant':'已在複製前暫停。點選「開始」繼續。',ja:'コピー前に一時停止しました。「開始」で続行します。'},
