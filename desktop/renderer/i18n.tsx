@@ -483,6 +483,8 @@ Mirror is on: removed files are moved aside after review.|镜像已开启：已�
 Move existing files into your folder structure.|将现有文件移入你的文件夹结构。|將現有檔案移入你的資料夾結構。|既存のファイルをフォルダー構成に合わせて移動します。
 No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）がありません。
 {count} organized files are no longer where this organization put them.|{count} 个已整理的文件已不在此次整理放置的位置。|{count} 個已整理的檔案已不在此次整理放置的位置。|整理したファイルのうち {count} 件は、この整理で置いた場所にありません。
+Full recheck|完整重新检查|完整重新檢查|すべて再確認
+Reads every organized file again, not only those changed since the last recheck.|重新读取每个已整理的文件，而不只是自上次重新检查以来有变化的文件。|重新讀取每個已整理的檔案，而不只是自上次重新檢查以來有變化的檔案。|前回の再確認以降に変わったファイルだけでなく、整理したすべてのファイルを読み直します。
 Reading organization history…|正在读取整理记录…|正在讀取整理記錄…|整理の履歴を読み込み中…
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
