@@ -175,12 +175,17 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  const stepOnly=(id:string,progress:EtaInput,context:EtaContext)=>{live.push(id);return tracker.observe(id,progress,context,now).step;};
  const since=(id:string)=>{live.push(id);return tracker.since(id,now);};
  // Reading files (organization), comparing with the destination and verifying report no speed of their own;
- // metadata checking reads only headers, so it counts files per second.
+ // metadata checking counts files per second and the bytes of the files it has covered per second.
  const speeds=(id:string,progress:Progress)=>{
   const key=stageKey(progress);live.push(id);
   if(key==='planning:reading'||key==='planning:comparing')progress.speed=tracker.measure(id,key,progress.bytes,now)??0;
   else if(key==='verifying:'&&progress.total)progress.speed=tracker.measure(id,key,progress.totalBytes*Math.min(1,progress.completed/progress.total),now)??0;
-  else if(key==='planning:checking'||key==='planning:listing'||key==='verifying:history'||key==='verifying:earlier')progress.fileRate=tracker.measure(id,key,progress.completed,now);
+  else if(key==='planning:checking'){
+   // Metadata checking shows both: files per second and the file bytes those files hold, per second.
+   progress.fileRate=tracker.measure(id,key,progress.completed,now);
+   live.push(id+':bytes');progress.speed=tracker.measure(id+':bytes',key,progress.bytes,now)??0;
+  }
+  else if(key==='planning:listing'||key==='verifying:history'||key==='verifying:earlier')progress.fileRate=tracker.measure(id,key,progress.completed,now);
   else tracker.measure(id,key,0,now);
  };
  for(const job of state.jobs){

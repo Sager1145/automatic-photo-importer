@@ -11,14 +11,17 @@ const signal=new AbortController();
 // already read) in a start message; any other message stops the scan.
 process.parentPort.on('message',event=>{const data=event.data as {type?:string;reuse?:Inventory;routing?:[string,Metadata][]};if(data?.type==='start'){void scan(data.reuse,data.routing??[]);return;}signal.abort();void closeMetadata().catch(()=>{}).finally(()=>process.exit(0));});
 async function scan(reuse:Inventory|undefined,routing:[string,Metadata][]){
- // Only reads made here go back: the parent already holds what it sent.
- const known=new Set(routing.map(([key])=>key)),learned=()=>routingEntries().filter(([key])=>!known.has(key));
+ // Only reads made here go back: the parent already holds what it sent. They go back as they are read
+ // (not only at the end), so a review started during the scan, or a scan stopped half way, keeps them.
+ const known=new Set(routing.map(([key])=>key)),learned=()=>{const entries=routingEntries().filter(([key])=>!known.has(key));for(const [key] of entries)known.add(key);return entries;};
+ const flush=()=>{const entries=learned();if(entries.length)process.parentPort.postMessage({type:'routing',entries});};
+ const timer=setInterval(flush,1000);
  try{
   primeRouting(routing);
   const result=await inventory(source.path,{...options,reuse,onProgress:(files,bytes,top,file)=>process.parentPort.postMessage({type:'progress',files,bytes,file,top})},signal.signal);
   process.parentPort.postMessage({type:'inventory',inventory:result});
   await analyzeSourceCameras(source,result,file=>metadata(file,{preview:false,details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
-  process.parentPort.postMessage({type:'routing',entries:learned()});
+  clearInterval(timer);flush();
   await closeMetadata();process.parentPort.postMessage({type:'done'});
- }catch(error){process.parentPort.postMessage({type:'routing',entries:learned()});await closeMetadata().catch(()=>{});process.parentPort.postMessage({type:'error',error:error instanceof Error?error.message:String(error)});}
+ }catch(error){clearInterval(timer);flush();await closeMetadata().catch(()=>{});process.parentPort.postMessage({type:'error',error:error instanceof Error?error.message:String(error)});}
 }
