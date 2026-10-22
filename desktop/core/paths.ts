@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { streams } from './devices';
 
 export function checkAbort(signal?:AbortSignal):void {
   if(signal?.aborted) throw new DOMException('Import stopped','AbortError');
@@ -46,7 +47,8 @@ export async function syncDirectory(folder:string):Promise<void> {
 const changedFolders=new Set<string>(),durableFolders=new Set<string>(),syncing=new Map<string,Promise<void>>();
 export async function syncParents(file:string,root:string):Promise<void> {
   for(let folder=path.dirname(file),own=true;;folder=path.dirname(folder),own=false){
-    if(own||changedFolders.has(folder)||!durableFolders.has(folder)){
+    // An ancestor unchanged since a sync of it started is covered by that sync.
+    if(own||changedFolders.has(folder)||(!durableFolders.has(folder)&&!syncing.has(folder))){
       // Cleared first, so a subfolder created during this sync marks the folder again.
       changedFolders.delete(folder);
       const sync=syncDirectory(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
@@ -116,20 +118,23 @@ export function statKey(stat:import('node:fs').BigIntStats):string {return `${st
 /** `onBytes` hears each chunk as it is read, so a long file shows progress before it is done. */
 export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<string> {
   checkAbort(signal);
-  const handle=await regularHandle(file);
-  try {
-    const before=await handle.stat({bigint:true});
-    const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(1024*1024);
-    for(;;) {
-      checkAbort(signal);
-      const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
-      if(!bytesRead) break;
-      hash.update(buffer.subarray(0,bytesRead));onBytes?.(bytesRead);
-    }
-    const after=await handle.stat({bigint:true});
-    const pathname=await fs.lstat(file,{bigint:true});
-    if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
-    return hash.digest('hex');
-  } finally { await handle.close(); }
+  // A stream slot on the file's device: spinning disks read one file at a time.
+  return streams.run([file],async chunk=>{
+    const handle=await regularHandle(file);
+    try {
+      const before=await handle.stat({bigint:true});
+      const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(chunk);
+      for(;;) {
+        checkAbort(signal);
+        const {bytesRead}=await handle.read(buffer,0,buffer.length,null);
+        if(!bytesRead) break;
+        hash.update(buffer.subarray(0,bytesRead));onBytes?.(bytesRead);
+      }
+      const after=await handle.stat({bigint:true});
+      const pathname=await fs.lstat(file,{bigint:true});
+      if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
+      return hash.digest('hex');
+    } finally { await handle.close(); }
+  },signal);
 }
 export function pathKey(file:string):string { return file.normalize('NFC').toLowerCase(); }
