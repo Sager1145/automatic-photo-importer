@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
 import {execute} from '../../core/index';
 import type {TransferPlan} from '../../shared';
@@ -30,15 +31,22 @@ export async function temporary(t:test.TestContext,prefix:string):Promise<string
 export async function put(file:string,content:Buffer|string):Promise<void> {
  await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,content);
 }
-/** Every regular file under `root` (relative path → SHA-256), without the app's own bookkeeping. */
+/** Every regular file under `root` (relative path → SHA-256), without the app's own bookkeeping or
+ * macOS AppleDouble (._) service files, which exFAT volumes gain. */
 export async function tree(root:string):Promise<Map<string,string>> {
  const found=new Map<string,string>();
  for(const entry of await fs.readdir(root,{withFileTypes:true,recursive:true})){
   const file=path.join(entry.parentPath,entry.name),relative=path.relative(root,file);
-  if(!entry.isFile()||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')))continue;
+  if(!entry.isFile()||entry.name.startsWith('._')||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')))continue;
   found.set(relative,await fileSha(file));
  }
  return found;
+}
+/** Every extension media-formats.ts lists, read from its source so tests follow the list. */
+export async function listedExtensions():Promise<string[]> {
+ const source=await fs.readFile(fileURLToPath(new URL('../../media-formats.ts',import.meta.url)),'utf8');
+ const block=source.slice(source.indexOf('Object.entries({'),source.indexOf('})) {'));
+ return [...block.matchAll(/^\s*\w+: '([a-z0-9 ]+)',?$/gm)].flatMap(match=>match[1]!.split(' '));
 }
 export const parts=(transfer:TransferPlan)=>[transfer,...(transfer.videos?[transfer.videos]:[])];
 /** Execute both parts of a plan (photos and, in video-root, videos) and return the summed result. */

@@ -2,13 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {plan,inventory,configureOrganizationRecovery} from '../core/index';
 import {formatFolder,mediaKindForPath} from '../media-formats';
 import {buildTemplate,parseTemplate,type FolderPath} from '../folder-template';
 import {metadata as readMetadata,closeMetadata} from '../platform/metadata';
 import type {MediaLayout,Metadata,PlanEntry} from '../shared';
-import {assertCopied,executeAll,fileSha,leftovers,parts,put,temporary} from './fixtures/edge';
+import {assertCopied,executeAll,leftovers,listedExtensions,parts,put,temporary} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const layouts:MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
@@ -16,12 +15,6 @@ const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const fixed=async():Promise<Metadata>=>({camera:'Fixture Cam',date:'2026-10-03T12:00:00',fields:{}});
 const camera='2026/202610/Fixture Cam';
 
-/** Every extension media-formats.ts lists, read from the source so the test follows the list. */
-async function listedExtensions():Promise<string[]> {
- const source=await fs.readFile(fileURLToPath(new URL('../media-formats.ts',import.meta.url)),'utf8');
- const block=source.slice(source.indexOf('Object.entries({'),source.indexOf('})) {'));
- return [...block.matchAll(/^\s*\w+: '([a-z0-9 ]+)',?$/gm)].flatMap(match=>match[1]!.split(' '));
-}
 async function drive(t:test.TestContext,prefix:string){
  const root=await temporary(t,prefix),source=path.join(root,'card'),photos=path.join(root,'drive','photobackup'),videos=path.join(root,'drive','videobackup');
  for(const folder of [source,photos,videos])await fs.mkdir(folder,{recursive:true});
@@ -30,7 +23,7 @@ async function drive(t:test.TestContext,prefix:string){
 const by=(entries:PlanEntry[],name:string)=>entries.find(entry=>path.basename(entry.source)===name)!;
 
 /** Copying every extension in every layout takes minutes; the stress suite does that. */
-const copyLayouts=new Set<MediaLayout>(process.env.EDGE_COPY_ALL_LAYOUTS?layouts:['video-root']);
+const copyLayouts=new Set<MediaLayout>(['video-root']);
 test('every listed media extension, in either case, is planned and filed by format in all six layouts and copied exactly',async t=>{
  const extensions=await listedExtensions();
  assert.ok(extensions.length>60,'the extension list was read');

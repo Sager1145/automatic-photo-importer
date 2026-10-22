@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build && node Scripts/build-desktop.mjs",
     "start": "npm run build && electron .",
     "test": "node --import tsx --test desktop/tests/*.test.ts",
+    "test:stress": "node --import tsx --test --test-concurrency=1 --test-timeout=3600000 desktop/stress/*.stress.ts",
     "typecheck": "tsc --noEmit",
     "package:mac": "npm run native:mac && npm run build && electron-builder --mac dir --arm64",
     "package:win": "npm run build && electron-builder --win dir",
