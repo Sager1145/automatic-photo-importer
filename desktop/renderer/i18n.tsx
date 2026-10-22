@@ -215,23 +215,50 @@ Choose a drive or folder to begin.|选择磁盘或文件夹即可开始。|選�
 Backup folder|备份文件夹|備份資料夾|バックアップフォルダー
 A folder inside each destination. Leave empty to use the destination itself.|每个目标内的文件夹。留空则直接使用目标。|每個目的地內的資料夾。留空則直接使用目的地。|各保存先内のフォルダーです。空欄にすると保存先を直接使用します。
 Folder structure|文件夹结构|資料夾結構|フォルダー構造
-Start with a preset, then make the template your own.|从预设开始，再按需要调整模板。|從預設開始，再依需求調整範本。|プリセットを選び、テンプレートを調整できます。
-Folder presets|文件夹预设|資料夾預設|フォルダープリセット
 Date, then camera|先日期后相机|先日期後相機|日付 → カメラ
-Year / Month / Camera|年 / 月 / 相机|年 / 月 / 相機|年 / 月 / カメラ
-Camera, then month|先相机后月份|先相機後月份|カメラ → 月
-Camera / Year / Month|相机 / 年 / 月|相機 / 年 / 月|カメラ / 年 / 月
-Daily shoots|按日拍摄|按日拍攝|撮影日ごと
-Year / Day / Camera|年 / 日期 / 相机|年 / 日期 / 相機|年 / 日 / カメラ
-Camera, then day|先相机后日期|先相機後日期|カメラ → 日
-Camera / Day|相机 / 日期|相機 / 日期|カメラ / 日
+Camera, then date|先相机后日期|先相機後日期|カメラ → 日付
+Organize first by|首先按以下分类|首先依以下分類|最初の分類
+Year folder|年份文件夹|年份資料夾|年のフォルダー
+Month folder|月份文件夹|月份資料夾|月のフォルダー
+Day folder|日期文件夹|日期資料夾|日のフォルダー
+Include the year in the name|名称中包含年份|名稱中包含年份|名前に年を含める
+Include the year and month in the name|名称中包含年份和月份|名稱中包含年份和月份|名前に年と月を含める
+Month names|月份名称|月份名稱|月の表記
+Numbers|数字|數字|数字
+English|英文|英文|英語
+Photo folders|照片文件夹|照片資料夾|写真のフォルダー
+Video folders|视频文件夹|影片資料夾|動画のフォルダー
+Then sort by file type|然后按文件类型分类|然後依檔案類型分類|次にファイルの種類で分類
+Use the photo folder path for videos|视频使用与照片相同的文件夹路径|影片使用與照片相同的資料夾路徑|動画にも写真と同じフォルダー構成を使う
+Advanced: custom template|高级：自定义模板|進階：自訂範本|詳細：カスタムテンプレート
+Photo folder template|照片文件夹模板|照片資料夾範本|写真のフォルダーテンプレート
+This folder path is a custom template. Edit it under Advanced, or start again with the folder builder.|此文件夹路径是自定义模板。可在“高级”中编辑，或使用文件夹构建器重新设置。|此資料夾路徑是自訂範本。可在「進階」中編輯，或使用資料夾建構器重新設定。|このフォルダー構成はカスタムテンプレートです。「詳細」で編集するか、フォルダービルダーで設定し直してください。
+Use the folder builder|使用文件夹构建器|使用資料夾建構器|フォルダービルダーを使う
 Folder template|文件夹模板|資料夾範本|フォルダーテンプレート
 Edited exports folder|编辑导出文件夹|編輯匯出資料夾|編集済み書き出しフォルダー
 Editor-exported photos go in this folder within each month. RAW originals and XMP stay together.|编辑器导出的照片会保存在每月目录中的此文件夹内。RAW 原片和 XMP 保存在一起。|編輯器匯出的照片會儲存在每月目錄中的此資料夾內。RAW 原始檔與 XMP 儲存在一起。|編集ソフトから書き出した写真を各月のこのフォルダーに保存します。RAWの原本とXMPは一緒に保存します。
 Your edited export lands here|编辑导出的照片将保存在这里|編輯匯出的照片將儲存在這裡|編集済み写真の保存先
-Available tokens: {year}, {yyyymm}, {month}, {day}, {yyyyMMdd}, {camera}|可用标记：{year}、{yyyymm}、{month}、{day}、{yyyyMMdd}、{camera}|可用標記：{year}、{yyyymm}、{month}、{day}、{yyyyMMdd}、{camera}|使用可能なトークン：{year}、{yyyymm}、{month}、{day}、{yyyyMMdd}、{camera}
-Separate files by media type|按媒体类型分开文件|依媒體類型分開檔案|メディアの種類ごとにファイルを分ける
-Give each media type its own folder inside the structure.|在目录结构中为每种媒体类型创建独立文件夹。|在目錄結構中為每種媒體類型建立獨立資料夾。|メディアの種類ごとに個別のフォルダーに保存します。
+Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}|可用标记：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|可用標記：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|使用可能なトークン：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}
+Media layout|媒体文件布局|媒體檔案配置|メディアの配置
+Photos and videos, then file formats|先分照片和视频，再按文件格式|先分照片和影片，再依檔案格式|写真と動画に分け、さらにファイル形式別に
+Photos/NEF, Photos/JPEG, Videos/MOV inside the camera folder.|相机文件夹内的 Photos/NEF、Photos/JPEG、Videos/MOV。|相機資料夾內的 Photos/NEF、Photos/JPEG、Videos/MOV。|カメラフォルダー内の Photos/NEF、Photos/JPEG、Videos/MOV。
+A folder for each file format|每种文件格式一个文件夹|每種檔案格式一個資料夾|ファイル形式ごとのフォルダー
+NEF, JPEG, MOV folders inside the camera folder.|相机文件夹内的 NEF、JPEG、MOV 文件夹。|相機資料夾內的 NEF、JPEG、MOV 資料夾。|カメラフォルダー内の NEF、JPEG、MOV フォルダー。
+Photos together, videos in a folder|照片放在一起，视频单独放一个文件夹|照片放在一起，影片另放一個資料夾|写真はまとめて、動画は専用フォルダーへ
+Photos in the camera folder, videos in its Videos folder.|照片直接放在相机文件夹，视频放在其中的 Videos 文件夹。|照片直接放在相機資料夾，影片放在其中的 Videos 資料夾。|写真はカメラフォルダーに、動画はその中の Videos フォルダーに保存します。
+Videos together, photos in a folder|视频放在一起，照片单独放一个文件夹|影片放在一起，照片另放一個資料夾|動画はまとめて、写真は専用フォルダーへ
+Videos in the camera folder, photos in its Photos folder.|视频直接放在相机文件夹，照片放在其中的 Photos 文件夹。|影片直接放在相機資料夾，照片放在其中的 Photos 資料夾。|動画はカメラフォルダーに、写真はその中の Photos フォルダーに保存します。
+Everything in the camera folder|全部放在相机文件夹|全部放在相機資料夾|すべてカメラフォルダーに
+Photos and videos side by side.|照片和视频放在一起。|照片和影片放在一起。|写真と動画を同じ場所に保存します。
+A separate video backup folder|单独的视频备份文件夹|獨立的影片備份資料夾|動画用の別のバックアップフォルダー
+Videos go to their own backup folder beside the photo backup folder.|视频保存到照片备份文件夹旁边的独立备份文件夹。|影片儲存到照片備份資料夾旁的獨立備份資料夾。|動画は写真のバックアップフォルダーの隣にある専用フォルダーに保存します。
+Video backup folder|视频备份文件夹|影片備份資料夾|動画のバックアップフォルダー
+Created beside the photo backup folder on each destination.|在每个目标位置的照片备份文件夹旁创建。|在每個目的地的照片備份資料夾旁建立。|各保存先で写真のバックアップフォルダーの隣に作成します。
+Video folder template|视频文件夹模板|影片資料夾範本|動画のフォルダーテンプレート
+Organization review progress|整理预览进度|整理預覽進度|整理の確認の進行状況
+Review progress|预览进度|預覽進度|確認の進行状況
+Checking the backup folder|正在检查备份文件夹|正在檢查備份資料夾|バックアップフォルダーを確認中
+Your next video lands here|下一个视频将保存在这里|下一部影片將儲存在這裡|次の動画の保存先
 Your next photo lands here|下一张照片将保存在这里|下一張照片將儲存在這裡|次の写真の保存先
 Example: Nikon Z6III · 20 October 2026|示例：Nikon Z6III · 2026年10月20日|範例：Nikon Z6III · 2026年10月20日|例：Nikon Z6III · 2026年10月20日
 Sources & automation|来源与自动化|來源與自動化|ソースと自動化
@@ -326,7 +353,7 @@ Extension breakdown|按扩展名统计|依副檔名統計|拡張子別の内訳
 {count} photos & videos|{count} 张照片和视频|{count} 張照片與影片|写真・動画 {count} 件
 {count} companions|{count} 个伴随文件|{count} 個伴隨檔案|関連ファイル {count} 件
 {count} other files|{count} 个其他文件|{count} 個其他檔案|その他 {count} 件
-{count} of 5|{count} / 5|{count} / 5|{count} / 5
+{count} of 10|{count} / 10|{count} / 10|{count} / 10
 Drive backups|驱动器备份|磁碟備份|ドライブのバックアップ
 Choose what happens when files disappear from a backed-up drive.|选择已备份驱动器上的文件消失后如何处理。|選擇已備份磁碟上的檔案消失後如何處理。|バックアップ済みドライブからファイルが消えたときの扱いを選択します。
 Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバックアップモード
@@ -511,6 +538,43 @@ Dismiss|关闭|關閉|閉じる
 Details|详情|詳細資訊|詳細
 {count} new issues|{count} 个新问题|{count} 個新問題|{count} 件の新しい問題
 View|查看|查看|表示
+Off|关|關|オフ
+Ask|询问|詢問|確認する
+Organize backup|整理备份|整理備份|バックアップを整理
+Check the backup folder|检查备份文件夹|檢查備份資料夾|バックアップフォルダーの確認
+Backup folder is in order.|备份文件夹已整理好。|備份資料夾已整理好。|バックアップフォルダーは整理済みです。
+{count} files outside your folder structure|{count} 个文件不在文件夹结构中|{count} 個檔案不在資料夾結構中|フォルダー構成の外に {count} 個のファイル
+Misplaced files are moved into place after each import.|每次导入后，放错位置的文件会自动移到正确位置。|每次匯入後，放錯位置的檔案會自動移到正確位置。|読み込みのたびに、場所違いのファイルを正しい場所へ移動します。
+Checked after each import. You choose when to move files.|每次导入后检查，由你决定何时移动文件。|每次匯入後檢查，由你決定何時移動檔案。|読み込みのたびに確認し、移動するタイミングは自分で選べます。
+Not checked automatically.|不自动检查。|不自動檢查。|自動では確認しません。
+{completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
+{completed} of {total} files read|已读取 {completed}/{total} 个文件|已讀取 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを読み込み
+{time} elapsed|已用时 {time}|已用時 {time}|経過時間 {time}
+Took {time}|用时 {time}|用時 {time}|所要時間 {time}
+Move {name} to the top|将 {name} 移到最上方|將 {name} 移到最上方|{name} を一番上へ移動
+Move to the top|移到最上方|移到最上方|一番上へ移動
+Drive reconnected|驱动器已重新连接|磁碟已重新連接|ドライブが再接続されました
+Drives reconnected|驱动器已重新连接|磁碟已重新連接|ドライブが再接続されました
+Last import verified {date}|上次导入并验证：{date}|上次匯入並驗證：{date}|前回の読み込みと検証：{date}
+Last scan finished {date}|上次扫描完成：{date}|上次掃描完成：{date}|前回のスキャン完了：{date}
+Import now|立即导入|立即匯入|今すぐ読み込む
+OK|好|好|OK
+Hide the import overview|隐藏导入概览|隱藏匯入概覽|読み込みの概要を隠す
+Show the import overview|显示导入概览|顯示匯入概覽|読み込みの概要を表示
+Importing|导入|匯入|読み込み
+Folders|文件夹|資料夾|フォルダー
+Manual|手动|手動|手動
+{count} at once|同时 {count} 个|同時 {count} 個|同時に {count} 台
+Not set|未设置|未設定|未設定
+{count} remembered|已记住 {count} 个|已記住 {count} 個|{count} 台を記憶
+Backup folder check|备份文件夹检查|備份資料夾檢查|バックアップフォルダーの確認
+Starting imports|开始导入|開始匯入|読み込みの開始
+Imports start as soon as a selected drive connects.|选定的驱动器一连接就开始导入。|選定的磁碟一連接就開始匯入。|選択したドライブを接続するとすぐに読み込みを開始します。
+Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ
+Lets you choose a folder of photos as a source.|允许选择一个照片文件夹作为来源。|允許選擇一個照片資料夾作為來源。|写真フォルダーを読み込み元として選べます。
+After organizing|整理之后|整理之後|整理の後
+Settings categories|设置类别|設定類別|設定のカテゴリ
+Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
 Limit: {count} simultaneous|上限：同时 {count} 个|上限：同時 {count} 個|同時処理上限：{count}
 of {size} planned|计划共 {size}|計畫共 {size}|予定 {size} 中
 {complete} sources complete · {errors} need attention|{complete} 个来源完成 · {errors} 个需处理|{complete} 個來源完成 · {errors} 個需處理|{complete} 件完了 · {errors} 件要確認
