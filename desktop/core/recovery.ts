@@ -12,10 +12,11 @@ import { beneath, checkAbort, code, contained, within, digest, identity, isAbort
 export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;}
 /** rename: move each file on its volume with rename(2); copy: verified copy plus a retained original. */
 export type OrganizationStrategy='rename'|'copy';
-export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;}
+/** kept: a duplicate removal's entry names the copy that stays as its destination; that copy may differ from the removed file's bytes (EXIF-identical duplicates), so its own size and SHA-256 are checked instead. */
+export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;kept?:{digest:string;size:number};}
 interface FileIdentity {dev:string;ino:string;size:string;mtime:string;ctime:string;}
-interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;}
-interface Manifest {version:1;id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];}
+interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
+interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];}
 /** Visible on purpose: the app never creates hidden folders. */
 export const RECOVERY_FOLDER='Photo Importer Recovery';
 /** Where versions before RECOVERY_FOLDER kept their journals and originals. */
@@ -271,16 +272,18 @@ async function validateOriginal(file:string,entry:Entry,scope:string,renamed:boo
 }
 async function targetMatches(entry:Entry,m:Manifest,signal?:AbortSignal,verifyContents=true):Promise<boolean> {
  await contained(entry.destination,m.root);const stat=await maybeStat(entry.destination);if(!stat)return false;
- if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(entry.size)||(verifyContents&&await digest(entry.destination,signal)!==entry.digest))throw new Error(`Destination changed; original retained: ${entry.destination}`);
+ const expected=entry.kept??entry;
+ if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(expected.size)||(verifyContents&&await digest(entry.destination,signal)!==expected.digest))throw new Error(`Destination changed; original retained: ${entry.destination}`);
  return true;
 }
 function validateManifest(value:unknown,root:string,id:string):Manifest {
  const m=value as Manifest;
- if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source)))))throw new Error('Invalid or unsafe organization recovery journal');
+ if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.kind!==undefined&&m.kind!=='duplicates')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source)))))throw new Error('Invalid or unsafe organization recovery journal');
  const sources=new Set<string>();
  for(const entry of m.entries) {
   if(!entry||(entry.captureTimeMs!==undefined&&(!Number.isFinite(entry.captureTimeMs)||Math.abs(entry.captureTimeMs)>8640000000000000))||typeof entry.source!=='string'||typeof entry.destination!=='string'||!beneath(entry.source,m.source)||path.resolve(entry.source)!==entry.source||!beneath(entry.destination,root)||path.resolve(entry.destination)!==entry.destination||typeof entry.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.digest)||!Number.isSafeInteger(entry.size)||entry.size<0||typeof entry.move!=='boolean'||!entry.stat||!entry.parents||typeof entry.parents!=='object')throw new Error('Invalid or unsafe organization recovery entry');
   if(path.relative(m.source,entry.source).split(path.sep).some(p=>isRecoveryName(p))||path.relative(root,entry.destination).split(path.sep).some(p=>isRecoveryName(p)))throw new Error('Unsafe recovery storage path in journal');
+  if(entry.kept!==undefined&&(m.kind!=='duplicates'||!entry.kept||typeof entry.kept.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.kept.digest)||!Number.isSafeInteger(entry.kept.size)||entry.kept.size<0||pathKey(entry.source)===pathKey(entry.destination)))throw new Error('Invalid duplicate removal entry');
   if(sources.has(pathKey(entry.source)))throw new Error('Duplicate recovery source');sources.add(pathKey(entry.source));
   const keys=Object.keys(entry.stat).sort().join(',');if(keys!=='ctime,dev,ino,mtime,size'||Object.entries(entry.stat).some(([key,v])=>typeof v!=='string'||!(key==='ino'?/^-?\d+$/:/^\d+$/).test(v))||entry.stat.size!==String(entry.size)||entry.stat.dev!==m.rootIdentity.split(':')[0])throw new Error('Invalid recovery source identity');
   const ancestors:string[]=[];for(let folder=path.dirname(entry.source);folder!==m.source;folder=path.dirname(folder)){if(!beneath(folder,m.source))throw new Error('Unsafe recovery source ancestor');ancestors.push(folder);}
@@ -807,6 +810,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    if(stash){if(!entry.move||source)throw new Error(`Recovery original collision: ${entry.source}`);await validateOriginal(saved!,entry,m.root,true,signal,contents);result.moved++;}
    else {if(!source)throw new Error(`Original is unavailable; reconnect and recheck: ${entry.source}`);await validateOriginal(entry.source,entry,m.source,false,signal);}
    let present:boolean;try{present=await targetMatches(entry,m,signal,contents);}catch(error){if(!await preserveIncomplete(entry,index,m,stash?saved!:entry.source,state,signal))throw error;present=false;}
+   if(!present&&entry.kept)throw new Error(`The copy to keep is missing; the duplicate stays where it is: ${entry.destination}`);
    if(!present){await copy(entry,index,m,stash?saved!:entry.source,signal,count=>{bytes+=count;progress(path.basename(entry.source));});result.copied++;}else result.skipped++;
    completed++;progress(path.basename(entry.source));
   }
@@ -871,6 +875,17 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
   }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
  }
  return result;
+}
+/** Set duplicates aside in the recovery store, with undo: each entry's source is a duplicate and its destination
+ * the copy kept. Nothing is copied unless an entry has no `kept` (a companion carried next to the kept file).
+ * `root` is the library; the journal lives in its recovery folder, like an organization's. */
+export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'rootIdentity'>,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<{id:string;result:ReorganizationResult}> {
+ checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
+ const id=randomUUID(),manifest:Manifest={version:1,kind:'duplicates',id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.root,sourceIdentity:transfer.rootIdentity,entries:[],keepFolders:true};
+ for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.root;folder=path.dirname(folder)){if(!beneath(folder,transfer.root))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
+ validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
+ await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
+ return {id,result:await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress))};
 }
 /** Resume, or recheck a finished organization. A journal from before the event log is first
  * converted to it (compactLegacyEvents), which only this explicit action does. */
@@ -944,7 +959,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  report(0,0,'');
  for(const [position,id] of ids.entries()) {
   const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id));if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id));if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
