@@ -505,15 +505,21 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
 /** exFAT gives an empty file a temporary inode and assigns the real one (its first cluster)
  * when data is written, so the staging identity is re-read through the open descriptor,
  * which can only name this staging file. */
+async function settled(output:Awaited<ReturnType<typeof fs.open>>):Promise<import('node:fs').BigIntStats> {
+  const stat=await output.stat({bigint:true});
+  // On larger exFAT volumes the real inode only arrives when the data is flushed.
+  if(stat.size===0n||(stat.ino>=0n&&stat.ino<2n**63n)) return stat;
+  await output.sync();return output.stat({bigint:true});
+}
 async function rebindStage(open:OpenStage):Promise<void> {
-  const stat=await open.output.stat({bigint:true});
+  const stat=await settled(open.output);
   open.staged.dev=stat.dev;open.staged.ino=stat.ino;open.staged.birthtime=stat.birthtimeNs;
 }
 /** A receipt names its file by inode. The temporary inode exFAT gives an empty file (see above)
  * is gone after the first write, and APFS may lower birthtime when an older date is applied, so
  * the receipt is rewritten for the file as it now is: a later run can then resume or release it. */
 async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.open>>,entry:PlanEntry,transfer:TransferPlan,recovery:RecoveryIndex):Promise<OwnedPartial> {
-  const now=await output.stat({bigint:true});
+  const now=await settled(output);
   if(now.dev===owned.stat.dev&&now.ino===owned.stat.ino&&now.birthtimeNs===owned.stat.birthtimeNs) return owned;
   await output.sync();
   const next=await recordPartial(owned.record.kind,owned.file,await output.stat({bigint:true}),entry,transfer,recovery);
@@ -592,12 +598,17 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
 const toError=(error:unknown)=>error instanceof Error?error:new Error(String(error));
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 /** `sync:false`: the caller synchronizes the folder once after removing many stages. */
-async function cleanStage(staged:Staged,root:string,sync=true):Promise<void> {
+async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string)=>void=text=>console.warn(text)):Promise<void> {
   claimedStages.delete(staged.file);
   try {
     await contained(staged.file,root);
     const current=await fs.lstat(staged.file,{bigint:true});
-    if(current.isFile() && current.dev===staged.dev && current.ino===staged.ino && current.birthtimeNs===staged.birthtime) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
+    if(!current.isFile()) return;
+    const exact=current.dev===staged.dev&&current.ino===staged.ino&&current.birthtimeNs===staged.birthtime;
+    // A temporary (negative) inode is replaced by the real one on exFAT; device and birth time still name the file.
+    const temporary=staged.ino<0n&&current.dev===staged.dev&&current.birthtimeNs===staged.birthtime&&current.nlink===1n;
+    if(exact||temporary) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
+    else note(`Staging file left in place, identity differs: ${staged.file} expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`);
   } catch { /* An unavailable/replaced destination is never followed or removed. */ }
 }
 /** A complete staged copy left by an interrupted run is released once the published file is
@@ -817,7 +828,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           run.completed+=family.length;
         }catch(error){if(isAbort(error))throw error;run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);}
         await exclusive(async()=>{
-          for(const temporary of staged.values())await cleanStage(temporary,transfer.root);
+          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,true,text=>batch.errors.push(text));
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
@@ -835,7 +846,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     for(const run of runs) {
       const stages=run.batches.flatMap(batch=>[...batch.staged.values()]);
       await exclusive(async()=>{
-        await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false));
+        await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false,text=>run.result.errors.push(text)));
         for(const folder of new Set(stages.map(temporary=>path.dirname(temporary.file))))await syncDirectory(folder).catch(()=>{});
       // Keyed by folder: unlinking a stage still linked to its published file changes that file.
       },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);

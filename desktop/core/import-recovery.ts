@@ -35,6 +35,20 @@ async function receiptNames(folder:string,root:string,index:RecoveryIndex):Promi
 const snapshot=(s:BigIntStats):Snapshot=>({dev:String(s.dev),ino:String(s.ino),size:String(s.size),mtime:String(s.mtimeNs),ctime:String(s.ctimeNs)});
 const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JSON.stringify(r);
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
+/** exFAT names a file without a start cluster by a temporary (negative) inode, replaced when data
+ * first reaches the disk or the volume is mounted again: such a receipt binds by device and birth time. */
+const binds=(s:BigIntStats,recorded:string)=>{if(fileIdentity(s)===recorded)return true;const [dev,ino,birth]=recorded.split(':');return !!ino&&ino.startsWith('-')&&String(s.dev)===dev&&String(s.birthtimeNs)===birth;};
+/** A device number names a mount, not a disk: after a re-attach the recorded dev is read as the
+ * current one while the recorded root/source folder is still the same inode at the same path. */
+async function rebaseMount(record:RecordData):Promise<RecordData>{
+ const swap=(value:string,dev:string)=>value.replace(/^\d+:/,dev+':');
+ const out:RecordData={...record,sourceStat:record.sourceStat&&{...record.sourceStat}};
+ const root=await fs.lstat(record.root,{bigint:true}).catch(()=>undefined);
+ if(root?.isDirectory()&&String(record.rootIdentity).split(':')[1]===String(root.ino)){const dev=String(root.dev);out.rootIdentity=swap(out.rootIdentity,dev);out.parentIdentity=swap(out.parentIdentity,dev);out.fileIdentity=swap(out.fileIdentity,dev);}
+ const source=typeof record.sourceRoot==='string'?await fs.lstat(record.sourceRoot,{bigint:true}).catch(()=>undefined):undefined;
+ if(source?.isDirectory()&&String(record.sourceIdentity).split(':')[1]===String(source.ino)){const dev=String(source.dev);out.sourceIdentity=swap(out.sourceIdentity,dev);if(out.sourceStat)out.sourceStat.dev=dev;}
+ return out;
+}
 const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.json$/;
 
 /** A leftover receipt, authenticated with this host's key (it throws otherwise): whether its file
@@ -43,10 +57,10 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
  * own folder. stale: the recorded source card is present and the source is missing or changed
  * (size or mtime), so the copy cannot continue; a card not connected proves nothing. */
 export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean}>{
- const {record}=await readRecord(journal,root);
+ const record=await rebaseMount((await readRecord(journal,root)).record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
- const bound=!!stat?.isFile()&&fileIdentity(stat)===record.fileIdentity;
+ const bound=!!stat?.isFile()&&binds(stat,record.fileIdentity);
  // A card that is not connected (its folder missing or another volume there) may come back
  // unchanged; only the same card holding a changed or removed file ends the copy's use.
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
@@ -92,13 +106,13 @@ export async function findPartial(kind:Kind,entry:PlanEntry,root:string,index:Re
  for(const name of [...names.keys()].sort()){
   checkAbort(signal);const journal=path.join(folder,name);
   try {
-   const {record,journalStat}=await readRecord(journal,root);
+   const read=await readRecord(journal,root),journalStat=read.journalStat,record=await rebaseMount(read.record);
    if(record.version!==1||record.kind!==kind||record.root!==root||record.source!==entry.source||record.destination!==entry.destination||(kind==='stage'?!stageMatch(record):record.sha256!==(entry.digest??''))||!record.sourceStat||typeof record.file!=='string'||path.dirname(record.file)!==folder)continue;
    if(kind==='publication'?record.file!==entry.destination:!/^(?:\.import|photo-importer)-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
    await rootUnchanged(root,record.rootIdentity);await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);await contained(record.file,root);
    if(await identity(folder)!==record.parentIdentity)continue;
    const source=await fs.lstat(entry.source,{bigint:true}),stat=await fs.lstat(record.file,{bigint:true});
-   if(!sourceMatches(source,record.sourceStat)||!stat.isFile()||stat.nlink!==1n||fileIdentity(stat)!==record.fileIdentity||stat.size>BigInt(entry.size))continue;
+   if(!sourceMatches(source,record.sourceStat)||!stat.isFile()||stat.nlink!==1n||!binds(stat,record.fileIdentity)||stat.size>BigInt(entry.size))continue;
    if(!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
    if(!sameStat(stat,await fs.lstat(record.file,{bigint:true}))||!sameStat(source,await fs.lstat(entry.source,{bigint:true})))continue;
    return {file:record.file,stat,journal,journalStat,record};
