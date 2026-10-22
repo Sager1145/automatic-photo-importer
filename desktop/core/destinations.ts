@@ -7,7 +7,7 @@ import type {Progress,TransferPlan} from '../shared';
  * video folder (video-root layout) runs as its own plan but is validated, reported and
  * settled as part of that destination. */
 export async function executeDestinations(plans:TransferPlan[],options:{
- signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;keepSourceFolders?:boolean;
+ signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;keepSourceFolders?:boolean;releaseDuplicates?:boolean;
  onVerified?:(source:string,sha256:string,identity:string)=>void;
  validate(index:number):Promise<void>;
  progress(index:number,value:Progress,pendingBytes:number):void;
@@ -22,7 +22,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  const workspace=plans.map(plan=>requiredTransferSpace(plan)-bytesOf(plan));
  const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
  const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0}));
- const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]};
+ const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];notes:string[]};
  const report=(slot:number,value:Progress)=>{
   // Checks before an organization moves anything count journal records or files, not the plan's work.
   if(value.step==='earlier'||value.step==='confirming'){const index=slots[slot].index;options.progress(index,value,slots.reduce((rest,item,other)=>item.index===index?rest+Math.max(0,pending[other]-latest[other].bytes):rest,0)+workspace[index]);return;}
@@ -39,8 +39,8 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    try{
     await options.validate(index);
     for(const [slot,{part}] of slots.entries())if(slots[slot].index===index){
-     const moved=await executeReorganization(part,options.signal,value=>report(slot,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders});
-     result.copied+=moved.copied;result.skipped+=moved.skipped;result.moved+=Number(moved.moved);result.retained+=Number(moved.retained);result.retainedBytes+=moved.retainedBytes;result.notes.push(...moved.notes??[]);
+     const moved=await executeReorganization(part,options.signal,value=>report(slot,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders,releaseDuplicates:options.releaseDuplicates});
+     result.copied+=moved.copied;result.skipped+=moved.skipped;result.moved+=Number(moved.moved);result.retained+=Number(moved.retained);result.retainedBytes+=moved.retainedBytes;if(moved.released){result.released=(result.released??0)+moved.released;result.releasedBytes=(result.releasedBytes??0)+(moved.releasedBytes??0);}result.notes.push(...moved.notes??[]);
      result.errors.push(...moved.errors.map(error=>`Destination ${index+1}: ${error}`));
     }
    }catch(error){if(options.signal.aborted)throw error;failed(index,error);}

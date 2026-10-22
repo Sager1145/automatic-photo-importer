@@ -225,11 +225,11 @@ test('metadata disclosure does not repeat parser error messages outside the erro
  assert.ok(!markup.includes('Invalid media payload'));assert.ok(markup.includes('EXIF:Model'));
 });
 
-test('mirror reviews list files moved to .mirror-removed with reasons, per destination, in every language', async () => {
+test('mirror reviews list files moved to Removed by mirror with reasons, per destination, in every language', async () => {
   const { MirrorRemovals } = await import('../renderer/RootApp');
   const plan = (root: string, removals: {path:string;size:number;reason:'missing'|'changed'}[]) => ({ source: '/Volumes/CARD', root, entries: [], rootIdentity: root, drive: { folder: 'CARD', identity: 'id', name: 'CARD' }, removals });
   const review = { id: 'r', kind: 'import', backup: true, source: { id: 's', name: 'CARD', path: '/Volumes/CARD', transport: 'removable' }, plans: [plan('/A', [{ path: 'DCIM/old.NEF', size: 2_000_000, reason: 'missing' }]), plan('/B', [{ path: 'notes.txt', size: 1_000, reason: 'changed' }])] } as unknown as NonNullable<AppState['review']>;
-  const expected = { en: ['2 files will be moved to .mirror-removed', 'No longer on the drive', 'Replaced by a newer version', 'Destination 2: '], ja: ['2 件のファイルが .mirror-removed へ移動されます', 'ドライブにもう存在しません', '新しいバージョンに置き換えられました'] } as const;
+  const expected = { en: ['2 files will be moved to Removed by mirror', 'No longer on the drive', 'Replaced by a newer version', 'Destination 2: '], ja: ['2 件のファイルが Removed by mirror へ移動されます', 'ドライブにもう存在しません', '新しいバージョンに置き換えられました'] } as const;
   for (const [language, labels] of Object.entries(expected)) {
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language: language as 'en' | 'ja', children: createElement(MirrorRemovals, { review }) }));
     for (const label of labels) assert.ok(markup.includes(label), `${language}: ${label}`);

@@ -60,7 +60,7 @@ async function killedWithoutFinally(base:string,mode:string) {
   await assert.rejects(fs.stat(path.join(base,`finally-${mode}`)),{code:'ENOENT'});
 }
 async function operation(library:string) {
-  const storage = path.join(library,'.photo-importer-recovery');
+  const storage = path.join(library,'Photo Importer Recovery');
   const [id] = await visible(storage);assert.ok(id);
   return {id,folder:path.join(storage,id)};
 }

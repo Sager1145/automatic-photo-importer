@@ -31,6 +31,7 @@ const lastVolume = {
 const failedCheck = "Every original file and its identity remains unchanged";
 const serviceNames = /* @__PURE__ */ new Set([
 	".photo-importer-recovery",
+	"photo importer recovery",
 	".ds_store",
 	".fseventsd",
 	".spotlight-v100",

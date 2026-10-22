@@ -361,15 +361,15 @@ Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバッ
 Additive|只增不删|只增不刪|追加のみ
 Mirror|镜像|鏡像|ミラー
 Keep files on the backup even after they're deleted from the drive.|即使文件已从驱动器删除，也保留在备份中。|即使檔案已從磁碟刪除，也保留在備份中。|ドライブから削除されたファイルもバックアップに残します。
-Make the backup match the drive. Files no longer on the drive, or changed since the last backup, are moved to Drive backups/.mirror-removed on that destination after you review them. Nothing is permanently deleted.|让备份与驱动器保持一致。驱动器上已不存在或自上次备份后已更改的文件，会在你审核后移到该目标的 Drive backups/.mirror-removed。不会永久删除任何文件。|讓備份與磁碟保持一致。磁碟上已不存在或自上次備份後已變更的檔案，會在你審核後移到該目的地的 Drive backups/.mirror-removed。不會永久刪除任何檔案。|バックアップをドライブと一致させます。ドライブにもう存在しないファイルや前回のバックアップ以降に変更されたファイルは、確認後にその保存先の Drive backups/.mirror-removed へ移動されます。完全に削除されるものはありません。
+Make the backup match the drive. Files no longer on the drive, or changed since the last backup, are moved to Drive backups/Removed by mirror on that destination after you review them. Nothing is permanently deleted.|让备份与驱动器保持一致。驱动器上已不存在或自上次备份后已更改的文件，会在你审核后移到该目标的 Drive backups/Removed by mirror。不会永久删除任何文件。|讓備份與磁碟保持一致。磁碟上已不存在或自上次備份後已變更的檔案，會在你審核後移到該目的地的 Drive backups/Removed by mirror。不會永久刪除任何檔案。|バックアップをドライブと一致させます。ドライブにもう存在しないファイルや前回のバックアップ以降に変更されたファイルは、確認後にその保存先の Drive backups/Removed by mirror へ移動されます。完全に削除されるものはありません。
 Mirror can’t be combined with Fill first, then second. Choose another copy policy to use Mirror.|镜像不能与“先存满第一块再用第二块”同时使用。请选择其他复制策略以使用镜像。|鏡像不能與「先存滿第一顆再用第二顆」同時使用。請選擇其他複製策略以使用鏡像。|ミラーは「1台目から順に保存」と併用できません。ミラーを使うには別のコピー方式を選択してください。
 Fill first, then second is unavailable while drive backups use Mirror.|驱动器备份使用镜像时，无法使用“先存满第一块再用第二块”。|磁碟備份使用鏡像時，無法使用「先存滿第一顆再用第二顆」。|ドライブのバックアップがミラーの間は「1台目から順に保存」は使用できません。
 Drive backups are saved in {path} on each destination.|驱动器备份保存在每个目标的 {path} 中。|磁碟備份儲存在每個目的地的 {path} 中。|ドライブのバックアップは各保存先の {path} に保存されます。
 Drive backups are saved here on each destination|驱动器备份保存在每个目标的此位置|磁碟備份儲存在每個目的地的此位置|ドライブのバックアップは各保存先のここに保存されます
-Mirror backup: the backup matches the drive. Removed or changed files move to .mirror-removed after you review them.|镜像备份：备份与驱动器保持一致。已删除或已更改的文件会在你审核后移到 .mirror-removed。|鏡像備份：備份與磁碟保持一致。已刪除或已變更的檔案會在你審核後移到 .mirror-removed。|ミラーバックアップ：バックアップをドライブと一致させます。削除・変更されたファイルは確認後に .mirror-removed へ移動します。
+Mirror backup: the backup matches the drive. Removed or changed files move to Removed by mirror after you review them.|镜像备份：备份与驱动器保持一致。已删除或已更改的文件会在你审核后移到 Removed by mirror。|鏡像備份：備份與磁碟保持一致。已刪除或已變更的檔案會在你審核後移到 Removed by mirror。|ミラーバックアップ：バックアップをドライブと一致させます。削除・変更されたファイルは確認後に Removed by mirror へ移動します。
 Review the files Mirror will move before this backup can continue.|请先审核镜像将要移动的文件，然后才能继续此备份。|請先審核鏡像將要移動的檔案，然後才能繼續此備份。|このバックアップを続行する前に、ミラーで移動されるファイルを確認してください。
-{count} files will be moved to .mirror-removed|{count} 个文件将移到 .mirror-removed|{count} 個檔案將移到 .mirror-removed|{count} 件のファイルが .mirror-removed へ移動されます
-Nothing is permanently deleted. Moved files stay in Drive backups/.mirror-removed on this destination.|不会永久删除任何文件。移动的文件保留在此目标的 Drive backups/.mirror-removed 中。|不會永久刪除任何檔案。移動的檔案保留在此目的地的 Drive backups/.mirror-removed 中。|完全に削除されるものはありません。移動したファイルはこの保存先の Drive backups/.mirror-removed に残ります。
+{count} files will be moved to Removed by mirror|{count} 个文件将移到 Removed by mirror|{count} 個檔案將移到 Removed by mirror|{count} 件のファイルが Removed by mirror へ移動されます
+Nothing is permanently deleted. Moved files stay in Drive backups/Removed by mirror on this destination.|不会永久删除任何文件。移动的文件保留在此目标的 Drive backups/Removed by mirror 中。|不會永久刪除任何檔案。移動的檔案保留在此目的地的 Drive backups/Removed by mirror 中。|完全に削除されるものはありません。移動したファイルはこの保存先の Drive backups/Removed by mirror に残ります。
 Drive folder: {folder}|驱动器文件夹：{folder}|磁碟資料夾：{folder}|ドライブフォルダー：{folder}
 Reason|原因|原因|理由
 No longer on the drive|驱动器上已不存在|磁碟上已不存在|ドライブにもう存在しません
@@ -483,7 +483,7 @@ No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。
 No saved rules.|没有已保存的规则。|沒有已儲存的規則。|保存されたルールはありません。
 Not available with Mirror.|镜像模式下不可用。|鏡像模式下不可用。|ミラーでは使用できません。
 Not photos or videos. Change this in Settings.|不是照片或视频。可在设置中更改。|不是照片或影片。可在設定中變更。|写真でも動画でもありません。設定で変更できます。
-Nothing is deleted; files go to .mirror-removed.|不会删除任何文件；文件会移到 .mirror-removed。|不會刪除任何檔案；檔案會移到 .mirror-removed。|何も削除されません。ファイルは .mirror-removed に移動します。
+Nothing is deleted; files go to Removed by mirror.|不会删除任何文件；文件会移到 Removed by mirror。|不會刪除任何檔案；檔案會移到 Removed by mirror。|何も削除されません。ファイルは Removed by mirror に移動します。
 Nothing moves until you apply.|应用之前不会移动任何文件。|套用之前不會移動任何檔案。|適用するまで何も移動しません。
 One verified copy.|一份校验过的副本。|一份驗證過的副本。|検証済みコピーを1つ保存します。
 Reads each copy back to confirm it. Off is faster.|重新读取每个副本以确认无误。关闭会更快。|重新讀取每個副本以確認無誤。關閉會更快。|各コピーを読み直して確認します。オフにすると速くなります。
@@ -504,6 +504,8 @@ Waiting|等待中|等待中|待機中
 In progress|进行中|進行中|処理中
 Skipped|已跳过|已略過|スキップ
 Remove emptied source folders|删除已清空的来源文件夹|刪除已清空的來源資料夾|空になった元フォルダーを削除
+Remove confirmed duplicates|删除已确认的重复文件|刪除已確認的重複檔案|確認済みの重複ファイルを削除
+After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.|整理无错误完成后，再次校验已存在于目标位置的原文件，然后将其删除，而不是保留以供撤销。|整理無錯誤完成後，再次校驗已存在於目標位置的原始檔案，然後將其刪除，而不是保留以供復原。|整理がエラーなく完了したら、移動先に既にある元のファイルを再確認し、元に戻す用に残さず削除します。
 Folders left empty after organizing are removed. Folders with files are kept.|整理后变空的文件夹会被删除，仍有文件的文件夹会保留。|整理後變空的資料夾會被刪除，仍有檔案的資料夾會保留。|整理後に空になったフォルダーは削除します。ファイルが残るフォルダーは残します。
 Large sizes shrink to fit small windows.|窗口较小时，大字号会自动缩小以适应。|視窗較小時，大字級會自動縮小以符合。|ウィンドウが小さいときは大きな文字が自動で縮小されます。
 Choose whether to import this drive.|请选择是否导入此驱动器。|請選擇是否匯入此磁碟。|このドライブを読み込むか選んでください。

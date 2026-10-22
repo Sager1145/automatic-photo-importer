@@ -14,7 +14,7 @@ const destination = path.join(base,'destination');
 const library = path.join(base,'library');
 const original = path.join(library,'incoming','A.JPG');
 const target = path.join(library,'2024','202402','FixtureCamera','JPEG','A.JPG');
-const recovery = path.join(library,'.photo-importer-recovery');
+const recovery = path.join(library,'Photo Importer Recovery');
 const finallyMarker = path.join(base,`finally-${mode}`);
 const metadata = async()=>({camera:'FixtureCamera',date:'2024-02-03',fields:{}});
 const importOptions = {backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
