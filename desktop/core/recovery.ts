@@ -342,8 +342,9 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
   // FAT and exFAT report ctime equal to mtime and cannot store dates before 1980.
   if(entry.captureTimeMs<earliestStorableDate&&current.ctimeNs===current.mtimeNs){note(`${path.basename(entry.destination)}: capture date before 1980 cannot be stored`);return;}
   try {
-   await applyFileTimestamps(handle,current,entry.captureTimeMs);await handle.sync();
+   const stored=await applyFileTimestamps(handle,current,entry.captureTimeMs);await handle.sync();
    await remember('timed',await handle.stat({bigint:true}));
+   if(!stored)note(`${path.basename(entry.destination)}: the drive cannot store its capture date`);
   } catch(error) {
    // A partly applied date still leaves the same inode; record what is there now.
    const now=await handle.stat({bigint:true});

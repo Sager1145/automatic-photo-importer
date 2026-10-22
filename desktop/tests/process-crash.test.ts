@@ -18,7 +18,7 @@ const prefixHash = hash(data.subarray(0,4093));
 const foreign = 'pre-existing foreign file';
 interface WorkerMessage {
   type:'checkpoint'|'result';file?:string;bytesWritten?:number;target?:string;
-  result?:{copied?:number;skipped?:number;errors?:string[];moved?:number;removed?:number;finalized?:number};
+  result?:{copied?:number;skipped?:number;errors?:string[];moved?:number;removed?:number;finalized?:number;restored?:number};
   jobs?:{id:string;status:string}[];
 }
 async function fixture(t:test.TestContext) {
@@ -138,4 +138,26 @@ for(const mode of ['finalize-intent','finalize-unlink'])test(`SIGKILL ${mode} al
   await assert.rejects(fs.stat(saved),{code:'ENOENT'});assert.equal(await fileHash(f.target),expectedHash);
   assert.equal(await fs.readFile(unowned,'utf8'),foreign);
   assert.deepEqual((await worker(t,'resume-organization',f.base,false,id)).result?.errors,[]);
+});
+
+for(const mode of ['organization-rename-link','organization-rename-unlink'])test(`SIGKILL ${mode} finishes the move in a new process, and undo there puts the original back`,async t=>{
+  const f = await fixture(t),before = await fs.lstat(f.original,{bigint:true});
+  const stopped = await worker(t,mode,f.base,true);await killedWithoutFinally(f.base,mode);assert.equal(stopped.file,f.target);
+  // A move never copies: the one inode is at the original path, the target, or both.
+  assert.equal((await fs.lstat(f.target,{bigint:true})).ino,before.ino);
+  if(mode === 'organization-rename-link')assert.equal((await fs.lstat(f.original,{bigint:true})).ino,before.ino);
+  else await assert.rejects(fs.stat(f.original),{code:'ENOENT'});
+  const job = await operation(f.library);
+  const retry = await worker(t,'resume-organization',f.base,false,job.id);
+  assert.deepEqual(retry.result?.errors,[]);assert.equal(retry.result?.moved,1);assert.equal(retry.jobs?.[0]?.status,'complete');
+  await assert.rejects(fs.stat(f.original),{code:'ENOENT'});
+  assert.equal(await fileHash(f.target),expectedHash);assert.equal((await fs.lstat(f.target,{bigint:true})).ino,before.ino);
+  // No retained copy: nothing in the recovery store holds media.
+  await assert.rejects(fs.stat(path.join(job.folder,'originals')),{code:'ENOENT'});
+  const undone = await worker(t,'undo-organization',f.base,false,job.id);
+  assert.equal(undone.result?.restored,1);assert.deepEqual(undone.jobs,[]);
+  const back = await fs.lstat(f.original,{bigint:true});
+  assert.equal(back.ino,before.ino);assert.equal(back.mtimeNs,before.mtimeNs);assert.equal(await fileHash(f.original),expectedHash);
+  await assert.rejects(fs.stat(f.target),{code:'ENOENT'});
+  assert.equal(await fs.readFile(path.join(f.library,'keep.txt'),'utf8'),foreign);
 });
