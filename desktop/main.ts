@@ -95,7 +95,7 @@ const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
 let lastEmit=0;
 const livePreferences=new Set(['language','appearance','sourceLayout','showDashboard','textScale','accent','parallel','automatic']);
-const jobPreferences=new Set(['copyMode','backupMode','verifyCopies','skipErrors','removeEmptySourceFolders','releaseDuplicatesAfterOrganizing','autoOrganizeBackup','unknownDefault','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder']);
+const jobPreferences=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','removeEmptySourceFolders','releaseDuplicatesAfterOrganizing','autoOrganizeBackup','unknownDefault','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder']);
 /** Reserved destination plans for one source. A review holds one until applied. */
 interface Prepared {review:Review;prefs:Preferences;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;}
 let reviewed:Prepared|undefined;
@@ -424,7 +424,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   onPlanning?.();
   // Card files copied before and still unchanged are recognised without reading them.
   const volume=reorganize||stage?undefined:memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,source.path):undefined;
-  const skipErrors=request.skipErrors===true||prefs.skipErrors===true;
+  const skipErrors=request.skipErrors===true||prefs.skipFileErrors!==false;
   const {inventory,plans,failures}=await plan(sourcePath,roots,{backup,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
@@ -590,10 +590,11 @@ async function action(input:Action):Promise<void>{
    const failed=state.jobs.find(job=>job.id===input.jobId&&job.skippablePath&&(job.phase==='error'||job.phase==='stopped')&&!active.has(job.id));if(!failed)break;
    if(input.type==='skipFile'&&input.path!==failed.skippablePath)break;
    const skip={exclude:[...new Set([...(failed.excluded??[]),failed.skippablePath!])],...(input.type==='skipAndContinue'?{skipErrors:true}:{})};
-   delete failed.skippablePath;
-   if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,...skip});break;}
+   // The buttons go away only once the rerun is queued; a refusal leaves them to try again.
+   if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,...skip});delete failed.skippablePath;break;}
+   if(state.jobs.some(job=>job.source.id===failed.source.id&&['queued','discovering','verifying','copying'].includes(job.phase)))throw new MessageError('error.busy');
    for(const id of skipRequests.keys())if(!state.jobs.some(job=>job.id===id&&job.phase==='queued'))skipRequests.delete(id);
-   enqueue(failed.source,failed.backup);const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued)skipRequests.set(queued.id,skip);pump();break;
+   enqueue(failed.source,failed.backup);const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued){skipRequests.set(queued.id,skip);delete failed.skippablePath;}pump();break;
   }
   case 'pause':{
    // Pause stops at once like Stop; verified copies stay, and Start continues with the rest.

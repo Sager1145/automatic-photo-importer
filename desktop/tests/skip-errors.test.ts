@@ -100,11 +100,13 @@ test('a copy that fails is reported while the other files are copied, with skipp
 });
 
 test('skipping errors is a saved setting that is on unless the user turned it off',()=>{
- assert.equal(defaultPreferences.skipErrors,true);
- assert.equal(normalizePreferences({}).skipErrors,true);
- assert.equal(normalizePreferences({skipErrors:false}).skipErrors,false);
- assert.equal(normalizePreferences({skipErrors:'yes'},{...defaultPreferences,skipErrors:false}).skipErrors,false);
- assert.equal(normalizePreferences({skipErrors:true},{...defaultPreferences,skipErrors:false}).skipErrors,true);
+ assert.equal(defaultPreferences.skipFileErrors,true);
+ assert.equal(normalizePreferences({}).skipFileErrors,true);
+ // Settings saved while the option was off by default still turn it on.
+ assert.equal(normalizePreferences({skipErrors:false}).skipFileErrors,true);
+ assert.equal(normalizePreferences({skipFileErrors:false}).skipFileErrors,false);
+ assert.equal(normalizePreferences({skipFileErrors:'yes'},{...defaultPreferences,skipFileErrors:false}).skipFileErrors,false);
+ assert.equal(normalizePreferences({skipFileErrors:true},{...defaultPreferences,skipFileErrors:false}).skipFileErrors,true);
 });
 
 test('a skipped file takes its whole family with it, so a sidecar never lands without its photo',async t=>{

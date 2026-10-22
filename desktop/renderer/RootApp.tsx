@@ -546,7 +546,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
       <fieldset className="settings-fieldset" disabled={busy}>
         <SettingsSection title={t("Copying")} icon={ShieldCheck}>
           <Switch checked={p.verifyCopies !== false} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
-          <Switch checked={p.skipErrors === true} onChange={skipErrors => act({ type: 'preferences', patch: { skipErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
+          <Switch checked={p.skipFileErrors !== false} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
           <Switch checked={p.allowFolderSource} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} label={t("Enable media folder selection")} detail={t("Lets you choose a folder of photos as a source.")} />
         </SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
