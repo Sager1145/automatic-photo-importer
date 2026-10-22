@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { formatMessage, text, type Message } from '../messages';
+import { filePath, formatMessage, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
@@ -321,7 +321,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; sourceId?: string; formatSourceId?: string};
+type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; sourceId?: string; jobId?: string; formatSourceId?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -441,8 +441,9 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
       <ul className="all-errors">{items.map((error, index) => {
         if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
         const explained = explainError(error.message, error.kind, language);
+        const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
         return <li key={index} className={`error-item is-${explained.severity}`} data-severity={explained.severity}>
-          <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!])}>{t("Clear")}</Button>}</div>
+          <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!])}>{t("Clear")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
           {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
           <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
         </li>;
@@ -929,7 +930,15 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
     <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
     <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}</p>
     <OrganizationProgress job={job} act={act} />
+    <SkipFileNotice job={job} act={act} />
   </article>;
+}
+/** A job stopped on one file it couldn't read or check: Skip leaves that file out, Skip all every file that fails. Both run the job again. */
+function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
+  const { t } = useTranslation();
+  if (job.phase !== 'error' || !job.skippablePath) return null;
+  const file = job.skippablePath;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}</p><div className="rule-actions"><Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
@@ -993,7 +1002,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
     {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <Elapsed job={job} />}{job && <Remaining job={job} />}<strong>{progress.speed > 0 && active ? `${bytes(progress.speed)}/s` : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
-    {job?.phase === 'error' && !job.skipErrors && !mirrorReview && (!job.progress || job.progress.phase === 'planning') && job.errors.some(error => error.key === 'error.sourceChanged' || error.key === 'text') && <div className="source-choice" data-testid="skip-and-continue"><p><Icon icon={CircleAlert} size={14} />{t("A file error stopped this import.")}</p><div className="rule-actions"><Button kind="primary" icon={Play} title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip and continue")}</Button></div></div>}
+    {job && <SkipFileNotice job={job} act={act} />}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}

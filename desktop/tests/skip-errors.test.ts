@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,execute} from '../core';
-import {MessageError} from '../messages';
+import {MessageError,filePath,toMessage} from '../messages';
 import {normalizePreferences,defaultPreferences} from '../preferences';
 
 /** Destination files without the checksum index and staging/receipt files. */
@@ -54,6 +54,12 @@ test(`an unreadable source .${ext} file is skipped and reported while the others
 });
 }
 
+async function unreadableJpg(t:test.TestContext){
+ const f=await fixture(t,['a.jpg','b.jpg','c.jpg']);
+ await fs.writeFile(path.join(f.root,'b.jpg'),'other of b.jpg');await fs.chmod(path.join(f.source,'b.jpg'),0);
+ return f;
+}
+
 // Metadata is read between two identity checks; a file rewritten then has changed mid-plan.
 const changing=(source:string)=>async(file:string)=>{if(path.basename(file)==='b.jpg')await fs.appendFile(path.join(source,'b.jpg'),'more');return {fields:{},camera:'Cam',date:'2024-05-06T07:08:09'};};
 const photos={backup:false,template:'{year}',layout:'flat' as const,unknownRules:{}};
@@ -93,11 +99,12 @@ test('a copy that fails is reported while the other files are copied, with skipp
  }
 });
 
-test('skipping errors is a saved setting that is off by default',()=>{
- assert.equal(defaultPreferences.skipErrors,false);
- assert.equal(normalizePreferences({skipErrors:true}).skipErrors,true);
- assert.equal(normalizePreferences({skipErrors:'yes'},{...defaultPreferences,skipErrors:true}).skipErrors,true);
- assert.equal(normalizePreferences({}).skipErrors,false);
+test('skipping errors is a saved setting that is on unless the user turned it off',()=>{
+ assert.equal(defaultPreferences.skipErrors,true);
+ assert.equal(normalizePreferences({}).skipErrors,true);
+ assert.equal(normalizePreferences({skipErrors:false}).skipErrors,false);
+ assert.equal(normalizePreferences({skipErrors:'yes'},{...defaultPreferences,skipErrors:false}).skipErrors,false);
+ assert.equal(normalizePreferences({skipErrors:true},{...defaultPreferences,skipErrors:false}).skipErrors,true);
 });
 
 test('a skipped file takes its whole family with it, so a sidecar never lands without its photo',async t=>{
@@ -107,4 +114,35 @@ test('a skipped file takes its whole family with it, so a sidecar never lands wi
  assert.deepEqual(failures.map(item=>path.basename(item.path)).sort(),['a.jpg','a.xmp']);
  assert.deepEqual(await execute(transfer!),{copied:1,skipped:0,errors:[]});
  assert.deepEqual(await published(f.root),['2024/c.jpg']);
+});
+
+test('with skipping off, a planning error names the file so it can be skipped by hand',async t=>{
+ const f=await unreadableJpg(t);
+ const error=await plan(f.source,[f.root],backup,async()=>({fields:{}})).then(()=>undefined,(caught:unknown)=>caught);
+ assert.ok(error instanceof MessageError);assert.match(error.message,/EACCES|permission/i);
+ assert.equal(filePath(toMessage(error)),path.join(f.source,'b.jpg'));
+ const changed=await fixture(t,['a.jpg','b.jpg']);
+ const moved=await plan(changed.source,[changed.root],photos,changing(changed.source)).then(()=>undefined,(caught:unknown)=>caught);
+ assert.equal(filePath(toMessage(moved)),path.join(changed.source,'b.jpg'));
+});
+
+test('a file the user skips is left out with its family even with skipping off, and the rest is copied',async t=>{
+ const f=await unreadableJpg(t);await fs.writeFile(path.join(f.source,'b.xmp'),'sidecar of b');
+ const {plans:[transfer],failures}=await plan(f.source,[f.root],{...photos,exclude:[path.join(f.source,'b.jpg')]},async()=>({fields:{},camera:'Cam',date:'2024-05-06T07:08:09'}));
+ assert.deepEqual(failures.map(item=>path.basename(item.path)).sort(),['b.jpg','b.xmp']);
+ assert.ok(failures.every(item=>item.error instanceof MessageError&&item.error.key==='error.userSkipped'));
+ assert.deepEqual(await execute(transfer!),{copied:2,skipped:0,errors:[]});
+ assert.deepEqual(await published(f.root),['2024/a.jpg','2024/c.jpg','b.jpg']);
+});
+
+test('a mirror backup never skips a file, even one the user asks to skip',async t=>{
+ const f=await fixture(t,['a.bin']);
+ await assert.rejects(plan(f.source,[f.root],{...backup,drive:{name:'Card',identity:'card-id',mirror:true},exclude:[path.join(f.source,'a.bin')]},async()=>({fields:{}})),/mirror/i);
+});
+
+test('a job error in All errors names its job, so its Skip button reaches that job',async()=>{
+ const {gatherErrors}=await import('../error-log');
+ const error={key:'error.fileFailed' as const,params:{path:'/card/DCIM/B.JPG',error:'EIO'}};
+ const [logged]=gatherErrors({jobs:[{id:'job-1',source:{id:'card',name:'Card',path:'/Volumes/Card',transport:'folder'},phase:'error',errors:[error],backup:false,skippablePath:'/card/DCIM/B.JPG'}],sources:[]} as never);
+ assert.equal(logged!.jobId,'job-1');assert.equal(filePath(logged!.message),'/card/DCIM/B.JPG');
 });
