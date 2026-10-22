@@ -7,7 +7,7 @@ import {inventory,plan} from '../core/index';
 import {knownSystemFile} from '../core/known-files';
 import type {Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:false,unknownRules:{}};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async(file:string):Promise<Metadata>=>({camera:/\.(?:nef|nksc)$/i.test(file)?'NIKON Z f':/\.mp4$/i.test(file)?'Osmo Pocket 3':'ILCE-7CM2',date:'2025-06-26T13:50:35+08:00',fields:{}});
 const alias=Buffer.concat([Buffer.from('book\0\0\0\0mark\0\0\0\0','latin1'),Buffer.alloc(600,1)]);
 async function fixture(t:test.TestContext){

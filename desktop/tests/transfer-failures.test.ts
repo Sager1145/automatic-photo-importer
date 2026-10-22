@@ -11,7 +11,7 @@ import {plan,execute} from '../core';
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('.photo-importer-index'));
 
 
-const options={backup:true,template:'{year}/{camera}',separateMedia:false,unknownRules:{}};
+const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'transfer-failures-')));
  t.after(()=>fs.rm(base,{recursive:true,force:true}));

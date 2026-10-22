@@ -7,7 +7,7 @@ import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery} from '../core';
 
 configureOrganizationRecovery('import-fixture-host-authentication-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{}};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async()=>({camera:'Fixture Camera',date:'2024-02-03',fields:{}});
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'import-resume-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));
@@ -54,7 +54,7 @@ test('a replaced partial symlink never redirects resumed writes',async t=>{
 
 test('different contents move the entire incoming family beneath camera Conflicts and repeated imports skip it',async t=>{
  const f=await fixture(t);await fs.writeFile(path.join(f.source,'A.ARW'),'new RAW');await fs.writeFile(path.join(f.source,'A.XMP'),'new sidecar');
- const existing=path.join(f.root,'2024/202402/Fixture Camera/RAW/A.ARW');await fs.mkdir(path.dirname(existing),{recursive:true});await fs.writeFile(existing,'old RAW');
+ const existing=path.join(f.root,'2024/202402/Fixture Camera/ARW/A.ARW');await fs.mkdir(path.dirname(existing),{recursive:true});await fs.writeFile(existing,'old RAW');
  const transfer=await f.prepare();assert.equal(transfer.entries.length,3);
  const folders=transfer.entries.map(entry=>path.relative(path.join(f.root,'2024/202402/Fixture Camera'),entry.destination).split(path.sep));
  assert.ok(folders.every(parts=>parts[0]==='Conflicts'));assert.equal(new Set(folders.map(parts=>parts[1])).size,1);

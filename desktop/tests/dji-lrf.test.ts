@@ -17,9 +17,9 @@ test('camera imports include standalone DJI LRF videos and preserve their bytes'
  assert.equal(scan.media,1);
  assert.equal(scan.files.find(file=>file.relative===name)?.kind,'Videos');
  assert.equal(scan.files.find(file=>file.relative===name)?.included,true);
- const prepared=await plan(source,[destination],{backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{}},async()=>({camera:'DJI Osmo Pocket 3',date:'2026-05-24T01:50:04+08:00',fields:{}}));
+ const prepared=await plan(source,[destination],{backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}},async()=>({camera:'DJI Osmo Pocket 3',date:'2026-05-24T01:50:04+08:00',fields:{}}));
  assert.equal(prepared.plans[0].entries.length,1);
- assert.equal(path.relative(destination,prepared.plans[0].entries[0].destination),'2026/202605/DJI Osmo Pocket 3/Videos/'+name);
+ assert.equal(path.relative(destination,prepared.plans[0].entries[0].destination),'2026/202605/DJI Osmo Pocket 3/LRF/'+name);
  assert.deepEqual(await execute(prepared.plans[0]),{copied:1,skipped:0,errors:[]});
  assert.deepEqual(await fs.readFile(prepared.plans[0].entries[0].destination),payload);
  assert.deepEqual(await fs.readFile(path.join(source,name)),payload);
@@ -39,7 +39,7 @@ test('paired DJI LRF inherits its original video routing without matching other 
  assert.equal(scan.files.find(file=>file.relative==='ambiguous/DJI_002.LRF')?.companionOf,undefined);
  assert.equal(scan.files.find(file=>file.relative==='paired/DJI_001.SRT')?.companionOf,path.join(source,'paired/DJI_001.MP4'));
  assert.equal(scan.files.find(file=>file.relative==='paired/DJI_001.SRT')?.included,true);
- const prepared=await plan(source,[destination],{backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{}},async file=>file.endsWith('.MP4')?{camera:'DJI Osmo Pocket 3',date:'2026-05-24T01:50:04+08:00',fields:{}}:{fields:{}});
+ const prepared=await plan(source,[destination],{backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}},async file=>file.endsWith('.MP4')?{camera:'DJI Osmo Pocket 3',date:'2026-05-24T01:50:04+08:00',fields:{}}:{fields:{}});
  const entries=prepared.plans[0].entries;
  const original=entries.find(entry=>entry.source.endsWith('paired/DJI_001.MP4'))!;
  const proxy=entries.find(entry=>entry.source.endsWith('paired/DJI_001.lRf'))!;

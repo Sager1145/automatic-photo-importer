@@ -8,7 +8,7 @@ import {plan,execute,inventory} from '../core';
 import {executeDestinations} from '../core/destinations';
 import {dropDestinationIndexes} from '../core/destination-index';
 
-const options={backup:true,template:'{camera}',separateMedia:false,unknownRules:{}};
+const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>({fields:{}});
 async function fixture(t:test.TestContext,destinations=1){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'transfer-speed-')));

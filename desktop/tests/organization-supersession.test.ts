@@ -15,7 +15,7 @@ async function fixture(t:test.TestContext){
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original));await fs.writeFile(original,'precious original');return {root,original};
 }
-async function plan(root:string,folder:string){return (await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,separateMedia:false,unknownRules:{}},metadata)).plans[0]!;}
+async function plan(root:string,folder:string){return (await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat' as const,unknownRules:{}},metadata)).plans[0]!;}
 async function saved(root:string,id:string){
  const directory=path.join(root,'.photo-importer-recovery',id,'originals','0');
  const [slot]=await fs.readdir(directory);return path.join(directory,slot!,'A.JPG');

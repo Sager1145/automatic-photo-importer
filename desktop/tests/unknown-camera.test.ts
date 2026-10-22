@@ -6,7 +6,7 @@ import os from 'node:os';
 import {inventory,plan,execute} from '../core';
 import type {Metadata,UnknownFileRule} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:false,unknownRules:{}};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const cameraRule={action:'camera' as const};
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-unknown-camera-')));
@@ -61,8 +61,8 @@ test('unknown files route to their own DCIM camera and mixed card root files sta
 
 test('a single-camera card supplies context for root unknowns without treating them as edited exports',async t=>{
  const {source,root,put}=await fixture(t);await put('DCIM/100NIKON/A.JPG');const unknown=await put('INDEX01.DSC');
- const {plans}=await plan(source,[root],{...options,separateMedia:true,unknownRules:{dsc:cameraRule}},async()=>({...await metadata(),edited:true}));
- assert.equal(plans[0].entries.find(entry=>entry.source===unknown)?.destination,path.join(root,'2024/202402/Nikon Z6/Other/INDEX01.DSC'));
+ const {plans}=await plan(source,[root],{...options,layout:'format' as const,unknownRules:{dsc:cameraRule}},async()=>({...await metadata(),edited:true}));
+ assert.equal(plans[0].entries.find(entry=>entry.source===unknown)?.destination,path.join(root,'2024/202402/Nikon Z6/INDEX01.DSC'));
  assert.ok(plans[0].entries.find(entry=>entry.kind==='JPEG')?.destination.includes('editied'));
  assert.ok(!plans[0].entries.find(entry=>entry.source===unknown)?.family.startsWith('edited:'));
 });
