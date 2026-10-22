@@ -691,6 +691,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 
 /* ---------- Organization ---------- */
 .organization-page{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,34rem),1fr));gap:1.25rem;align-items:start}
+.organization-column{display:flex;flex-direction:column;gap:1.25rem;min-width:0}
 .history-page{display:grid;gap:1.25rem;max-width:80rem}
 .organization-action{display:grid;gap:1rem;padding:1.25rem 1.35rem}
 .organization-destination-select{display:grid;gap:.4rem;font-weight:500;max-width:36rem}
