@@ -120,7 +120,8 @@ export type InterfaceChange = 'crossfade' | 'layout' | 'forward' | 'back' | 'cat
 let interfaceTransition: ViewTransition | undefined;
 /** Runs a DOM change as a View Transition; a newer change skips the running one, and reduced motion applies it directly. */
 export function animateInterfaceChange(change: () => void, kind: InterfaceChange = 'crossfade') {
-  if (!document.startViewTransition || reducedMotion()) { change(); return; }
+  // Under an open sheet the page changes without a transition: snapshots would lift it above the sheet's backdrop.
+  if (!document.startViewTransition || reducedMotion() || document.querySelector('dialog[open]')) { change(); return; }
   document.documentElement.dataset.transition = kind;
   const transition = interfaceTransition = document.startViewTransition(() => flushSync(change));
   void transition.finished.catch(() => {}).then(() => { if (interfaceTransition === transition) { interfaceTransition = undefined; delete document.documentElement.dataset.transition; } });

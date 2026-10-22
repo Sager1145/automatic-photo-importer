@@ -4,12 +4,12 @@ import {animateInterfaceChange,interfaceChangeKind} from '../renderer/RootApp';
 import type {AppState,Job,Preferences} from '../shared';
 
 // A minimal browser: View Transitions record the kind they ran with; reduced motion is switchable.
-let reduce=false;
+let reduce=false,sheetOpen=false;
 const transitions:(string|undefined)[]=[];
 const root={dataset:{} as Record<string,string>};
 Object.assign(globalThis,{
  window:{matchMedia:(query:string)=>({matches:query.includes('reduce')&&reduce})},
- document:{documentElement:root,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){}};}},
+ document:{documentElement:root,querySelector:(selector:string)=>selector==='dialog[open]'&&sheetOpen?{}:null,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){}};}},
 });
 
 test('an interface change runs as a View Transition of its kind',()=>{
@@ -26,6 +26,13 @@ test('reduced motion applies the change directly, without a transition',()=>{
  animateInterfaceChange(()=>{applied++;},'back');
  assert.deepEqual(transitions,[]);assert.equal(applied,1);
  reduce=false;
+});
+
+test('under an open sheet the change applies directly, so nothing is lifted above its backdrop',()=>{
+ sheetOpen=true;transitions.length=0;let applied=0;
+ animateInterfaceChange(()=>{applied++;},'layout');
+ assert.deepEqual(transitions,[]);assert.equal(applied,1);
+ sheetOpen=false;
 });
 
 const preferences={language:'en',appearance:'system',accent:'coral',sourceLayout:'list',showDashboard:true,copyMode:'single',destinations:['/backup']} as Preferences;

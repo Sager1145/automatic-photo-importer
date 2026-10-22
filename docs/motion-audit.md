@@ -136,6 +136,24 @@ Deliberately not animated: direct manipulation (sliders, typing in search fields
 | Resize between compact and wide (container queries) | Column count, button labels collapse to icons, settings tab strip | Instant reflow | Instant reflow (live resize must follow the pointer); scroll-driven titlebar shadow unchanged |
 | Scroll | Titlebar hairline, sections reveal | Scroll-driven | Same |
 
+## Layers
+
+Static stacking, bottom to top: page content (cards are `position: relative`, the destination bay and Settings list are sticky at `z-index: auto`), the sidebar (`z-index: 30`), the titlebar (`40`), the error toast (`60`), then sheets in the top layer.
+
+During a View Transition every named element becomes a group drawn above everything unnamed, in paint order, and outside any clipping ancestor. Rules that keep each layer where it belongs:
+
+| Layer | Problem it had | Rule |
+| --- | --- | --- |
+| Sidebar and Settings selection capsules | The gliding capsule was drawn over its own label (sidebar hid it with a blend mode) | Labels and icons get their own groups, so the capsule passes beneath them |
+| Settings selection capsule in a narrow window | The strip scrolled sideways; the capsule escaped the strip's clipping and drew over the last visible tab | The strip wraps onto more rows instead of scrolling |
+| Titlebar | Its blur cannot be captured, so moving content showed through; its scroll shadow widened the old snapshot and drew the old buttons 20 px low | Opaque background and no scroll shadow while a transition runs |
+| Error toast | Unnamed, so it was flattened into the bottom snapshot and sank under the page | Its own group, drawn last |
+| Sheets (All errors, metadata, confirmations, new drives) | A layout change arriving under an open sheet lifted the page above the backdrop | No transition runs while a sheet is open; the change applies directly |
+
+Reduced motion runs no View Transitions, so none of these groups exist; the static order above is all there is.
+
+Checked by the Electron QA "Transitions keep each layer in place" (records each transition's layers and that none runs under an open sheet).
+
 ## Reduced motion
 
 `prefers-reduced-motion: reduce` (or `--force-prefers-reduced-motion` in QA):

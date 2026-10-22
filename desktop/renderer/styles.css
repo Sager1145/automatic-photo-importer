@@ -1012,12 +1012,16 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .window-titlebar{view-transition-name:titlebar}
 .titlebar-page-title{view-transition-name:page-title}
 .sidebar{view-transition-name:sidebar}
-/* Sheets in the top layer must stay above page snapshots during a transition */
-.activity-dialog{view-transition-name:activity-sheet}
-.metadata-dialog{view-transition-name:metadata-sheet}
-::view-transition-group(activity-sheet),::view-transition-group(metadata-sheet){animation-duration:0s}
-::view-transition-group(nav-indicator){animation-duration:var(--spring-duration);animation-timing-function:var(--spring);mix-blend-mode:darken}
-:root[data-theme=dark]::view-transition-group(nav-indicator){mix-blend-mode:lighten}
+/* Layers during a transition. Named groups are drawn above everything unnamed, in paint order, and outside any clipping.
+   So: the toast keeps its own group to stay on top; the titlebar is opaque, because its blur cannot be captured and
+   moving content would show through; selection capsules glide beneath their labels, which get groups of their own.
+   Sheets need nothing: no transition runs while one is open (animateInterfaceChange). */
+.error-toast{view-transition-name:error-toast}
+:root[data-transition] .window-titlebar{background:var(--window)}
+/* The scroll shadow below the titlebar would widen its snapshot past the bar and draw the old bar offset: leave it out while one runs. */
+:root[data-transition] .window-titlebar::after{display:none}
+.nav-item>:not(.nav-indicator),:root[data-transition^=category] .settings-nav [role=tab]>:not(.settings-indicator){view-transition-name:match-element;view-transition-class:label}
+::view-transition-group(nav-indicator){animation-duration:var(--spring-duration);animation-timing-function:var(--spring)}
 /* Every other group crossfades or morphs on the same timing */
 ::view-transition-group(*){animation-duration:var(--base);animation-timing-function:var(--ease-ios)}
 /* Transitions never swallow a click: it reaches the live interface underneath */
