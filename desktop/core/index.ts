@@ -16,7 +16,7 @@ import { streams } from './devices';
 import { hasher } from './hasher';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
-import {MessageError} from '../messages';
+import {MessageError,toMessage} from '../messages';
 export { configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER } from './recovery';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
 
@@ -33,7 +33,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;}
+interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -196,7 +196,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // never skips: a file left out of it would read as removed from the drive and its copy moved away.
   // An organization always skips: leaving a file where it is is safe, and one bad file must not stop the rest.
   const skipping=options.reorganize===true||options.skipErrors===true&&!options.drive?.mirror;
-  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error)||!skipping)throw error;failures.set(file,toError(error));};
+  // Otherwise the error names its file, so the user can skip that file by hand.
+  const failures=new Map<string,Error>(),skip=(file:string,error:unknown)=>{if(isAbort(error))throw error;if(!skipping)throw error instanceof MessageError&&typeof error.params?.path==='string'?error:new MessageError('error.fileFailed',{path:file,error:toMessage(error)});failures.set(file,toError(error));};
+  if(options.exclude?.length&&options.drive?.mirror)throw new Error('A mirror backup cannot skip files.');
+  for(const file of options.exclude??[])failures.set(file,new MessageError('error.userSkipped'));
   // A file is copied or moved with its whole family (RAW, JPG, sidecars), so a failure leaves the family out.
   const skipFamilies=<T>(items:T[],file:(item:T)=>string,family:(item:T)=>string|undefined)=>{
     const failed=new Map<string,Error>();for(const item of items){const error=failures.get(file(item)),key=family(item);if(error&&key!==undefined&&!failed.has(key))failed.set(key,error);}
@@ -225,7 +228,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   await Promise.all(Array.from({length:Math.min(files.length,PLAN_CONCURRENCY)},async()=>{
     while(failure===undefined && next<files.length) {
       const position=next++;
-      try { checkAbort(signal); await examine(files[position]!,position); } catch(error) { try { skip(files[position]!.path,error); } catch { failure??=error; } }
+      try { checkAbort(signal); if(!failures.has(files[position]!.path)) await examine(files[position]!,position); } catch(error) { try { skip(files[position]!.path,error); } catch(thrown) { failure??=thrown; } }
     }
   }));
   if(failure!==undefined) throw failure;

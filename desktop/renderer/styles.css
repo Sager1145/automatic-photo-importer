@@ -1231,3 +1231,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .remembered-drive-cameras{display:grid;gap:.2rem;margin:0;padding:0;list-style:none}
 .remembered-drive-cameras li{display:flex;justify-content:space-between;gap:.75rem}
 .remembered-drive-cameras small{color:var(--label-secondary);white-space:nowrap}
+/* Show in Finder: quiet icon buttons beside a path; in the sidebar they appear on hover or keyboard focus. */
+.source-location dd [data-testid=reveal],.progress-job-place [data-testid=reveal],.source-choice p [data-testid=reveal]{margin-left:.25rem;vertical-align:middle}
+.sidebar-drive [data-testid=reveal]{flex:none;opacity:0;transition:opacity .15s ease}
+.sidebar-drive:hover [data-testid=reveal],.sidebar-drive [data-testid=reveal]:focus-visible{opacity:1}
+@media (hover:none){.sidebar-drive [data-testid=reveal]{opacity:1}}

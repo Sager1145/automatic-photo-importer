@@ -3,7 +3,7 @@ import {text,type Message} from './messages';
 
 export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
 /** One problem shown in All errors. id is stable while the problem lasts; source groups it, drive names the volume it came from. */
-export interface LoggedError {id:string;source:string;drive:string;message:Message;kind:ErrorKind;sourceId?:string;}
+export interface LoggedError {id:string;source:string;drive:string;message:Message;kind:ErrorKind;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
 /** When each shown error first appeared (ISO), and the ids the user cleared while they last. */
 export interface ErrorLogState {at:Record<string,string>;cleared:string[];}
 
@@ -16,16 +16,16 @@ function hash(value:string):string{let result=0x811c9dc5;for(let index=0;index<v
 /** Every problem the state carries. A job's errors belong to that job, so the same failure in a later import is a new error. */
 export function gatherErrors(state:AppState):LoggedError[]{
  const result:LoggedError[]=[],ids=new Set<string>();
- const add=(scope:string,source:string,location:string,message:Message|undefined,kind:ErrorKind,sourceId?:string)=>{
+ const add=(scope:string,source:string,location:string,message:Message|undefined,kind:ErrorKind,sourceId?:string,jobId?:string)=>{
   if(!message)return;const id=hash(`${scope}|${source}|${JSON.stringify(message)}`);if(ids.has(id))return;ids.add(id);
-  result.push({id,source,drive:location?driveName(location,source):'',message,kind,...(sourceId?{sourceId}:{})});
+  result.push({id,source,drive:location?driveName(location,source):'',message,kind,...(sourceId?{sourceId}:{}),...(jobId?{jobId}:{})});
  };
  const raw=(value?:string)=>value?text(value):undefined;
  const issue=(item:{path:string;message:string})=>text(`${item.path}: ${item.message}`);
  add('app','','',state.error,'app');
  for(const job of state.jobs){
   const kind:ErrorKind=job.organization?'organization':'source',id=job.organization?undefined:job.source.id,{name,path}=job.source;
-  for(const error of job.errors)add('job:'+job.id,name,path,error,kind,id);
+  for(const error of job.errors)add('job:'+job.id,name,path,error,kind,id,job.id);
   for(const item of job.inventory?.issues??[])add('issue:'+job.source.id,name,path,issue(item),'metadata',id);
   if(job.phase==='error'&&!job.errors.length)add('job:'+job.id,name,path,job.detail,kind,id);
  }

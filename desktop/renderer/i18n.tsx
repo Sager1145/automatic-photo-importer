@@ -512,9 +512,15 @@ One verified copy.|一份校验过的副本。|一份驗證過的副本。|検�
 Reads each copy back to confirm it. Off is faster.|重新读取每个副本以确认无误。关闭会更快。|重新讀取每個副本以確認無誤。關閉會更快。|各コピーを読み直して確認します。オフにすると速くなります。
 Skip files with errors and continue|跳过出错的文件并继续|略過出錯的檔案並繼續|エラーのファイルをスキップして続行
 A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.|无法读取或在检查时发生变化的文件会列入“所有错误”并被跳过，其余文件照常复制。关闭时，遇到这类文件会停止导入。|無法讀取或在檢查時發生變化的檔案會列入「所有錯誤」並被略過，其餘檔案照常複製。關閉時，遇到這類檔案會停止匯入。|読み取れないファイルや確認中に変更されたファイルは「すべてのエラー」に記録してスキップし、ほかのファイルはコピーを続けます。オフにすると、そのようなファイルでインポートを停止します。
-A file error stopped this import.|文件错误导致此次导入停止。|檔案錯誤導致此次匯入停止。|ファイルのエラーでこのインポートが停止しました。
-Skip and continue|跳过并继续|略過並繼續|スキップして続行
 Run again, skipping files with errors|重新运行，并跳过出错的文件|重新執行，並略過出錯的檔案|エラーのファイルをスキップしてもう一度実行
+{file} stopped this job.|{file} 导致此任务停止。|{file} 導致此工作停止。|{file} でこのジョブが停止しました。
+Skip|跳过|略過|スキップ
+Skip all|全部跳过|全部略過|すべてスキップ
+Leave this file out and run the job again|跳过此文件并重新运行任务|略過此檔案並重新執行工作|このファイルを除外してジョブをもう一度実行
+Retry|重试|重試|再試行
+Run this job again, including files that had errors|重新运行此任务，包括出错的文件|重新執行此工作，包括出錯的檔案|エラーのファイルも含めてこのジョブをもう一度実行
+This job ended with errors.|此任务完成时有错误。|此工作完成時有錯誤。|このジョブはエラーがある状態で終了しました。
+Show in Finder|在访达中显示|在 Finder 中顯示|Finder で表示
 Review what Mirror will move to continue.|请先审核镜像将移动的文件再继续。|請先審核鏡像將移動的檔案再繼續。|続行するには、ミラーで移動するファイルを確認してください。
 Settings are locked while importing or reviewing.|导入或审核期间设置已锁定。|匯入或審核期間設定已鎖定。|読み込み中または確認中は設定を変更できません。
 Showing 500 matches. Search to narrow.|显示 500 个匹配项，可搜索以缩小范围。|顯示 500 個符合項目，可搜尋以縮小範圍。|500件を表示中。検索で絞り込めます。
