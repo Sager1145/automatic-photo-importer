@@ -45,6 +45,7 @@ export const backendMessages={
  'job.recheckFinalize':{en:'Rechecking organized files before releasing kept originals','zh-Hans':'正在重新检查已整理的文件，然后释放保留的原文件','zh-Hant':'正在重新檢查已整理的檔案，然後釋放保留的原始檔案',ja:'保持中の元のファイルを解放する前に、整理済みファイルを再確認中'},
  'job.recheckUndo':{en:'Rechecking organized files before putting them back','zh-Hans':'正在重新检查已整理的文件，然后将其放回原处','zh-Hant':'正在重新檢查已整理的檔案，然後將其放回原處',ja:'元に戻す前に、整理済みファイルを再確認中'},
  'job.recheckJournal':{en:'Rechecking journal and retained originals','zh-Hans':'正在重新检查日志和保留的原文件','zh-Hant':'正在重新檢查日誌和保留的原始檔案',ja:'ジャーナルと保持中の元のファイルを再確認中'},
+ 'job.readingHistory':{en:'Reading organization history: {count} of {total} files','zh-Hans':'正在读取整理历史：{count}/{total} 个文件','zh-Hant':'正在讀取整理歷史：{count}/{total} 個檔案',ja:'整理履歴を読み込み中：{total} 件中 {count} 件'},
  'job.resuming':{en:'Rechecking and resuming organization','zh-Hans':'正在重新检查并继续整理','zh-Hant':'正在重新檢查並繼續整理',ja:'再確認して整理を再開中'},
  'job.releasedDuplicates':{en:'Removed {count} confirmed duplicates from their original place ({size}).','zh-Hans':'已从原位置删除 {count} 个已确认的重复文件（{size}）。','zh-Hant':'已從原位置刪除 {count} 個已確認的重複檔案（{size}）。',ja:'確認済みの重複ファイル {count} 件を元の場所から削除しました（{size}）。'},
  'job.released':{en:'Released {count} kept originals ({size}). The organized files are unchanged.','zh-Hans':'已释放 {count} 个保留的原文件（{size}）。已整理的文件保持不变。','zh-Hant':'已釋放 {count} 個保留的原始檔案（{size}）。已整理的檔案保持不變。',ja:'保持していた元のファイル {count} 件（{size}）を解放しました。整理済みファイルは変更されていません。'},

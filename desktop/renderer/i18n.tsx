@@ -552,6 +552,8 @@ Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
 {completed} files found|已找到 {completed} 个文件|已找到 {completed} 個檔案|{completed} 件見つかりました
 {completed} files found · {size}|已找到 {completed} 个文件 · {size}|已找到 {completed} 個檔案 · {size}|{completed} 件見つかりました · {size}
 {completed} of {total} files read · {size} of {totalSize}|已读取 {completed}/{total} 个文件 · {size}/{totalSize}|已讀取 {completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件を読み込み · {totalSize} 中 {size}
+Reading organization history: {completed} of {total} files|正在读取整理历史：{completed}/{total} 个文件|正在讀取整理歷史：{completed}/{total} 個檔案|整理履歴を読み込み中：{total} 件中 {completed} 件
+Reading history|正在读取历史|正在讀取歷史|履歴を読み込み中
 Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
 Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み

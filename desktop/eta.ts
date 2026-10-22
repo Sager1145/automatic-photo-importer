@@ -70,7 +70,7 @@ export class RateMeter {
 }
 
 /** A job's progress as the tracker needs it (the shape of Progress). */
-export interface EtaInput {phase?:string;step?:string;completed:number;total:number;bytes:number;totalBytes:number;}
+export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;}
 /** listingTotalBytes: the used space of the drive being listed, when known. */
 export interface EtaContext {kind:'import'|'organization'|'finalize'|'undo';destinations:number;verify:boolean;listingTotalBytes?:number;}
 export interface JobEta {step?:number;job?:number;}
@@ -80,13 +80,16 @@ const MiB=1<<20;
 const dataStages=new Set(['planning:reading','copying:','copying:moving','verifying:']);
 /** Work units per second before a stage was measured this session: conservative for spinning drives. */
 const defaultRates:Record<string,number>={'planning:checking':40,'planning:comparing':300,'planning:existing':100,'planning:reading':80e6,'copying:':60e6,'verifying:':100e6,
- 'verifying:earlier':200,'verifying:confirming':100,'copying:moving':200e6,'verifying:checking':100,'copying:releasing':50,'copying:restoring':50};
+ 'verifying:history':200,'verifying:earlier':200,'verifying:confirming':100,'copying:moving':200e6,'verifying:checking':100,'copying:releasing':50,'copying:restoring':50};
 const pipelines:Record<EtaContext['kind'],string[]>={
  import:['planning:listing','planning:checking','planning:comparing','planning:existing','copying:','verifying:'],
- organization:['planning:listing','planning:checking','planning:reading','verifying:earlier','verifying:confirming','copying:moving'],
+ organization:['planning:listing','planning:checking','planning:reading','verifying:history','verifying:earlier','verifying:confirming','copying:moving'],
  finalize:['verifying:checking','copying:releasing'],
  undo:['verifying:checking','copying:restoring'],
 };
+/** Bytes a listing will find: the job's own estimate (an earlier listing of the scope), else the drive's used space; 0 when unknown. */
+const listingTotal=(progress:EtaInput,context:EtaContext)=>progress.totalBytes>progress.bytes?progress.totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0;
+const SHARE_UNITS=10000;
 const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`;
 
 interface Known {files?:number;bytes?:number;copyFiles?:number;copyBytes?:number;entries?:number;}
@@ -109,13 +112,15 @@ export class EtaTracker {
  since(id:string,now:number):string{let start=this.starts.get(id);if(!start){start=new Date(now).toISOString();this.starts.set(id,start);}return start;}
  private rate(key:string){return this.rates.get(key)??defaultRates[key];}
  private sample(key:string,progress:EtaInput,context:EtaContext):EtaSample{
-  if(key==='planning:listing')return {files:0,bytes:progress.bytes,totalFiles:0,totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0};
+  // A listing's estimate is a share of the files (a remembered count, or top-level folders) when it has no bytes to measure by.
+  if(key==='planning:listing'){const totalBytes=listingTotal(progress,context);return !totalBytes&&progress.share!==undefined?{files:Math.round(progress.share*SHARE_UNITS),bytes:progress.bytes,totalFiles:SHARE_UNITS,totalBytes:0}:{files:0,bytes:progress.bytes,totalFiles:0,totalBytes};}
   // Verification reports files; its bytes follow the share of files verified.
   const bytes=key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
   return {files:progress.completed,bytes,totalFiles:progress.total,totalBytes:progress.totalBytes};
  }
  private learn(key:string,progress:EtaInput,context:EtaContext,known:Known){
-  if(key==='planning:listing'&&progress.bytes>0&&context.listingTotalBytes&&context.listingTotalBytes>progress.bytes){known.bytes=context.listingTotalBytes;known.files=Math.round(progress.completed*context.listingTotalBytes/progress.bytes);}
+  const listed=listingTotal(progress,context);
+  if(key==='planning:listing'&&progress.bytes>0&&listed>progress.bytes){known.bytes=listed;known.files=Math.round(progress.completed*listed/progress.bytes);}
   if(key==='planning:checking'){known.files=progress.total;known.bytes=progress.totalBytes;}
   if(key==='copying:'||key==='verifying:'){known.copyFiles=progress.total;known.copyBytes=progress.totalBytes;}
   if(key==='verifying:confirming'||key==='verifying:checking')known.entries=progress.total;
@@ -175,7 +180,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   const key=stageKey(progress);live.push(id);
   if(key==='planning:reading'||key==='planning:comparing')progress.speed=tracker.measure(id,key,progress.bytes,now)??0;
   else if(key==='verifying:'&&progress.total)progress.speed=tracker.measure(id,key,progress.totalBytes*Math.min(1,progress.completed/progress.total),now)??0;
-  else if(key==='planning:checking')progress.fileRate=tracker.measure(id,key,progress.completed,now);
+  else if(key==='planning:checking'||key==='planning:listing'||key==='verifying:history'||key==='verifying:earlier')progress.fileRate=tracker.measure(id,key,progress.completed,now);
   else tracker.measure(id,key,0,now);
  };
  for(const job of state.jobs){
@@ -190,7 +195,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  if(state.reviewProgress){state.reviewProgress.eta=stepOnly('review',state.reviewProgress,{kind:'import',destinations:1,verify});state.reviewProgress.startedAt=since('start:review');speeds('speed:review',state.reviewProgress);}
  for(const [destination,progress] of Object.entries(state.misplacedProgress??{})){progress.eta=stepOnly('misplaced:'+destination,progress,{kind:'organization',destinations:1,verify});progress.startedAt=since('start:misplaced:'+destination);speeds('speed:misplaced:'+destination,progress);}
  // A scan lists the files, then reads their metadata: one clock for both.
- for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);}
+ for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0,...(listing.topShare!==undefined?{share:listing.topShare}:{})},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);listing.fileRate=tracker.measure('speed:scan:'+id,'listing',listing.files,now);live.push('speed:scan:'+id);}
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
   if(info.status!=='reading'){info.eta=info.fileRate=info.startedAt=undefined;continue;}
   info.eta=stepOnly('camera:'+id,{phase:'planning',step:'checking',completed:info.checked,total:info.total,bytes:0,totalBytes:0},{kind:'import',destinations:1,verify});
