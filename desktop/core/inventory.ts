@@ -132,14 +132,21 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;
     const rule=unknownRule(extension(file.path),custom,defaults);
-    file.included=(!!options.backup || file.size>0) && (!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera'));
+    file.included=!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
   }
   // Nothing is dropped silently: every file left out is listed with its reason.
   const skipped:SkippedFile[]=[],systemKinds:Record<string,number>={};
   for(const file of files) {
     if(file.system) systemKinds[file.system.id]=(systemKinds[file.system.id]??0)+1;
+    // Resolve links only after every companion is identified: a sidecar can belong
+    // to a proxy which itself belongs to an original listed later. Empty companions
+    // travel with that original; an empty original leaves the whole family in place.
+    if(!options.backup && !file.system) {
+      let primary=file;
+      while(primary.companionOf) {const original=byPath.get(pathKey(primary.companionOf));if(!original)break;primary=original;}
+      if(primary.size===0) {file.included=false;skipped.push({path:file.path,reason:primary===file?'empty':'emptyPrimary'});continue;}
+    }
     if(file.included) continue;
-    if(file.size===0&&!file.system){skipped.push({path:file.path,reason:'empty'});continue;}
     const rule=file.system?undefined:unknownRule(extension(file.path),custom,defaults);
     skipped.push(file.system?{path:file.path,reason:'system',label:file.system.label}:{path:file.path,reason:rule===null?'unknown-rule':defaults.fallback==='ask'?'unknown-ask':'unknown-skip'});
   }

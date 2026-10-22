@@ -320,7 +320,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
       const original=file.companionOf?byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf;
       const lead=chapterLead.get(file.path),route:Metadata=lead?{...info,date:infos.get(lead.path)?.date}:info;
-      place=folder(route,mtimes.get((lead??(nksc?primary:file)).path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},options);
+      // An empty companion has no capture metadata of its own. Its primary also
+      // supplies the fallback date, so differing mtimes cannot split the family.
+      const dated=lead??(nksc || file.size===0&&file.companionOf?primary:file);
+      place=folder(route,mtimes.get(dated.path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},options);
       // NX Studio reads NKSC_PARAM beside the original.
       relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':'',path.basename(file.path));
     }

@@ -106,6 +106,8 @@ export const backendMessages={
  'error.backupFolderCheck':{en:'Backup folder check: {error}','zh-Hans':'备份文件夹检查：{error}','zh-Hant':'備份資料夾檢查：{error}',ja:'バックアップフォルダーの確認：{error}'},
  'inventory.emptyFile':{en:'empty file (0 bytes)','zh-Hans':'空文件（0 字节）','zh-Hant':'空檔案（0 位元組）',ja:'空のファイル（0 バイト）'},
  'inventory.emptySkipped':{en:'{count} skipped: empty file (0 bytes)','zh-Hans':'已跳过 {count} 个：空文件（0 字节）','zh-Hant':'已略過 {count} 個：空檔案（0 位元組）',ja:'{count} 件をスキップ：空のファイル（0 バイト）'},
+ 'inventory.emptyPrimaryFile':{en:'companion to an empty file','zh-Hans':'空文件的伴随文件','zh-Hant':'空檔案的隨附檔案',ja:'空のファイルの関連ファイル'},
+ 'inventory.emptyPrimarySkipped':{en:'{count} skipped: companion to an empty file','zh-Hans':'已跳过 {count} 个：空文件的伴随文件','zh-Hant':'已略過 {count} 個：空檔案的隨附檔案',ja:'{count} 件をスキップ：空のファイルの関連ファイル'},
  'error.fileFailed':{en:'Problem with {path}: {error}','zh-Hans':'{path} 出现问题：{error}','zh-Hant':'{path} 發生問題：{error}',ja:'{path} で問題が発生しました：{error}'},
  'error.userSkipped':{en:'Skipped by you','zh-Hans':'已由你跳过','zh-Hant':'已由你略過',ja:'手動でスキップしました'},
  'error.fileSkipped':{en:'Skipped {path}: {error}','zh-Hans':'已跳过 {path}：{error}','zh-Hant':'已略過 {path}：{error}',ja:'スキップしました {path}：{error}'},
