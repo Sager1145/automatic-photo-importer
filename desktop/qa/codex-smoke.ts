@@ -261,6 +261,25 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('Changing an unknown-file rule invalidates a ready import review',async()=>{
    const ready=await action({type:'preview',sourceId:'fixture:1'});assert.ok(ready.review);const before=ready.jobs.length;const changed=await action({type:'unknownRule',extension:'dat',folder:null,remember:false});assert.equal(changed.review,undefined);assert.equal(changed.jobs.length,before);
   });
+  await check('No button stretches far past its label at any text size or window size',async()=>{
+   // A button may grow a little for alignment, never into a bar: rendered width is compared with the width its content needs.
+   const measure=`(()=>{const out=[];for(const b of document.querySelectorAll('button,.button,[role=button]')){const r=b.getBoundingClientRect();if(!r.width||!r.height||b.closest('[hidden],dialog:not([open])'))continue;if(b.matches('.nav-item,.sidebar-item,[role=tab],[role=switch],[role=radio],.appearance-segments button,.segmented button')||b.closest('[role=tablist],[role=radiogroup],.segmented'))continue;const style=b.style.cssText;b.style.setProperty('width','max-content','important');b.style.setProperty('flex','none','important');b.style.setProperty('min-width','0','important');const need=b.getBoundingClientRect().width;b.style.cssText=style;if(r.width>need*1.5&&r.width-need>64)out.push({text:(b.textContent||b.getAttribute('aria-label')||'').trim().slice(0,40),cls:b.className,width:Math.round(r.width),need:Math.round(need)});}return out;})()`;
+   const pages=['Import desk','Drives','Organization','History','Settings'];
+   const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();
+   const wide:Record<string,unknown>[]=[];
+   try{
+    for(const [w,h] of [[1000,720],[1440,940],[1920,1200]]){window.setContentSize(w,h);
+     for(const scale of [1,1.25,1.5,1.75,2]){await action({type:'preferences',patch:{textScale:scale}});await wait(()=>js<boolean>(`getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()===${JSON.stringify(String(scale))}`),`text scale ${scale}`);
+      for(const page of pages){await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click()`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(page==='History'?'Import history':page)}`),`page ${page}`);await new Promise(r=>setTimeout(r,250));
+       const tabs=page==='Settings'?await js<string[]>("Array.from(document.querySelectorAll('[id^=settings-tab-]')).map(t=>t.id.slice('settings-tab-'.length))"):[''];
+       for(const tab of tabs){if(tab){await settingsTab(tab);await new Promise(r=>setTimeout(r,150));}
+        for(const item of await js<Record<string,unknown>[]>(measure))wide.push({window:`${w}x${h}`,scale,page:tab?`Settings/${tab}`:page,...item});}
+      }}}
+   }finally{await action({type:'preferences',patch:{textScale:original}});window.setContentSize(width,height);await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click()");}
+   await fs.writeFile(path.join(report,'button-widths.json'),JSON.stringify(wide,null,2));
+   if(wide.length)console.log(`WIDE BUTTONS ${JSON.stringify(wide)}`);
+   assert.deepEqual(wide,[],'Buttons wider than their content needs');
+  });
   if(!uiOnly){
   await check('Five sources run and the sixth queues; Stop settles every job',async()=>{
    await action({type:'preferences',patch:{parallel:5}});const started=await action({type:'start'});
