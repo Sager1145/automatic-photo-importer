@@ -8,7 +8,7 @@ import * as core from '../core/index';
 
 async function singlePlan(source:string,root:string,...args:Parameters<typeof core.plan> extends [string,string[],...infer Rest]?Rest:never){return (await core.plan(source,[root],...args)).plans[0]!;}
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{},reorganize:true};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 async function fixture(t:test.TestContext) {
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-recovery-')));
@@ -283,4 +283,27 @@ test('a second entry interrupted during exclusive publication resumes using its 
  t.mock.restoreAll();const [job]=await core.getOrganizationRecovery(root);assert.equal(job!.status,'pending');
  const resumed=await core.resumeOrganization(root,job!.id);assert.deepEqual(resumed.errors,[]);assert.equal(resumed.moved,2);
  assert.equal(await fs.readFile(target,'utf8'),'second precious original');assert.equal((await core.getOrganizationRecovery(root))[0]!.status,'complete');
+});
+
+test('finalizing and undoing report n of x progress through their checking and their changes',async t=>{
+ const {root}=await fixture(t),destination=path.join(root,'2024/202402/Sony/JPEG/A.JPG');
+ await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,'precious original');
+ const second=path.join(root,'incoming/B.JPG');await fs.writeFile(second,'another original');
+ const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const [job]=await core.getOrganizationRecovery(root);
+ const seen:{step:string;completed:number;total:number}[]=[];
+ const released=await core.finalizeOrganization(root,job!.id,undefined,progress=>seen.push({step:progress.step,completed:progress.completed,total:progress.total}));
+ assert.equal(released.removed,1);
+ const checking=seen.filter(item=>item.step==='checking'),releasing=seen.filter(item=>item.step==='releasing');
+ assert.deepEqual(checking.map(item=>item.completed),[1,2]);assert.ok(checking.every(item=>item.total===2));
+ assert.deepEqual(releasing.at(-1),{step:'releasing',completed:2,total:2});
+
+ const other=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-undo-progress-')));
+ t.after(()=>fs.rm(other,{recursive:true,force:true}));
+ for(const name of ['C.JPG','D.JPG']){await fs.mkdir(path.join(other,'incoming'),{recursive:true});await fs.writeFile(path.join(other,'incoming',name),name);}
+ const q=await singlePlan(other,other,options,metadata);assert.deepEqual((await core.executeReorganization(q,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const [moved]=await core.getOrganizationRecovery(other);const undoing:{step:string;completed:number;total:number}[]=[];
+ assert.equal((await core.undoOrganization(other,moved!.id,undefined,progress=>undoing.push({step:progress.step,completed:progress.completed,total:progress.total}))).restored,2);
+ assert.deepEqual(undoing.filter(item=>item.step==='checking').map(item=>item.completed),[1,2]);
+ assert.deepEqual(undoing.filter(item=>item.step==='restoring').at(-1),{step:'restoring',completed:2,total:2});
 });

@@ -17,8 +17,8 @@ const target = path.join(library,'2024','202402','FixtureCamera','JPEG','A.JPG')
 const recovery = path.join(library,'.photo-importer-recovery');
 const finallyMarker = path.join(base,`finally-${mode}`);
 const metadata = async()=>({camera:'FixtureCamera',date:'2024-02-03',fields:{}});
-const importOptions = {backup:true,template:'{year}/{camera}',separateMedia:false,unknownRules:{}};
-const organizationOptions = {...importOptions,backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,reorganize:true};
+const importOptions = {backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
+const organizationOptions = {...importOptions,backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,reorganize:true};
 
 // An IPC listener keeps a blocked worker alive until its parent sends SIGKILL.
 process.on('message',()=>{});
