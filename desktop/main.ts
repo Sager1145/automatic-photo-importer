@@ -1,4 +1,4 @@
-import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme} from 'electron';
+import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme,powerMonitor} from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -208,7 +208,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size)retur
 // rules give them. It runs while nothing else does: after imports finish and when a destination connects.
 let misplacedControl:AbortController|undefined,misplacedScope='',organizeAfterImport=false;
 function scheduleMisplacedCheck(force=false){
- if(qa||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl)return;
+ if(qa||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
  const prefs=state.preferences,scope=JSON.stringify([prefs.destinations,prefs.destinationIds,prefs.basePath,prefs.template,prefs.mediaLayout,prefs.videoBasePath,prefs.videoTemplate,prefs.editedFolder,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===misplacedScope)return;
  misplacedScope=scope;const control=new AbortController();misplacedControl=control;const organize=organizeAfterImport;organizeAfterImport=false;
@@ -224,7 +224,7 @@ function scheduleMisplacedCheck(force=false){
    if(found.count&&organize&&state.preferences.autoOrganizeBackup==='auto')try{queueBackupOrganization(index,true);}catch{/* Another organization or a review comes first; the count stays visible. */}
   }
   for(const destination of Object.keys(state.misplacedFiles??{}))if(!checked.has(destination))delete state.misplacedFiles![destination];
- })().catch(error=>{if(!control.signal.aborted)state.error=message('error.backupFolderCheck',{error:toMessage(error)});}).finally(()=>{if(misplacedControl===control)misplacedControl=undefined;if(control.signal.aborted)misplacedScope='';emit();});
+ })().catch(error=>{if(!control.signal.aborted)state.error=message('error.backupFolderCheck',{error:toMessage(error)});}).finally(()=>{if(misplacedControl===control)misplacedControl=undefined;if(control.signal.aborted)misplacedScope='';emit();scheduleResidueCheck();});
 }
 // Leftovers of interrupted runs: staging files and receipts beside media, index and organization
 // scratch files, and camera and preview folders in the system temporary folder. Looked for while
@@ -239,9 +239,12 @@ async function residueRoots():Promise<string[]>{
  // A folder inside another one is looked through with it.
  return [...new Set(roots)].filter((root,_index,all)=>!all.some(other=>other!==root&&within(root,other)));
 }
-const residueIdle=()=>!active.size&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
+// The automatic check also waits for the backup folder check, which rewrites index files; Clean up does not.
+const residueIdle=(manual=false)=>!active.size&&!resumingOrganizations.size&&(manual||!misplacedControl)&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
 function scheduleResidueCheck(force=false){
- if(qa||!residueIdle()||residueTask)return;
+ if(qa)return;
+ // Something running now: look again once it is idle (any later refresh or finished job).
+ if(!residueIdle()||residueTask){residueScope='';return;}
  const scope=JSON.stringify([state.preferences.destinations,state.preferences.destinationIds,backupFolders(state.preferences),organizationLocations,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===residueScope)return;
  residueScope=scope;void checkResidue(false);
@@ -251,8 +254,8 @@ function checkResidue(all:boolean):Promise<void>{
  const control=new AbortController();residueControl=control;
  state.residue={...state.residue??{files:0,bytes:0,resumable:{files:0,bytes:0}},checking:true};emit();
  const task:Promise<void>=(async()=>{
-  const found=await findResidue(await residueRoots(),{temporary:os.tmpdir(),inUse:previewFoldersInUse(),signal:control.signal});
-  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,signal:control.signal}):{removed:{files:0,bytes:0},left:found};
+  const found=await findResidue(await residueRoots(),{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal});
+  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
   state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,checkedAt:now,...(cleaned?{cleaned}:{})};
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue)delete state.residue.checking;emit();});
@@ -391,7 +394,7 @@ async function previewSource(source:Source,backup:boolean,organizationDestinatio
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);
  const request:RunRequest={prefs,reorganize,sourceFolders:reorganize?state.organizationFolders?.[source.path]?.slice():undefined};
- misplacedControl?.abort();residueControl?.abort();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
+ misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
  try{
   reviewed=await prepare(randomUUID(),source,backup,request,control.signal,()=>{},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();});
   state.review=reviewed.review;(state.sourceInventories??={})[source.id]=reviewed.inventory;
@@ -411,7 +414,7 @@ async function action(input:Action):Promise<void>{
   case 'scanSource':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'refreshOrganization':await refreshOrganizations();break;
-  case 'cleanResidue':{if(!residueIdle())throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle())throw new MessageError('error.busy');await checkResidue(true);break;}
+  case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;
   case 'undoOrganization':await resumeOrganizationJob(input.root,input.id,'undo');break;
@@ -523,6 +526,8 @@ if(!qa&&!hardwareTest&&!app.requestSingleInstanceLock())app.quit();else app.when
 app.on('second-instance',()=>{if(window?.isMinimized())window.restore();window?.focus();});
 app.on('window-all-closed',()=>app.quit());
 let quitting=false;
+// Holding a system shutdown or logout would cancel it; jobs are then stopped without waiting.
+app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch(()=>{});
 app.on('before-quit',event=>{
  if(timer)clearInterval(timer);for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();residueControl?.abort();
  // Stopped jobs and an open review remove their staging files and camera downloads first (at most 10 s).

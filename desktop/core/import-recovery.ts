@@ -39,13 +39,16 @@ const recordPattern=/^\.import-(?:stage|intent)-[a-f0-9-]+\.json$/;
 
 /** A leftover receipt, authenticated with this host's key (it throws otherwise): whether its file
  * is still there, whether the receipt still binds it, and for a stage, whether that copy could
- * continue from its unchanged source. */
+ * continue from its unchanged source (or a card not connected now). */
 export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean}>{
  const {record}=await readRecord(journal,root);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
  const bound=!!stat?.isFile()&&fileIdentity(stat)===record.fileIdentity;
- const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false);
+ // A card that is not connected (its folder missing or another volume there) may come back
+ // unchanged; only the same card holding a changed or removed file ends the copy's use.
+ const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
+ const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
  return {kind:record.kind,file,present:!!stat,bound,resumable};
 }
 

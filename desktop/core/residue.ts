@@ -68,7 +68,7 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
  * original stays at its path or among the retained originals), and folders emptied when retained
  * originals were released. Journals and retained originals are never listed. */
 async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
-  const folder=async(item:string)=>{const stat=await fs.lstat(item,{bigint:true});items.push({path:item,kind:'folder',bytes:0,root,stat});};
+  const folder=async(item:string)=>{const stat=await fs.lstat(item,{bigint:true}).catch(()=>undefined);if(stat)items.push({path:item,kind:'folder',bytes:0,root,stat});};
   for(const job of await list(storage)) {
     if(!job.isDirectory()||!uuid.test(job.name)) continue;
     const jobPath=path.join(storage,job.name);
@@ -105,21 +105,25 @@ async function walk(folder:string,root:string,items:ResidueItem[],signal?:AbortS
   }
 }
 
+/** Folders in the temporary folder being used now; asked again right before each removal. */
+type InUse=()=>string[];
+const used=async(folder:string,inUse?:InUse)=>!!inUse&&(await Promise.all(inUse().map(item=>fs.realpath(item).catch(()=>item)))).includes(folder);
 /** Read-only: the app's leftovers under each backup folder in `roots`, and its camera and preview
  * folders in `temporary` (the system temporary folder) other than those `inUse`. User files are
  * never listed, whatever their names. */
-export async function findResidue(roots:string[],options:{temporary?:string;inUse?:string[];signal?:AbortSignal}={}):Promise<Residue> {
+export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal}={}):Promise<Residue> {
   const items:ResidueItem[]=[];
   // Canonical paths, as removal checks every item is still inside its root (macOS /var is /private/var).
   const canonical=(folder:string)=>fs.realpath(folder).catch(()=>undefined);
   for(const root of roots){const real=await canonical(root);if(real)await walk(real,real,items,options.signal);}
-  const temporary=options.temporary&&await canonical(options.temporary),inUse=new Set(await Promise.all((options.inUse??[]).map(canonical)));
+  const temporary=options.temporary&&await canonical(options.temporary);
   if(temporary) for(const entry of await list(temporary)) {
     checkAbort(options.signal);
     const folder=path.join(temporary,entry.name);
-    if(!entry.isDirectory()||!temporaryFolder.test(entry.name)||inUse.has(folder)) continue;
-    const stat=await fs.lstat(folder,{bigint:true});
-    items.push({path:folder,kind:'temporary',bytes:await folderBytes(folder,options.signal),root:temporary,stat});
+    if(!entry.isDirectory()||!temporaryFolder.test(entry.name)||await used(folder,options.inUse)) continue;
+    // A preview removes its own folder when it finishes.
+    const stat=await fs.lstat(folder,{bigint:true}).catch(()=>undefined);
+    if(stat) items.push({path:folder,kind:'temporary',bytes:await folderBytes(folder,options.signal),root:temporary,stat});
   }
   return summary(items);
 }
@@ -131,7 +135,7 @@ function summary(items:ResidueItem[]):Residue {
 
 /** Remove what findResidue listed, each only while it is still the very file or folder found.
  * Folders go only when empty. keepResumable leaves copies a re-import could continue. */
-export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;signal?:AbortSignal}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
+export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
   for(const item of residue.items) {
     checkAbort(options.signal);
@@ -141,7 +145,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
       await contained(item.path,item.root);
       const now=await fs.lstat(item.path,{bigint:true});
       if(item.kind==='folder'||item.kind==='temporary') {
-        if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino) continue;
+        if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
         if(item.kind==='folder') await fs.rmdir(item.path); else await fs.rm(item.path,{recursive:true});
       } else {
         if(!now.isFile()||!sameStat(now,item.stat)) continue;
