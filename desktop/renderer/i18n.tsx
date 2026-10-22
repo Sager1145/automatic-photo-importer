@@ -261,6 +261,15 @@ Photo folder template|照片文件夹模板|照片資料夾範本|写真のフ�
 This folder path is a custom template. Edit it under Advanced, or start again with the folder builder.|此文件夹路径是自定义模板。可在“高级”中编辑，或使用文件夹构建器重新设置。|此資料夾路徑是自訂範本。可在「進階」中編輯，或使用資料夾建構器重新設定。|このフォルダー構成はカスタムテンプレートです。「詳細」で編集するか、フォルダービルダーで設定し直してください。
 Use the folder builder|使用文件夹构建器|使用資料夾建構器|フォルダービルダーを使う
 Folder template|文件夹模板|資料夾範本|フォルダーテンプレート
+Collect problem files|收集问题文件|收集問題檔案|問題のあるファイルを集める
+Move 0-byte files and their companions into Problem files. Undo puts them back.|将 0 字节文件及其伴随文件移入“Problem files”。撤销会把它们放回原处。|將 0 位元組檔案及其隨附檔案移入「Problem files」。還原會把它們放回原處。|0 バイトのファイルとその関連ファイルを「Problem files」に移動します。取り消すと元に戻ります。
+{count} problem files will be collected into Problem files/…|{count} 个问题文件将被收集到 Problem files/…|{count} 個問題檔案將被收集到 Problem files/…|問題のあるファイル {count} 件を Problem files/… に集めます
+{count} problem files will stay where they are|{count} 个问题文件将保留在原处|{count} 個問題檔案將保留在原處|問題のあるファイル {count} 件はそのまま残ります
+{count} problem files are skipped and not copied|已跳过 {count} 个问题文件，不会复制|已略過 {count} 個問題檔案，不會複製|問題のあるファイル {count} 件はスキップされ、コピーされません
+Empty files|空文件|空檔案|空のファイル
+Unreadable files|无法读取的文件|無法讀取的檔案|読み取れないファイル
+Could not be read|无法读取|無法讀取|読み取れませんでした
+and {count} more|还有 {count} 个|還有 {count} 個|ほか {count} 件
 Edited exports folder|编辑导出文件夹|編輯匯出資料夾|編集済み書き出しフォルダー
 Editor-exported photos go in this folder within each month. RAW originals and XMP stay together.|编辑器导出的照片会保存在每月目录中的此文件夹内。RAW 原片和 XMP 保存在一起。|編輯器匯出的照片會儲存在每月目錄中的此資料夾內。RAW 原始檔與 XMP 儲存在一起。|編集ソフトから書き出した写真を各月のこのフォルダーに保存します。RAWの原本とXMPは一緒に保存します。
 Your edited export lands here|编辑导出的照片将保存在这里|編輯匯出的照片將儲存在這裡|編集済み写真の保存先
