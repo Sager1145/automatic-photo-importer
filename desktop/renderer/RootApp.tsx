@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { formatMessage, message, text, type Message } from '../messages';
+import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
@@ -242,8 +242,8 @@ export default function RootApp() {
         {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
           <button key={item.id} type="button" className={`nav-item ${page === item.id ? 'selected' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon icon={item.icon} /><span>{item.label}</span>{page === item.id && <span className="nav-indicator" aria-hidden="true" />}</button>)}
       </nav>
-      <SidebarSources state={state} onOpen={openSource} errors={errors} onErrors={openErrorsFor} />
-      <SidebarDestinations state={state} errors={errors} onErrors={openErrorsFor} />
+      <SidebarSources state={state} onOpen={openSource} errors={errors} onErrors={openErrorsFor} act={act} />
+      <SidebarDestinations state={state} errors={errors} onErrors={openErrorsFor} act={act} />
     </aside>
     <div className="main-shell">
       <main id="main-content" className="main-content">
@@ -281,7 +281,7 @@ function MiniSteps({ states }: { states: StepState[] }) {
   return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state}>{state === 'done' ? <Icon icon={Check} size={9} /> : state === 'error' ? '!' : state === 'skipped' ? '–' : index + 1}</i>)}</span>;
 }
 
-export function SidebarSources({ state, onOpen, errors, onErrors }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void }) {
+export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
   const { t } = useTranslation();
   const verifyOff = state.preferences.verifyCopies === false;
   return <section className="sidebar-section" aria-labelledby="sidebar-sources"><h2 id="sidebar-sources">{t("Sources")}</h2>
@@ -290,13 +290,13 @@ export function SidebarSources({ state, onOpen, errors, onErrors }: { state: App
       const scanning = !!state.scanningSources?.includes(source.id);
       const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
       const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff);
-      return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button><SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
+      return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
         <SidebarCapacity total={source.total} free={source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} />} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
   </section>;
 }
 
-export function SidebarDestinations({ state, errors, onErrors }: { state: AppState; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void }) {
+export function SidebarDestinations({ state, errors, onErrors, act }: { state: AppState; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
   const { t } = useTranslation();
   const count = state.preferences.copyMode === 'single' ? 1 : 2;
   const destinations = state.preferences.destinations.slice(0, count);
@@ -304,7 +304,7 @@ export function SidebarDestinations({ state, errors, onErrors }: { state: AppSta
     {destinations.length ? <ul>{destinations.map(path => {
       const status = state.destinationStatus?.find(item => item.path === path);
       const online = status?.available !== false;
-      return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-item sidebar-static"><Icon icon={HardDrive} size={16} /><span>{filename(path) || path}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /><SidebarErrors errors={errors} target={{ destination: path, name: filename(path) || path }} onErrors={onErrors} /></div>
+      return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-item sidebar-static"><Icon icon={HardDrive} size={16} /><span>{filename(path) || path}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} />{act && online && <RevealButton path={path} act={act} name={filename(path) || path} />}<SidebarErrors errors={errors} target={{ destination: path, name: filename(path) || path }} onErrors={onErrors} /></div>
         <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
   </section>;
@@ -321,7 +321,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; sourceId?: string; formatSourceId?: string};
+type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; sourceId?: string; jobId?: string; formatSourceId?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -441,8 +441,10 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
       <ul className="all-errors">{items.map((error, index) => {
         if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
         const explained = explainError(error.message, error.kind, language);
+        const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
+        const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
         return <li key={index} className={`error-item is-${explained.severity}`} data-severity={explained.severity}>
-          <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!])}>{t("Clear")}</Button>}</div>
+          <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!])}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
           {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
           <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
         </li>;
@@ -547,7 +549,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
       <fieldset className="settings-fieldset" disabled={busy}>
         <SettingsSection title={t("Copying")} icon={ShieldCheck}>
           <Switch checked={p.verifyCopies !== false} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
-          <Switch checked={p.skipErrors === true} onChange={skipErrors => act({ type: 'preferences', patch: { skipErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
+          <Switch checked={p.skipFileErrors !== false} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
           <Switch checked={p.allowFolderSource} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} label={t("Enable media folder selection")} detail={t("Lets you choose a folder of photos as a source.")} />
         </SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
@@ -951,9 +953,27 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
     <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
-    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}</p>
+    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}<RevealButton path={job.source.path} act={act} /></p>
     <OrganizationProgress job={job} act={act} />
+    <SkipFileNotice job={job} act={act} />
   </article>;
+}
+/** macOS calls its file manager Finder. */
+export const revealLabel = () => /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? "Show in Finder" : "Show in file manager";
+/** Opens the Finder (file manager) at a source, destination, folder or file the app already works with. */
+export function RevealButton({ path, act, name }: { path: string; act: Dispatch; name?: string }) {
+  const { t } = useTranslation();
+  const label = t(revealLabel());
+  return <Button kind="quiet" icon={ExternalLink} data-testid="reveal" aria-label={name ? `${label}: ${name}` : label} title={`${label}: ${path}`} onClick={() => act({ type: 'reveal', path })} />;
+}
+/** A job that ended with errors: Retry runs it again. One stopped on a file it couldn't read or check also offers Skip (that file) and Skip all (every file that fails). */
+function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
+  const { t } = useTranslation();
+  if (job.phase !== 'error') return null;
+  const retry = job.retryable ? <Button icon={RotateCcw} data-testid="retry-button" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: job.id })}>{t("Retry")}</Button> : null;
+  if (!job.skippablePath) return retry && <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}</div></div>;
+  const file = job.skippablePath;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
@@ -1017,7 +1037,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
     {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <JobTiming job={job} />}<strong>{hasSpeed(progress) && active ? <ProgressSpeed progress={progress} /> : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
-    {job?.phase === 'error' && !job.skipErrors && !mirrorReview && (!job.progress || job.progress.phase === 'planning') && job.errors.some(error => error.key === 'error.sourceChanged' || error.key === 'text') && <div className="source-choice" data-testid="skip-and-continue"><p><Icon icon={CircleAlert} size={14} />{t("A file error stopped this import.")}</p><div className="rule-actions"><Button kind="primary" icon={Play} title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip and continue")}</Button></div></div>}
+    {job && <SkipFileNotice job={job} act={act} />}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
@@ -1026,7 +1046,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     <details className="source-disclosure">
       <summary aria-label={t("Drive details")}><div className="source-compact-capacity"><CapacityBar total={source.total} free={source.free} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
       <div className="source-expanded-details">
-        <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}</dd></div></dl>
+        <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
         <SourceMediaSummary source={source} inventory={inventory} scanning={scanning} />
         {inventory && <SkippedFilesNotice inventory={inventory} />}

@@ -101,6 +101,8 @@ export const backendMessages={
  'error.backupFolderCheck':{en:'Backup folder check: {error}','zh-Hans':'备份文件夹检查：{error}','zh-Hant':'備份資料夾檢查：{error}',ja:'バックアップフォルダーの確認：{error}'},
  'inventory.emptyFile':{en:'empty file (0 bytes)','zh-Hans':'空文件（0 字节）','zh-Hant':'空檔案（0 位元組）',ja:'空のファイル（0 バイト）'},
  'inventory.emptySkipped':{en:'{count} skipped: empty file (0 bytes)','zh-Hans':'已跳过 {count} 个：空文件（0 字节）','zh-Hant':'已略過 {count} 個：空檔案（0 位元組）',ja:'{count} 件をスキップ：空のファイル（0 バイト）'},
+ 'error.fileFailed':{en:'Problem with {path}: {error}','zh-Hans':'{path} 出现问题：{error}','zh-Hant':'{path} 發生問題：{error}',ja:'{path} で問題が発生しました：{error}'},
+ 'error.userSkipped':{en:'Skipped by you','zh-Hans':'已由你跳过','zh-Hant':'已由你略過',ja:'手動でスキップしました'},
  'error.fileSkipped':{en:'Skipped {path}: {error}','zh-Hans':'已跳过 {path}：{error}','zh-Hant':'已略過 {path}：{error}',ja:'スキップしました {path}：{error}'},
  'error.residueCleanup':{en:'Leftover file cleanup: {error}','zh-Hans':'残留文件清理：{error}','zh-Hant':'殘留檔案清理：{error}',ja:'残ったファイルのクリーンアップ：{error}'},
  'error.folderCleanup':{en:'Folder cleanup: {error}','zh-Hans':'文件夹清理：{error}','zh-Hant':'資料夾清理：{error}',ja:'フォルダーの整理：{error}'},
@@ -125,6 +127,16 @@ export function formatMessage(value:Message,language:Language):string {
 /** An error the user sees translated. Its `message` is the English text, for logs and reports. */
 export class MessageError extends Error {
  constructor(readonly key:MessageKey,readonly params?:Record<string,MessageParam>){super(formatMessage(message(key,params),'en'));}
+}
+/** The source file a planning error is about, when the user can skip that file. */
+export function filePath(value:Message|undefined):string|undefined {
+ const path=value?.params?.path;
+ return value&&(value.key==='error.sourceChanged'||value.key==='error.fileFailed')&&typeof path==='string'?path:undefined;
+}
+/** The file or folder an error is about, for Show in Finder. */
+export function errorPath(value:Message|undefined):string|undefined {
+ const path=value?.params?.path;
+ return value&&value.key!=='text'&&typeof path==='string'?path:undefined;
 }
 export function toMessage(error:unknown):Message {
  return error instanceof MessageError?message(error.key,error.params):text(error instanceof Error?error.message:String(error));
