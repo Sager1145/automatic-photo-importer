@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { DestinationStatus, Source } from '../shared';
 import { within } from '../core/paths';
+import { MessageError } from '../messages';
 import { cameraSources } from './camera-bridge';
 
 const exec = promisify(execFile);
@@ -204,26 +205,26 @@ export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promis
 }
 /** Pass `identity` to require the saved volume: a destination is a particular disk, not a reusable path. */
 export async function validateDestination(target:string, knownSources:Source[], options:{identity?:string; volumes?:MountedVolume[]}={}):Promise<DestinationStatus> {
-  if(!target || !path.isAbsolute(target))throw new Error('Choose an absolute destination folder.');
+  if(!target || !path.isAbsolute(target))throw new MessageError('error.destinationRelative');
   await requireMountedRoot(target);
   const resolved=await canonical(target);
   for(const source of knownSources) {
     let sourcePath:string;try{sourcePath=await canonical(source.path);}catch{sourcePath=path.resolve(source.path);}
-    if(within(resolved,sourcePath))throw new Error('A destination cannot be on or inside an import source or camera card.');
+    if(within(resolved,sourcePath))throw new MessageError('error.destinationInSource');
   }
   const snapshot=options.volumes??await mountedVolumes();
   for(const volume of snapshot)if(within(resolved,volume.path)) {
     const classification=await classifyMounted(volume);
-    if(classification.source)throw new Error('A destination cannot be on a camera card or removable flash media.');
-    if(classification.layoutUnavailable)throw new Error('Could not inspect this volume for camera folders. Authorize access or reconnect it before choosing a destination.');
+    if(classification.source)throw new MessageError('error.destinationOnCard');
+    if(classification.layoutUnavailable)throw new MessageError('error.destinationUninspectable');
     // macOS sealed '/' contains writable Data-volume firmlinks such as /Users and /private.
     // access(W_OK) below checks the actual destination filesystem rather than the sealed ancestor.
-    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/'))throw new Error('The destination filesystem is read-only.');
+    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/'))throw new MessageError('error.destinationReadOnly');
   }
   const ancestor=await existingAncestor(resolved);
-  if(!(await stat(ancestor)).isDirectory())throw new Error('The destination must be a folder.');
+  if(!(await stat(ancestor)).isDirectory())throw new MessageError('error.destinationNotFolder');
   await access(ancestor,constants.W_OK);
-  const info=await volumeInfo(target,snapshot);if(!info.available)throw new Error(info.detail??'The destination is unavailable.');
-  if(options.identity!==undefined&&(!options.identity||options.identity!==info.volumeId))throw new Error('The selected destination disk changed or cannot be identified. Choose it again before copying.');
+  const info=await volumeInfo(target,snapshot);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');
+  if(options.identity!==undefined&&(!options.identity||options.identity!==info.volumeId))throw new MessageError('error.destinationChanged');
   return info;
 }

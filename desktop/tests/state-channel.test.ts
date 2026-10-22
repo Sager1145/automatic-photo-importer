@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createStateChannel,createStateReceiver,type StateUpdate} from '../state-channel';
 import type {AppState,Inventory,Review} from '../shared';
+import {text} from '../messages';
 
 function inventory(name='photo.nef'):Inventory{return {files:[{path:'/card/'+name,relative:name,size:8,kind:'RAW',included:true}],media:1,companions:0,unknown:0,bytes:8,unknownExtensions:{},elapsedMs:1};}
 function state():AppState{return {preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',separateMedia:false,allowFolderSource:false,unknownRules:{}},sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin'};}
@@ -10,7 +11,7 @@ const wire=(update:StateUpdate)=>structuredClone(update);
 
 test('progress sends each shared file list and review once, preserving receiver details',()=>{
  const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
- const files=inventory();value.sourceInventories={card:files};value.jobs=[{id:'job',source:value.sources[0],phase:'copying',detail:'Copying',errors:[],backup:false,inventory:files}];value.review=review();
+ const files=inventory();value.sourceInventories={card:files};value.jobs=[{id:'job',source:value.sources[0],phase:'copying',detail:text('Copying'),errors:[],backup:false,inventory:files}];value.review=review();
  channel.publish(value);
  const initial=channel.snapshot(value);assert.equal(Object.keys(initial.inventories).length,1);receiver.apply(wire(initial));
  const received=receiver.snapshot()!,retained=received.jobs[0].inventory,savedReview=received.review;
@@ -20,7 +21,7 @@ test('progress sends each shared file list and review once, preserving receiver 
 
 test('replacement, job eviction, source disconnection and review removal update details exactly',()=>{
  const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
- const original=inventory();value.sourceInventories={card:original};value.jobs=[{id:'job',source:value.sources[0],phase:'complete',detail:'Done',errors:[],backup:false,inventory:original}];value.review=review();channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
+ const original=inventory();value.sourceInventories={card:original};value.jobs=[{id:'job',source:value.sources[0],phase:'complete',detail:text('Done'),errors:[],backup:false,inventory:original}];value.review=review();channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
  const replacement=inventory('next.nef');value.sourceInventories.card=replacement;channel.publish(value);assert.equal(Object.keys(updates.at(-1)!.inventories).length,1);receiver.apply(updates.at(-1)!);assert.equal(receiver.snapshot()!.sourceInventories!.card.files[0].relative,'next.nef');assert.equal(receiver.snapshot()!.jobs[0].inventory!.files[0].relative,'photo.nef');
  value.jobs=[];value.sources=[];value.sourceInventories={};value.review=undefined;channel.publish(value);assert.equal(updates.at(-1)!.review,null);receiver.apply(updates.at(-1)!);assert.deepEqual(receiver.snapshot()!.jobs,[]);assert.deepEqual(receiver.snapshot()!.sourceInventories,{});assert.equal(receiver.snapshot()!.review,undefined);
  // The same object returning after eviction must be transmitted again.

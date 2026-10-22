@@ -9,6 +9,7 @@ import type {Action,AppState,Job,PlanEntry,Source} from '../shared';
 import {plan} from '../core';
 import {digest} from '../core/paths';
 import {metadata} from '../platform/metadata';
+import {formatMessage} from '../messages';
 interface FileRecord {path:string;relative:string;size:string;mtimeNs:string;birthtimeNs:string;ino:string;dev:string;sha256:string;identityIssues?:string[];contentIssues?:string[];}
 interface SourceManifest {source:Source;files:FileRecord[];symlinks:string[];complete:boolean;errors?:{path:string;error:string}[];}
 interface Check {name:string;passed:boolean;error?:string;}
@@ -516,7 +517,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 		await check("Repeat every import verifies existing data without copying", async () => {
 			const ids = await beginPass();
 			await completePass(ids);
-			for (const job of passJobs(ids)) assert.match(job!.detail, /^0 copied · \d+ verified · 0 errors$/u, job!.detail);
+			for (const job of passJobs(ids)) {const detail=formatMessage(job!.detail!,'en');assert.match(detail, /^0 copied · [\d,]+ verified · 0 errors$/u, detail);}
 		});
 		await check("Independent destination hashes and capture timestamps match every imported file", () => verifyDestinations("destination-verification.json"));
 		await check("One real photograph exposes metadata and preview status", async () => {

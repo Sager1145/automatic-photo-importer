@@ -6,6 +6,8 @@ import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import type {Action,AppState,Metadata} from '../shared';
 import {createStateReceiver,type StateUpdate} from '../state-channel';
+import {formatMessage,type Message} from '../messages';
+const english=(message?:Message)=>message?formatMessage(message,'en'):'';
 
 export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=false,organizationOnly=false):Promise<boolean>{
  const checks:{name:string;passed:boolean;error?:string}[]=[];
@@ -180,7 +182,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
     }
     // The UI bridge reports action failures in AppState.error rather than rejecting its promise.
     const rejected=await action({type:'preferences',patch:{editedFolder:'../escape'}});
-    assert.equal(rejected.preferences.editedFolder,'Finished');assert.match(rejected.error??'',/safe folder name/i);
+    assert.equal(rejected.preferences.editedFolder,'Finished');assert.match(english(rejected.error),/safe folder name/i);
     assert.equal(await js<boolean>("document.querySelector('.error-banner,.job-errors,.source-camera-error,.recovery-error')===null&&document.querySelector('.activity-dialog')===null"),true,'Errors stay out of the main workspace');
     await js("document.querySelector('[data-testid=show-errors]').click()");await wait(()=>js<boolean>("document.querySelector('.all-errors')?.textContent.includes('safe folder name')"),'error appears in dedicated panel');await shot('all-errors-with-detail');await js("document.querySelector('[data-testid=activity-close]').click()");await wait(()=>js<boolean>("document.querySelector('.activity-dialog')===null"),'animated activity close');
     assert.equal(JSON.parse(await fs.readFile(path.join(root,'user-data','settings.json'),'utf8')).preferences.editedFolder,'Finished','An invalid folder must not be persisted');
@@ -245,7 +247,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    const run=async()=>{const before=new Set((await state()).jobs.map(j=>j.id));await action({type:'start'});await wait(async()=>{const jobs=(await state()).jobs.filter(j=>!before.has(j.id));return jobs.length===6&&jobs.every(j=>['complete','error','stopped'].includes(j.phase));},'copy completion');const jobs=(await state()).jobs.filter(j=>!before.has(j.id));assert.ok(jobs.every(j=>j.phase==='complete'),JSON.stringify(jobs.map(j=>({phase:j.phase,detail:j.detail}))));return jobs;};
    await run();const output:string[]=[];const walk=async(dir:string)=>{for(const entry of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await walk(file);else if(entry.isFile())output.push(await digest(file));}};await walk(path.join(root,'destination','photobackup'));for(const [file,hash] of originals)if(file.startsWith(path.join(root,'source-')))assert.ok(output.includes(hash),`Missing copied content: ${file}`);
    const copiedFiles=output.length;
-   const repeated=await run();assert.ok(repeated.every(j=>j.alreadyImported||j.detail.startsWith('0 copied')),'Repeated imports must not copy duplicates');
+   const repeated=await run();assert.ok(repeated.every(j=>j.alreadyImported||english(j.detail).startsWith('0 copied')),'Repeated imports must not copy duplicates');
    output.length=0;await walk(path.join(root,'destination','photobackup'));assert.equal(output.length,copiedFiles,'Repeated imports must not add files to the backup');
   });
   await check('Concurrent sources create a fresh nested backup folder without directory races',async()=>{
@@ -273,14 +275,14 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    const previous=new Set((await state()).jobs.map(job=>job.id));await js("Promise.all([window.importer.action({type:'applyReview'}),window.importer.action({type:'applyReview'})])");await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'organization finish');
    assert.equal((await state()).jobs.filter(job=>!previous.has(job.id)).length,1,'Double Apply must create only one organization job');
    await action({type:'refreshOrganization'});const recovery=(await state()).organizationRecovery?.find(job=>job.status==='complete');assert.ok(recovery,JSON.stringify((await state()).jobs));
-   const beforeResume=new Set((await state()).jobs.map(job=>job.id));await js(`Promise.all([window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})}),window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})})])`);await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'recheck finish');assert.equal((await state()).jobs[0].phase,'complete',(await state()).jobs[0].detail);assert.equal((await state()).jobs.filter(job=>!beforeResume.has(job.id)).length,1,'Double Resume must create only one recovery job');await action({type:'clearError'});
+   const beforeResume=new Set((await state()).jobs.map(job=>job.id));await js(`Promise.all([window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})}),window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})})])`);await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'recheck finish');assert.equal((await state()).jobs[0].phase,'complete',english((await state()).jobs[0].detail));assert.equal((await state()).jobs.filter(job=>!beforeResume.has(job.id)).length,1,'Double Resume must create only one recovery job');await action({type:'clearError'});
   });
   await check('One-click organization executes through the public app action and writes real execution reports',async()=>{
    await action({type:'preferences',patch:{basePath:'oneclick-library'}});
    const before=new Set((await state()).jobs.map(job=>job.id));const started=await action({type:'organize',destinationIndex:0});
    const job=started.jobs.find(job=>!before.has(job.id)&&job.organization);assert.ok(job,'App must create an organization job');
    await wait(async()=>{const current=(await state()).jobs.find(item=>item.id===job.id);return !!current&&['complete','error','stopped'].includes(current.phase);},'one-click organization completion');
-   const current=(await state()).jobs.find(item=>item.id===job.id)!;assert.equal(current.phase,'complete',current.detail);assert.equal(current.organization,true);
+   const current=(await state()).jobs.find(item=>item.id===job.id)!;assert.equal(current.phase,'complete',english(current.detail));assert.equal(current.organization,true);
    const directory=path.join(root,'user-data','operation-reports',job.id),summary=JSON.parse(await fs.readFile(path.join(directory,'summary.json'),'utf8')),plan=JSON.parse(await fs.readFile(path.join(directory,'plan.json'),'utf8'));
    assert.equal(summary.producer,'desktop-app');assert.equal(summary.kind,'reorganize');assert.equal(summary.passed,true);assert.equal(summary.retainedOriginals,true);
    assert.deepEqual(plan.sourceFolders,(await state()).organizationFolders?.[path.join(root,'destination')]);assert.equal(plan.plans[0].source,path.join(root,'destination'));assert.equal(plan.plans[0].root,path.join(root,'destination','oneclick-library'));
@@ -294,7 +296,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    await wait(()=>js<boolean>(`document.querySelector('.organization-paths').textContent.includes(${JSON.stringify(second)})`),'selected organization location');
    await action({type:'preferences',patch:{basePath:'second-organized'}});
    const reviewed=await action({type:'previewOrganization',destinationIndex:1});assert.equal(reviewed.review?.source.path,second);assert.equal(reviewed.review?.plans[0].root,path.join(second,'second-organized'));assert.deepEqual(reviewed.preferences.destinations,before);
-   await action({type:'applyReview'});await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'second organization finish');assert.equal((await state()).jobs[0].phase,'complete',(await state()).jobs[0].detail);
+   await action({type:'applyReview'});await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'second organization finish');assert.equal((await state()).jobs[0].phase,'complete',english((await state()).jobs[0].detail));
   });
  }
  }catch(error){failure=error;}

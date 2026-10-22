@@ -13,6 +13,7 @@ export { removeRedundantFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {MessageError} from '../messages';
 export { configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization } from './recovery';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationStrategy, OrganizationUndo } from './recovery';
 
@@ -111,7 +112,7 @@ export async function plan(source:string,roots:string[],options:Options,metadata
   // A file rewritten in place leaves its folder unchanged, so a remembered listing
   // can hold a stale size. List the card again once rather than failing.
   try { return await planOnce(source,roots,options,metadata,signal,onProgress); }
-  catch(error) { if(isAbort(error) || !(error instanceof Error) || !error.message.startsWith('Source changed')) throw error; }
+  catch(error) { if(isAbort(error) || !(error instanceof MessageError && error.key==='error.sourceChanged')) throw error; }
   return planOnce(source,roots,{...options,reuse:undefined},metadata,signal,onProgress);
 }
 /** Read-only check of an organized folder: the files (relative to it) that are not where
@@ -133,7 +134,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const destinationRoot=await directory(root);
     if(options.reorganize) {
       if(options.backup || (sourceRoot!==destinationRoot && !beneath(destinationRoot,sourceRoot)) || (await fs.lstat(sourceRoot,{bigint:true})).dev!==(await fs.lstat(destinationRoot,{bigint:true})).dev) throw new Error('Reorganization requires the same library or a base folder beneath it on the same filesystem and cannot use backup mode.');
-    } else if(sourceRoot===destinationRoot || beneath(sourceRoot,destinationRoot)) throw new Error(`${sourceRoot} is already in your backup (${destinationRoot}); there is nothing to import from it.`);
+    } else if(sourceRoot===destinationRoot || beneath(sourceRoot,destinationRoot)) throw new MessageError('error.alreadyInBackup',{source:sourceRoot,root:destinationRoot});
     // A backup folder inside the chosen source is left out of it, so the backup is never copied into itself.
     else if(beneath(destinationRoot,sourceRoot)) excludedRoots.push(destinationRoot);
     destinations.push({root:destinationRoot,identity:await identity(destinationRoot)});
@@ -152,12 +153,12 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   async function examine(file:InventoryFile,position:number):Promise<void> {
     await contained(file.path,sourceRoot);
     const originalStat=await fs.lstat(file.path,{bigint:true});
-    if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new Error(`Source changed; scan again: ${file.path}`);
+    if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new MessageError('error.sourceChanged',{path:file.path});
     mtimes.set(file.path,originalStat.mtime);
     if(!options.backup && file.kind!=='Other') {
       try {const info=await metadata(file.path);for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string)))issues[position]!.push({path:file.path,message});infos.set(file.path,{camera:info.camera,date:info.date,edited:info.edited,fields:{}});} catch(error) {if(isAbort(error)) throw error;issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
     }
-    if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new Error(`Source changed; scan again: ${file.path}`);
+    if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:file.path});
     sourceStats.set(file.path,originalStat);
     onProgress?.(++done,file.relative);
   }
@@ -248,7 +249,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       while(position<prepared.length) {
         const {entry}=prepared[position++]!;checkAbort(signal);
         hashes.set(entry.source,await digest(entry.source,signal));
-        if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new Error(`Source changed; scan again: ${entry.source}`);
+        if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       }
     }));
     for(const {entry} of prepared) entry.digest=hashes.get(entry.source)!;
@@ -260,7 +261,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     if(value!==undefined) resolved.set(entry.source,value);
     else {
       await contained(entry.source,sourceRoot);value=await digest(entry.source,signal);
-      if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new Error(`Source changed; scan again: ${entry.source}`);
+      if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       resolved.set(entry.source,value);
     }
     return value;
@@ -312,7 +313,7 @@ interface Staged {streamDigest?:string;sourceStat?:import('node:fs').BigIntStats
 const claimedStages=new Set<string>();
 interface StageTarget {entry:PlanEntry;transfer:TransferPlan;recovery:RecoveryIndex;onBytes:(bytes:number)=>void;}
 interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<typeof fs.open>>;initialSize:number;error?:unknown;}
-const sourceChanged=(entry:PlanEntry)=>new Error(`Source changed; scan again: ${entry.source}`);
+const sourceChanged=(entry:PlanEntry)=>new MessageError('error.sourceChanged',{path:entry.source});
 async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promise<OpenStage> {
   const {entry,transfer,recovery}=target;
   checkAbort(signal); await rootUnchanged(transfer.root,transfer.rootIdentity); await contained(entry.source,transfer.source); await makeParent(entry.destination,transfer.root);

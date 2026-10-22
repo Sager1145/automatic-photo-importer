@@ -42,8 +42,8 @@ test('a backup folder beside the source is created as before',async t=>{
 
 test('only a source inside a backup folder is refused when chosen; one that contains it is allowed',()=>{
  const destinations=['/Volumes/A006'];
- assert.match(sourceInsideBackup('/Volumes/A006/photobackup',destinations,'photobackup')??'',/already in your backup/i);
- assert.match(sourceInsideBackup('/Volumes/A006/photobackup/2025',destinations,'photobackup')??'',/already in your backup/i);
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup',destinations,'photobackup')?.key,'error.alreadyInBackup');
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup/2025',destinations,'photobackup')?.key,'error.alreadyInBackup');
  assert.equal(sourceInsideBackup('/Volumes/A006',destinations,'photobackup'),undefined,'the backup folder is left out instead');
  assert.equal(sourceInsideBackup('/Volumes/A006/2024',destinations,'photobackup'),undefined);
  assert.equal(sourceInsideBackup('/Volumes/A006/photobackup-old',destinations,'photobackup'),undefined);

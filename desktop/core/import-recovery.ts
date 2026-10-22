@@ -4,6 +4,7 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
+import {MessageError} from '../messages';
 import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameStat,syncDirectory,syncParents} from './paths';
 
 type Kind='stage'|'publication';
@@ -40,7 +41,7 @@ const recordPattern=/^\.import-(?:stage|intent)-[a-f0-9-]+\.json$/;
 export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<OwnedPartial> {
  await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(file,transfer.root);await contained(entry.source,transfer.source);
  const sourceStat=await fs.lstat(entry.source,{bigint:true});
- if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new Error(`Source changed; scan again: ${entry.source}`);
+ if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
  const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileIdentity(stat)};
  const journal=path.join(path.dirname(file),`.import-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;

@@ -1,4 +1,5 @@
 import type {Preferences,TransferPlan} from '../shared';
+import {MessageError} from '../messages';
 
 /** Staging holds all pending bytes; linkless publication temporarily needs one
  * additional related family before that family's staging can be released. No
@@ -14,7 +15,7 @@ export function requiredTransferSpace(plan:TransferPlan):number{
  * filters plans only after the entire assignment, including workspace, fits.
  */
 export function allocateDestinations(plans:TransferPlan[],available:number[],mode:Preferences['copyMode']):number[]{
- if(plans.length!==available.length||plans.length!==(mode==='single'?1:2))throw new Error('Choose the required backup destinations first.');
+ if(plans.length!==available.length||plans.length!==(mode==='single'?1:2))throw new MessageError('error.chooseDestinations');
  if(mode==='sequential'){
   const secondaryBytes=new Map<string,number>();
   for(const entry of plans[1].entries){const source=entry.source;secondaryBytes.set(source,(secondaryBytes.get(source)??0)+(entry.skip?0:entry.size));}
@@ -26,14 +27,14 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
    let bytes=group.reduce((sum,entry)=>sum+(entry.skip?0:entry.size),0);
    if(destination===0&&assigned[0]+bytes+Math.max(largest[0],bytes)>available[0])destination=1;
    if(destination===1)bytes=[...sources].reduce((sum,source)=>sum+(secondaryBytes.get(source)??0),0);
-   if(assigned[destination]+bytes+Math.max(largest[destination],bytes)>available[destination])throw new Error('Both destinations need more free space for the next related file group and publication workspace.');
+   if(assigned[destination]+bytes+Math.max(largest[destination],bytes)>available[destination])throw new MessageError('error.bothNeedSpace');
    assigned[destination]+=bytes;largest[destination]=Math.max(largest[destination],bytes);for(const source of sources)assignments[destination].add(source);
   }
   plans.forEach((plan,index)=>{plan.entries=plan.entries.filter(entry=>assignments[index].has(entry.source));});
  }
  return plans.map((plan,index)=>{
   const bytes=requiredTransferSpace(plan);
-  if(bytes>available[index])throw new Error(`Destination ${index+1} needs more free space, including publication workspace.`);
+  if(bytes>available[index])throw new MessageError('error.destinationNeedsSpace',{index:index+1});
   return bytes;
  });
 }
