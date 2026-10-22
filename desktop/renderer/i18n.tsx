@@ -576,6 +576,7 @@ Lets you choose a folder of photos as a source.|允许选择一个照片文件�
 After organizing|整理之后|整理之後|整理の後
 Settings categories|设置类别|設定類別|設定のカテゴリ
 Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
+1 file outside your folder structure|1 个文件不在文件夹结构中|1 個檔案不在資料夾結構中|フォルダー構成の外に 1 個のファイル
 Limit: {count} simultaneous|上限：同时 {count} 个|上限：同時 {count} 個|同時処理上限：{count}
 of {size} planned|计划共 {size}|計畫共 {size}|予定 {size} 中
 {complete} sources complete · {errors} need attention|{complete} 个来源完成 · {errors} 个需处理|{complete} 個來源完成 · {errors} 個需處理|{complete} 件完了 · {errors} 件要確認

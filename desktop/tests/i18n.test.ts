@@ -796,3 +796,24 @@ test('the parallel drives slider runs from 1 to 10', async () => {
     assert.ok(markup.includes(t('{count} of 10', { count: 5 })), `${language}: label out of 10`);
   }
 });
+
+test('a finished organization shows 100%, and one misplaced file is counted in the singular', async () => {
+  const { OrganizationProgress, Organization, ImportDesk } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 5, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+  const source = { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' as const };
+  for (const language of languages) {
+    const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
+    // Moves are renames: no bytes are copied even though the planned size is known.
+    const done = render(createElement(OrganizationProgress, { job: { id: 'o', source, phase: 'complete', organization: true, errors: [], backup: false, progress: { phase: 'copying', completed: 1, total: 1, bytes: 0, totalBytes: 5e6, speed: 0, file: '' } } }));
+    assert.ok(done.includes('100%') && !done.includes('>0%'), `${language}: complete reads 100%`);
+    const moving = render(createElement(OrganizationProgress, { job: { id: 'o', source, phase: 'copying', organization: true, errors: [], backup: false, progress: { phase: 'copying', completed: 3, total: 4, bytes: 0, totalBytes: 5e6, speed: 0, file: 'x' } } }));
+    assert.ok(moving.includes('75%'), `${language}: moves count files, not bytes`);
+    const misplaced = { '/Volumes/A006': { count: 1, bytes: 2e6, checkedAt: '2026-10-21T10:00:00Z' } };
+    const page = render(createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, busy: false }));
+    const desk = render(createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    const singular = t('1 file outside your folder structure'), plural = t('{count} files outside your folder structure', { count: '1' });
+    // Chinese and Japanese do not inflect, so both forms read the same there.
+    for (const markup of [page, desk]) assert.ok(markup.includes(singular) && (singular === plural || !markup.includes(plural)), `${language}: singular`);
+    if (language === 'en') assert.notEqual(t('1 file outside your folder structure'), t('{count} files outside your folder structure', { count: '1' }));
+  }
+});
