@@ -477,7 +477,7 @@ test('a card with nothing new finishes as Already imported, and a backup inside 
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences: { ...preferences, language }, sources: [source], jobs: [job], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
     assert.ok(markup.includes(t('Already imported')) && markup.includes('data-testid="already-imported"') && markup.includes('aria-valuenow="100"'), `${language}: calm completed state`);
     assert.ok(markup.includes(t('All {count} files are in the backup and verified', { count: 12 })));
-    assert.ok(markup.includes(t('Your backup folder is left out of this drive')), `${language}: backup exclusion note`);
+    assert.ok(markup.includes(t("The backup folder {folder} isn't scanned as a source", { folder: 'photobackup' }).replaceAll("'", '&#x27;')), `${language}: backup exclusion note`);
   }
   const other = renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(ImportDesk, { state: { preferences: { ...preferences, destinations: ['/Volumes/A0060'] }, sources: [source], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
   assert.ok(!other.includes('backup-excluded'), 'A sibling path with the same prefix is not inside the source');
@@ -560,9 +560,9 @@ test('scans show a percentage of used space, organizations show n of x with %, a
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const scan = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 500, bytes: 10e9 }, usedBytes: 40e9 }));
-    assert.ok(scan.includes(t('{percent}% scanned', { percent: 25 })) && scan.includes('aria-valuenow="25"'), `${language}: listing % of used space`);
+    assert.ok(scan.includes('25%') && scan.includes('aria-valuenow="25"'), `${language}: listing % of used space`);
     const planning = render(createElement(OrganizationProgress, { job: org() }));
-    assert.ok(planning.includes(t('Preparing organization…')), `${language}: planning label`);
+    assert.ok(planning.includes(t('Starting…')), `${language}: planning label`);
     const moving = render(createElement(OrganizationProgress, { job: org({ phase: 'copying', completed: 30, total: 120, bytes: 1, totalBytes: 4, speed: 0, file: '' }) }));
     assert.ok(moving.includes(t('{completed} of {total} files organized', { completed: 30, total: 120 })) && moving.includes('25%'), `${language}: n of x and %`);
     const desk = render(createElement(ImportDesk, { state: { preferences: { ...preferences, language }, sources: [source], jobs: [], history: [], platform: 'darwin', newDevices: ['stick'] }, act: () => {}, needsChoice: ['stick'], inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));

@@ -87,7 +87,7 @@ export async function claimDriveFolder(root:string,drive:NonNullable<TransferPla
 }
 /** Move reviewed extras into a dated holding folder on the same destination.
  * Every file is checked before the first move; nothing is deleted. */
-export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal,rootIdentity?:string):Promise<number> {
+export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal,rootIdentity?:string,/** Hears each file as it is set aside: files done, bytes done, and the file's name. */onProgress?:(completed:number,bytes:number,file:string)=>void):Promise<number> {
   const base=path.join(root,DRIVE_BACKUPS,drive.folder);
   for(const removal of removals) {
     checkAbort(signal);await contained(removal.path,root);
@@ -98,13 +98,15 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
   const legacy=path.join(root,DRIVE_BACKUPS,'.mirror-removed'),visible=path.join(root,DRIVE_BACKUPS,holding);
   if(await fs.lstat(legacy).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink(),error=>{if(code(error)==='ENOENT')return false;throw error;})&&!await fs.lstat(visible).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})){await contained(legacy,root);await fs.rename(legacy,visible);await syncDirectory(path.dirname(visible));}
   const held=path.join(root,DRIVE_BACKUPS,holding,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,8)}`,drive.folder),parents=new Set<string>();
-  for(const removal of removals) {
+  let movedBytes=0;onProgress?.(0,0,'');
+  for(const [position,removal] of removals.entries()) {
     checkAbort(signal);
     const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root,rootIdentity);
     if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) throw new Error(`Mirror holding path already exists: ${target}`);
     await fs.rename(removal.path,target);
     await syncDirectory(path.dirname(removal.path));await syncParents(target,root);
     parents.add(path.dirname(removal.path));
+    movedBytes+=removal.size;onProgress?.(position+1,movedBytes,path.basename(removal.path));
   }
   // Mirror the source's folder layout: drop folders the moves left empty.
   for(const folder of [...parents].sort((a,b)=>b.length-a.length))

@@ -105,6 +105,26 @@ Combined active sources|所有活动来源合计|所有進行中來源合計|実
 No active transfers|没有正在进行的传输|沒有進行中的傳輸|転送は実行されていません
 Transferred|已传输|已傳輸|転送済み
 No transfer planned|尚无传输计划|尚無傳輸計畫|転送予定なし
+Starting…|正在开始…|開始中…|開始しています…
+Moving|移动|移動|移動
+Files processed|已处理的文件|已處理的檔案|処理済みファイル
+Files verified|已验证的文件|已驗證的檔案|検証済みファイル
+Files moved|已移动的文件|已移動的檔案|移動済みファイル
+Files copied|已复制的文件|已複製的檔案|コピー済みファイル
+{complete} sources complete · {errors} need attention · {warnings} warnings|{complete} 个来源完成 · {errors} 个需处理 · {warnings} 个警告|{complete} 個來源完成 · {errors} 個需處理 · {warnings} 個警告|{complete} 件完了 · {errors} 件要確認 · 警告 {warnings} 件
+The backup folder {folder} isn't scanned as a source|备份文件夹 {folder} 不会作为来源被扫描|備份資料夾 {folder} 不會作為來源被掃描|バックアップフォルダー {folder} はソースとしてスキャンされません
+The backup folder isn't scanned as a source|备份文件夹不会作为来源被扫描|備份資料夾不會作為來源被掃描|バックアップフォルダーはソースとしてスキャンされません
+{completed} of {total} files downloaded|已下载 {completed}/{total} 个文件|已下載 {completed}/{total} 個檔案|{total} 件中 {completed} 件ダウンロード済み
+{completed} of {total} extra files set aside|已搁置 {completed}/{total} 个多余文件|已擱置 {completed}/{total} 個多餘檔案|余分なファイル {total} 件中 {completed} 件を退避済み
+{completed} files looked at|已查看 {completed} 个文件|已查看 {completed} 個檔案|{completed} 件のファイルを確認済み
+Setting aside duplicates: {completed} of {total}|正在搁置重复文件：{completed}/{total}|正在擱置重複檔案：{completed}/{total}|重複ファイルを退避中：{total} 件中 {completed} 件
+Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在收尾：{completed}/{total}|仕上げ中：{total} 件中 {completed} 件
+{completed} of {total} files released|已释放 {completed}/{total} 个文件|已釋放 {completed}/{total} 個檔案|{total} 件中 {completed} 件を解放済み
+{completed} of {total} files put back|已放回 {completed}/{total} 个文件|已放回 {completed}/{total} 個檔案|{total} 件中 {completed} 件を元に戻し済み
+{completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
+Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
+Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
+Organization history progress|整理记录读取进度|整理記錄讀取進度|整理履歴の読み込み状況
 Files checked|已检查的文件|已檢查的檔案|確認済みファイル
 Destinations ready|已就绪的目标|已就緒的目的地|準備済みの保存先
 Choose a backup destination|选择备份目标|選擇備份目的地|バックアップ先を選択
@@ -473,7 +493,6 @@ Verifying|校验|驗證|検証
 Already imported|已导入|已匯入|読み込み済み
 All {count} files are in the backup and verified|全部 {count} 个文件已在备份中并通过校验|全部 {count} 個檔案已在備份中並通過驗證|{count} 件すべてがバックアップ済みで検証済みです
 All files are in the backup and verified|所有文件已在备份中并通过校验|所有檔案已在備份中並通過驗證|すべてのファイルがバックアップ済みで検証済みです
-Your backup folder is left out of this drive|此驱动器中的备份文件夹会被排除|此磁碟中的備份資料夾會被排除|このドライブ内のバックアップフォルダーは除外されます
 A destination is offline. Reconnect it to import.|有目标离线，请重新连接后再导入。|有目的地離線，請重新連接後再匯入。|保存先がオフラインです。再接続してから読み込んでください。
 A verified copy on both drives.|在两个驱动器上各保存一份校验副本。|在兩個磁碟上各保存一份驗證副本。|両方のドライブに検証済みコピーを保存します。
 Apply or discard the review.|请应用或放弃此审核。|請套用或放棄此審核。|確認内容を適用するか破棄してください。
