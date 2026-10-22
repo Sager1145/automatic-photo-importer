@@ -4,13 +4,14 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {Action,AppState,Preferences,Job,Source,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace} from './shared';
+import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace} from './shared';
 import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders} from './core';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {destinationEntries,destinationParts,destinationSpace,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
-import {backupDriveIdentity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
+import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
+import {driveCameraRecord} from './source-cameras';
 import {backupFolders,destinationRoots} from './platform/destination-roots';
 import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
@@ -77,8 +78,15 @@ function loadRememberedScans(){
   });
  }
 }
-/** Remember that a device finished a scan or a verified import, for the reconnection notice. */
-function noteDevice(source:Source,event:'scan'|'import'){if(qa)return;recordDeviceHistory(state.preferences.deviceHistory??={},source,event,new Date().toISOString());void save().catch(()=>{});}
+/** Remember that a device finished a scan (with the cameras it read) or a verified import, for the reconnection notice and Drives. */
+function noteDevice(source:Source,event:'scan'|'import',cameras?:SourceCameraInfo){if(qa)return;const now=new Date().toISOString();recordDeviceHistory(state.preferences.deviceHistory??={},source,event,now,driveCameraRecord(cameras,now));void save().catch(()=>{});}
+/** A chosen folder shows the capacity of the volume it lives on. */
+async function updateFolderCapacity(source:Source){
+ if(source.transport!=='folder')return;
+ const capacity=await folderCapacity(source.path),entry=folders.get(source.id);
+ if(entry)entry.source={...entry.source,...capacity};
+ state.sources=state.sources.map(item=>item.id===source.id?{...item,...capacity}:item);
+}
 function publishDevices(){state.newDevices=[...selection.newDevices];state.reconnectedDevices=[...selection.reconnectedDevices];}
 const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.sourceInventories?.[source.id]??rememberedScans.get(source.id);
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
@@ -147,7 +155,7 @@ async function scanSource(source:Source){
  if(scanControls.has(source.id))return;
  if(source.transport==='camera')throw new MessageError('error.cameraScan');
  const control=new AbortController();scanControls.set(source.id,control);state.scanningSources=[...scanControls.keys()];emit();
- try{await scanSourceInWorker(source,control.signal,result=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes)=>{(state.scanProgress??={})[source.id]={files,bytes};progressEmit();},primeRouting,{reuse:reusableScan(source),routing:routingEntries().filter(([key])=>key.startsWith(source.path+path.sep))});rememberScan(source,state.sourceInventories?.[source.id]);noteDevice(source,'scan');}
+ try{await scanSourceInWorker(source,control.signal,result=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes)=>{(state.scanProgress??={})[source.id]={files,bytes};progressEmit();},primeRouting,{reuse:reusableScan(source),routing:routingEntries().filter(([key])=>key.startsWith(source.path+path.sep))});rememberScan(source,state.sourceInventories?.[source.id]);noteDevice(source,'scan',state.sourceCameraInfo?.[source.id]);await updateFolderCapacity(source);}
  catch(error){const info=state.sourceCameraInfo?.[source.id];if(info)state.sourceCameraInfo![source.id]={...info,status:control.signal.aborted?'stopped':'error',...(!control.signal.aborted?{error:errorText(error)}:{})};if(!control.signal.aborted)throw error;}
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();}

@@ -12,7 +12,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { formatMessage, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
@@ -554,8 +554,23 @@ export function RememberedDrives({ preferences, act }: { preferences: Preference
   const { t, language } = useTranslation();
   const devices = Object.entries(rememberedDevices(preferences)).sort(([, a], [, b]) => b.lastSelected.localeCompare(a.lastSelected));
   return <SettingsSection title={t("Remembered drives")} icon={CheckCircle2}>
-    <div className="saved-rules remembered-devices" data-testid="remembered-devices">{devices.length ? devices.map(([id, device]) => <div key={id}><span className="extension-name">{device.name}</span><span className="muted">{t("Last selected {date}", { date: formatWhen(device.lastSelected, language) })}</span><Button kind="quiet" icon={Trash2} aria-label={t("Forget {name}", { name: device.name })} onClick={() => forgetDevice(act, id)}>{t("Forget")}</Button></div>) : <p className="muted">{t("No remembered drives.")}</p>}</div>
+    <div className="saved-rules remembered-devices" data-testid="remembered-devices">{devices.length ? devices.map(([id, device]) => <div key={id}><span className="extension-name">{device.name}</span><span className="muted">{t("Last selected {date}", { date: formatWhen(device.lastSelected, language) })}</span><Button kind="quiet" icon={Trash2} aria-label={t("Forget {name}", { name: device.name })} onClick={() => forgetDevice(act, id)}>{t("Forget")}</Button><RememberedDriveDetails id={id} name={device.name} cameras={preferences.deviceHistory?.[id]?.cameras} /></div>) : <p className="muted">{t("No remembered drives.")}</p>}</div>
   </SettingsSection>;
+}
+
+// What the drive's last scan confirmed from EXIF, kept in the device history so it shows while the drive is unplugged.
+function RememberedDriveDetails({ id, name, cameras }: { id: string; name: string; cameras?: DriveCameraRecord }) {
+  const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
+  const progress = cameras && { checked: formatNumber(cameras.checked), total: formatNumber(cameras.total) };
+  const tally = (items: DriveCameraRecord['models'], testid: string) => <ul className="remembered-drive-cameras" data-testid={testid}>{items.map(item => <li key={item.name} data-camera-bytes={item.bytes}><span>{item.name}</span><small>{t("{count} files", { count: formatNumber(item.files) })} · {bytes(item.bytes)}</small></li>)}</ul>;
+  return <details className="remembered-drive-details" data-testid="remembered-drive-details" data-device-id={id}>
+    <summary aria-label={t("Camera details for {name}", { name })}><Icon icon={Camera} size={14} />{t("Details")}<Icon icon={ChevronDown} size={14} /></summary>
+    {cameras && progress ? <div className="remembered-drive-content">
+      <ul className="drive-history"><li data-testid="drive-scan-time"><Icon icon={ScanLine} size={13} />{t("Last scan finished {date}", { date: formatWhen(cameras.scanned, language) })}</li><li><Icon icon={Files} size={13} />{cameras.status === 'stopped' ? t("Camera metadata scan stopped: {checked}/{total}", progress) : cameras.status === 'error' ? t("Camera metadata scan incomplete: {checked}/{total}", progress) : t("Camera metadata checked: {checked}/{total}", progress)}</li></ul>
+      <div><h4>{t("Confirmed by EXIF metadata")}</h4>{cameras.models.length ? tally(cameras.models, 'remembered-drive-models') : <p className="muted">{t("No camera models confirmed in checked files.")}</p>}{cameras.unknown > 0 && <p className="muted">{t("{count} files without a camera model", { count: formatNumber(cameras.unknown) })}</p>}</div>
+      {!!cameras.lenses?.length && <div><h4>{t("Lenses from EXIF metadata")}</h4>{tally(cameras.lenses, 'remembered-drive-lenses')}</div>}
+    </div> : <p className="muted">{t("No camera data from a scan yet. Scan this drive to see its cameras.")}</p>}
+  </details>;
 }
 
 export function IgnoredDrives({ preferences, act }: { preferences: Preferences; act: Dispatch }) {

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Message} from './messages';
 import {sourceInsideBackup} from './platform/destination-roots';
+import {folderCapacity} from './platform/volumes';
 import type {Source} from './shared';
 
 /** Turns the folders chosen in one dialog into sources to add. Each folder is checked on its own,
@@ -17,7 +18,7 @@ export async function resolveFolderSources(paths:string[],context:{sources:Sourc
   if(inside){rejected.push(inside);continue;}
   const existing=context.sources.find(source=>source.path===root);
   if(existing&&context.registered.get(existing.id)?.backup===context.backup)continue;
-  sources.push(existing??{id:`folder:${root}`,name:path.basename(root),path:root,transport:'folder'});
+  sources.push(existing??{id:`folder:${root}`,name:path.basename(root),path:root,transport:'folder',...await folderCapacity(root)});
  }
  return {sources,rejected};
 }
