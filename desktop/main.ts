@@ -201,6 +201,7 @@ async function listOrganizations(){
   weights.set(location.root,status?.available&&status.volumeId===location.volumeId?await journalWeight(location.root):0);
  }
  locations.sort((a,b)=>weights.get(a.root)!-weights.get(b.root)!);
+ let looked=0;
  try{
   for(let position=0;position<locations.length;position++){
    const location=locations[position]!;
@@ -209,7 +210,7 @@ async function listOrganizations(){
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
-    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true});byRoot.set(location.root,found);
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,onProgress:update=>{state.organizationRecoveryProgress={phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share:Math.min(.99,(position+update.share)/locations.length),speed:0,file:update.file||path.basename(location.root)};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
     // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
     if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
     // The sibling backup folders those journals list are read too, on the same drive.
@@ -220,7 +221,7 @@ async function listOrganizations(){
   // Folders not listed this time (drive away, or no longer configured) leave the list.
   for(const root of [...byRoot.keys()])if(!listed.has(root))byRoot.delete(root);
   publish();
- }finally{state.organizationRecoveryLoading=false;emit();}
+ }finally{state.organizationRecoveryLoading=false;delete state.organizationRecoveryProgress;emit();}
 }
 async function rememberOrganization(root:string,prefs:Preferences){
  const destination=prefs.destinations[0],volumeId=prefs.destinationIds?.[0];if(!destination||!volumeId||!within(root,destination))throw new MessageError('error.organizationDestination');
@@ -259,6 +260,8 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
 }
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */
 function planningProgress(count:number,file:string,detail?:Parameters<PlanProgress>[2]):Progress{return {phase:'planning',step:detail?.step??'checking',completed:count,total:detail?.total??0,bytes:detail?.bytes??0,totalBytes:detail?.totalBytes??0,...(detail?.share!==undefined?{share:detail.share}:{}),speed:0,file};}
+/** Files staged from a USB camera so far (the camera reports counts, not bytes or names). */
+function downloadProgress(done:number,total:number):Progress{return {phase:'planning',step:'downloading',completed:done,total,bytes:0,totalBytes:0,speed:0,file:''};}
 /** What to estimate a listing by: the last completed listing of this scope, else (an import) the drive's used bytes. Remembers the new size when the listing ends. */
 async function listingOptions(root:string,folders:string[]|undefined,backup:boolean,fallback?:ListingHint):Promise<{listingHint?:ListingHint;onListed:(files:number,bytes:number)=>void}>{
  const store=app.getPath('userData'),remembered=await loadListingHint(store,root,folders,backup).catch(()=>undefined),hint=remembered??fallback;
@@ -364,11 +367,14 @@ function checkResidue(all:boolean):Promise<void>{
  const control=new AbortController();residueControl=control;
  state.residue={...state.residue??{files:0,bytes:0,resumable:{files:0,bytes:0}},checking:true};emit();
  const task:Promise<void>=(async()=>{
-  const roots=await residueRoots();residuePaths=roots;const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal});
-  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal}):{removed:{files:0,bytes:0},left:found};
+  const roots=await residueRoots();residuePaths=roots;
+  // Looking is a share of the folders walked; removing counts the leftovers found. Both show in the settings row.
+  const show=(progress:Progress)=>{if(state.residue)state.residue.progress=progress;progressEmit();};
+  const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
+  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
   state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,checkedAt:now,...(cleaned?{cleaned}:{})};
- })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue)delete state.residue.checking;emit();void releaseIfIdle();});
+ })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue){delete state.residue.checking;delete state.residue.progress;}emit();void releaseIfIdle();});
  residueTask=task;return task;
 }
 /** Anything about to write waits for a running cleanup to stop. */
@@ -468,7 +474,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   else{
    job.phase='discovering';job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
    await stopResidueCheck();
-   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
    // Mirror moves only run from a review the user applied.
    const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
    if(moving)throw new MessageError('error.mirrorReview',{count:moving});
@@ -520,7 +526,7 @@ async function previewSource(source:Source,backup:boolean,organizationDestinatio
  const request:RunRequest={prefs,reorganize,sourceFolders:reorganize?state.organizationFolders?.[source.path]?.slice():undefined};
  cancelAutomaticChecks();misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
  try{
-  reviewed=await prepare(randomUUID(),source,backup,request,control.signal,()=>{},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();});
+  reviewed=await prepare(randomUUID(),source,backup,request,control.signal,(done,total)=>{state.reviewProgress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();});
   state.review=reviewed.review;(state.sourceInventories??={})[source.id]=reviewed.inventory;
  }catch(error){if(!control.signal.aborted)throw error;}
  finally{if(reviewControl===control){state.busyReview=false;state.reviewProgress=undefined;reviewControl=undefined;}emit();void releaseIfIdle();}

@@ -719,7 +719,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       if(transfer.removals&&(!removals||!transfer.drive))throw new Error('Mirror changes require the reviewed backup plan.');
       run.index=await destinationIndex(transfer.root,transfer.rootIdentity);
       if(transfer.drive){const drive=transfer.drive;await exclusive(()=>claimDriveFolder(transfer.root,drive,transfer.rootIdentity));}
-      if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal,transfer.rootIdentity)):0;for(const removal of removals)run.index.forget(removal.path);}
+      if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal,transfer.rootIdentity,(completed,bytes,file)=>onProgress?.(position,{phase:'copying',step:'removing',completed,total:removals.length,bytes,totalBytes:removals.reduce((sum,item)=>sum+item.size,0),speed:0,file,renames:true}))):0;for(const removal of removals)run.index.forget(removal.path);}
       for(const batch of run.batches) try {
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);
