@@ -179,7 +179,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 	let reportError:unknown;
 	let sources:Source[] = [];
 	let manifestProgress:unknown;
-	let originalPreferences:{basePath:string;parallel:number}|undefined;
+	let originalPreferences:{basePath:string;parallel:number;mediaLayout:import('../shared').MediaLayout}|undefined;
 	let sourcePreservation:ReturnType<typeof compareSourceManifests>[] = [];
 	const testBasePath = "photobackup-hardware-" + (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
 	const testRoot = path.join(destination, testBasePath);
@@ -403,7 +403,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 			const result = await bounded(plan(original.source.path, [root], {
 				backup: false,
 				template: prefs.template,
-				separateMedia: prefs.separateMedia,
+				layout: prefs.mediaLayout, videoTemplate: prefs.videoTemplate,
 				editedFolder: prefs.editedFolder,
 				unknownRules: {}
 			}, (file) => metadata(file, { preview: false, details: false }), control.signal), hour, `verification plan for ${original.source.name}`, () => control.abort());
@@ -449,15 +449,19 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 			}
 			originalPreferences = {
 				basePath: state.preferences.basePath,
-				parallel: state.preferences.parallel
+				parallel: state.preferences.parallel,
+				mediaLayout: state.preferences.mediaLayout
 			};
 			await send({
 				type: "preferences",
 				patch: {
 					basePath: testBasePath,
-					parallel: 2
+					parallel: 2,
+					// A separate video backup folder would write outside the test root.
+					...(state.preferences.mediaLayout === "video-root" ? { mediaLayout: "photos-flat" as const } : {})
 				}
 			});
+			assert.notEqual(getState().preferences.mediaLayout, "video-root");
 			assert.equal(getState().preferences.parallel, 2);
 			assert.equal(getState().preferences.basePath, testBasePath);
 		});

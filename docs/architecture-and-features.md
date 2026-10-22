@@ -60,6 +60,8 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 递归媒体识别、伴随文件、系统文件 | 扫描与计划共用 | `core/inventory.ts`；扩展名表唯一在 `media-formats.ts`；厂商系统文件目录在 `core/known-files.ts` |
 | 每张卡的相机/镜头 | 扫描 | `source-cameras.ts`：每个媒体读一次路由元数据；盘名/格式/布局只作提示 |
 | 偏好（外观、语言、字号、布局、并行、自动、复制策略、路径模板等） | `preferences {patch}` | **`preferences.ts` 的 `normalizePreferences`**：读盘与每次修改走同一套规则；main 只决定哪些键可在任务运行时修改 |
+| 媒体文件布局（6 种）与视频备份目录 | `preferences {mediaLayout,videoBasePath,videoTemplate}` | `core/index.ts` 的 **`folder()`** 是唯一的路由规则：模板给出相机目录，`layoutFolder()` 给出其中的 `Photos`/`Videos`/格式目录（`media-formats.formatFolder`：大写扩展名，jpg/jpe→JPEG、heic/hif→HEIF、tif→TIFF、mpg→MPEG）；伴随文件按其原件归档，NKSC_PARAM 在 NEF 旁，编辑导出始终平放，无原件的“放入相机目录”文件直接放相机目录；冲突目录始终在相机目录 `Conflicts/<内容 id>/`。`video-root` 时 `destinationRoots` 为每个目的地多返回一个 `videoRoots`，`plan` 把视频族放进同盘的嵌套 `TransferPlan.videos`；`allocation.destinationParts` 让空间计算、`executeDestinations` 与审核把它当作同一个目的地。旧的 `separateMedia` 由 `normalizePreferences` 迁移（true→`format`，false→`flat`） |
+| 文件夹路径构建器（先日期/先相机，年/月/日开关，月份数字或英文） | `preferences {template,videoTemplate}` | `folder-template.ts` 的 `buildTemplate`/`parseTemplate` 只读写模板字符串；模板仍是唯一存储形式，`folder()` 是唯一应用它的地方（新增 `{monthName}` = `10 October`、`{yearMonthName}` = `2026-10 October`，月份名始终为英文）。构建器无法原样写回的模板显示为自定义，在“高级：自定义模板”中编辑 |
 | 未知扩展名规则 | `unknownRule {extension,folder,remember}` | main 保存会话/持久规则；`inventory` 决定是否包含，`plan` 决定去向 |
 | **源 → 预留计划** | 审核、直接导入、整理 | **`main.prepare()`**：`destinationRoots`（一次卷快照）→ 相机暂存 → `core.plan` → `allocateDestinations` / `requiredOrganizationSpace` → 按卷预留空间 |
 | 审核 / 应用 / 丢弃 | `preview` · `previewOrganization` / `applyReview`（或审核打开时的 `start`）/ `discardReview` | 审核 = 保存 `prepare()` 的结果；应用 = 同一个 `Prepared` 及预留交给 `run()`；丢弃释放暂存与预留 |
@@ -70,7 +72,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 盘到盘备份（只增 / 镜像） | `preferences {backupMode}` + `chooseSource {backup:true}` | `core/drive-backup.ts`：每个源盘在目的地拥有一个带标记的目录；镜像差异只在审核后把多余文件移入 `.mirror-removed`，从不删除 |
 | **整理现有文件** | `organize`（整个目的地/所选子目录）、`organizeFolder`（任选文件夹就地）、自动备份目录整理、`previewOrganization`（先审核） | **`main.queueOrganization()`** → 同一 `prepare()` → `executeReorganization` → `core/recovery` 签名日志（rename，跨卷/空文件回退到校验复制） |
 | 整理范围 | `chooseOrganizationFolders` / `resetOrganizationFolders` | main 保存每个目的地的子目录列表，作为 `plan` 的 `sourceFolders` |
-| 备份目录错位检查 | 自动（`autoOrganizeBackup`：off/ask/auto） | `core.findMisplaced` = `plan` 的只路由模式；`auto` 时导入完成后排入 `queueOrganization` |
+| 备份目录错位检查 | 自动（`autoOrganizeBackup`：off/ask/auto） | `core.findMisplaced(source,root,…)` = `plan` 的只路由模式；main 的 `backupLibrary()` 给出范围：普通布局为备份目录本身，`video-root` 为目的地并以 `sourceFolders` 限定在照片/视频两个备份目录（视频目录尚不存在时跳过检查，首次导入会创建）；`auto` 时导入完成后排入 `queueOrganization`。整理日志的 `libraries` 记录同次整理的另一个备份目录，清理空目录时不会删除它 |
 | 整理恢复列表 / 重查继续 / 撤销 / 释放原件 | `refreshOrganization` / `resumeOrganization` / `undoOrganization` / `finalizeOrganization` | `core/recovery.ts`：`getOrganizationRecovery`（不重哈希）、`resumeOrganization`、`undoOrganization`、`finalizeOrganization`（全部目标重验后才释放）；main 用一个 `resumeOrganizationJob(kind)` 承载三者 |
 | 清空的源目录清理 | 整理完成后 | `core/redundant-folders.removeRedundantFolders`（只删仅含系统服务文件的目录） |
 | 窗口按钮 / 在访达中显示 / 清除错误 | `window` / `reveal` / `clearError` | Electron 窗口 API（Windows/Linux 无原生框时使用）；`allowed()` 授权后 `shell.showItemInFolder` |
@@ -120,7 +122,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 移除“直接 USB 相机检测”宣传文案（SRC-11, UI-33） | 已移除 |
 | 多平台前端、macOS 原生窗口按钮（PROJ-05/06/07） | 共享 React/Electron；macOS 已运行；Windows/Linux 包未实机验证 |
 | 首次选择目的地与路径；阻止相机卡作目的地（DST-01–04） | 已实现（`validateDestination`） |
-| 目录模板、预设、自动创建目录（DST-05/06, ORG-01–03） | 已实现；缺元数据时为 `Unknown Camera` |
+| 目录模板、预设、自动创建目录（DST-05/06, ORG-01–03）；路径构建器（ORG-22） | 已实现；缺元数据时为 `Unknown Camera`；预设由构建器取代，自由模板保留在“高级”中 |
 | 路径设置集中在设置页（DST-07, UI-35/36） | 已实现 |
 | 只复制照片/视频与相关伴随文件；忽略 `NIKON001.DSC` 等（FMT-01–07） | 已实现（`known-files.ts` 厂商目录） |
 | 未知格式默认排除、可指定去向/放入相机目录/记住（FMT-08–11） | 已实现 |
@@ -129,7 +131,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | DJI `.LRF`（FMT-15） | 已实现 |
 | 读取相机型号、时区、日期时间分开显示（META-01–06） | 已实现 |
 | 详细 EXIF、曝光摘要、默认折叠、快门数、视频无快门数（META-07–11） | 已实现；快门数只在元数据提供时显示 |
-| RAW/JPEG/HEIF/视频分目录（ORG-04） | 已实现 |
+| RAW/JPEG/HEIF/视频分目录（ORG-04）→ 六种媒体文件布局与独立视频备份目录（ORG-21） | 已实现：照片/视频再分格式、按格式、照片平放+Videos、视频平放+Photos、全部平放、独立视频备份目录（可用单独模板）；伴随文件随原件；整理可把旧布局与两个备份目录间放错的文件移到新布局 |
 | 导入时复查已存在文件、避免重复复制（ORG-05） | 已实现（目的地索引 + SHA-256；已导入记忆） |
 | 一键整理现有文件、规则变更后重新整理、修正相机目录、合并、删除空旧目录、可恢复（ORG-06–14, ORG-20） | 已实现：三个入口共用一条实现；签名日志可重查、继续、撤销；界面不自动释放原件 |
 | 编辑导出放 `editied`（可改），RAW+XMP 留原处（ORG-15–19） | 已实现 |
