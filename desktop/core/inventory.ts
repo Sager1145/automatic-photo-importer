@@ -5,8 +5,18 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
-const sidecars=new Set('xmp aae thm lrv xml wav m4a mp3 aac srt dop cos'.split(' '));
-const videoOnly=new Set('xml srt lrv thm wav m4a mp3 aac'.split(' '));
+const sidecars=new Set('xmp aae thm xml moi wav m4a mp3 aac srt dop cos'.split(' '));
+const videoOnly=new Set('xml moi srt thm wav m4a mp3 aac'.split(' '));
+/** Low-resolution proxies: real video, kept with their original or imported alone. */
+const proxies=new Set(['lrf','lrv']);
+/** Stems a proxy's original may have: its own (DJI LRF), GoPro GL… → GX…/GH… (same chapter and
+ * number), Insta360 LRV_<date>_<time>_<lens>1_<seq> → VID_<date>_<time>_<lens>0_<seq>. */
+function proxyOriginals(file:string):string[] {
+  const folder=path.dirname(file),name=path.basename(file,path.extname(file)),names=[name];
+  const gopro=/^GL(\d{6})$/i.exec(name);if(gopro)names.push('GX'+gopro[1],'GH'+gopro[1]);
+  const insta=/^LRV(_\d{8}_\d{6}_\d)1(_\d+)$/i.exec(name);if(insta)names.push(`VID${insta[1]}0${insta[2]}`);
+  return names.map(item=>pathKey(path.join(folder,item)));
+}
 const audio=new Set('wav m4a mp3 aac'.split(' '));
 const artifacts=new Set(['.photo-importer-recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
 const importArtifact=/^\.import-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
@@ -98,21 +108,21 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     checkAbort(signal);
     if(file.kind==='Other') file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size);
     if(file.system) { file.included=!!options.backup; continue; }
-    // DJI proxies contain real video and remain importable on their own. An
-    // unambiguous original in the same directory supplies routing/family context.
-    if(extension(file.path)==='lrf') {
-      const originals=(media.get(stem(file.path))??[]).filter(candidate=>candidate.kind==='Videos'&&extension(candidate.path)!=='lrf');
+    // Proxies (DJI LRF, GoPro and Insta360 LRV) contain real video and remain importable on their
+    // own. An unambiguous original in the same directory supplies routing/family context.
+    if(proxies.has(extension(file.path))) {
+      const originals=proxyOriginals(file.path).flatMap(name=>media.get(name)??[]).filter(candidate=>candidate.kind==='Videos'&&!proxies.has(extension(candidate.path)));
       if(originals.length===1)file.companionOf=originals[0].path;
     }
     if(file.kind==='Other' && sidecars.has(extension(file.path))) {
       const matches=media.get(stem(file.path))??[], stills=matches.filter(f=>f.kind!=='Videos'), videos=matches.filter(f=>f.kind==='Videos');
-      const originals=videos.filter(video=>extension(video.path)!=='lrf'),videoCandidates=originals.length?originals:videos;
+      const originals=videos.filter(video=>!proxies.has(extension(video.path))),videoCandidates=originals.length?originals:videos;
       let primary:InventoryFile|undefined;
       if(stills.length && !(videoOnly.has(extension(file.path)) && videos.length)) primary=stills.find(f=>f.kind==='RAW')??stills[0];
       else if(videoCandidates.length===1) primary=videoCandidates[0];
       if(!primary && extension(file.path)==='xml' && /^C\d+M\d{2}$/i.test(path.basename(file.path,path.extname(file.path)))) {
         const videoStem=stem(file.path).slice(0,-3), videos=(media.get(videoStem)??[]).filter(f=>f.kind==='Videos');
-        const originals=videos.filter(video=>extension(video.path)!=='lrf'),candidates=originals.length?originals:videos;
+        const originals=videos.filter(video=>!proxies.has(extension(video.path))),candidates=originals.length?originals:videos;
         if(candidates.length===1) primary=candidates[0];
       }
       // Lightroom and Camera Raw also write <name>.<original extension>.xmp.

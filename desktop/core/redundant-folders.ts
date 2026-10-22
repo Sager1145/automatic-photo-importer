@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { beneath, code, contained, syncDirectory, within } from './paths';
+import { destinationEntries, destinationParts } from './allocation';
+import type { TransferPlan } from '../shared';
 
 /** Files the operating system creates that are not user content. The app's own recovery
  * files (.import-*, .photo-importer-*) are deliberately absent: they are never removed here. */
@@ -40,6 +42,21 @@ export async function removeRedundantFolders(library:string,folders:string[],kee
     if(!beneath(folder,root)) throw new Error(`Only folders inside the library can be cleaned up: ${folder}`);
     if(kept.some(item=>within(folder,item))) throw new Error(`The backup folder is never cleaned up: ${folder}`);
     if(await fs.lstat(folder).then(()=>true,()=>false)) await sweep(folder);
+  }
+  return removed;
+}
+
+/** Cleanup after an organization of `source` that produced `plans`. Chosen `sourceFolders`
+ * outside the backup are swept whole. A backup folder organized in place (the source itself, or
+ * both folders of the video-root layout, which are named as source folders) has the top-level
+ * folders inside it that files moved out of swept; the backup folder itself always stays. */
+export async function removeOrganizedFolders(source:string,plans:TransferPlan[],sourceFolders:string[]=[]):Promise<number> {
+  const roots=plans.flatMap(plan=>destinationParts(plan).map(part=>part.root)),chosen=sourceFolders.map(folder=>path.join(source,folder));
+  const outside=chosen.filter(folder=>!roots.includes(folder)),inPlace=roots.filter(root=>root===source||chosen.includes(root));
+  let removed=outside.length?await removeRedundantFolders(source,outside,roots):0;
+  for(const root of inPlace) {
+    const moved=new Set(plans.flatMap(plan=>destinationEntries(plan)).filter(entry=>beneath(entry.source,root)).map(entry=>path.relative(root,entry.source).split(path.sep)).filter(parts=>parts.length>1).map(parts=>path.join(root,parts[0]!)));
+    if(moved.size) removed+=await removeRedundantFolders(root,[...moved],[]);
   }
   return removed;
 }

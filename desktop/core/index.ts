@@ -2,24 +2,25 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { Inventory, InventoryFile, Metadata, PlanEntry, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import type { Inventory, InventoryFile, MediaLayout, Metadata, PlanEntry, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { inventory, extension, stem, rules, nkscEdit, unknownRule, type RuleDefaults } from './inventory';
 import { destinationIndex, flushIndex, type DestinationIndex } from './destination-index';
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
+import { formatFolder, layoutFolders } from '../media-formats';
 import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameStat, statKey, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
-export { removeRedundantFolders } from './redundant-folders';
+export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError} from '../messages';
 export { configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization } from './recovery';
-export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationStrategy, OrganizationUndo } from './recovery';
+export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
 const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
-interface Options {backup:boolean;template:string;separateMedia:boolean;unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;}
+interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry)=>Promise<string>;
@@ -28,8 +29,14 @@ type Resolve=(entry:PlanEntry)=>Promise<string>;
 const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>();
 // Mirror moves are likewise limited to removals found by plan() for that plan.
 const mirrorReviews=new WeakMap<TransferPlan,ReviewedRemoval[]>();
-const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string}>();
-function folder(info:Metadata,mtime:Date,kind:PlanEntry['kind'],options:Options):string {
+const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[]}>();
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+/** The media a file is filed as: its own, or for a companion its original's. Absent for a file
+ * with neither, which stays directly in the camera folder. */
+interface Media {video:boolean;format:string;}
+/** `camera`: the templated folder (a family's conflict folder lives there); `sub`: the layout's
+ * folders inside it; `root`: which backup folder, the video one only in the video-root layout. */
+function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):{root:'photos'|'videos';camera:string;sub:string} {
   // Capture dates describe the camera's calendar day. Converting an EXIF
   // offset to UTC can move a midnight photo into the previous folder.
   const calendar=info.date?.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
@@ -37,15 +44,18 @@ function folder(info:Metadata,mtime:Date,kind:PlanEntry['kind'],options:Options)
   const validCalendar=!!candidate && Number.isFinite(candidate.getTime()) && candidate.toISOString().slice(0,10)===calendar![0].slice(0,10);
   const capture=validCalendar?candidate!:mtime;
   const year=String(capture.getUTCFullYear()).padStart(4,'0'), month=String(capture.getUTCMonth()+1).padStart(2,'0'), day=String(capture.getUTCDate()).padStart(2,'0');
-  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,camera:safeComponent(info.camera?.trim()||'Unknown Camera')};
+  // Month names are English whatever the app language; the number first keeps calendar order.
+  const monthName=`${month} ${MONTHS[capture.getUTCMonth()]}`;
+  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||'Unknown Camera')};
   const editedFolder=options.editedFolder??'editied';
   if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
-  const template=info.edited?`{year}/{yyyymm}/${editedFolder}/{camera}`:options.template;
-  let result=template.replace(/\{([^{}]+)\}/g,(token,key:string)=>values[key]??token);
-  if(/[{}]/u.test(result)) throw new Error(`Invalid folder template: ${options.template}`);
+  const video=options.layout==='video-root'&&!!media?.video;
+  const template=info.edited?`{year}/{yyyymm}/${editedFolder}/{camera}`:video&&options.videoTemplate?options.videoTemplate:options.template;
+  const result=template.replace(/\{([^{}]+)\}/g,(token,key:string)=>values[key]??token);
+  if(/[{}]/u.test(result)) throw new MessageError('error.invalidTemplate',{template});
   validateRelative(result);
-  if(options.separateMedia) result+='/'+kind;
-  return result;
+  // Edited exports stay directly in their edited camera folder.
+  return {root:video?'videos':'photos',camera:result,sub:media&&!info.edited?path.join(...layoutFolders(options.layout,media.video,media.format)):''};
 }
 function groups(entries:PlanEntry[]):PlanEntry[][] {
   const families=new Map<string,PlanEntry[]>();
@@ -107,7 +117,7 @@ function contradicts(a:Metadata,b:Metadata):boolean {
   const precision=Math.min(left[2]?.length??0,right[2]?.length??0);
   return (left[2]??'').slice(0,precision)!==(right[2]??'').slice(0,precision);
 }
-export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:(count:number,file:string)=>void):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
+export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
   if(!options.reuse) return planOnce(source,roots,options,metadata,signal,onProgress);
   // A file rewritten in place leaves its folder unchanged, so a remembered listing
   // can hold a stale size. List the card again once rather than failing.
@@ -115,36 +125,53 @@ export async function plan(source:string,roots:string[],options:Options,metadata
   catch(error) { if(isAbort(error) || !(error instanceof MessageError && error.key==='error.sourceChanged')) throw error; }
   return planOnce(source,roots,{...options,reuse:undefined},metadata,signal,onProgress);
 }
-/** Read-only check of an organized folder: the files (relative to it) that are not where
- * the folder rules put them. Nothing is read beyond names, sizes and metadata. */
-export async function findMisplaced(root:string,options:Omit<Options,'reorganize'|'misplacedOnly'|'backup'|'drive'>&{backup?:boolean},metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal):Promise<{count:number;bytes:number;files:string[]}> {
-  const {plans:[found]}=await planOnce(root,[root],{...options,backup:false,reorganize:true,misplacedOnly:true},metadata,signal);
-  const entries=found?.entries??[];
+/** Read-only check of an organized library: the files in `source` (relative to it) that are not
+ * where the folder rules put them under `root` (and the video root of the video-root layout).
+ * `source` is the library itself or a folder holding it. Nothing is read beyond names, sizes and metadata. */
+export async function findMisplaced(source:string,root:string,options:Omit<Options,'reorganize'|'misplacedOnly'|'backup'|'drive'>&{backup?:boolean},metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{count:number;bytes:number;files:string[]}> {
+  const {plans:[found]}=await planOnce(source,[root],{...options,backup:false,reorganize:true,misplacedOnly:true},metadata,signal,onProgress);
+  const entries=[...found?.entries??[],...found?.videos?.entries??[]];
   return {count:entries.length,bytes:entries.reduce((sum,entry)=>sum+entry.size,0),files:entries.map(entry=>path.relative(found!.source,entry.source))};
 }
-async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:(count:number,file:string)=>void):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
+/** Planning progress: `count` files of `detail.total` done. Every plan first checks each file
+ * (metadata and identity, without reading contents); library organization then reads the files
+ * that will move to checksum them. */
+export type PlanProgress=(count:number,file:string,detail?:{step:'checking'|'reading';total:number;bytes:number;totalBytes:number})=>void;
+async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[]}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
   if(options.reorganize&&roots.length!==1)throw new Error('Review one organization destination at a time.');
   const sourceRoot=await directory(source),custom=rules(options.reorganize?{}:options.unknownRules);
   // Library organization never adopts unknown files, whatever the import defaults are.
   const defaults:RuleDefaults=options.reorganize?{fallback:'skip',builtins:false}:{fallback:options.unknownDefault??'skip',builtins:true};
-  const sourceIdentity=await identity(sourceRoot),destinations:{root:string;identity:string}[]=[],excludedRoots:string[]=[];
-  for(const root of roots){
+  const videoRoots=!options.backup&&options.layout==='video-root'?options.videoRoots:undefined;
+  if(!options.backup&&options.layout==='video-root'&&videoRoots?.length!==roots.length)throw new MessageError('error.videoFolderMissing');
+  const sourceIdentity=await identity(sourceRoot),excludedRoots:string[]=[];
+  type Root={root:string;identity:string};
+  const destinations:(Root&{videos?:Root})[]=[];
+  // Each backup folder (and the video one beside it) is checked against the source alike.
+  async function backupRoot(root:string):Promise<Root> {
     const destinationRoot=await directory(root);
     if(options.reorganize) {
       if(options.backup || (sourceRoot!==destinationRoot && !beneath(destinationRoot,sourceRoot)) || (await fs.lstat(sourceRoot,{bigint:true})).dev!==(await fs.lstat(destinationRoot,{bigint:true})).dev) throw new Error('Reorganization requires the same library or a base folder beneath it on the same filesystem and cannot use backup mode.');
     } else if(sourceRoot===destinationRoot || beneath(sourceRoot,destinationRoot)) throw new MessageError('error.alreadyInBackup',{source:sourceRoot,root:destinationRoot});
     // A backup folder inside the chosen source is left out of it, so the backup is never copied into itself.
     else if(beneath(destinationRoot,sourceRoot)) excludedRoots.push(destinationRoot);
-    destinations.push({root:destinationRoot,identity:await identity(destinationRoot)});
+    return {root:destinationRoot,identity:await identity(destinationRoot)};
   }
+  for(const [position,root] of roots.entries()){
+    const photos=await backupRoot(root),videos=videoRoots?await backupRoot(videoRoots[position]!):undefined;
+    if(videos&&(videos.root===photos.root||beneath(videos.root,photos.root)||beneath(photos.root,videos.root)))throw new MessageError('error.videoFolderNested');
+    destinations.push({...photos,...(videos?{videos}:{})});
+  }
+  const allRoots=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
   if(options.drive&&!options.backup)throw new Error('Only drive backups use a drive folder.');
-  if(!options.backup) folder({fields:{}},new Date(0),'RAW',options);
+  if(!options.backup) {folder({fields:{}},new Date(0),undefined,options);folder({fields:{}},new Date(0),{video:true,format:'MOV'},options);}
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
-  if(options.reorganize) excludedRoots.push(...destinations.map(({root})=>path.join(root,DRIVE_BACKUPS)));
-  const organizationOwned=(file:string)=>options.reorganize===true&&destinations.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
+  if(options.reorganize) excludedRoots.push(...allRoots.map(({root})=>path.join(root,DRIVE_BACKUPS)));
+  const organizationOwned=(file:string)=>options.reorganize===true&&allRoots.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
   const scan=await inventory(sourceRoot,{backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots},signal), files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
+  const listedBytes=files.reduce((sum,file)=>sum+file.size,0);let checkedBytes=0;
   const infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for
   // files library organization will move or when a same-size file already occupies a destination.
@@ -160,7 +187,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
     if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:file.path});
     sourceStats.set(file.path,originalStat);
-    onProgress?.(++done,file.relative);
+    checkedBytes+=file.size;onProgress?.(++done,file.relative,{step:'checking',total:files.length,bytes:checkedBytes,totalBytes:listedBytes});
   }
   await Promise.all(Array.from({length:Math.min(files.length,PLAN_CONCURRENCY)},async()=>{
     while(failure===undefined && next<files.length) {
@@ -189,6 +216,22 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     // Video companions, <name>.<ext>.xmp and NKSC_PARAM edits travel in their original's family.
     const primary=byPath.get(file.companionOf);
     if(primary && (primary.kind==='Videos' || stem(primary.path)!==stem(file.path))) {primaryFor.set(file.path,primary);familyFor.set(file.path,familyFor.get(primary.path)!);}
+  }
+  // GoPro splits a long recording into chapters GXzzxxxx/GHzzxxxx (zz the chapter, xxxx the
+  // video). They form one family filed by the first chapter, so a recording that crosses
+  // midnight or a month stays in one folder; their proxies follow their chapter.
+  const chapterLead=new Map<string,InventoryFile>();
+  if(!options.backup) {
+    const recordings=new Map<string,InventoryFile[]>();
+    for(const file of files) {
+      const match=/^G([XH])(\d{2})(\d{4})\.mp4$/i.exec(path.basename(file.path));
+      if(match&&file.kind==='Videos') {const key=pathKey(path.join(path.dirname(file.path),`G${match[1]!.toUpperCase()}${match[3]}`));recordings.set(key,[...(recordings.get(key)??[]),file]);}
+    }
+    for(const [key,chapters] of recordings) if(chapters.length>1) {
+      const lead=chapters.reduce((first,chapter)=>path.basename(chapter.path).toUpperCase()<path.basename(first.path).toUpperCase()?chapter:first);
+      for(const chapter of chapters) {chapterLead.set(chapter.path,lead);familyFor.set(chapter.path,'gopro:'+key);}
+    }
+    for(const file of files) if(file.companionOf&&chapterLead.has(file.companionOf)) {chapterLead.set(file.path,chapterLead.get(file.companionOf)!);familyFor.set(file.path,familyFor.get(file.companionOf)!);}
   }
   // Each ancestor describes only media within its own subtree. Stop at the
   // nearest evidence, including mixed-camera evidence, rather than guessing
@@ -224,7 +267,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       if(ancestor===sourceRoot) return {fields:{}};
     }
   }
-  const prepared:{entry:Omit<PlanEntry,'destination'>;relative:string}[]=[];
+  // `camera`: the family's conflict folder relative to the root, when the layout chose it.
+  const prepared:{entry:Omit<PlanEntry,'destination'>;relative:string;root:'photos'|'videos';camera?:string}[]=[];
   for(const file of files) {
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
@@ -232,23 +276,33 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const info:Metadata={fields:{},camera:own.camera?.trim() || (inherit?paired.camera:undefined),date:own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
-    let relative:string;
+    let relative:string,place:ReturnType<typeof folder>|undefined;
     if(options.backup) relative=file.relative;
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
-    else if(nkscEdit(file.path) && file.companionOf) relative=path.join(folder(info,mtimes.get(primary.path)!,primary.kind,options),'NKSC_PARAM',path.basename(file.path));
-    else relative=path.join(folder(info,mtimes.get(file.path)!,file.kind==='Other' && primary.kind==='Videos'?'Videos':file.kind,options),path.basename(file.path));
-    prepared.push({relative,entry:{captureTimeMs:options.backup?undefined:captureTimestamp(info.date),id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:(info.edited?'edited:':'')+familyFor.get(file.path)!}});
+    else {
+      // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
+      const original=file.companionOf?byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf;
+      const lead=chapterLead.get(file.path),route:Metadata=lead?{...info,date:infos.get(lead.path)?.date}:info;
+      place=folder(route,mtimes.get((lead??(nksc?primary:file)).path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},options);
+      // NX Studio reads NKSC_PARAM beside the original.
+      relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':'',path.basename(file.path));
+    }
+    prepared.push({relative,root:place?.root??'photos',camera:place?.camera,entry:{captureTimeMs:options.backup?undefined:captureTimestamp(info.date),id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:(info.edited?'edited:':'')+familyFor.get(file.path)!}});
   }
   if(options.reorganize) {
     // Files already where the rules put them need nothing: they are neither read nor planned.
-    const placed=destinations[0]!.root;
-    for(let index=prepared.length-1;index>=0;index--) if(pathKey(path.join(placed,prepared[index]!.relative))===pathKey(prepared[index]!.entry.source)) prepared.splice(index,1);
-    if(options.misplacedOnly) return {inventory:scan,plans:[{source:sourceRoot,root:placed,rootIdentity:destinations[0]!.identity,entries:prepared.map(({entry,relative})=>({...entry,destination:path.join(placed,relative)}))}]};
-    let position=0;
+    const library=destinations[0]!,rootOf=(item:{root:'photos'|'videos'})=>item.root==='videos'?library.videos!:library;
+    for(let index=prepared.length-1;index>=0;index--) if(pathKey(path.join(rootOf(prepared[index]!).root,prepared[index]!.relative))===pathKey(prepared[index]!.entry.source)) prepared.splice(index,1);
+    if(options.misplacedOnly) {
+      const listed=(part:Root,kind:'photos'|'videos'):TransferPlan=>({source:sourceRoot,root:part.root,rootIdentity:part.identity,entries:prepared.filter(item=>item.root===kind).map(({entry,relative})=>({...entry,destination:path.join(part.root,relative)}))});
+      return {inventory:scan,plans:[{...listed(library,'photos'),...(library.videos?{videos:listed(library.videos,'videos')}:{})}]};
+    }
+    let position=0,hashed=0,hashedBytes=0;const movingBytes=prepared.reduce((sum,{entry})=>sum+entry.size,0);
     await Promise.all(Array.from({length:Math.min(prepared.length,PLAN_CONCURRENCY)},async()=>{
       while(position<prepared.length) {
         const {entry}=prepared[position++]!;checkAbort(signal);
         hashes.set(entry.source,await digest(entry.source,signal));
+        hashedBytes+=entry.size;onProgress?.(++hashed,path.relative(sourceRoot,entry.source),{step:'reading',total:prepared.length,bytes:hashedBytes,totalBytes:movingBytes});
         if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
       }
     }));
@@ -266,17 +320,17 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     }
     return value;
   };
-  const plans:TransferPlan[]=[];
-  for(const {root:destinationRoot,identity:rootIdentity} of destinations){
+  // One plan per backup folder: the files routed to it, checked against what it already holds.
+  async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity);
     // Drive backups land in the folder this drive owns on each destination.
     const drive=options.drive?{folder:await driveFolder(destinationRoot,options.drive),identity:options.drive.identity,name:options.drive.name}:undefined;
-    for(const {entry,relative} of prepared){
+    for(const {entry,relative,root,camera} of prepared){
+      if(root!==kind) continue;
       checkAbort(signal);
       const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
-      const parent=path.dirname(destination),customFolder=entry.kind==='Other'&&!byPath.get(entry.source)?.companionOf&&typeof unknownRule(extension(entry.source),custom,defaults)==='string';
-      pending.push({...entry,destination,allocation:{destination,folder:!options.backup&&options.separateMedia&&!customFolder?path.dirname(parent):parent}});
+      pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera)}});
     }
     const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal):undefined;
     const reservations=new Map<string,PlanEntry>(),entries:PlanEntry[]=[];
@@ -291,8 +345,14 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     if(options.reorganize){
       await rootUnchanged(sourceRoot,sourceIdentity);
       reorganizationReviews.set(transfer,new Map(entries.map(entry=>[entry.id,{captureTimeMs:entry.captureTimeMs,stat:sourceStats.get(entry.source)!,source:entry.source,destination:entry.destination,digest:entry.digest}])));
-      reorganizationScopes.set(transfer,{source:sourceRoot,sourceIdentity,root:destinationRoot,rootIdentity});
+      reorganizationScopes.set(transfer,{source:sourceRoot,sourceIdentity,root:destinationRoot,rootIdentity,libraries:allRoots.map(({root})=>root).filter(root=>root!==destinationRoot)});
     }
+    return transfer;
+  }
+  const plans:TransferPlan[]=[];
+  for(const destination of destinations){
+    const transfer=await rootPlan(destination,'photos');
+    if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
     plans.push(transfer);
   }
   return {inventory:scan,plans};
@@ -328,8 +388,16 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
   try{outputStat=await output.stat({bigint:true});}catch(error){await output.close().catch(()=>{});claimedStages.delete(file);if(!recovered)await fs.unlink(file).catch(()=>{});throw error;}
   return {target,output,initialSize:Number(outputStat.size),staged:{file,dev:outputStat.dev,ino:outputStat.ino,birthtime:outputStat.birthtimeNs,record:recovered,recovery}};
 }
+/** exFAT gives an empty file a temporary inode and assigns the real one (its first cluster)
+ * when data is written, so the staging identity is re-read through the open descriptor,
+ * which can only name this staging file. */
+async function rebindStage(open:OpenStage):Promise<void> {
+  const stat=await open.output.stat({bigint:true});
+  open.staged.dev=stat.dev;open.staged.ino=stat.ino;open.staged.birthtime=stat.birthtimeNs;
+}
 async function abandonStage(open:OpenStage,error:unknown):Promise<void> {
   open.error??=error;
+  await rebindStage(open).catch(()=>{});
   await open.output.close().catch(()=>{});
   await cleanStage(open.staged,open.target.transfer.root);
 }
@@ -373,7 +441,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
           const {output,staged,target}=open;
           staged.streamDigest=streamDigest;staged.sourceStat=after;
           await applyFileTimestamps(output,before,target.entry.captureTimeMs);
-          staged.birthtime=(await output.stat({bigint:true})).birthtimeNs;
+          await rebindStage(open);
           await output.sync();
           // APFS may lower birthtime when applying an older source mtime. Refresh
           // the signed identity durably before retiring the previous receipt.
@@ -401,6 +469,21 @@ async function cleanStage(staged:Staged,root:string):Promise<void> {
     const current=await fs.lstat(staged.file,{bigint:true});
     if(current.isFile() && current.dev===staged.dev && current.ino===staged.ino && current.birthtimeNs===staged.birthtime) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery);}
   } catch { /* An unavailable/replaced destination is never followed or removed. */ }
+}
+/** A complete staged copy left by an interrupted run is released once the published file is
+ * known to match: it must be this app's signed stage for the same source and destination, hold
+ * every byte, hash to the published checksum and be unchanged until it is removed. */
+async function releaseStaleStage(entry:PlanEntry,root:string,recovery:RecoveryIndex,signal?:AbortSignal):Promise<void> {
+  const stale=await findPartial('stage',entry,root,recovery,signal);
+  if(!stale||claimedStages.has(stale.file)) return;
+  // Reserved while it is checked, so a copy starting meanwhile cannot resume into it.
+  claimedStages.add(stale.file);
+  try {
+    if(stale.stat.size!==BigInt(entry.size)||await digest(stale.file,signal)!==entry.digest) return;
+    if(!sameStat(stale.stat,await fs.lstat(stale.file,{bigint:true}))) return;
+    await fs.unlink(stale.file);
+    await clearPartialRecord(stale,root,recovery);
+  } finally { claimedStages.delete(stale.file); }
 }
 export interface ExecutionOptions {
   /** Use journaled exclusive copies for a filesystem known not to support hard links. */
@@ -558,7 +641,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,index!,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);result.skipped++;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,index!,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
@@ -607,7 +690,7 @@ export async function executeReorganization(transfer:TransferPlan,signal?:AbortS
     }
     // Organization renames files; drop the cached checksums for this library.
     index.clear();
-    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders);
+    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries);
   });
   await flushIndex(index);
   return result;

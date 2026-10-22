@@ -37,24 +37,43 @@ export async function syncDirectory(folder:string):Promise<void> {
   } catch(error){throw Object.assign(new Error(`Directory synchronization failed: ${folder}: ${error instanceof Error?error.message:String(error)}`,{cause:error}),{code:code(error)});}
   finally {await handle?.close();}
 }
+// A folder's entries change when a file is published into it, and its ancestors' only when a
+// subfolder is created. So the file's own folder is always synchronized, and an ancestor only
+// when makeParent created a subfolder in it, or the first time this process meets it (a folder
+// left by an interrupted run may never have been synchronized).
+// A sync in progress is shared: a caller that would skip the folder waits for it instead, and
+// gets its failure, so nobody returns before the folder is on disk.
+const changedFolders=new Set<string>(),durableFolders=new Set<string>(),syncing=new Map<string,Promise<void>>();
 export async function syncParents(file:string,root:string):Promise<void> {
-  for(let folder=path.dirname(file);;folder=path.dirname(folder)){await syncDirectory(folder);if(folder===root)break;if(!beneath(folder,root))throw new Error('Unsafe synchronization scope');}
+  for(let folder=path.dirname(file),own=true;;folder=path.dirname(folder),own=false){
+    if(own||changedFolders.has(folder)||!durableFolders.has(folder)){
+      // Cleared first, so a subfolder created during this sync marks the folder again.
+      changedFolders.delete(folder);
+      const sync=syncDirectory(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
+      syncing.set(folder,sync);
+      try{await sync;}finally{if(syncing.get(folder)===sync)syncing.delete(folder);}
+    } else await syncing.get(folder);
+    if(folder===root)break;if(!beneath(folder,root))throw new Error('Unsafe synchronization scope');
+  }
 }
 export async function syncFile(file:string):Promise<void> {const handle=await regularHandle(file);try{await handle.sync();}finally{await handle.close();}}
 /** Check every existing path component, including ancestors of a missing leaf. */
 export async function contained(file:string,root:string):Promise<void> {
   if(!beneath(path.resolve(file),root)) throw new Error(`Unsafe path outside selected folder: ${file}`);
   const parts=path.relative(root,file).split(path.sep);
-  let current=root;
+  let current=root,deepest:string|undefined;
   for(let i=0;i<parts.length;i++) {
     current=path.join(current,parts[i]!);
     try {
       const stat=await fs.lstat(current);
       if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);
       if(i<parts.length-1 && !stat.isDirectory()) throw new Error(`Unsafe non-directory ancestor: ${current}`);
-      if(!beneath(await fs.realpath(current),root)) throw new Error(`Unsafe resolved path: ${current}`);
-    } catch(error) { if(code(error)==='ENOENT') return; throw error; }
+      deepest=current;
+    } catch(error) { if(code(error)==='ENOENT') break; throw error; }
   }
+  // One resolution of the deepest existing component covers every ancestor: a component
+  // replaced by a link after its own check still resolves outside `root` here.
+  if(deepest) try { if(!beneath(await fs.realpath(deepest),root)) throw new Error(`Unsafe resolved path: ${deepest}`); } catch(error) { if(code(error)!=='ENOENT') throw error; }
 }
 export async function makeParent(file:string,root:string):Promise<void> {
   await contained(file,root);
@@ -62,9 +81,11 @@ export async function makeParent(file:string,root:string):Promise<void> {
   let current=root;
   for(const part of parts) {
     current=path.join(current,part);
-    try { await fs.mkdir(current); } catch(error) { if(code(error)!=='EEXIST') throw error; }
-    await contained(current,root);
-    if(!(await fs.lstat(current)).isDirectory()) throw new Error(`Unsafe parent: ${current}`);
+    try { await fs.mkdir(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
+    // Ancestors were checked a step earlier; the whole chain is checked again below.
+    const stat=await fs.lstat(current);
+    if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);
+    if(!stat.isDirectory()) throw new Error(`Unsafe parent: ${current}`);
   }
   await contained(file,root);
 }

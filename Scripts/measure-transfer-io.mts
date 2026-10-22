@@ -32,7 +32,7 @@ fs.open=async(...args:Parameters<typeof fs.open>)=>{
 };
 syncBuiltinESMExports();
 try{
- const {plans:[prepared]}=await plan(source,[root],{backup:true,template:'{year}/{camera}',separateMedia:false,unknownRules:{}},async()=>{throw new Error('Backup must not read metadata');});
+ const {plans:[prepared]}=await plan(source,[root],{backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}},async()=>{throw new Error('Backup must not read metadata');});
  phase='execute';const result=await execute(prepared);assert.deepEqual(result,{copied:1,skipped:0,errors:[]});
  fs.open=open;syncBuiltinESMExports();
  const copied=await fs.readFile(path.join(root,'original.bin'));

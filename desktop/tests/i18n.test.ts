@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createTranslator, formatBytes, I18nProvider, languages, localeNames, translationCatalogs, useTranslation } from '../renderer/i18n';
+import { createTranslator, formatBytes, formatNumber, I18nProvider, languages, localeNames, translationCatalogs, useTranslation } from '../renderer/i18n';
 import type {AppState, Inventory, Job, SourceCameraInfo} from '../shared';
 import { message, text } from '../messages';
 
@@ -27,7 +27,7 @@ test('fallback and interpolation preserve filenames, EXIF tokens and unmatched p
   assert.equal(t('{count} files'), '{count} ファイル');
   assert.equal(t('toString'), 'toString');
   assert.equal(t('__proto__'), '__proto__');
-  assert.equal(t('Available tokens: {year}, {yyyymm}, {month}, {day}, {yyyyMMdd}, {camera}'), '使用可能なトークン：{year}、{yyyymm}、{month}、{day}、{yyyyMMdd}、{camera}');
+  assert.equal(t('Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}'), '使用可能なトークン：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}');
 });
 test('provider selects the persisted language and escapes user data through React', () => {
   function Label() { const { t } = useTranslation(); return createElement('span', null, t('Preview of {name}', { name: '<camera>' })); }
@@ -43,8 +43,8 @@ test('copy and discovery labels describe destinations, media types and mounted s
   const labels = [
     ['Copy to both destinations','复制到两个目标','複製到兩個目的地','両方の保存先にコピー'],
     ['Folder backup','文件夹备份','資料夾備份','フォルダーバックアップ'],
-    ['Separate files by media type','按媒体类型分开文件','依媒體類型分開檔案','メディアの種類ごとにファイルを分ける'],
-    ['Give each media type its own folder inside the structure.','在目录结构中为每种媒体类型创建独立文件夹。','在目錄結構中為每種媒體類型建立獨立資料夾。','メディアの種類ごとに個別のフォルダーに保存します。'],
+    ['Media layout','媒体文件布局','媒體檔案配置','メディアの配置'],
+    ['A separate video backup folder','单独的视频备份文件夹','獨立的影片備份資料夾','動画用の別のバックアップフォルダー'],
     ['Mounted SD cards, CFexpress cards and camera storage appear here. Check your destination, then start importing.','已挂载的 SD 卡、CFexpress 卡和相机存储会显示在此处。确认目标后即可开始导入。','已掛載的 SD 卡、CFexpress 卡與相機儲存裝置會顯示於此。確認目的地後即可開始匯入。','マウント済みのSDカード、CFexpressカード、カメラのストレージをここに表示します。保存先を確認してインポートを開始してください。'],
   ];
   for (const values of labels) for (const [index,language] of languages.entries()) assert.equal(createTranslator(language)(values[0]),values[index]);
@@ -96,7 +96,7 @@ test('edited-export folder settings localize the default and custom preview with
   const {SettingsPage}=await import('../renderer/RootApp');
   const labels=['Edited exports folder','编辑导出文件夹','編輯匯出資料夾','編集済み書き出しフォルダー'];
   for(const folder of [undefined,'finished'])for(const [index,language] of languages.entries()){
-    const state:AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{camera}/{year}/{yyyymm}',separateMedia:false,allowFolderSource:false,unknownRules:{},...(folder===undefined?{}:{editedFolder:folder})},sources:[],jobs:[],history:[],platform:'darwin'};
+    const state:AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{camera}/{year}/{yyyymm}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{},...(folder===undefined?{}:{editedFolder:folder})},sources:[],jobs:[],history:[],platform:'darwin'};
     const markup=renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(SettingsPage,{state,act:()=>{},busy:false})}));
     assert.ok(markup.includes(labels[index]));
     assert.ok(markup.includes(`placeholder="editied" value="${folder??'editied'}"`));
@@ -112,7 +112,7 @@ test('edited-export folder settings localize the default and custom preview with
 test('organization shows the exact selected folder scope and retains an explicit whole-destination option', async () => {
   const { Organization } = await import('../renderer/RootApp');
   for (const language of languages) {
-    const state: AppState = { preferences: { language, appearance:'system', textScale:1.25, accent:'coral', automatic:true, parallel:2, destinations:['/Volumes/A006'], copyMode:'single', basePath:'photobackup', template:'{year}/{yyyymm}/{camera}', separateMedia:false, allowFolderSource:false, unknownRules:{} }, sources:[], jobs:[], history:[], platform:'darwin', organizationFolders:{'/Volumes/A006':['2024','2025','2026']} };
+    const state: AppState = { preferences: { language, appearance:'system', textScale:1.25, accent:'coral', automatic:true, parallel:2, destinations:['/Volumes/A006'], copyMode:'single', basePath:'photobackup', template:'{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource:false, unknownRules:{} }, sources:[], jobs:[], history:[], platform:'darwin', organizationFolders:{'/Volumes/A006':['2024','2025','2026']} };
     const t = createTranslator(language);
     const render = () => renderToStaticMarkup(createElement(I18nProvider, {language, children:createElement(Organization, {state, act:()=>{}, busy:false})}));
     const selected = render();
@@ -126,8 +126,10 @@ test('organization shows the exact selected folder scope and retains an explicit
     const whole = render();
     assert.ok(whole.includes(t('All folders on this destination will be scanned.')));
     assert.ok(!whole.includes(t('Use whole destination')));
-    state.busyReview = true; state.reviewProgress = {count:123, file:'/Volumes/A006/2024/photo.JPG'};
-    assert.ok(render().includes(t('Checking organization files: {count} · {file}', {count:123, file:'/Volumes/A006/2024/photo.JPG'})));
+    state.busyReview = true; state.reviewProgress = {phase:'planning', step:'checking', completed:123, total:400, bytes:0, totalBytes:0, speed:0, file:'/Volumes/A006/2024/photo.JPG'};
+    const checking = render();
+    assert.ok(checking.includes(t('Checking organization files: {count} · {file}', {count:(123).toLocaleString(language), file:'/Volumes/A006/2024/photo.JPG'})));
+    assert.ok(checking.includes('aria-valuenow="31"') && checking.includes(t('{completed} of {total} files checked', {completed:(123).toLocaleString(language), total:(400).toLocaleString(language)})), `${language}: organization review shows a determinate bar`);
   }
 });
 
@@ -156,7 +158,7 @@ test('unknown formats prompt is visible before opening rules and keeps imports a
 test('saved camera rules render as camera mode while custom folders and Ignore remain supported', async () => {
   const { SettingsPage } = await import('../renderer/RootApp');
   for (const language of languages) {
-    const state: AppState = { preferences: { language, appearance:'system', textScale:1.25, accent:'coral', automatic:true, parallel:2, destinations:[], copyMode:'single', basePath:'photobackup', template:'{year}/{yyyymm}/{camera}', separateMedia:false, allowFolderSource:false, unknownRules:{dat:{action:'camera'},pdf:'Documents',txt:null} }, sources:[], jobs:[], history:[], platform:'darwin' };
+    const state: AppState = { preferences: { language, appearance:'system', textScale:1.25, accent:'coral', automatic:true, parallel:2, destinations:[], copyMode:'single', basePath:'photobackup', template:'{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource:false, unknownRules:{dat:{action:'camera'},pdf:'Documents',txt:null} }, sources:[], jobs:[], history:[], platform:'darwin' };
     const t = createTranslator(language);
     const markup = renderToStaticMarkup(createElement(I18nProvider, {language,children:createElement(SettingsPage,{state,act:()=>{},busy:false})}));
     assert.ok(markup.includes(`<span class="extension-name">.dat</span><span>${t('Copy to camera folders')}</span>`));
@@ -171,7 +173,7 @@ test('saved camera rules render as camera mode while custom folders and Ignore r
 
 test('global controls stay independent of pages and source error details are isolated in the errors panel', async () => {
   const {TitlebarControls, ImportDesk, ActivityPanel, collectErrors} = await import('../renderer/RootApp');
-  const state: AppState = {preferences:{language:'en',appearance:'system',textScale:1.5,accent:'coral',automatic:true,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',separateMedia:false,allowFolderSource:false,unknownRules:{}},sources:[{id:'one',name:'Card one',path:'/one',transport:'storage'},{id:'two',name:'Card two',path:'/two',transport:'storage'}],jobs:[{id:'failed',source:{id:'one',name:'Card one',path:'/one',transport:'storage'},phase:'error',detail:text('copy failure detail'),errors:[text('copy failure detail')],backup:false}],history:[],platform:'darwin',error:text('application failure detail'),sourceCameraInfo:{two:{status:'error',hints:[],models:[],checked:0,total:1,unknown:0,error:'camera failure detail'}},organizationRecovery:[{id:'r',root:'/backup',status:'pending',files:1,completed:0,error:'recovery failure detail'}]};
+  const state: AppState = {preferences:{language:'en',appearance:'system',textScale:1.5,accent:'coral',automatic:true,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[{id:'one',name:'Card one',path:'/one',transport:'storage'},{id:'two',name:'Card two',path:'/two',transport:'storage'}],jobs:[{id:'failed',source:{id:'one',name:'Card one',path:'/one',transport:'storage'},phase:'error',detail:text('copy failure detail'),errors:[text('copy failure detail')],backup:false}],history:[],platform:'darwin',error:text('application failure detail'),sourceCameraInfo:{two:{status:'error',hints:[],models:[],checked:0,total:1,unknown:0,error:'camera failure detail'}},organizationRecovery:[{id:'r',root:'/backup',status:'pending',files:1,completed:0,error:'recovery failure detail'}]};
   const errors=collectErrors(state,['connection failure detail']);assert.equal(errors.length,5);
   for(const language of languages){
     const t=createTranslator(language);
@@ -193,7 +195,7 @@ test('global controls stay independent of pages and source error details are iso
 test('Organize now can queue behind imports and the desk dashboard lists organization jobs', async () => {
   const {Organization, ImportDashboard}=await import('../renderer/RootApp');
   const source={id:'card',name:'Card',path:'/card',transport:'storage' as const};
-  const state: AppState={preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:true,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',separateMedia:false,allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'import',source,phase:'copying',detail:text('Copying photos'),errors:[],backup:false}],history:[],platform:'darwin',organizationFolders:{'/backup':['2024','2025','2026']}};
+  const state: AppState={preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:true,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'import',source,phase:'copying',detail:text('Copying photos'),errors:[],backup:false}],history:[],platform:'darwin',organizationFolders:{'/backup':['2024','2025','2026']}};
   for(const language of languages){
     const t=createTranslator(language),render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const markup=render(createElement(Organization,{state,act:()=>{},busy:true}));
@@ -206,7 +208,7 @@ test('Organize now can queue behind imports and the desk dashboard lists organiz
 
 test('format problems and metadata read issues are isolated in All errors; acknowledged exclusions disappear',async()=>{
  const {collectErrors,ActivityPanel,ImportDesk}=await import('../renderer/RootApp');
- const state:AppState={preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',separateMedia:false,allowFolderSource:false,unknownRules:{},unknownDefault:'ask'},sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin',sourceInventories:{card:{files:[{path:'/card/NOTE.DAT',relative:'NOTE.DAT',size:10,kind:'Other',included:false}],media:0,companions:0,unknown:1,unknownExtensions:{dat:1},bytes:0,elapsedMs:0,issues:[{path:'/card/BROKEN.NEF',message:'Invalid file format'}]}}};
+ const state:AppState={preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{},unknownDefault:'ask'},sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin',sourceInventories:{card:{files:[{path:'/card/NOTE.DAT',relative:'NOTE.DAT',size:10,kind:'Other',included:false}],media:0,companions:0,unknown:1,unknownExtensions:{dat:1},bytes:0,elapsedMs:0,issues:[{path:'/card/BROKEN.NEF',message:'Invalid file format'}]}}};
  const errors=collectErrors(state);assert.equal(errors.length,2);
  const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
  const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
@@ -244,7 +246,7 @@ test('unknown files are skipped quietly by default and only become errors when t
     {path:'/card/AVF_INFO/AVIN0001.BNP',relative:'AVF_INFO/AVIN0001.BNP',size:10,kind:'Other',included:false,system:{id:'sony-avf',vendor:'Sony',label:'AVF info'}},
     {path:'/card/NOTE.XYZ',relative:'NOTE.XYZ',size:10,kind:'Other',included:false},
   ],media:0,companions:0,unknown:1,unknownExtensions:{xyz:1},system:2,systemKinds:{'sony-card-index':1,'sony-avf':1},bytes:0,elapsedMs:0} as Inventory;
-  const preferences={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',separateMedia:false,allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+  const preferences={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/backup'],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
   const state:AppState={preferences,sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin',sourceInventories:{card:inventory}};
   assert.equal(collectErrors(state).length,0,'Skip is the default and raises no error');
   state.preferences={...preferences,unknownDefault:'other'};assert.equal(collectErrors(state).length,0);
@@ -298,7 +300,7 @@ test('source scans show listing progress, then determinate camera-metadata progr
 
 test('new drives prompt for a choice, unselected drives are excluded on their cards, and remembered drives can be forgotten', async () => {
   const { NewDrivePrompt, ImportDesk, TitlebarControls, RememberedDrives } = await import('../renderer/RootApp');
-  const preferences = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', separateMedia: false, allowFolderSource: false, unknownRules: {},
+  const preferences = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {},
     rememberedDevices: { 'uuid-card': { name: 'NIKON Z6III', lastSelected: '2026-10-20T08:00:00.000Z' } } };
   const sources = [
     { id: 'card', name: 'NIKON Z6III', path: '/Volumes/NIKON', transport: 'storage', camera: true, total: 128_000_000_000, selected: true },
@@ -336,7 +338,7 @@ test('the import overview shows total progress and sizes keep their decimals', a
   assert.equal(formatBytes(994_700_000_000, 'en'), '994.7 GB');
   assert.equal(formatBytes(2_000_000_000, 'ja'), '2.0 GB');
   const source = { id: 'card', name: 'Card', path: '/card', transport: 'storage' as const };
-  const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', separateMedia: false, allowFolderSource: false, unknownRules: {} }, sources: [source],
+  const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} }, sources: [source],
     jobs: [{ id: 'job', source, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 10, total: 40, bytes: 1_250_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'a.NEF' } }], history: [], platform: 'darwin' };
   for (const language of languages) {
     const t = createTranslator(language);
@@ -350,7 +352,7 @@ test('drives pause and continue individually, Start becomes Pause while importin
   const { ImportDesk, TitlebarControls, DrivesPage } = await import('../renderer/RootApp');
   const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true };
   const usb = { id: 'usb', name: 'Work stick', path: '/Volumes/WORK', transport: 'storage' as const, selected: false };
-  const base: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', separateMedia: false, allowFolderSource: false, unknownRules: {},
+  const base: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {},
     ignoredDevices: { usb: { name: 'Work stick', ignoredAt: '2026-10-21T08:00:00.000Z' } }, rememberedDevices: { card: { name: 'Card', lastSelected: '2026-10-21T08:00:00.000Z' } } }, sources: [card, usb], jobs: [], history: [], platform: 'darwin' };
   const running: AppState = { ...base, jobs: [{ id: 'j', source: card, phase: 'copying', errors: [], backup: false }] };
   const paused: AppState = { ...base, jobs: [{ id: 'j', source: card, phase: 'stopped', paused: true, errors: [], backup: false }] };
@@ -392,7 +394,7 @@ test('completed organizations explain retained originals and confirm before rele
 
 test('copy verification is a Settings toggle that defaults on, with a dashboard notice when off', async () => {
   const { SettingsPage, ImportDashboard } = await import('../renderer/RootApp');
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin' };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
@@ -412,7 +414,7 @@ test('the per-drive file counter names its phase', async () => {
   const job = (phase: 'copying' | 'verifying', completed: number, failed = 0) => ({ id: 'j', source, phase, errors: [], backup: false, progress: { phase, completed, total: 40, bytes: 1, totalBytes: 2, speed: 1, file: 'a', failed } });
   for (const language of languages) {
     const t = createTranslator(language);
-    const render = (phase: 'copying' | 'verifying', completed: number, failed = 0) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences: { language, appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} }, sources: [source], jobs: [job(phase, completed, failed)], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
+    const render = (phase: 'copying' | 'verifying', completed: number, failed = 0) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences: { language, appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} }, sources: [source], jobs: [job(phase, completed, failed)], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
     assert.ok(render('copying', 12).includes(t('{completed} of {total} files copied', { completed: 12, total: 40 })), `${language}: copying`);
     assert.ok(render('verifying', 5).includes(t('{completed} of {total} files verified', { completed: 5, total: 40 })), `${language}: verifying`);
     assert.ok(!render('copying', 12).includes('progress-failed'), `${language}: no failed note without failures`);
@@ -448,7 +450,7 @@ test('every card shows Scanning, Copying and Verifying with a checkmark after ea
 test('a card with nothing new finishes as Already imported, and a backup inside the source is noted', async () => {
   const { ImportDesk } = await import('../renderer/RootApp');
   const source = { id: 'a006', name: 'A006', path: '/Volumes/A006', transport: 'storage' as const, selected: true };
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const job: Job = { id: 'j', source, phase: 'complete', alreadyImported: true, detail: message('job.alreadyImported', { count: 12 }), errors: [], backup: false, progress: { phase: 'verifying', completed: 12, total: 12, bytes: 0, totalBytes: 0, speed: 0, file: '' } };
   for (const language of languages) {
     const t = createTranslator(language);
@@ -466,7 +468,7 @@ test('one drive can be continued or started while another drive is importing; an
   const busy = { id: 'busy', name: 'Busy', path: '/Volumes/BUSY', transport: 'storage' as const, selected: true };
   const paused = { id: 'paused', name: 'Paused', path: '/Volumes/PAUSED', transport: 'storage' as const, selected: true };
   const idle = { id: 'idle', name: 'Idle', path: '/Volumes/IDLE', transport: 'storage' as const, selected: true };
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const jobs: Job[] = [
     { id: 'b', source: busy, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 1, total: 9, bytes: 1, totalBytes: 9, speed: 1, file: 'a' } },
     { id: 'p', source: paused, phase: 'stopped', paused: true, errors: [], backup: false },
@@ -483,7 +485,7 @@ test('one drive can be continued or started while another drive is importing; an
 
 test('any folder can be organized in place from the Organization page', async () => {
   const { Organization } = await import('../renderer/RootApp');
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   for (const language of languages) {
     const t = createTranslator(language), html = (text: string) => text.replaceAll("'", '&#x27;');
     const idle = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: false }) }));
@@ -500,7 +502,7 @@ test('sidebar drives show capacity, free space and a 1·2·3 status; destination
   const GB = 1e9;
   const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128 * GB, free: 40 * GB };
   const usb = { id: 'usb', name: 'USB camera', path: '', transport: 'camera' as const, selected: true };
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/BACKUP', '/Volumes/SECOND'], copyMode: 'mirror', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/BACKUP', '/Volumes/SECOND'], copyMode: 'mirror', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const state: AppState = { preferences, sources: [card, usb], history: [], platform: 'darwin',
     jobs: [{ id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 1, total: 4, bytes: 1, totalBytes: 4, speed: 1, file: 'a' } }],
     destinationStatus: [{ path: '/Volumes/BACKUP', available: true, total: 2000 * GB, free: 812.4 * GB }, { path: '/Volumes/SECOND', available: false }] };
@@ -521,7 +523,7 @@ test('sidebar drives show capacity, free space and a 1·2·3 status; destination
 
 test('organizing removes emptied source folders by default, and the user can turn it off', async () => {
   const { Organization } = await import('../renderer/RootApp');
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const toggle = (markup: string) => markup.match(/data-testid="remove-empty-folders"[\s\S]*?<\/label>/)?.[0] ?? '';
   for (const language of languages) {
     const t = createTranslator(language), render = (removeEmptySourceFolders?: boolean) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(Organization, { state: { preferences: { ...preferences, removeEmptySourceFolders }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: false }) }));
@@ -533,7 +535,7 @@ test('organizing removes emptied source folders by default, and the user can tur
 test('scans show a percentage of used space, organizations show n of x with %, and unanswered new drives are marked', async () => {
   const { ScanProgress, OrganizationProgress, ImportDesk } = await import('../renderer/RootApp');
   const source = { id: 'stick', name: 'Work stick', path: '/Volumes/WORK', transport: 'storage' as const, selected: false, total: 100e9, free: 60e9 };
-  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const org = (progress?: Job['progress']): Job => ({ id: 'o', source: { id: 'library:/b', name: 'Library organization', path: '/b', transport: 'folder' }, organization: true, phase: 'copying', errors: [], backup: false, ...(progress ? { progress } : {}) });
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
@@ -556,7 +558,7 @@ test('errors are explained in plain language, grouped by drive, and keep the tec
   assert.equal(explainError(text('/card/A.NEF: Bad format'), 'metadata').severity, 'warning');
   assert.equal(explainError(text('Something odd happened. More text.')).title, 'Something odd happened.');
   const card = { id: 'card', name: 'Card one', path: '/card', transport: 'storage' as const };
-  const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', separateMedia: false, allowFolderSource: false, unknownRules: {} }, sources: [card], history: [], platform: 'darwin',
+  const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} }, sources: [card], history: [], platform: 'darwin',
     jobs: [{ id: 'j', source: card, phase: 'error', errors: [text('EIO: i/o error, read /card/DSC_1.NEF'), text('ENOSPC: no space left on device')], backup: false }] };
   const errors = collectErrors(state);
   assert.ok(errors.every(error => error.kind === 'source' && error.sourceId === 'card'));
@@ -566,5 +568,231 @@ test('errors are explained in plain language, grouped by drive, and keep the tec
     assert.ok(panel.includes(t('The drive reported a read or write error.')) && panel.includes(t('Free up space or choose another destination.')), `${language}: plain explanations`);
     assert.ok(panel.includes(t('{count} issues', { count: 2 })) && panel.includes(t('Show drive')), `${language}: grouped with a jump to the drive`);
     assert.ok(panel.includes('EIO: i/o error, read /card/DSC_1.NEF') && panel.includes(t('Copy all details')), `${language}: technical details kept`);
+  }
+});
+
+test('the backup folder can be organized by button, shows misplaced files, and the check can be Off, Ask or Automatic', async () => {
+  const { Organization, ImportDesk } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
+  const misplaced = { '/Volumes/A006': { count: 1234, bytes: 5.6e9, checkedAt: '2026-10-21T10:00:00Z' } };
+  const card = (markup: string) => markup.match(/data-testid="backup-check"[\s\S]*?<\/section>/)?.[0] ?? '';
+  for (const language of languages) {
+    const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
+    const actions: unknown[] = [];
+    const page = (state: Partial<AppState>, busy = false) => card(render(createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', ...state }, act: action => actions.push(action), busy })));
+    const clean = page({ misplacedFiles: { '/Volumes/A006': { count: 0, bytes: 0, checkedAt: '2026-10-21T10:00:00Z' } } });
+    assert.ok(clean.includes(t('Organize backup')) && !/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup/.test(clean), `${language}: button is available, not emphasized, when in order`);
+    assert.ok(clean.includes(t('Backup folder is in order.')), `${language}: in order`);
+    assert.ok(/aria-pressed="true"[^>]*>(?:(?!<\/button>)[\s\S])*?/.test(clean) && clean.includes(t('Ask')) && clean.includes(t('Off')) && clean.includes(t('Automatic')), `${language}: three modes`);
+    assert.ok(clean.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1].includes(t('Ask')), `${language}: Ask is the default`);
+    const found = page({ misplacedFiles: misplaced });
+    assert.ok(found.includes(t('{count} files outside your folder structure', { count: formatNumber(1234, language) })) && found.includes(formatBytes(5.6e9, language)), `${language}: count and size`);
+    assert.ok(/<button[^>]*button-primary/.test(found), `${language}: primary when files are misplaced`);
+    const auto = page({ preferences: { ...preferences, autoOrganizeBackup: 'auto' }, misplacedFiles: misplaced });
+    assert.ok(auto.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1].includes(t('Automatic')), `${language}: auto selected`);
+    const off = page({ preferences: { ...preferences, autoOrganizeBackup: 'off' }, misplacedFiles: misplaced });
+    assert.ok(!off.includes(t('Backup folder is in order.')) && !/data-testid="misplaced-files"/.test(off) && off.includes(t('Organize backup')), `${language}: off hides findings but keeps the button`);
+    const running = page({ jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }] }, true);
+    assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*disabled/.test(running), `${language}: disabled while organizing`);
+    const desk = render(createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    assert.ok(/data-testid="destination-misplaced"/.test(desk), `${language}: destination shows misplaced files on the desk`);
+  }
+});
+
+test('planning shows files checked or read with a percentage, and jobs show elapsed time while running and when finished', async () => {
+  const { ImportDesk, OrganizationProgress, formatDuration } = await import('../renderer/RootApp');
+  const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
+  const start = '2026-10-21T10:00:00.000Z', end = '2026-10-21T11:02:05.000Z';
+  assert.equal(formatDuration(3725000), '1:02:05'); assert.equal(formatDuration(65000), '1:05'); assert.equal(formatDuration(4000), '0:04');
+  for (const language of languages) {
+    const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
+    const desk = (job: Job) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    const planning = desk({ id: 'j', source: card, phase: 'verifying', errors: [], backup: false, startedAt: new Date(Date.now() - 65000).toISOString(), progress: { phase: 'planning', step: 'checking', completed: 50, total: 200, bytes: 1, totalBytes: 4, speed: 0, file: 'a' } });
+    assert.ok(planning.includes(t('{completed} of {total} files checked', { completed: '50', total: '200' })), `${language}: files checked`);
+    assert.ok(planning.includes('aria-valuenow="25"'), `${language}: planning bar follows files checked`);
+    assert.match(planning, /data-testid="elapsed"/, `${language}: elapsed while running`);
+    const done = desk({ id: 'j', source: card, phase: 'complete', errors: [], backup: false, startedAt: start, phaseStartedAt: end, progress: { phase: 'verifying', completed: 4, total: 4, bytes: 4, totalBytes: 4, speed: 0, file: '' } });
+    assert.ok(done.includes(t('Took {time}', { time: '1:02:05' })), `${language}: total time when finished`);
+    const organizing: Job = { id: 'o', source: { id: 'l', name: 'Backup organization', path: '/b', transport: 'folder' }, phase: 'verifying', organization: true, errors: [], backup: false, startedAt: start, progress: { phase: 'planning', step: 'reading', completed: 3, total: 10, bytes: 30, totalBytes: 40, speed: 0, file: 'x' } };
+    const reading = render(createElement(OrganizationProgress, { job: organizing }));
+    assert.ok(reading.includes(t('{completed} of {total} files read', { completed: '3', total: '10' })) && reading.includes('75%'), `${language}: reading uses bytes for %`);
+    const checking = render(createElement(OrganizationProgress, { job: { ...organizing, progress: { ...organizing.progress!, step: 'checking' } } }));
+    assert.ok(checking.includes(t('{completed} of {total} files checked', { completed: '3', total: '10' })) && checking.includes('30%'), `${language}: checking uses files for %`);
+  }
+});
+
+test('the drive popup shows when a reconnected drive last finished a scan or a verified import', async () => {
+  const { NewDrivePrompt, formatWhen } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {},
+    deviceHistory: { known: { name: 'Known', lastScanCompleted: '2026-10-19T08:30:00Z', lastImportVerified: '2026-10-20T21:15:00Z' }, fresh: { name: 'Fresh', lastScanCompleted: '2026-10-18T09:00:00Z' } } };
+  const known = { id: 'known', name: 'Known', path: '/Volumes/KNOWN', transport: 'storage' as const, selected: true };
+  const fresh = { id: 'fresh', name: 'Fresh', path: '/Volumes/FRESH', transport: 'storage' as const, selected: false };
+  for (const language of languages) {
+    const t = createTranslator(language), render = (state: Partial<AppState>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(NewDrivePrompt, { state: { preferences, sources: [known, fresh], jobs: [], history: [], platform: 'darwin', ...state }, act: () => {} }) }));
+    const back = render({ reconnectedDevices: ['known'] });
+    const row = back.match(/<li[^>]*data-source-id="known"[\s\S]*$/)?.[0] ?? '';
+    assert.ok(row.includes(t('Last import verified {date}', { date: formatWhen('2026-10-20T21:15:00Z', language) })) && row.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-19T08:30:00Z', language) })), `${language}: both times`);
+    assert.ok(back.includes(t('Drive reconnected')), `${language}: reconnected heading`);
+    assert.ok(row.includes(t('Import now')) && row.includes(t('OK')), `${language}: remembered drive offers Import now and OK`);
+    const both = render({ newDevices: ['fresh'], reconnectedDevices: ['fresh'] });
+    const freshRow = both.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
+    assert.ok(freshRow.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-18T09:00:00Z', language) })) && !freshRow.includes(t('Last import verified {date}', { date: '@@' }).split('@@')[0]), `${language}: new drive with history shows its scan`);
+    assert.ok(freshRow.includes(t('Import from this drive')) && freshRow.includes(t("Don't import").replaceAll("'", '&#x27;')), `${language}: still needs a choice`);
+  }
+});
+
+test('a drive card can be moved to the top of the queue, and cards follow the source order', async () => {
+  const { ImportDesk } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
+  const a = { id: 'a', name: 'Alpha', path: '/Volumes/A', transport: 'storage' as const, selected: true };
+  const b = { id: 'b', name: 'Bravo', path: '/Volumes/B', transport: 'storage' as const, selected: true };
+  const c = { id: 'c', name: 'Charlie', path: '/Volumes/C', transport: 'storage' as const, selected: true };
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences, sources: [c, a, b], history: [], platform: 'darwin',
+      jobs: [{ id: 'ja', source: a, phase: 'copying', errors: [], backup: false }, { id: 'jb', source: b, phase: 'queued', errors: [], backup: false }] }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
+    assert.deepEqual([...markup.matchAll(/<article data-source-id="(\w)"/g)].map(m => m[1]), ['c', 'a', 'b'], `${language}: source order`);
+    const cardOf = (id: string) => markup.match(new RegExp(`<article data-source-id="${id}"[\\s\\S]*?</article>`))?.[0] ?? '';
+    assert.ok(cardOf('b').includes(`aria-label="${t('Move {name} to the top', { name: 'Bravo' })}"`), `${language}: queued card can move up`);
+    assert.ok(!cardOf('c').includes('data-testid="move-to-top"'), `${language}: first card has no move button`);
+    assert.ok(!cardOf('a').includes('data-testid="move-to-top"'), `${language}: active card has no move button`);
+  }
+});
+
+test('every media layout option is translated in all supported languages', () => {
+  const source = readFileSync(new URL('../renderer/RootApp.tsx', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('const mediaLayouts'), source.indexOf('];', source.indexOf('const mediaLayouts')));
+  const keys = [...block.matchAll(/(?:title|detail): '([^']+)'/g)].map(match => match[1]);
+  assert.equal(keys.length, 12);
+  for (const key of keys) for (const [language, catalog] of Object.entries(translationCatalogs)) assert.ok(Object.hasOwn(catalog, key), `${language}: ${key}`);
+});
+
+test('folder settings preview where the next photo and video land for each media layout', async () => {
+  const {SettingsPage}=await import('../renderer/RootApp');
+  const expected:Record<string,[string,string]>={
+    'type-format':['photobackup2026202610Nikon Z6IIIPhotosNEFDSC_0001.NEF','photobackup2026202610Nikon Z6IIIVideosMOVDSC_0002.MOV'],
+    'format':['photobackup2026202610Nikon Z6IIINEFDSC_0001.NEF','photobackup2026202610Nikon Z6IIIMOVDSC_0002.MOV'],
+    'photos-flat':['photobackup2026202610Nikon Z6IIIDSC_0001.NEF','photobackup2026202610Nikon Z6IIIVideosDSC_0002.MOV'],
+    'videos-flat':['photobackup2026202610Nikon Z6IIIPhotosDSC_0001.NEF','photobackup2026202610Nikon Z6IIIDSC_0002.MOV'],
+    'flat':['photobackup2026202610Nikon Z6IIIDSC_0001.NEF','photobackup2026202610Nikon Z6IIIDSC_0002.MOV'],
+    'video-root':['photobackup2026202610Nikon Z6IIIDSC_0001.NEF','videobackupNikon Z6III20261020DSC_0002.MOV'],
+  };
+  for(const [layout,[photo,video]] of Object.entries(expected)){
+    const state:AppState={preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:layout as AppState['preferences']['mediaLayout'],videoBasePath:'videobackup',videoTemplate:'{camera}/{yyyyMMdd}',allowFolderSource:false,unknownRules:{}},sources:[],jobs:[],history:[],platform:'darwin'};
+    const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SettingsPage,{state,act:()=>{},busy:false})}));
+    const text=(id:string)=>{const start=markup.indexOf(`data-testid="${id}"`);return markup.slice(start,markup.indexOf('</div></div>',start)).replace(/<[^>]+>/g,'').replace(/^[^>]*>/,'');};
+    assert.ok(text('photo-preview').endsWith(photo),`${layout} photo: ${text('photo-preview')}`);
+    assert.ok(text('video-preview').endsWith(video),`${layout} video: ${text('video-preview')}`);
+    assert.equal(markup.includes('Video backup folder'),layout==='video-root');
+  }
+});
+
+test('the folder builder shows the saved path, and a hand-written template opens as custom', async () => {
+  const {SettingsPage}=await import('../renderer/RootApp');
+  const render=(template:string,mediaLayout:AppState['preferences']['mediaLayout']='flat',videoTemplate='')=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SettingsPage,{state:{preferences:{language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template,mediaLayout,videoBasePath:'videobackup',videoTemplate,allowFolderSource:false,unknownRules:{}},sources:[],jobs:[],history:[],platform:'darwin'},act:()=>{},busy:false})}));
+  const preview=(markup:string,id:string)=>{const start=markup.indexOf(`data-testid="${id}"`);return markup.slice(start,markup.indexOf('</div></div>',start)).replace(/<[^>]+>/g,'').replace(/^[^>]*>/,'');};
+  const english=render('{camera}/{year}/{monthName}/{day}');
+  assert.ok(english.includes('aria-pressed="true">Camera, then date'));
+  assert.ok(english.includes('aria-pressed="true">English'));
+  assert.ok(preview(english,'photo-preview').endsWith('photobackupNikon Z6III202610 October20DSC_0001.NEF'));
+  const custom=render('shoots/{year}/{camera}');
+  assert.ok(custom.includes('This folder path is a custom template.'));
+  assert.ok(preview(custom,'photo-preview').endsWith('photobackupshoots2026Nikon Z6IIIDSC_0001.NEF'));
+  const video=render('{year}/{yyyymm}/{camera}','video-root','{camera}/{year}');
+  assert.ok(video.includes('data-testid="video-path-builder"'));
+  assert.ok(preview(video,'video-preview').endsWith('videobackupNikon Z6III2026DSC_0002.MOV'));
+  assert.ok(!render('{year}/{yyyymm}/{camera}','video-root').includes('data-testid="video-path-builder"'),'videos use the photo path until set apart');
+});
+
+test('scans, reviews and the backup folder check show a progress bar', async () => {
+  const { PlanningProgress, scanTotalBytes, ScanProgress } = await import('../renderer/RootApp');
+  const render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: child }));
+  const checking = render(createElement(PlanningProgress, { label: 'Review progress', progress: { phase: 'planning', step: 'checking', completed: 50, total: 200, bytes: 0, totalBytes: 0, speed: 0, file: '/card/DCIM/DSC_0050.NEF' } }));
+  assert.ok(checking.includes('aria-valuenow="25"') && checking.includes('50 of 200 files checked') && checking.includes('DSC_0050.NEF'));
+  const listing = render(createElement(PlanningProgress, { label: 'Checking the backup folder', progress: { phase: 'planning', step: 'checking', completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, file: '' } }));
+  assert.ok(listing.includes('progress-discovering'), 'no total yet: indeterminate');
+  const folder = { id: 'folder:/Users/me/Pictures', name: 'Pictures', path: '/Users/me/Pictures', transport: 'folder' as const, total: 1e12, free: 4e11 };
+  const previous: Inventory = { files: [{ path: '/Users/me/Pictures/a.JPG', relative: 'a.JPG', size: 3e9, kind: 'JPEG', included: true }, { path: '/Users/me/Pictures/b.txt', relative: 'b.txt', size: 1e9, kind: 'Other', included: false }], media: 1, companions: 0, unknown: 1, bytes: 3e9, unknownExtensions: {}, elapsedMs: 0 };
+  assert.equal(scanTotalBytes(folder, previous), 4e9, 'a folder is measured against its last listing, not the whole volume');
+  assert.equal(scanTotalBytes(folder), undefined);
+  assert.equal(scanTotalBytes({ ...folder, id: 'card', transport: 'storage' }), 6e11, 'a drive is measured against its used space');
+  const scan = render(createElement(ScanProgress, { sourceName: 'Pictures', listing: { files: 10, bytes: 2e9 }, usedBytes: scanTotalBytes(folder, previous) }));
+  assert.ok(scan.includes('aria-valuenow="50"'));
+});
+
+test('Settings is organized into categories with live summaries, one open panel, and every setting in its place', async () => {
+  const { SettingsPage } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: true, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {},
+    rememberedDevices: { card: { name: 'Card', lastSelected: '2026-10-20T10:00:00Z' } } };
+  const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [{ path: '/Volumes/A006', available: true, total: 2e12, free: 8e11 }] };
+  const order = ['importing', 'destinations', 'folders', 'organization', 'drives', 'general'];
+  for (const language of languages) {
+    const t = createTranslator(language), render = (s: AppState, busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state: s, act: () => {}, busy }) }));
+    const markup = render(state);
+    assert.deepEqual([...markup.matchAll(/data-testid="settings-tab-(\w+)"/g)].map(m => m[1]), order, `${language}: categories in task order`);
+    assert.equal((markup.match(/role="tab"[^>]*aria-selected="true"|aria-selected="true"[^>]*role="tab"/g) ?? []).length, 1, `${language}: one selected category`);
+    const tab = (id: string) => markup.match(new RegExp(`<button[^>]*data-testid="settings-tab-${id}"[\\s\\S]*?</button>`))?.[0] ?? '';
+    const panel = (id: string) => markup.match(new RegExp(`<section[^>]*data-testid="settings-panel-${id}"[\\s\\S]*?(?=<section[^>]*data-testid="settings-panel-|$)`))?.[0] ?? '';
+    assert.ok(tab('importing').includes(t('Automatic')) && tab('importing').includes(t('{count} at once', { count: '2' })), `${language}: importing summary`);
+    assert.ok(tab('destinations').includes('A006'), `${language}: destinations summary`);
+    assert.ok(tab('folders').includes('2026') && tab('folders').includes('202610'), `${language}: folders summary`);
+    assert.ok(tab('organization').includes(t('Ask')), `${language}: organization summary`);
+    assert.ok(tab('drives').includes(t('{count} remembered', { count: '1' })), `${language}: drives summary`);
+    assert.ok(tab('general').includes('125%'), `${language}: general summary`);
+    assert.ok(!/<section[^>]*data-testid="settings-panel-importing"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
+    assert.ok(panel('importing').includes(t('Automatic import')) && panel('importing').includes('id="settings-parallel"') && panel('importing').includes(t('Verify each copy after copying')) && panel('importing').includes(t('Enable media folder selection')), `${language}: importing controls`);
+    assert.ok(panel('destinations').includes('destination-slot') && panel('destinations').includes(t('Backup folder')), `${language}: destination controls`);
+    assert.ok(panel('folders').includes('data-testid="photo-path-builder"') && panel('folders').includes(t('Edited exports folder')), `${language}: folder controls`);
+    assert.ok(panel('organization').includes(t('Remove emptied source folders')) && panel('organization').includes(t('Check the backup folder')), `${language}: organization controls`);
+    assert.ok(panel('drives').includes('data-testid="remembered-devices"') && panel('drives').includes('data-testid="ignored-devices"'), `${language}: drive memory`);
+    assert.ok(panel('general').includes('id="app-language"') && panel('general').includes('id="text-size"'), `${language}: general controls`);
+    const busy = render(state, true);
+    const busyPanel = (id: string) => busy.match(new RegExp(`<section[^>]*data-testid="settings-panel-${id}"[\\s\\S]*?(?=<section[^>]*data-testid="settings-panel-|$)`))?.[0] ?? '';
+    assert.ok(/<fieldset[^>]*disabled/.test(busyPanel('destinations')) && /<fieldset[^>]*disabled/.test(busyPanel('folders')), `${language}: pipeline settings lock while importing`);
+    assert.ok(!/<fieldset[^>]*disabled/.test(busyPanel('general')) && !/<input[^>]*id="settings-parallel"[^>]*disabled/.test(busyPanel('importing')), `${language}: general and live controls stay usable`);
+  }
+});
+
+test('queue positions follow the published start order, so a drive moved to the top says it starts next', async () => {
+  const { ImportDesk } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+  const b = { id: 'b', name: 'Bravo', path: '/Volumes/B', transport: 'storage' as const, selected: true };
+  const c = { id: 'c', name: 'Charlie', path: '/Volumes/C', transport: 'storage' as const, selected: true };
+  // state.jobs is newest first: B was queued before C.
+  const jobs: Job[] = [{ id: 'jc', source: c, phase: 'queued', errors: [], backup: false }, { id: 'jb', source: b, phase: 'queued', errors: [], backup: false }];
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const position = (state: Partial<AppState>, id: string) => { const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences, sources: [c, b], jobs, history: [], platform: 'darwin', ...state }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) })); return markup.match(new RegExp(`<article data-source-id="${id}"[\\s\\S]*?</article>`))?.[0] ?? ''; };
+    assert.ok(position({ queueOrder: ['jc', 'jb'] }, 'c').includes(t('Queue position {count}', { count: 1 })), `${language}: moved drive starts next`);
+    assert.ok(position({ queueOrder: ['jc', 'jb'] }, 'b').includes(t('Queue position {count}', { count: 2 })), `${language}: the other waits`);
+    assert.ok(position({}, 'b').includes(t('Queue position {count}', { count: 1 })), `${language}: without a published order, longest waiting first`);
+  }
+});
+
+test('the Import overview can be hidden from the desk and turned back on in Settings', async () => {
+  const { ImportDesk, SettingsPage } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+  for (const language of languages) {
+    const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
+    const desk = (showDashboard?: boolean) => render(createElement(ImportDesk, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    assert.ok(desk().includes('class="import-dashboard"') && desk().includes(`aria-label="${t('Hide the import overview')}"`), `${language}: shown by default with a hide button`);
+    assert.ok(!desk(false).includes('class="import-dashboard"'), `${language}: can be hidden`);
+    assert.ok(desk(false).includes(`aria-label="${t('Show the import overview')}"`) && !desk().includes('data-testid="show-dashboard-desk"'), `${language}: the desk offers to show it again only while hidden`);
+    const settings = (showDashboard?: boolean) => render(createElement(SettingsPage, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: true })).match(/data-testid="show-dashboard"[\s\S]*?<\/label>/)?.[0] ?? '';
+    assert.ok(settings().includes(t('Show the import overview')) && /checked=""/.test(settings()) && !/disabled/.test(settings()), `${language}: Settings switch, on by default, usable while importing`);
+    assert.ok(!/checked=""/.test(settings(false)), `${language}: off when hidden`);
+  }
+});
+
+test('the parallel drives slider runs from 1 to 10', async () => {
+  const { ImportDesk } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 5, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
+    const slider = markup.match(/<input id="parallel-source-limit"[^>]*>/)?.[0] ?? '';
+    assert.ok(/min="1"/.test(slider) && /max="10"/.test(slider) && /value="5"/.test(slider), `${language}: 1–10, showing 5`);
+    assert.ok(markup.includes(t('{count} of 10', { count: 5 })), `${language}: label out of 10`);
   }
 });

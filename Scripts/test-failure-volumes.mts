@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {plan,execute} from '../desktop/core/index.ts';
 
 const self=fileURLToPath(import.meta.url);
-const options={backup:true,template:'{year}/{camera}',separateMedia:false,unknownRules:{}};
+const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
 if(process.argv[2]==='--fixture-worker'){
  const [source,destination,stop]=process.argv.slice(3);
  try{

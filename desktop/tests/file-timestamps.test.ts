@@ -6,7 +6,7 @@ import os from 'node:os';
 import {configureOrganizationRecovery,execute,executeReorganization,getOrganizationRecovery,plan,resumeOrganization} from '../core/index';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{}};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const capture='2024-02-03T12:34:56.123+09:00';
 const captureMs=1706931296123;
 async function fixture(t:test.TestContext){

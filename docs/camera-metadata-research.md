@@ -22,7 +22,7 @@
 | Panasonic / Leica | 标准 `Model`；Leica/Panasonic 专有结构也解码成 `Model` | 无需复制 ExifTool 的相机表或靠 `.RW2` 推具体型号。[Panasonic 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/Panasonic.pm) |
 | Olympus / OM System | 标准或解码后的 `Model` | `CameraType` 是如 SX… 的内部代码，由 PrintConv 表解码；`-n` 读取时不能把原代码当作新型号名称。[Olympus 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/Olympus.pm) |
 | Pentax / Ricoh | 标准 `Model`；部分 Pentax 记录直接解码为 `Model` | `PentaxModelID` 需要映射，不是字符串型号。[Pentax 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/Pentax.pm) |
-| DJI | 标准 `Model`；已支持的视频 protobuf 字段也映射为 `Model` | 具体协议名和序列号不是新型号别名。[DJI 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/DJI.pm) |
+| DJI | 照片：标准 `Model`（多为机身/镜头模组代码，如 Mini 3 Pro 的 `FC3582`、Pocket 3 的 `PP-101`）。视频：新款机型无顶层 `Model`，产品名在 `ItemList:Encoder`（个别在 `UserData:Encoder`），实测 `DJI OsmoPocket3`，另有报告 `DJI Mini4 Pro`、`DJI Mini5Pro`、`DJI OsmoAction4/5 Pro/6`、`DJI DJIMavic3 Enterprise`；旧款写 `Dji AVC Encoder`（编码器名，不是机型）。timed-metadata 的 `TrackN:Model` 需要 `-ee`，路由不读 | 照片代码（含 Hasselblad 制造的 `L1D-20c`、`L2D-20c`）与视频 Encoder 统一为一个产品名，例如“DJI Osmo Pocket 3”，使同一设备的照片和视频进入同一相机目录。代码表取自 [Wikimedia “DJI camera model names”](https://commons.wikimedia.org/wiki/DJI_camera_model_names)（2026-10-22 抓取，所有有真实代码的行），见 `desktop/platform/dji-models.ts`。代码在任何品牌下都匹配；产品名只在 DJI 语境下匹配。Encoder 只接受以 DJI 开头、且不含 encoder/AVC/HEVC/H.26x 的值。未列出的代码保留原值。 |
 | GoPro | `Model`，包括 GPMF `MINF` 的解码结果 | `DeviceName` 还可能是 Camera、Global Settings、Highlights 或镜头/传感器名称，不能通用作型号。[GoPro 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/GoPro.pm) |
 | Apple / QuickTime | `Keys:Model`；ExifTool 把 `com.apple.quicktime.model` 解码为 Model | 文件品牌、编码器软件名不是相机型号。[QuickTime Keys 定义](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/QuickTime.pm) |
 
@@ -39,7 +39,8 @@
 | Pentax WorldTime | Hometown/Destination 选择、两个城市及各自 DST 标志 | 不把城市 ID 当偏移，也不根据当代城市时区库猜旧照片时间。[Pentax 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/Pentax.pm) |
 | GoPro GPMF `TZON` | 解码为 TimeZone，分钟到时区字符串的转换 | 仍需确定它对应的具体拍摄日期，不能和任意 QuickTime 整数日期拼接。[GoPro 源码](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/GoPro.pm) |
 | Sony XML CreationDate value | 实例含 ISO 日期及 Z/数字偏移，ExifTool 输出 CreationDateValue | 使用字段自身偏移，不根据卡名或另一文件推断。[ExifTool 原始样例记录](https://exiftool.org/forum/index.php?topic=15941.0) |
-| Fujifilm / Panasonic / Olympus / DJI | 本次没有核实到可统一套用的额外 maker-note 时区算法 | 使用实际出现的标准 EXIF 偏移、带偏移内容日期；缺失就保持未知，不增加品牌猜测。各自型号来源见上表。 |
+| Fujifilm / Panasonic / Olympus | 本次没有核实到可统一套用的额外 maker-note 时区算法 | 使用实际出现的标准 EXIF 偏移、带偏移内容日期；缺失就保持未知，不增加品牌猜测。各自型号来源见上表。 |
+| DJI 视频 `QuickTime:CreateDate` + 文件名 `DJI_YYYYMMDDhhmmss_…` | CreateDate 无偏移，A006 上 Pocket 3 实测为 UTC（与文件名相差 +8、−4、−5 小时，偶有 1 秒差）；Mini 4 Pro、Mini 5 Pro、Action 5 Pro 的公开样本也相同。文件名是相机本地时间。有报告称部分固件把 CreateDate 记为片尾时间，初代 Mavic Mini 两者都不对 | 带时间戳的 DJI 文件名作为本地拍摄时间（仅当日期本来会取自无偏移的 QuickTime CreateDate）；两者相差整时区（±2 秒、≤14 小时）时附上该偏移，否则不带偏移；相差 0 时保持墙钟、不标 UTC。改名后的文件与 EXIF 日期不受影响。[Lightroom 已知问题](https://community.adobe.com/feature-requests-676/p-handle-video-capture-times-for-cameras-obeying-the-quicktime-mp4-standard-665608)、[ChatGPT 调研](https://chatgpt.com/c/6ad9504a-6aec-83ea-8575-7fe30cd6d2b0) |
 
 ## 建议的单一规范化策略
 
@@ -96,3 +97,48 @@ ExifTool 的 **Nikon NCTG** 表明确对应 MOV 内的 NCTG 私有记录：`0x11
 预览按拍摄时记录的日历、时分秒和小数秒显示，时区独立显示为 UTC±HH:MM；不转换为电脑时区，也不补猜缺失时区。关键曝光参数保持紧凑，完整原始字段默认折叠，用户可展开并搜索。视频摘要不显示快门计数或其说明。
 
 只读复查六份 A006 副本的结果见 `build/hardware-a006/camera-exposure-normalized.json`：Nikon NEF/JPG 与 Sony ARW 有完整曝光摘要；Fujifilm RAF 有曝光数据但没有镜头名称字段，不能从 X100VI 型号猜填名称。Sony MP4 普通元数据读取没有这些曝光值；单独诊断 `-ee` 产生逐帧曝光记录，快门值会随帧变化，因此不能把任意一帧的值标成整段视频的统一设置。保持快速默认读取，不全局开启嵌入时间序列提取。[ExifTool Sony 实现](https://github.com/exiftool/exiftool/blob/master/lib/Image/ExifTool/Sony.pm)
+
+## 2026-10-22 格式与元数据读取核对
+
+对照来源：[ExifTool 支持格式表](https://exiftool.org/#supported)、[ExifTool QuickTimeUTC 说明](https://exiftool.org/ExifTool.html)、[ExifTool FAQ 16](https://exiftool.org/faq.html)、[ExifTool Sony 标签](https://exiftool.org/TagNames/Sony.html)、[ExifTool QuickTime 标签](https://exiftool.org/TagNames/QuickTime.html)、Immich [mime-types.ts](https://github.com/immich-app/immich/blob/main/server/src/utils/mime-types.ts) 与 [metadata.service.ts](https://github.com/immich-app/immich/blob/main/server/src/services/metadata.service.ts)、Rapid Photo Downloader [fileformats.py](https://github.com/damonlynch/rapid-photo-downloader/blob/master/raphodo/metadata/fileformats.py) 与 [metadatavideo.py](https://github.com/damonlynch/rapid-photo-downloader/blob/master/raphodo/metadata/metadatavideo.py)、PhotoPrism [exif.go](https://github.com/photoprism/photoprism/blob/develop/internal/meta/exif.go)、[digiKam bug 518334](https://bugs.kde.org/show_bug.cgi?id=518334)、[exiftool-vendored DATES.md](https://github.com/photostructure/exiftool-vendored.js/blob/main/docs/DATES.md)。
+
+### 已修改
+
+| 项目 | 变更 | 依据 |
+|---|---|---|
+| RAW | 新增 `arq`（Sony 像素偏移）、`gpr`（GoPro）、`erf`（Epson）、`kdc`/`dcr`（Kodak）、`mef`（Mamiya） | ExifTool 支持表；Immich / Rapid Photo Downloader |
+| 图片 | 新增 `insp`（Insta360 照片）、`mpo`（多图/3D JPEG） | ExifTool、Immich |
+| 视频 | 新增 `3gp`、`m2t`（HDV）、`mod`/`tod`（JVC/Panasonic）、`osv`（DJI Osmo 360 全景主文件） | Rapid Photo Downloader、Immich、ExifTool；`osv` 依据 DJI 360 规格与用户报告 |
+| 视频 | 删除 `nraw`：Nikon N-RAW 视频扩展名是 `.NEV`（已支持） | [Newsshooter](https://www.newsshooter.com/2024/07/24/nikon-n-raw/)、[RPD 讨论](https://discuss.pixls.us/t/rpd-does-not-support-nev-files/32336) |
+| 伴随文件 | 新增 `moi`，与同名 `.mod` 视频一起复制，单独存在时不复制 | `.moi` 是 `.mod` 的元数据文件 |
+| 机型 | 读取 Android 视频的 `AndroidModel`（QuickTime Keys `com.android.model`） | ExifTool QuickTime 标签；Immich 机型回退顺序 |
+| 快门数 | 没有 `MechanicalShutterCount` / `ShutterCount` 时，依次使用 Sony `ShutterCount2`、`ShutterCount3` | ExifTool Sony Tag9050a–c 的机型说明 |
+| DJI | 照片代码与视频 Encoder 统一为产品名（见 `desktop/platform/dji-models.ts`） | Wikimedia Commons、RawTherapee camconst、SANS ISC |
+
+### A006 实测（只读）
+
+- Sony ILCE-6700 MP4：`QuickTime:CreateDate` 为 UTC（23:51:52）；同一文件内嵌 `XML:CreationDateValue 18:51:52-05:00` 与 `QuickTime:TimeZone -05:00`。程序优先使用前者，结果正确。
+- Fujifilm X100VI MOV：`QuickTime:CreateDate` 是 UTC 的片尾时间（02:03:34）；`ExifIFD:DateTimeOriginal 21:51:48` 加 `OffsetTimeOriginal -04:00` 是拍摄开始时间。程序优先使用后者，结果正确。
+- Nikon Z f MOV：`QuickTime:CreateDate` 为 UTC；`Nikon:DateTimeOriginal` 加 `Nikon:TimeZone +08:00` 是本地时间。程序优先使用后者，结果正确。
+- DJI Osmo Pocket 3：见上方 DJI 视频行。
+
+### 核对后保持不变（附原因）
+
+- **无偏移的 QuickTime CreateDate 仍按墙钟处理**：ExifTool 默认也不转换，原因是“许多相机存的是本地时间”（Canon CR3 除外）。iPhone 由带偏移的 `Keys:CreationDate` 覆盖。风险集中在缺少该标签的手机视频，例如照片应用导出的 `IMG_E*.MOV` 和部分 Android 视频。若出现实例，可加入 GPSDateTime 推算偏移（exiftool-vendored 的做法）。
+- 编辑导出识别：可能漏掉的软件有 Luminar、ON1、Pixelmator、NX Studio、Imaging Edge、DPP、Snapseed，但没有找到它们写入 Software 字段的公开证据，暂不加入。由 Lightroom 转换的 DNG 属于 RAW，本来就不会被标为编辑导出。
+- 无日期文件回退：Immich 用 min(birthtime, mtime)，本程序用 mtime。卡上文件的 mtime 就是相机写入时间，所以不改。
+- `webp`、`mkv`、`psd`、`lrcat` 等不是相机写入卡的格式，不加入。`.lrv`、`.lrf` 维持现有处理：作为代理文件随主视频复制，LRF 单独存在时仍作为视频复制（FMT-15）。
+
+## 2026-10-22 运动相机与全景相机
+
+| 设备 | 处理 | 依据 |
+|---|---|---|
+| GoPro | 型号取自 MP4 GPMF 盒内的 `MINF`（不需要 `-ee`），照片取自 EXIF Model。`GLzzxxxx.LRV` 代理文件跟随同一章节号和编号的 `GX`/`GH` 视频；`.THM` 按同名跟随视频；没有原始视频的 LRV 仍作为视频导入；`.GPR` 归为 RAW | [ExifTool GoPro 标签](https://exiftool.org/TagNames/GoPro.html)；GoPro 命名规则（第三方转述 GoPro 支持文章：[gopro-file-renamer](https://github.com/imagingbook/gopro-file-renamer/blob/master/README.md)、[ffmpeg 合并章节](https://alexbevi.com/blog/2023/12/21/combine-gopro-files-with-ffmpeg)） |
+| Insta360 | `.insv` 为视频，`.insp` 为照片。`LRV_<日期>_<时间>_<镜头>1_<序号>` 跟随 `VID_<日期>_<时间>_<镜头>0_<序号>`；双镜头文件 `_00_`、`_10_` 都保留。没有可读型号时，相机名为“Insta360” | [Insta360 文件命名手册](https://onlinemanual.insta360.com/x5/en-us/operating-tutorials/storage/fileformat) |
+| DJI Osmo 360 | `.osv` 为视频，同名 `.lrf` 跟随 | DJI 360 规格（第三方转述） |
+
+未核实、未加入：
+- DJI 视频协议 id（`dvtm_ac203` 等）只在 `-ee` 下出现，路由不读，型号改用 Encoder 读取。
+- Insta360 INSV/INSP trailer 中的型号同样需要 `-ee`，因此使用品牌回退。
+- GoPro 长视频跨章节时的同目录保证：每个章节按自身拍摄时间归档，跨午夜的录像可能分到两天。要强制同目录需要修改 `core/index.ts`，该文件目前由其他会话负责。
+- GoPro MAX `.360`、Fusion `GPFR`/`GPBK`、Ricoh Theta、Kandao、Garmin VIRB、Akaso：已有格式支持，型号来自标准 EXIF/QuickTime Model；没有找到额外的配对规则来源，未作改动。

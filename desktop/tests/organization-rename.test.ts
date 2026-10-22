@@ -9,7 +9,7 @@ import * as core from '../core/index';
 import {sameHardLink,sameFile,movedFileIdentity} from '../core/recovery';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:true,unknownRules:{},reorganize:true};
+const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 const rename={strategy:'rename' as const};
 async function fixture(t:test.TestContext,count=1){
@@ -185,16 +185,20 @@ test('an empty file is organized by the copy path, which works on exFAT',async t
 });
 
 const dated=async(root:string)=>(await core.plan(root,[root],options,async()=>({camera:'Sony',date:'2024-02-03T12:00:00',fields:{}}))).plans[0]!;
-const eventsFor=async(root:string,id:string,event:string)=>{const folder=path.join(root,'.photo-importer-recovery',id),found:string[]=[];for(const name of await fs.readdir(folder))if(name.startsWith('event-')&&JSON.parse(await fs.readFile(path.join(folder,name),'utf8')).event===event)found.push(path.join(folder,name));return found;};
+// Journal events are signed lines of one log; each test rearranges or drops whole lines.
+const eventLog=(root:string,id:string)=>path.join(root,'.photo-importer-recovery',id,'event-log.jsonl');
+const eventLines=async(root:string,id:string)=>(await fs.readFile(eventLog(root,id),'utf8')).split('\n').filter(Boolean);
+const isEvent=(event:string)=>(line:string)=>JSON.parse(line).event===event;
+const rewriteLog=async(root:string,id:string,lines:string[])=>fs.writeFile(eventLog(root,id),lines.map(line=>line+'\n').join(''));
 
 test('a moved file given its capture date stays recognised however its journal events are ordered',async t=>{
  const f=await fixture(t,2);
  await core.executeReorganization(await dated(f.root),undefined,undefined,rename);
  const [job]=await core.getOrganizationRecovery(f.root);
  assert.equal(job!.status,'complete');
- const timed=await eventsFor(f.root,job!.id,'timed');assert.ok(timed.length>0,'dates were applied and journaled');
- // Give the older record the name that sorts last, as readdir order is not chronological.
- for(const file of await eventsFor(f.root,job!.id,'renamed'))await fs.rename(file,path.join(path.dirname(file),'event-ffffffff-'+path.basename(file).slice(15)));
+ const lines=await eventLines(f.root,job!.id);assert.ok(lines.some(isEvent('timed')),'dates were applied and journaled');
+ // Put the older records last, as a journal from an older version has no chronological order.
+ await rewriteLog(f.root,job!.id,[...lines.filter(line=>!isEvent('renamed')(line)),...lines.filter(isEvent('renamed'))]);
  assert.equal((await core.getOrganizationRecovery(f.root))[0]!.status,'complete');
  assert.equal((await core.resumeOrganization(f.root,job!.id)).errors.length,0);
  assert.equal((await core.undoOrganization(f.root,job!.id)).restored,2);
@@ -204,7 +208,7 @@ test('a crash after a moved file was dated but before that was journaled still r
  const f=await fixture(t);
  await core.executeReorganization(await dated(f.root),undefined,undefined,rename);
  const [job]=await core.getOrganizationRecovery(f.root);
- for(const file of await eventsFor(f.root,job!.id,'timed'))await fs.unlink(file);
+ await rewriteLog(f.root,job!.id,(await eventLines(f.root,job!.id)).filter(line=>!isEvent('timed')(line)));
  assert.equal((await core.getOrganizationRecovery(f.root))[0]!.status,'complete');
  assert.deepEqual((await core.resumeOrganization(f.root,job!.id)).errors,[]);
  assert.equal((await core.undoOrganization(f.root,job!.id)).restored,1);
@@ -225,4 +229,20 @@ test('a restored Modified date rounded to the filesystem resolution still identi
  const stat=(mtime:bigint)=>({dev:7n,ino:24n,size:10n,mtimeNs:mtime,ctimeNs:mtime,isFile:()=>true,isSymbolicLink:()=>false}) as unknown as import('node:fs').BigIntStats;
  assert.equal(movedFileIdentity(stat(1792573947330000000n),entry),true,'exFAT stores 10 ms steps');
  assert.equal(movedFileIdentity(stat(1792573946340000000n),entry),false,'a second off is another date');
+});
+
+test('an organization journals into one append-only log, not one file per event',async t=>{
+ const f=await fixture(t,5);
+ assert.deepEqual((await core.executeReorganization(await prepare(f.root),undefined,undefined,rename)).errors,[]);
+ const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.status,'complete');
+ const names=await fs.readdir(path.join(f.root,'.photo-importer-recovery',job!.id));
+ assert.deepEqual(names.filter(name=>name.startsWith('event-')),['event-log.jsonl']);
+ const log=path.join(f.root,'.photo-importer-recovery',job!.id,'event-log.jsonl');
+ assert.ok(!(await fs.readFile(log,'utf8')).slice(0,-1).split('\n').includes(''),'one event per line, no blank lines');
+ // A write cut short by power loss leaves a torn last line, which carries no event.
+ await fs.appendFile(path.join(f.root,'.photo-importer-recovery',job!.id,'event-log.jsonl'),'{"id":"torn');
+ assert.equal((await core.getOrganizationRecovery(f.root))[0]!.status,'complete');
+ assert.equal((await core.undoOrganization(f.root,job!.id)).restored,5);
+ assert.match(await fs.readFile(log,'utf8'),/\{"id":"torn\n\{/,'the next event starts on its own line');
+ for(const original of f.originals)assert.ok((await fs.stat(original)).isFile());
 });

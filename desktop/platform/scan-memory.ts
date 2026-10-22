@@ -9,7 +9,8 @@ import { mediaKindForPath } from '../media-formats';
  * every mount. Nothing here is trusted as-is: folders are reused only when their entry
  * names still match, and EXIF results only when a file's inode, size and times match. */
 interface Stored {
-  version:1;volume:string;saved:string;backup:boolean;
+  /** 3: routing metadata names DJI products consistently for photos and videos. */
+  version:3;volume:string;saved:string;backup:boolean;
   folders:[string,string[]][];
   files:[string,number][];
   routing:[string,string,Metadata][];
@@ -21,7 +22,7 @@ const safeRelative=(relative:unknown):relative is string=>typeof relative==='str
 export async function saveScanMemory(store:string,volume:string,mount:string,scan:Inventory,routing:[string,Metadata][]):Promise<void> {
   if(!scan.listing) return;
   const prefix=mount+path.sep,stored:Stored={
-    version:1,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
+    version:3,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
     // A folder without remembered names cannot be checked after a remount; it is listed again.
     folders:scan.listing.folders.filter((folder):folder is [string,string,string[]]=>Array.isArray(folder[2])).map(([relative,,names])=>[relative,names]),
     files:scan.files.map(file=>[file.relative,file.size]),
@@ -43,7 +44,7 @@ export async function loadScanMemory(store:string,volume:string,mount:string):Pr
     const file=memoryFile(store,volume);
     if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
     const stored=JSON.parse(await fs.readFile(file,'utf8')) as Stored;
-    if(stored?.version!==1 || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
+    if(stored?.version!==3 || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
     const dev=(await fs.lstat(mount,{bigint:true})).dev;
     const folders=stored.folders.filter(([relative,names])=>safeRelative(relative)&&Array.isArray(names)&&names.every(name=>typeof name==='string'));
     const files=stored.files.filter(([relative,size])=>safeRelative(relative)&&relative!==''&&Number.isSafeInteger(size)&&size>=0);

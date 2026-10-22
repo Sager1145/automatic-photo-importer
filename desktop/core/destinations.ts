@@ -1,9 +1,11 @@
 import {executeMany,executeReorganization,type OrganizationStrategy} from './index';
-import {requiredTransferSpace} from './allocation';
+import {destinationEntries,destinationParts,requiredTransferSpace} from './allocation';
 import type {Progress,TransferPlan} from '../shared';
 
 /** Execute independent destination copies; one unavailable disk must not cancel the
- * other. Copies to several destinations share one read of each source file. */
+ * other. Copies to several destinations share one read of each source file. A destination's
+ * video folder (video-root layout) runs as its own plan but is validated, reported and
+ * settled as part of that destination. */
 export async function executeDestinations(plans:TransferPlan[],options:{
  signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;keepSourceFolders?:boolean;
  onVerified?:(source:string,sha256:string,identity:string)=>void;
@@ -11,15 +13,21 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  progress(index:number,value:Progress,pendingBytes:number):void;
  settled(index:number):void;
 }) {
- const pending=plans.map(plan=>plan.entries.reduce((sum,entry)=>sum+(entry.skip?0:entry.size),0));
- const initialPending=[...pending],workspace=plans.map((plan,index)=>requiredTransferSpace(plan)-pending[index]);
- const fullWorkspace=plans.map(plan=>{const all={...plan,entries:plan.entries.map(entry=>({...entry,skip:false}))};return requiredTransferSpace(all)-all.entries.reduce((sum,entry)=>sum+entry.size,0);});
- const total=plans.reduce((sum,plan)=>sum+plan.entries.length,0),latest=plans.map(()=>({bytes:0,completed:0}));
+ // Slots: every plan to run, with the destination it belongs to.
+ const slots=plans.flatMap((plan,index)=>destinationParts(plan).map(part=>({part,index})));
+ const bytesOf=(plan:TransferPlan,all=false)=>destinationEntries(plan).reduce((sum,entry)=>sum+(entry.skip&&!all?0:entry.size),0);
+ const pending=slots.map(({part})=>bytesOf({...part,videos:undefined}));
+ const initialPending=[...pending];
+ // Publication workspace is one related family per destination, as requiredTransferSpace reserved it.
+ const workspace=plans.map(plan=>requiredTransferSpace(plan)-bytesOf(plan));
+ const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
+ const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0}));
  const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]};
- const report=(index:number,value:Progress)=>{
-  const required=Math.max(pending[index],value.totalBytes,value.bytes);pending[index]=required;latest[index]={bytes:value.bytes,completed:value.completed};
-  const sum=(key:'bytes'|'completed')=>latest.reduce((value,item)=>value+item[key],0);
-  options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed')},Math.max(0,pending[index]-value.bytes)+(required>initialPending[index]?fullWorkspace[index]:workspace[index]));
+ const report=(slot:number,value:Progress)=>{
+  const required=Math.max(pending[slot],value.totalBytes,value.bytes);pending[slot]=required;latest[slot]={bytes:value.bytes,completed:value.completed};
+  const sum=(key:'bytes'|'completed')=>latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
+  const grown=own.some(other=>pending[other]>initialPending[other]);
+  options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed')},own.reduce((rest,other)=>rest+Math.max(0,pending[other]-latest[other].bytes),0)+(grown?fullWorkspace[index]:workspace[index]));
  };
  const failed=(index:number,error:unknown)=>result.errors.push(`Destination ${index+1}: ${error instanceof Error?error.message:String(error)}`);
  if(options.reorganize){
@@ -28,28 +36,33 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    options.signal.throwIfAborted();
    try{
     await options.validate(index);
-    const moved=await executeReorganization(plans[index],options.signal,value=>report(index,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders});
-    result.copied+=moved.copied;result.skipped+=moved.skipped;result.moved+=Number(moved.moved);result.retained+=Number(moved.retained);result.retainedBytes+=moved.retainedBytes;result.notes.push(...moved.notes??[]);
-    result.errors.push(...moved.errors.map(error=>`Destination ${index+1}: ${error}`));
+    for(const [slot,{part}] of slots.entries())if(slots[slot].index===index){
+     const moved=await executeReorganization(part,options.signal,value=>report(slot,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders});
+     result.copied+=moved.copied;result.skipped+=moved.skipped;result.moved+=Number(moved.moved);result.retained+=Number(moved.retained);result.retainedBytes+=moved.retainedBytes;result.notes.push(...moved.notes??[]);
+     result.errors.push(...moved.errors.map(error=>`Destination ${index+1}: ${error}`));
+    }
    }catch(error){if(options.signal.aborted)throw error;failed(index,error);}
    finally{options.settled(index);}
   }
   return result;
  }
- const ready:number[]=[];let settledUntil=0;
+ const ready:number[]=[],settled=new Set<number>();
+ // A destination settles once each of its plans has.
+ const settle=(index:number)=>{if(!settled.has(index)){settled.add(index);options.settled(index);}};
+ const finished=new Set<number>();
  try{
   for(let index=0;index<plans.length;index++){
    options.signal.throwIfAborted();
-   try{await options.validate(index);ready.push(index);}
-   catch(error){if(options.signal.aborted)throw error;failed(index,error);options.settled(index);}
+   try{await options.validate(index);ready.push(...slots.flatMap((slot,position)=>slot.index===index?[position]:[]));}
+   catch(error){if(options.signal.aborted)throw error;failed(index,error);settle(index);}
   }
-  const results=await executeMany(ready.map(index=>plans[index]),options.signal,(slot,value)=>report(ready[slot],value),{verify:options.verify,onVerified:options.onVerified},slot=>{settledUntil=slot+1;options.settled(ready[slot]);});
-  results.forEach((value,slot)=>{
-   const index=ready[slot];
+  const results=await executeMany(ready.map(slot=>slots[slot].part),options.signal,(position,value)=>report(ready[position],value),{verify:options.verify,onVerified:options.onVerified},position=>{finished.add(ready[position]);const index=slots[ready[position]].index;if(slots.every((slot,other)=>slot.index!==index||finished.has(other)))settle(index);});
+  results.forEach((value,position)=>{
+   const index=slots[ready[position]].index;
    if(value instanceof Error){failed(index,value);return;}
    result.copied+=value.copied;result.skipped+=value.skipped;result.removed+=value.removed??0;
    result.errors.push(...value.errors.map(error=>`Destination ${index+1}: ${error}`));
   });
- }finally{for(const index of ready.slice(settledUntil))options.settled(index);}
+ }finally{for(const slot of ready)settle(slots[slot].index);}
  return result;
 }

@@ -148,14 +148,12 @@ input[type=range]:focus-visible{outline:2.5px solid var(--accent-fill);outline-o
 .button:disabled{opacity:.42}
 .button-primary{background:var(--accent-fill);color:var(--on-accent);box-shadow:var(--button-highlight),0 1px 2px rgba(0,0,0,.14),0 3px 10px -4px var(--accent-ring)}
 .button-primary:hover:not(:disabled){background:var(--accent-fill-hover)}
-.button-secondary{background:var(--surface);box-shadow:var(--highlight),0 0 0 1px var(--separator-strong),var(--shadow-1)}
-:root[data-theme=dark] .button-secondary{background:rgba(255,255,255,.08);box-shadow:var(--highlight),0 0 0 1px var(--separator)}
-.button-secondary:hover:not(:disabled){background:var(--surface-raised);box-shadow:var(--highlight),0 0 0 1px var(--separator-strong),var(--shadow-2)}
-:root[data-theme=dark] .button-secondary:hover:not(:disabled){background:rgba(255,255,255,.13)}
-.button-quiet{color:var(--label-secondary)}
-.button-quiet:hover:not(:disabled){background:var(--fill-3);color:var(--label)}
+.button-secondary,.button-quiet{background:var(--surface);box-shadow:var(--highlight),0 0 0 1px var(--separator-strong),var(--shadow-1)}
+:root[data-theme=dark] :is(.button-secondary,.button-quiet){background:rgba(255,255,255,.08);box-shadow:var(--highlight),0 0 0 1px var(--separator)}
+:is(.button-secondary,.button-quiet):hover:not(:disabled){background:var(--surface-raised);box-shadow:var(--highlight),0 0 0 1px var(--separator-strong),var(--shadow-2)}
+:root[data-theme=dark] :is(.button-secondary,.button-quiet):hover:not(:disabled){background:rgba(255,255,255,.13)}
 .button-icon-only{padding:0;width:var(--control-height)}
-.button-danger{background:var(--danger-soft);color:var(--danger)}
+.button-danger{background:var(--danger-soft);color:var(--danger);box-shadow:0 0 0 1px var(--danger-border)}
 
 /* Toggle switch */
 .switch-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;cursor:pointer;min-width:0}
@@ -676,9 +674,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .settings-row{display:grid;grid-template-columns:minmax(7rem,11rem) minmax(0,1fr);align-items:center;gap:1rem;padding:.55rem 0;border-bottom:1px solid var(--separator);font-weight:500}
 .settings-row:last-child{border-bottom:0}
 .settings-row .select-wrap{max-width:20rem}
-.text-size-control{display:flex;align-items:center;gap:.75rem;min-width:0}
+.text-size-control{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;min-width:0}
 .settings-row-note{grid-column:2;font-size:var(--text-caption);color:var(--label-secondary)}
-.text-size-control input{flex:1;min-width:6rem}
+.text-size-control input{flex:1 1 6rem;min-width:6rem}
 .text-size-control strong{font-variant-numeric:tabular-nums;color:var(--accent);min-width:3ch}
 .settings-row .appearance-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem}
 .settings-row .accent-row>span{display:none}
@@ -869,7 +867,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .new-drives>li.is-unplugged{opacity:.6;filter:saturate(.4)}
 .organization-progress{display:grid;gap:.4rem}
 .organization-progress-line{display:flex;align-items:center;gap:.6rem;min-width:0;font-size:var(--text-footnote);font-weight:600}
-.organization-progress-line>span{flex:1;min-width:0}
+.organization-progress-line>span:first-child{flex:1;min-width:0}
 .organization-progress-line>strong{color:var(--accent);font-variant-numeric:tabular-nums}
 .organization-progress>small{font-size:var(--text-caption);color:var(--label-secondary)}
 .organization-running{border-color:var(--accent-border)}
@@ -943,13 +941,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
   .destination-bay>.section-heading,.destination-bay>.bay-actions{grid-column:1/-1}
 }
 
-/* Import overview: one strip → status row over a metrics grid → two columns (sized by the desk). */
-@container desk (max-width:58rem){
-  .desk-page>.import-dashboard{grid-template-columns:minmax(0,1fr)}
-  .desk-page>.import-dashboard .dashboard-heading{flex-direction:row;align-items:center;justify-content:space-between}
-  .desk-page>.import-dashboard .dashboard-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem 0}
-}
-@container desk (max-width:36rem){.desk-page>.import-dashboard .dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Settings and Drives rows: side by side when wide, stacked when narrow. */
 .settings-section,.drives-page>.settings-section{container:section/inline-size}
@@ -1061,7 +1052,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 @media (prefers-contrast:more){
   :root{--separator:rgba(0,0,0,.32);--separator-strong:rgba(0,0,0,.55);--field-border:rgba(0,0,0,.6);--label-secondary:#4a4a4f}
   :root[data-theme=dark]{--separator:rgba(255,255,255,.32);--separator-strong:rgba(255,255,255,.55);--field-border:rgba(255,255,255,.6);--label-secondary:#c7c7cc}
-  .button-quiet{text-decoration:underline;text-underline-offset:3px}
 }
 @media (forced-colors:active){
   .button,.nav-item,.segmented button,.source-layout-switch button,.preset,.inventory-open{border:1px solid ButtonText}
@@ -1071,3 +1061,119 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
   .source-row,.settings-section,.destination-panel,.inventory-panel,.review-panel{border:1px solid CanvasText}
 }
 @media (hover:none){.source-row:hover{box-shadow:var(--shadow-1)}}
+
+/* Backup folder check */
+.backup-check{display:grid;gap:.75rem}
+.backup-check>.segmented{justify-self:start;max-width:100%}
+.misplaced-files{display:flex;align-items:flex-start;gap:.45rem;margin:0;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}
+.misplaced-files.is-clean{color:var(--success)}
+.misplaced-files>svg,.destination-misplaced>svg{flex:none;margin-top:.15em}
+.destination-misplaced{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}
+.destination-misplaced>span{flex:1 1 8rem}
+.destination-misplaced>.button{margin-inline-start:auto}
+@starting-style{.misplaced-files,.destination-misplaced{opacity:0;translate:0 6px}}
+.misplaced-files,.destination-misplaced{transition:opacity var(--base) var(--ease-out),translate var(--slow) var(--ease-ios),color var(--base) var(--ease-out)}
+
+/* Elapsed time, drive history */
+.source-progress>div{flex-wrap:wrap;row-gap:.2rem}
+.source-progress>div>span:first-child{margin-inline-end:auto}
+.progress-elapsed{display:inline-flex;align-items:center;gap:.3rem;color:var(--label-tertiary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
+.progress-elapsed>svg{flex:none}
+.drive-history{display:grid;gap:.25rem;margin:0;padding:0;list-style:none;font-size:var(--text-footnote);color:var(--label-secondary)}
+.drive-history li{display:flex;align-items:flex-start;gap:.4rem}
+.drive-history svg{flex:none;margin-top:.15em;color:var(--success)}
+
+/* Compact import overview for small windows: narrow desk or short window. */
+@container desk (max-width:62rem){
+  .desk-page>.import-dashboard{grid-template-columns:minmax(0,1fr) auto;gap:.5rem .75rem;padding:.65rem .85rem}
+  .desk-page>.import-dashboard .dashboard-heading{grid-column:2;grid-row:1;flex-direction:row;align-items:center;align-self:start;gap:.35rem}
+  .desk-page>.import-dashboard .dashboard-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .desk-page>.import-dashboard .status-pill{padding-block:.2rem;font-size:var(--text-caption)}
+  .desk-page>.import-dashboard .dashboard-metrics{grid-column:1;grid-row:1;display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem 1rem}
+  .desk-page>.import-dashboard .dashboard-metrics>div{display:flex;flex:0 1 auto;align-items:baseline;gap:.3rem;padding:0;box-shadow:none;min-width:0}
+  .desk-page>.import-dashboard .dashboard-metrics dd{order:-1;font-size:var(--text-headline);line-height:1.2}
+  .desk-page>.import-dashboard .dashboard-metrics dt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .desk-page>.import-dashboard .dashboard-metrics dt svg,.desk-page>.import-dashboard .dashboard-metrics small{display:none}
+  .desk-page>.import-dashboard .dashboard-total{grid-template-columns:auto minmax(4rem,1fr);align-items:center;column-gap:.75rem}
+  .desk-page>.import-dashboard .dashboard-total>div{gap:.45rem;min-width:0}
+  .desk-page>.import-dashboard .dashboard-total span{font-size:var(--text-callout)}
+  .desk-page>.import-dashboard .dashboard-total .progress-track{height:.375rem}
+  .desk-page>.import-dashboard .dashboard-next-step{padding:.4rem .65rem}
+  .desk-page>.import-dashboard>.progress-jobs li{grid-template-columns:auto minmax(0,1fr);gap:.2rem .75rem;padding:.4rem .7rem}
+  .desk-page>.import-dashboard>.progress-jobs li>span,.desk-page>.import-dashboard>.progress-jobs .organization-progress>small{display:none}
+  .desk-page>.import-dashboard>.progress-jobs strong{font-size:var(--text-footnote)}
+  .desk-page>.import-dashboard>.progress-jobs .organization-progress{gap:.25rem}
+  .desk-page>.import-dashboard>.progress-jobs .progress-track{height:.3rem}
+}
+@media (max-height:820px){
+  .desk-page>.import-dashboard{grid-template-columns:minmax(0,1fr) auto;gap:.5rem .75rem;padding:.65rem .85rem}
+  .desk-page>.import-dashboard .dashboard-heading{grid-column:2;grid-row:1;flex-direction:row;align-items:center;align-self:start;gap:.35rem}
+  .desk-page>.import-dashboard .dashboard-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .desk-page>.import-dashboard .status-pill{padding-block:.2rem;font-size:var(--text-caption)}
+  .desk-page>.import-dashboard .dashboard-metrics{grid-column:1;grid-row:1;display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem 1rem}
+  .desk-page>.import-dashboard .dashboard-metrics>div{display:flex;flex:0 1 auto;align-items:baseline;gap:.3rem;padding:0;box-shadow:none;min-width:0}
+  .desk-page>.import-dashboard .dashboard-metrics dd{order:-1;font-size:var(--text-headline);line-height:1.2}
+  .desk-page>.import-dashboard .dashboard-metrics dt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .desk-page>.import-dashboard .dashboard-metrics dt svg,.desk-page>.import-dashboard .dashboard-metrics small{display:none}
+  .desk-page>.import-dashboard .dashboard-total{grid-template-columns:auto minmax(4rem,1fr);align-items:center;column-gap:.75rem}
+  .desk-page>.import-dashboard .dashboard-total>div{gap:.45rem;min-width:0}
+  .desk-page>.import-dashboard .dashboard-total span{font-size:var(--text-callout)}
+  .desk-page>.import-dashboard .dashboard-total .progress-track{height:.375rem}
+  .desk-page>.import-dashboard .dashboard-next-step{padding:.4rem .65rem}
+  .desk-page>.import-dashboard>.progress-jobs li{grid-template-columns:auto minmax(0,1fr);gap:.2rem .75rem;padding:.4rem .7rem}
+  .desk-page>.import-dashboard>.progress-jobs li>span,.desk-page>.import-dashboard>.progress-jobs .organization-progress>small{display:none}
+  .desk-page>.import-dashboard>.progress-jobs strong{font-size:var(--text-footnote)}
+  .desk-page>.import-dashboard>.progress-jobs .organization-progress{gap:.25rem}
+  .desk-page>.import-dashboard>.progress-jobs .progress-track{height:.3rem}
+}
+/* Narrow sources column: the toolbar keeps its controls on one line; the count repeats the overview. */
+@container sources (max-width:46rem){
+  .connected-count{display:none}
+  .parallel-source-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .parallel-source-control{padding:0 .7rem}
+  .parallel-source-control input{width:4.5rem}
+}
+/* Folder path builder: options of an enabled date level sit under it. */
+.path-builder{display:grid;gap:.25rem}
+.path-builder-heading{margin:.75rem 0 .25rem;font-size:.95em;font-weight:600}
+.path-level-options{display:grid;gap:.5rem;justify-items:start;margin:0 0 .5rem 1.5rem}
+.path-advanced summary{cursor:pointer;color:var(--label-secondary);padding:.5rem 0}
+
+/* Hide / show the import overview */
+.dashboard-title{display:flex;align-items:center;gap:.4rem;min-width:0}
+.dashboard-hide.button-icon-only{--control-height:1.75rem;min-height:1.75rem}
+.dashboard-hide>svg{width:14px;height:14px}
+
+/* Sidebar drive status: the running step flashes. Reduced motion keeps a steady filled dot. */
+.mini-steps i[data-state=active]{position:relative;background:var(--accent-soft);animation:step-flash 1.2s var(--ease-out) infinite}
+.mini-steps i[data-state=active]::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 1.5px var(--accent-fill);opacity:0;pointer-events:none;animation:step-ping 1.2s var(--ease-out) infinite}
+@keyframes step-flash{0%,100%{background-color:var(--accent-soft)}45%{background-color:var(--accent-fill);color:var(--on-accent)}}
+@keyframes step-ping{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.9)}}
+
+/* Settings: category list beside the open panel; a scrolling tab strip when narrow. */
+.settings-page.settings-layout{columns:auto;display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.25rem;container:settings/inline-size}
+.settings-nav{flex:1 1 15rem;max-width:18rem;position:sticky;top:calc(var(--titlebar-height) + 1rem);min-width:0}
+.settings-nav [role=tablist]{display:grid;gap:.2rem;padding:.35rem;border-radius:var(--radius-xl);background:var(--surface);box-shadow:0 0 0 1px var(--separator),var(--shadow-1)}
+.settings-nav [role=tab]{display:flex;align-items:center;gap:.7rem;width:100%;min-width:0;padding:.55rem .65rem;border-radius:var(--radius-lg);text-align:start;color:var(--label);transition:background-color var(--base) var(--ease-out),box-shadow var(--base) var(--ease-out)}
+.settings-nav [role=tab]:hover{background:var(--fill-4)}
+.settings-nav [role=tab][aria-selected=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
+.settings-nav [role=tab]:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
+.settings-nav-icon{display:inline-grid;place-items:center;flex:none;width:1.9rem;height:1.9rem;border-radius:var(--radius-md);background:var(--fill-3);color:var(--label-secondary);transition:background-color var(--base) var(--ease-out),color var(--base) var(--ease-out)}
+.settings-nav [aria-selected=true] .settings-nav-icon{background:var(--accent-fill);color:var(--on-accent)}
+.settings-nav-text{display:grid;gap:.05rem;min-width:0}
+.settings-nav-text strong{font-size:var(--text-callout);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settings-nav-text small{font-size:var(--text-caption);color:var(--label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.settings-panels{flex:999 1 30rem;min-width:0;max-width:56rem}
+.settings-panel{display:grid;gap:1rem;min-width:0}
+.settings-panel[hidden]{display:none}
+.settings-panel:not([hidden]){animation:interface-in var(--base) var(--ease-out)}
+.settings-panel-title{font-size:var(--text-title-2);font-weight:700;letter-spacing:var(--tracking-tight)}
+.settings-panel .settings-section{margin-bottom:0}
+.settings-panel>.settings-fieldset{display:grid;gap:1rem;min-width:0;margin:0;padding:0;border:0}
+@container settings (max-width:46.25rem){
+  .settings-nav{flex-basis:100%;max-width:none;position:static}
+  .settings-nav [role=tablist]{display:flex;overflow-x:auto;scrollbar-width:none}
+  .settings-nav [role=tab]{width:auto;flex:none;padding:.45rem .7rem}
+  .settings-nav-text small{display:none}
+  .settings-nav-icon{width:1.6rem;height:1.6rem}
+}

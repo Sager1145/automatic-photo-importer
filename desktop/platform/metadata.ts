@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Exposure, Metadata } from '../shared';
+import { djiProduct } from './dji-models';
 
 let reader:ExifTool|undefined;
 function exiftool():ExifTool {
@@ -55,8 +56,8 @@ function dateFamily(entries:TagEntries,plainName:string,compositeName:string,sub
   const zone=base.zone||(offsets.length>1?'':offset||composite?.zone||nikonOffset||'');
   return {key:plain.key,date:base.clock+fraction+zone};
 }
-function cameraModel(entries:TagEntries):string|undefined {
-  for(const name of ['Model','CameraModelName','CameraModel','DeviceModelName']){
+function recordedCamera(entries:TagEntries):string|undefined {
+  for(const name of ['Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel']){
     const candidates=entries.filter(([key])=>tagName(key)===name);
     if(name==='Model'){
       const priority=(key:string)=>/^(?:IFD0|EXIF|ExifIFD)$/.test(tagGroup(key))?0:tagGroup(key)==='Keys'?1:2;
@@ -68,6 +69,33 @@ function cameraModel(entries:TagEntries):string|undefined {
       if(/[\p{L}]/u.test(model)&&!/^(?:unknown(?: camera)?|not (?:available|recorded)|n\/a)$/i.test(model))return model;
     }
   }
+  // Newer DJI video names its product only in the item list ("DJI OsmoPocket3", "DJI Mini4 Pro").
+  // Older drones write a codec name there ("Dji AVC Encoder"), and other software (Lavf) is never a camera.
+  for(const [key,value] of entries)if(['ItemList','UserData'].includes(tagGroup(key))&&tagName(key)==='Encoder'&&typeof value==='string'&&/^DJI\b/i.test(value.trim())&&!/encoder|\b(?:avc|hevc|h\.?26[45])\b/i.test(value))return value.trim().replace(/\s+/g,' ');
+}
+/** A DJI photo's camera code and its videos' encoder name become the product's one folder name.
+ * Insta360 keeps its model in a trailer that routing does not read, so its files fall back to the brand. */
+function cameraModel(entries:TagEntries,file?:string):string|undefined {
+  const model=recordedCamera(entries),make=find(entries,['Make']);
+  if(model)return djiProduct(model,/^DJI\b/i.test(model)||/^DJI\b/i.test(String(make??'').trim()))??model;
+  if(file&&/\.ins[vp]$/i.test(file))return 'Insta360';
+}
+/** DJI names files DJI_<camera-local yyyyMMddhhmmss>_…, while its QuickTime CreateDate has no
+ * offset and is usually UTC (some firmware records the clip's end instead). Such a name is the
+ * local capture time. When the two differ by a whole timezone offset, that offset is kept with it. */
+function djiLocalDate(file:string|undefined,entries:TagEntries,date:string|undefined):string|undefined {
+  const match=file&&path.basename(file).match(/^DJI_(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:[_.]|$)/i);
+  const named=match?captureDate(`${match[1]}:${match[2]}:${match[3]} ${match[4]}:${match[5]}:${match[6]}`):undefined;
+  if(!named)return date;
+  if(!date)return named;
+  const created=dates(entries,'CreateDate').find(item=>tagGroup(item.key)==='QuickTime')?.date;
+  if(!created||created!==date||dateParts(created).zone)return date;
+  const utc=Date.parse(created+'Z'),gap=Date.parse(named+'Z')-utc,minutes=Math.round(gap/900000)*15;
+  // No gap means this camera recorded local time; any other gap names no offset. Either way the
+  // name's wall clock stands, never labelled UTC.
+  if(!Number.isFinite(gap)||!minutes||Math.abs(gap-minutes*60000)>2000||Math.abs(minutes)>14*60)return named;
+  const local=new Date(utc+minutes*60000).toISOString().slice(0,19)+dateParts(created).fraction,sign=minutes<0?'-':'+',size=Math.abs(minutes);
+  return `${local}${sign}${String(Math.floor(size/60)).padStart(2,'0')}:${String(size%60).padStart(2,'0')}`;
 }
 function recordedDate(entries:TagEntries):string|undefined {
   const original=dateFamily(entries,'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal');
@@ -133,9 +161,10 @@ function editorProvenance(entries:TagEntries):boolean {
   return false;
 }
 /** Pure interpretation keeps maker-note counter rules testable without camera hardware. */
-export function metadataFromTags(tags:Record<string,unknown>, options:{details?:boolean}={}):Metadata {
+/** `file` (its name only) lets DJI clips take their local capture time from the name. */
+export function metadataFromTags(tags:Record<string,unknown>, options:{details?:boolean;file?:string}={}):Metadata {
   const entries=Object.entries(tags);
-  const camera=cameraModel(entries),date=recordedDate(entries);
+  const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries));
   const fields:Record<string,unknown>={};
   const result:Metadata={camera,date,fields};
   if(editorProvenance(entries))result.edited=true;
@@ -149,7 +178,8 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   for(const [key,value] of entries)flatten(key,value);
   const exposure=exposureSummary(entries);if(exposure)result.exposure=exposure;
   const mechanical=entries.filter(([key])=>tagName(key)==='MechanicalShutterCount').map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined);
-  const total=entries.filter(([key])=>tagName(key)==='ShutterCount');
+  // Sony bodies that keep their count only in ShutterCount2 or ShutterCount3 (ExifTool Sony Tag9050a-c) fall back to it.
+  const total=['ShutterCount','ShutterCount2','ShutterCount3'].map(name=>entries.filter(([key])=>tagName(key)===name)).find(found=>found.some(([key,value])=>counter(key,value)!==undefined))??[];
   const mechanicalValues=new Set(mechanical);
   const totalValues=new Set(total.map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined));
   if(mechanicalValues.size>1)result.shutterNote='Conflicting mechanical shutter counters were found. Review the individual metadata values.';
@@ -197,11 +227,11 @@ async function preview(filename:string):Promise<string|undefined> {
 // Routing reads only what camera, capture date, editor provenance, lens and
 // read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
-  'Model','CameraModelName','CameraModel','DeviceModelName',
+  'Make','Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel',
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',
-  'LensModel','Error','Warning',
+  'Encoder','LensModel','Error','Warning',
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();
@@ -227,7 +257,7 @@ export async function metadata(filename:string, options:{preview?:boolean;detail
   // Grouped raw values preserve duplicate tags and the camera's recorded clock.
   const readArgs=['-G1:4','-a','-n',...(options.details===false?['-fast',...routingTags]:['-api','RequestAll=3'])];
   const tags=await exiftool().readRaw(absolute,{readArgs});
-  const result=metadataFromTags(tags as Record<string,unknown>,options);
+  const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
   if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key){if(routingCache.size>=50000)routingCache.clear();routingCache.set(key,structuredClone(result));}
   if(options.preview!==false)result.preview=await preview(absolute);
   if(options.preview!==false && !result.preview)result.fields.PreviewStatus='No supported embedded image preview is available for this file.';

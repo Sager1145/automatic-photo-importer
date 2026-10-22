@@ -12,7 +12,7 @@ const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!nam
 
 async function plan(source:string,root:string,...args:Parameters<typeof planDestinations> extends [string,string[],...infer Rest]?Rest:never){return (await planDestinations(source,[root],...args)).plans[0]!;}
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options = {backup:false, template:'{year}/{yyyymm}/{camera}', separateMedia:true, unknownRules:{}};
+const options = {backup:false, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
 const metadata = async ():Promise<Metadata> => ({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 async function fixture(t:test.TestContext) {
   const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-core-')));
@@ -64,7 +64,7 @@ test('backup includes hidden user files and unknowns without metadata and preser
 test('copy verifies duplicates, never replaces extras, and shares collision stem across RAW/JPEG/sidecars',async t=>{
   const {source,root,put}=await fixture(t);
   await put('DSC0001.ARW','new raw'); await put('DSC0001.JPG','new jpeg'); await put('DSC0001.XMP','sidecar');
-  const rawFolder=path.join(root,'2024/202402/Sony A7/RAW'); await fs.mkdir(rawFolder,{recursive:true});
+  const rawFolder=path.join(root,'2024/202402/Sony A7/ARW'); await fs.mkdir(rawFolder,{recursive:true});
   await fs.writeFile(path.join(rawFolder,'DSC0001.ARW'),'old raw'); await fs.writeFile(path.join(root,'extra.txt'),'keep');
   const p=await plan(source,root,options,metadata);
   const stems=p.entries.map(e=>path.basename(e.destination,path.extname(e.destination)));
@@ -81,8 +81,8 @@ test('copy verifies duplicates, never replaces extras, and shares collision stem
 test('Sony XML collision suffix stays before M01 and follows the MP4',async t=>{
   const {source,root,put}=await fixture(t);
   await put('C0001.MP4','movie'); await put('C0001M01.XML','metadata');
-  await fs.mkdir(path.join(root,'2024/202402/Sony A7/Videos'),{recursive:true});
-  await fs.writeFile(path.join(root,'2024/202402/Sony A7/Videos/C0001.MP4'),'different');
+  await fs.mkdir(path.join(root,'2024/202402/Sony A7/MP4'),{recursive:true});
+  await fs.writeFile(path.join(root,'2024/202402/Sony A7/MP4/C0001.MP4'),'different');
   const p=await plan(source,root,options,metadata);
   const video=p.entries.find(e=>e.kind==='Videos')!; const xml=p.entries.find(e=>e.kind==='Other')!;
   assert.equal(path.basename(xml.destination),path.basename(video.destination,'.MP4')+'M01.XML');
@@ -177,8 +177,8 @@ test('concurrent plans allocate one consistent family suffix without overwriting
   const [p1,p2]=await Promise.all([plan(source,root,options,metadata),plan(source2,root,options,metadata)]);
   const results=await Promise.all([execute(p1),execute(p2)]); assert.equal(results.reduce((n,r)=>n+r.copied,0),4); assert.ok(results.every(r=>r.errors.length===0));
   const camera=path.join(root,'2024/202402/Sony A7'),[conflict]=await visible(path.join(camera,'Conflicts'));assert.ok(conflict);
-  const originals=await Promise.all(['RAW/A.ARW','JPEG/A.JPG'].map(file=>fs.readFile(path.join(camera,file),'utf8')));
-  const incoming=await Promise.all(['RAW/A.ARW','JPEG/A.JPG'].map(file=>fs.readFile(path.join(camera,'Conflicts',conflict,file),'utf8')));
+  const originals=await Promise.all(['ARW/A.ARW','JPEG/A.JPG'].map(file=>fs.readFile(path.join(camera,file),'utf8')));
+  const incoming=await Promise.all(['ARW/A.ARW','JPEG/A.JPG'].map(file=>fs.readFile(path.join(camera,'Conflicts',conflict,file),'utf8')));
   assert.deepEqual([originals,incoming].sort(),[['first raw','first jpeg'],['second raw','second jpeg']].sort());
   const repeated=await Promise.all([plan(source,root,options,metadata),plan(source2,root,options,metadata)]);assert.ok(repeated.every(transfer=>transfer.entries.every(entry=>entry.skip)));
 });

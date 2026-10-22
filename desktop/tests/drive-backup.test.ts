@@ -6,7 +6,7 @@ import os from 'node:os';
 import {plan,execute} from '../core/index';
 import {driveIdentity} from '../platform/volumes';
 
-const base={backup:true,template:'{year}',separateMedia:false,unknownRules:{}};
+const base={backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>{throw new Error('Backup must not read metadata');};
 async function fixture(t:test.TestContext){
  const folder=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-drive-backup-')));

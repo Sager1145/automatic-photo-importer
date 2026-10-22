@@ -78,7 +78,9 @@ test('blank and invalid grouped values do not hide valid camera models or captur
   assert.equal(metadataFromTags({'IFD0:Model':'unknown','XML:DeviceModelName':' ILCE-6700 '}).camera,'ILCE-6700');
 });
 test('standard decoded model tags support camera brands without treating makers or camera-type codes as models', () => {
-  for(const model of ['NIKON Z f','Canon EOS R5','X100VI','DC-S5M2','OM-1','PENTAX K-1','FC3582','HERO12 Black'])assert.equal(metadataFromTags({'IFD0:Model':` ${model} `}).camera,model);
+  for(const model of ['NIKON Z f','Canon EOS R5','X100VI','DC-S5M2','OM-1','PENTAX K-1','HERO12 Black'])assert.equal(metadataFromTags({'IFD0:Model':` ${model} `}).camera,model);
+  // DJI camera codes become the product name (desktop/platform/dji-models.ts).
+  assert.equal(metadataFromTags({'IFD0:Model':' FC3582 '}).camera,'DJI Mini 3 Pro');
   assert.equal(metadataFromTags({'IFD0:Make':'Canon','Canon:CameraType':248,'GoPro:DeviceName':'Global Settings','QuickTime:Encoder':'Lavf60'}).camera,undefined);
 });
 test('primary standard camera model wins over preview and edited metadata regardless of object order', () => {
@@ -252,4 +254,13 @@ test('destination capacity status does not enumerate camera layouts, but destina
   assert.equal(Object.hasOwn(status,'camera'),false);
   await assert.rejects(validateDestination(root,[],{volumes:snapshot}),/inspect this volume/);
   assert.equal(probe.mock.callCount(),1);
+});
+
+test('Android phone videos are named from their QuickTime Keys model',()=>{
+  assert.equal(metadataFromTags({'Keys:AndroidMake':'Google','Keys:AndroidModel':'Pixel 8 Pro'},{details:false}).camera,'Pixel 8 Pro');
+});
+
+test('Sony bodies that record only ShutterCount2 or ShutterCount3 still report a count',()=>{
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7M3','Sony:ShutterCount2':12345}).shutterCount,'12,345');
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7RM3','Sony:ShutterCount3':678}).shutterCount,'678');
 });

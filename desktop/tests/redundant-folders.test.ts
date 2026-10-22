@@ -41,11 +41,23 @@ test('the chosen folders must be inside the library and never the library itself
 
 test('an organization asked to keep source folders leaves the emptied folders in place',async t=>{
  const l=await library(t);await l.put('incoming/A.JPG','original');
- const {plans:[p]}=await core.plan(l.root,[l.root],{backup:false,template:'{year}/{yyyymm}/{camera}',separateMedia:false,unknownRules:{},reorganize:true},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
+ const {plans:[p]}=await core.plan(l.root,[l.root],{backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{},reorganize:true},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
  const result=await core.executeReorganization(p!,undefined,undefined,{strategy:'rename',keepSourceFolders:true});
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.equal(await l.exists('incoming'),true);
  const [job]=await core.getOrganizationRecovery(l.root);
  assert.deepEqual((await core.resumeOrganization(l.root,job!.id)).errors,[]);
  assert.equal(await l.exists('incoming'),true,'a resumed run keeps honouring the choice');
+});
+
+test('after a video-root backup organization both backup folders stay and only emptied folders inside them go',async t=>{
+ const l=await library(t),photos=path.join(l.root,'photobackup'),videos=path.join(l.root,'videobackup');
+ await l.put('photobackup/2024/202402/Sony A7/RAW/A.ARW');await l.put('photobackup/old/C.MOV');await l.put('photobackup/old/.DS_Store');
+ await l.put('videobackup/stray/B.JPG');await l.put('elsewhere/D.JPG');
+ const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{},sourceFolders:['photobackup','videobackup']};
+ const metadata=async()=>({camera:'Sony A7',date:'2024-02-03T12:00:00',fields:{}});
+ const {plans}=await core.plan(l.root,[photos],{...options,reorganize:true},metadata);
+ for(const part of [plans[0]!,plans[0]!.videos!])assert.deepEqual((await core.executeReorganization(part,undefined,undefined,{strategy:'rename',keepSourceFolders:true})).errors,[]);
+ assert.equal(await core.removeOrganizedFolders(l.root,plans,options.sourceFolders),3,'old, stray and the emptied RAW folder');
+ assert.deepEqual(await Promise.all(['photobackup','videobackup','photobackup/old','videobackup/stray','elsewhere/D.JPG','videobackup/2024/202402/Sony A7/C.MOV','photobackup/2024/202402/Sony A7/B.JPG','photobackup/2024/202402/Sony A7/RAW'].map(l.exists)),[true,true,false,false,true,true,true,false]);
 });

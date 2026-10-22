@@ -131,7 +131,7 @@ for(const mode of ['finalize-intent','finalize-unlink'])test(`SIGKILL ${mode} al
   assert.equal(await fileHash(f.target),expectedHash);
   if(mode === 'finalize-intent')assert.equal(await fileHash(saved),expectedHash);
   else await assert.rejects(fs.stat(saved),{code:'ENOENT'});
-  const events = await Promise.all((await visible(job.folder)).filter(name=>/^event-.*\.json$/.test(name)).map(async name=>JSON.parse(await fs.readFile(path.join(job.folder,name),'utf8'))));
+  const events = (await fs.readFile(path.join(job.folder,'event-log.jsonl'),'utf8')).split('\n').filter(Boolean).map(line=>JSON.parse(line));
   assert.ok(events.some(event=>event.event==='finalize-intent'));assert.ok(!events.some(event=>event.event==='finalized'));
   const retry = await worker(t,'retry-finalize',f.base,false,id);
   assert.equal(retry.result?.removed,mode === 'finalize-intent'?1:0);assert.equal(retry.result?.finalized,1);assert.equal(retry.jobs?.[0]?.status,'complete');
