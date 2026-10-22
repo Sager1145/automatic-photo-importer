@@ -10,6 +10,8 @@ import { plan, execute, configureOrganizationRecovery } from '../core/index';
 import { recordPartial } from '../core/import-recovery';
 import { randomUUID } from 'node:crypto';
 import type { Metadata } from '../shared';
+import files from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -91,4 +93,34 @@ test('a copy stopped while publishing on exFAT is finished in place by the next 
   assert.deepEqual(await execute(again),{copied:1,skipped:0,errors:[]});
   assert.equal((await fs.stat(destination)).size,3*1024*1024);
   assert.deepEqual(await leftovers(root),[]);
+});
+
+test('re-importing onto exFAT reads each file already there once to plan and once to confirm it',async t=>{
+  const mount=await exfat(t);
+  if(!mount) return t.skip('exFAT disk images are unavailable here');
+  const source=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'exfat-reimport-')));
+  t.after(()=>fs.rm(source,{recursive:true,force:true}));
+  await fs.writeFile(path.join(source,'DSC_0001.NEF'),Buffer.alloc(300_000,7));
+  await fs.writeFile(path.join(source,'DSC_0002.JPG'),Buffer.alloc(120_000,9));
+  const root=path.join(mount,'photobackup');await fs.mkdir(root);
+  assert.equal((await execute((await plan(source,[root],options,metadata)).plans[0]!)).copied,2);
+  // exFAT cannot prove a file unchanged from its stat across sessions, so the library is read
+  // again, but only by the checks that need it: one comparison to plan and one to confirm.
+  const reads=new Map<string,number>(),open=files.open.bind(files);
+  t.mock.method(files,'open',async(...args:Parameters<typeof files.open>)=>{
+    const handle=await open(...args),file=String(args[0]);
+    if(file.startsWith(root+path.sep)&&!path.basename(file).startsWith('.')){const read=handle.read.bind(handle) as (...values:unknown[])=>Promise<{bytesRead:number}>;t.mock.method(handle,'read',async(...values:unknown[])=>{const result=await read(...values);if(result.bytesRead)reads.set(file,(reads.get(file)??0)+result.bytesRead);return result;});}
+    return handle;
+  });syncBuiltinESMExports();
+  t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+  const again=(await plan(source,[root],options,metadata)).plans[0]!;
+  assert.ok(again.entries.every(entry=>entry.skip));
+  const planned=new Map(reads);
+  const result=await execute(again);
+  t.mock.restoreAll();syncBuiltinESMExports();
+  assert.deepEqual(result,{copied:0,skipped:2,errors:[]});
+  for(const entry of again.entries) {
+    assert.equal(planned.get(entry.destination),entry.size,`planning reads ${path.basename(entry.destination)} once`);
+    assert.equal(reads.get(entry.destination),2*entry.size,`copying confirms ${path.basename(entry.destination)} with one more read`);
+  }
 });

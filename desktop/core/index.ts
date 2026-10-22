@@ -4,7 +4,7 @@ import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Inventory, InventoryFile, MediaLayout, Metadata, PlanEntry, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { inventory, extension, stem, rules, nkscEdit, unknownRule, type RuleDefaults } from './inventory';
-import { destinationIndex, flushIndex, type DestinationIndex } from './destination-index';
+import { destinationIndex, flushIndex, type DestinationIndex, type Digests } from './destination-index';
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
@@ -12,6 +12,7 @@ import { beneath, checkAbort, code, contained, digest, directory, identity, isAb
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
+import { streams } from './devices';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError} from '../messages';
@@ -20,6 +21,17 @@ export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalizati
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
 const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
+/** Whole files hashed or copied at once by one job; each device's own limit (devices.ts) still
+ * applies, so a spinning disk serves them one at a time. */
+const STREAM_CONCURRENCY=4;
+/** Bounded worker pool in input order; the first failure stops new work and is rethrown. */
+async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Promise<void> {
+  let next=0,failure:unknown;
+  await Promise.all(Array.from({length:Math.min(items.length,limit)},async()=>{
+    while(failure===undefined && next<items.length) {const item=items[next++]!;try { await work(item); } catch(error) { failure??=error; }}
+  }));
+  if(failure!==undefined) throw failure;
+}
 interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;editedFolder?:string;sourceFolders?:string[];drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
@@ -76,14 +88,14 @@ function target(entry:PlanEntry,attempt:number,family:PlanEntry[],digests?:Map<s
 }
 /** null: nothing there. A different size is a different file without reading
  * anything; equal sizes compare SHA-256 values (the destination via its index). */
-async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:DestinationIndex,signal?:AbortSignal):Promise<boolean|null> {
+async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:Digests,signal?:AbortSignal):Promise<boolean|null> {
   await contained(file,root);
   let stat;
   try { stat=await fs.lstat(file,{bigint:true}); } catch(error) { if(code(error)==='ENOENT') return null; throw error; }
   if(!stat.isFile() || stat.size!==BigInt(size)) return false;
   return await index.digestOf(file,signal)===await expected();
 }
-async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:DestinationIndex,signal?:AbortSignal,known?:Map<string,boolean>):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
+async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal,known?:Map<string,boolean>):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
@@ -366,12 +378,23 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera)}});
     }
     const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal):undefined;
+    // A same-size file at a destination is compared by content. Both sides are hashed here, several
+    // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
+    // allocation below then reuses those digests unless a file changed in between.
+    await pool(pending,STREAM_CONCURRENCY,async entry=>{
+      checkAbort(signal);
+      if(mirror?.known.has(pathKey(entry.destination))) return;
+      const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
+      if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
+      try { await Promise.all([resolve(entry),index.hinted.digestOf(entry.destination,signal)]); }
+      catch(error) { if(isAbort(error)) throw error; /* Allocation checks it again and reports it where it always has. */ }
+    });
     const reservations=new Map<string,PlanEntry>(),entries:PlanEntry[]=[];
     for(const family of groups(pending)) {
       if(family.some(entry=>failures.has(entry.source))) continue;
       let allocation;
       // A family is planned whole or not at all; nothing has been written for it yet.
-      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index,signal,mirror?.known)); }
+      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal,mirror?.known),familyFolders(family),signal); }
       catch(error) { for(const entry of family) skip(entry.source,error); continue; }
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
       compared+=family.length;comparing(path.relative(sourceRoot,family[0]!.source));
@@ -407,18 +430,40 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
 // Destination checks, publication and staging-link cleanup share this lock:
 // linking/unlinking a staging file changes the destination inode's ctime.
 // Staging remains independent so jobs can read/copy concurrently.
-let publication:Promise<void>=Promise.resolve();
-async function exclusive<T>(work:()=>Promise<T>):Promise<T> {
-  const previous=publication;
+// A hold names the paths it decides about (files, or folders for everything beneath them) and
+// waits only for earlier holds that overlap them; a hold without paths (drive folders, mirror
+// moves, organization) overlaps everything. Waiting only on earlier holds cannot deadlock.
+// No overwrite ever depends on it: publication creates names with link or O_EXCL.
+const holds=new Set<{keys?:string[];done:Promise<void>}>();
+const overlaps=(a?:string[],b?:string[])=>!a||!b||a.some(left=>b.some(right=>left===right||left.startsWith(right+path.sep)||right.startsWith(left+path.sep)));
+/** With `signal`, Stop ends the wait for the lock at once. */
+async function exclusive<T>(work:()=>Promise<T>,paths?:string[],signal?:AbortSignal):Promise<T> {
+  const keys=paths?.map(pathKey),earlier=[...holds].filter(hold=>overlaps(hold.keys,keys));
   let release!:()=>void;
-  publication=new Promise<void>(resolve=>{release=resolve;});
-  await previous;
-  try { return await work(); } finally { release(); }
+  const hold={keys,done:new Promise<void>(resolve=>{release=resolve;})};holds.add(hold);
+  try { await abortable(Promise.all(earlier.map(item=>item.done)),signal); return await work(); } finally { holds.delete(hold);release(); }
 }
+/** The paths a family's allocation can touch: its destinations, or, when one is already taken
+ * and a conflict folder may be needed, the whole folder it is filed in. */
+const familyFolders=(family:PlanEntry[])=>family.map(entry=>entry.allocation?.folder??path.dirname(entry.destination));
+async function familyPaths(family:PlanEntry[]):Promise<string[]|undefined> {
+  const taken=await Promise.all(family.map(entry=>fs.lstat(entry.destination).then(()=>true,()=>false)));
+  return taken.includes(true)||new Set(family.map(entry=>pathKey(entry.destination))).size<family.length?undefined:family.map(entry=>entry.destination);
+}
+/** Thrown inside a hold on exact paths when allocation needs a conflict folder after all. */
+const WIDEN=Symbol('widen');
 interface Staged {streamDigest?:string;sourceStat?:import('node:fs').BigIntStats;verifiedStat?:import('node:fs').BigIntStats;file:string;dev:bigint;ino:bigint;birthtime:bigint;record?:OwnedPartial;recovery:RecoveryIndex;}
 const claimedStages=new Set<string>();
 interface StageTarget {entry:PlanEntry;transfer:TransferPlan;recovery:RecoveryIndex;onBytes:(bytes:number)=>void;}
 interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<typeof fs.open>>;initialSize:number;error?:unknown;}
+/** Wait for `work`, or stop waiting (without stopping it) as soon as `signal` aborts. */
+function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T> {
+  if(!signal) return work;
+  checkAbort(signal);
+  let stop!:()=>void;
+  const stopped=new Promise<never>((_resolve,reject)=>{stop=()=>reject(new DOMException('Import stopped','AbortError'));signal.addEventListener('abort',stop,{once:true});});
+  return Promise.race([work,stopped]).finally(()=>signal.removeEventListener('abort',stop));
+}
 const sourceChanged=(entry:PlanEntry)=>new MessageError('error.sourceChanged',{path:entry.source});
 async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promise<OpenStage> {
   const {entry,transfer,recovery}=target;
@@ -466,12 +511,13 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
   for(const target of targets) try { opened.push(await openStage(target,signal)); } catch(error) { if(isAbort(error)) {for(const open of opened)await abandonStage(open,error);throw error;} failures.set(target,error); }
   let input:Awaited<ReturnType<typeof regularHandle>>|undefined;
   try {
-    if(opened.length) {
+    // One stream slot on the source's and each destination's device for the whole copy.
+    if(opened.length) await streams.run([entry.source,...opened.map(open=>open.staged.file)],async chunk=>{
       input=await regularHandle(entry.source);
       const before=await input.stat({bigint:true});
       if(before.size!==BigInt(entry.size) || (entry.sourceIdentity!==undefined && statKey(before)!==entry.sourceIdentity)) throw sourceChanged(entry);
       for(const open of opened) if(!open.staged.record&&importRecoveryAvailable()) try { await open.output.sync(); open.staged.record=await recordPartial('stage',open.staged.file,await open.output.stat({bigint:true}),open.target.entry,open.target.transfer,open.target.recovery); } catch(error) { await abandonStage(open,error); }
-      const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(1024*1024);let position=0;
+      const hash=createHash('sha256'), buffer=Buffer.allocUnsafe(chunk);let position=0;
       for(;;) {
         checkAbort(signal);
         if(opened.every(open=>open.error)) break;
@@ -490,7 +536,6 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
         }
         position+=bytesRead;
       }
-      for(const open of opened) if(!open.error) try { await open.output.sync(); } catch(error) { await abandonStage(open,error); }
       const after=await input.stat({bigint:true}), pathname=await fs.lstat(entry.source,{bigint:true}),streamDigest=hash.digest('hex');
       if(!opened.every(open=>open.error) && (position!==entry.size || !sameStat(before,after) || !sameStat(after,pathname))) throw sourceChanged(entry);
       for(const open of opened) {
@@ -500,12 +545,13 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
           staged.streamDigest=streamDigest;staged.sourceStat=after;
           await applyFileTimestamps(output,before,target.entry.captureTimeMs);
           await rebindStage(open);
+          // The one sync after the last write: data and timestamps reach the disk together.
           await output.sync();
           if(staged.record)staged.record=await rebound(staged.record,output,target.entry,target.transfer,staged.recovery);
           await output.close();
         } catch(error) { await abandonStage(open,error); }
       }
-    }
+    },signal);
   } catch(error) {
     for(const open of opened) if(!open.error) await abandonStage(open,error);
     if(isAbort(error)) throw error;
@@ -518,12 +564,13 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
 }
 const toError=(error:unknown)=>error instanceof Error?error:new Error(String(error));
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
-async function cleanStage(staged:Staged,root:string):Promise<void> {
+/** `sync:false`: the caller synchronizes the folder once after removing many stages. */
+async function cleanStage(staged:Staged,root:string,sync=true):Promise<void> {
   claimedStages.delete(staged.file);
   try {
     await contained(staged.file,root);
     const current=await fs.lstat(staged.file,{bigint:true});
-    if(current.isFile() && current.dev===staged.dev && current.ino===staged.ino && current.birthtimeNs===staged.birthtime) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery);}
+    if(current.isFile() && current.dev===staged.dev && current.ino===staged.ino && current.birthtimeNs===staged.birthtime) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
   } catch { /* An unavailable/replaced destination is never followed or removed. */ }
 }
 /** A complete staged copy left by an interrupted run is released once the published file is
@@ -585,17 +632,20 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
     const output=owned?await openPartial(owned,transfer.root):await fs.open(destination,'wx',0o600);
     try {
       if(!owned){await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);}
-      const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(1024*1024);let position=Number((await output.stat({bigint:true})).size);
+      await streams.run([staged.file,destination],async chunk=>{
+      const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(chunk);let position=Number((await output.stat({bigint:true})).size);
       try {for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,position);if(!bytesRead)break;let offset=0;
         while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}
-        if(!position)owned=await rebound(owned,output,publicationEntry,transfer,recovery);position+=bytesRead;
+        if(!position&&owned)owned=await rebound(owned,output,publicationEntry,transfer,recovery);position+=bytesRead;
       }const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();
-      owned=await rebound(owned,output,publicationEntry,transfer,recovery);}finally{await input.close();}
+      if(owned)owned=await rebound(owned,output,publicationEntry,transfer,recovery);}finally{await input.close();}
+      },signal);
       const stat=await output.stat({bigint:true});if(!sameStat(stat,await fs.lstat(destination,{bigint:true})))throw new Error('Destination changed while publishing');
     }finally{await output.close();}
   }
   await rootUnchanged(transfer.root,transfer.rootIdentity); await contained(destination,transfer.root);
-  await syncFile(destination);
+  // A copy was already synced after its last write and timestamps.
+  if(!copy) await syncFile(destination);
   if(copy&&options.verify===false) bound=undefined;
   else if(copy) {
     const before=await fs.lstat(destination,{bigint:true});
@@ -614,17 +664,19 @@ export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgre
 }
 interface Run {
   transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;
-  batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean}[];pending:Set<string>;
+  batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[]}[];pending:Set<string>;
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
 }
 /** Copy the same reviewed entries to several destinations. Each source file is
  * read once for all of them; checks, publication and errors stay per destination.
  * A destination that cannot start returns an Error in its slot; Stop throws. */
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0)}));
+  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0)}));
   const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file});};
   // A failed group stops counting as done and is reported as failed, once.
-  const fail=(run:Run,batch:Run['batches'][number],error:unknown)=>{if(!batch.failed){run.failed+=batch.family.length;for(const entry of batch.family)if(run.counted.delete(entry.id))run.completed--;}batch.failed=true;run.result.errors.push(`${path.basename(batch.family[0]!.source)}: ${message(error)}`);};
+  const fail=(run:Run,batch:Run['batches'][number],error:unknown)=>{if(!batch.failed){run.failed+=batch.family.length;for(const entry of batch.family)if(run.counted.delete(entry.id))run.completed--;}batch.failed=true;batch.errors.push(`${path.basename(batch.family[0]!.source)}: ${message(error)}`);};
+  // Errors of families handled side by side, in file order.
+  const report=(run:Run)=>{for(const batch of run.batches){run.result.errors.push(...batch.errors);batch.errors=[];}};
   const settled=new Set<number>();
   try {
     // Setup per destination: mirror moves, then the duplicate preflight. A
@@ -644,91 +696,123 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       for(const batch of run.batches) try {
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);
-          if(!entry.digest || await exclusive(()=>existingMatches(entry.destination,entry.size,async()=>entry.digest!,transfer.root,run.index!,signal))!==true)run.pending.add(entry.id);
+          // A hint: the verification phase reads the destination again before trusting it.
+          if(!entry.digest || await exclusive(()=>existingMatches(entry.destination,entry.size,async()=>entry.digest!,transfer.root,run.index!.hinted,signal),[entry.destination],signal)!==true)run.pending.add(entry.id);
           checked++;existing(path.basename(entry.source));
         }
       } catch(error) { if(isAbort(error))throw error; fail(run,batch,error); }
       checked=transfer.entries.length;existing('');
+      report(run);
       // Files already verified at their destination need no copy and count as done.
       for(const batch of run.batches)if(!batch.failed)for(const entry of batch.family)if(!run.pending.has(entry.id)){run.counted.add(entry.id);run.completed++;}
     } catch(error) { if(isAbort(error))throw error; run.error=toError(error); }
     // One read per source file, written to every destination still waiting for it.
     const order:string[]=[],seen=new Set<string>(),owners=runs.map(()=>new Map<string,{batch:Run['batches'][number];entry:PlanEntry}>());
     runs.forEach((run,position)=>{for(const batch of run.batches)for(const entry of batch.family){owners[position]!.set(entry.id,{batch,entry});if(!seen.has(entry.id)){seen.add(entry.id);order.push(entry.id);}}});
-    for(const id of order) {
+    // Several files stream at once (one each on a spinning disk), hiding each file's open,
+    // receipt and sync latency behind the others' transfers.
+    await pool(order,STREAM_CONCURRENCY,async id=>{
       checkAbort(signal);
       const targets:{run:Run;position:number;batch:Run['batches'][number];entry:PlanEntry}[]=[];
       runs.forEach((run,position)=>{if(run.error||!run.pending.has(id))return;const {batch,entry}=owners[position]!.get(id)!;if(!batch.failed)targets.push({run,position,batch,entry});});
-      if(!targets.length) continue;
+      if(!targets.length) return;
       const results=await stageMany(targets.map(({run,position,entry})=>({entry,transfer:run.transfer,recovery:run.recovery,onBytes:count=>{run.bytes+=count;progress(position,path.basename(entry.source));}})),signal);
       results.forEach((value,slot)=>{const {run,position,batch,entry}=targets[slot]!;if(value instanceof Error)fail(run,batch,value);else{batch.staged.set(entry.id,value);if(!batch.failed){run.counted.add(entry.id);run.completed++;}progress(position,path.basename(entry.source));}});
-    }
-    // Verification and publication stay per destination and in order.
+    });
+    for(const run of runs)report(run);
+    // Destinations are verified one after another; within one, families run side by side and
+    // their errors are reported in file order.
     for(const [position,run] of runs.entries()) {
       if(run.error){settled.add(position);onSettled?.(position);continue;}
       const {transfer,recovery,index,result}=run;
       run.phase='verifying';run.completed=0;run.counted.clear();progress(position,'');
-      for(const {family,staged,failed} of run.batches){
+      // Check all members of a family before publishing it. Publication then checks
+      // inode/stat identity, avoiding another full staging hash.
+      const check=async({family,staged}:Run['batches'][number])=>{
+        const verifiedSources=new Map<string,import('node:fs').BigIntStats>(),effective=new Map<string,PlanEntry>();
+        for(const entry of family){
+          await contained(entry.source,transfer.source);
+          const temporary=staged.get(entry.id);
+          if(temporary){
+            if(entry.digest!==undefined&&temporary.streamDigest!==entry.digest)throw sourceChanged(entry);
+            const streamed=temporary.streamDigest!;
+            const before=await fs.lstat(temporary.file,{bigint:true});
+            if(options.verify!==false&&await digest(temporary.file,signal)!==streamed)throw new Error(`Staged file verification failed: ${entry.source}`);
+            const after=await fs.lstat(temporary.file,{bigint:true});if(!sameStat(before,after))throw new Error(`Staged file changed: ${entry.source}`);
+            temporary.verifiedStat=after;effective.set(entry.id,{...entry,digest:streamed});
+          } else {
+            // Preflight matched a planned checksum. It still describes the source
+            // while the plan-time stat identity holds; otherwise hash it again.
+            if(entry.digest===undefined)throw new Error(`Destination changed after copy preparation; retry: ${entry.destination}`);
+            effective.set(entry.id,entry);
+          }
+          const before=await fs.lstat(entry.source,{bigint:true});
+          if(temporary?!sameStat(temporary.sourceStat!,before):!(entry.sourceIdentity!==undefined&&statKey(before)===entry.sourceIdentity)&&await digest(entry.source,signal)!==entry.digest)throw sourceChanged(entry);
+          const after=await fs.lstat(entry.source,{bigint:true});if(!sameStat(before,after))throw sourceChanged(entry);
+          verifiedSources.set(entry.id,after);
+        }
+        return {verifiedSources,members:family.map(entry=>effective.get(entry.id)!)};
+      };
+      // Several families are checked and published at once; each holds the lock only for the
+      // paths it decides about, so families filed apart publish side by side.
+      await pool(run.batches,STREAM_CONCURRENCY,async batch=>{
+        const {family,staged,failed}=batch;
         checkAbort(signal);
         const published:{file:string;sha256:string;stat:import('node:fs').BigIntStats}[]=[];
         if(!failed)try{
-          // Check all members before publishing this related family. Publication
-          // then checks inode/stat identity, avoiding another full staging hash.
-          const verifiedSources=new Map<string,import('node:fs').BigIntStats>(),effective=new Map<string,PlanEntry>();
-          for(const entry of family){
-            await contained(entry.source,transfer.source);
-            const temporary=staged.get(entry.id);
-            if(temporary){
-              if(entry.digest!==undefined&&temporary.streamDigest!==entry.digest)throw sourceChanged(entry);
-              const streamed=temporary.streamDigest!;
-              const before=await fs.lstat(temporary.file,{bigint:true});
-              if(options.verify!==false&&await digest(temporary.file,signal)!==streamed)throw new Error(`Staged file verification failed: ${entry.source}`);
-              const after=await fs.lstat(temporary.file,{bigint:true});if(!sameStat(before,after))throw new Error(`Staged file changed: ${entry.source}`);
-              temporary.verifiedStat=after;effective.set(entry.id,{...entry,digest:streamed});
-            } else {
-              // Preflight matched a planned checksum. It still describes the source
-              // while the plan-time stat identity holds; otherwise hash it again.
-              if(entry.digest===undefined)throw new Error(`Destination changed after copy preparation; retry: ${entry.destination}`);
-              effective.set(entry.id,entry);
-            }
-            const before=await fs.lstat(entry.source,{bigint:true});
-            if(temporary?!sameStat(temporary.sourceStat!,before):!(entry.sourceIdentity!==undefined&&statKey(before)===entry.sourceIdentity)&&await digest(entry.source,signal)!==entry.digest)throw sourceChanged(entry);
-            const after=await fs.lstat(entry.source,{bigint:true});if(!sameStat(before,after))throw sourceChanged(entry);
-            verifiedSources.set(entry.id,after);
-          }
-          const members=family.map(entry=>effective.get(entry.id)!),known:Resolve=async entry=>entry.digest!;
-          await exclusive(async()=>{
+          const {verifiedSources,members}=await check(batch),known:Resolve=async entry=>entry.digest!;
+          // A destination taken meanwhile sends the family to a conflict folder: then it gives
+          // up its hold on the exact paths and decides again holding the whole folder.
+          const exact=await familyPaths(members);
+          const decide=(keys:string[])=>exclusive(async()=>{
             checkAbort(signal);await rootUnchanged(transfer.root,transfer.rootIdentity);
-            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,index!,signal);
+            const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
+            // Allocation and the final duplicate check decide together under this lock: a file
+            // the first read is not read again by the second while its stat is unchanged.
+            const checks=index!.section();
+            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);
+            if(outside(allocated))throw WIDEN;
             for(let i=0;i<allocated.length;){
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,index!,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
               try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
-              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,index!,signal);continue;}throw error;}
+              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
-          });
+          },keys,signal);
+          try { await decide(exact??familyFolders(members)); }
+          catch(error) { if(error!==WIDEN) throw error; await decide(familyFolders(members)); }
           run.completed+=family.length;
-        }catch(error){if(isAbort(error))throw error;run.failed+=family.length;result.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);}
+        }catch(error){if(isAbort(error))throw error;run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);}
         await exclusive(async()=>{
           for(const temporary of staged.values())await cleanStage(temporary,transfer.root);
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
-        });
+        },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file)]);
         staged.clear();
         progress(position,path.basename(family[family.length-1]!.source));
-      }
+      });
+      report(run);
       await flushIndex(index!);
       settled.add(position);onSettled?.(position);
     }
   } finally {
-    for(const run of runs) await exclusive(async()=>{for(const batch of run.batches)for(const temporary of batch.staged.values())await cleanStage(temporary,run.transfer.root);});
+    // After Stop every file staged so far is removed: many at once, each folder synchronized
+    // once rather than once per file, so stopping during verification returns promptly.
+    for(const run of runs) {
+      const stages=run.batches.flatMap(batch=>[...batch.staged.values()]);
+      await exclusive(async()=>{
+        await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false));
+        for(const folder of new Set(stages.map(temporary=>path.dirname(temporary.file))))await syncDirectory(folder).catch(()=>{});
+      // Keyed by folder: unlinking a stage still linked to its published file changes that file.
+      },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);
+    }
     for(const run of runs) if(run.index) await flushIndex(run.index);
     runs.forEach((_run,position)=>{if(!settled.has(position))onSettled?.(position);});
   }

@@ -110,8 +110,9 @@ export async function openPartial(partial:OwnedPartial,root:string){
  const output=await fs.open(partial.file,constants.O_RDWR|(constants.O_NOFOLLOW??0));
  try{if(!sameStat(partial.stat,await output.stat({bigint:true}))||!sameStat(partial.stat,await fs.lstat(partial.file,{bigint:true})))throw new Error('Incomplete copy changed before resuming');return output;}catch(error){await output.close();throw error;}
 }
-export async function clearPartialRecord(partial:OwnedPartial,root:string,index:RecoveryIndex):Promise<void>{
+/** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. */
+export async function clearPartialRecord(partial:OwnedPartial,root:string,index:RecoveryIndex,sync=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
- await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));await syncDirectory(path.dirname(partial.journal));
+ await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
 }
