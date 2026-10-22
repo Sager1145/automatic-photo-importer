@@ -84,11 +84,12 @@ async function ensureDirectory(folder:string,root:string):Promise<void> {
 }
 async function maybeStat(file:string):Promise<BigIntStats|undefined> {try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return;throw error;}}
 function jobPath(root:string,id:string):string {if(!uuid.test(id))throw new Error('Invalid recovery identifier');return path.join(root,storage,id);}
-interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;
+interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
  renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
-/** `onRead`: records read so far out of the journal's files, for journals written one file per event. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void):Promise<JournalState> {
+/** `onRead`: records read so far out of the journal's files, for journals written one file per event.
+ * `follow` false reads only this journal's own signed events, without checking its successor. */
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false};
  const apply=(record:Record<string,unknown>)=>{
@@ -96,8 +97,10 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   if(record.event==='complete'){state.complete=true;return;}
   if(record.event==='undo-complete'){state.undoComplete=true;return;}
   if(record.event==='superseded'){
-   if(typeof record.successor!=='string'||!uuid.test(record.successor)||record.successor===m.id||(state.superseded&&state.superseded!==record.successor))throw new Error('Invalid organization successor');
-   state.superseded=record.successor;return;
+   const successorRoot=record.successorRoot;
+   if(typeof record.successor!=='string'||!uuid.test(record.successor)||record.successor===m.id||(state.superseded&&(state.superseded!==record.successor||state.successorRoot!==successorRoot)))throw new Error('Invalid organization successor');
+   if(successorRoot!==undefined&&(typeof successorRoot!=='string'||path.resolve(successorRoot)!==successorRoot||successorRoot===m.root))throw new Error('Invalid organization successor folder');
+   state.superseded=record.successor;if(successorRoot!==undefined)state.successorRoot=successorRoot;return;
   }
   if(!Number.isSafeInteger(record.index)||(record.index as number)<0||(record.index as number)>=m.entries.length)throw new Error('Invalid recovery entry index');
   const index=record.index as number;
@@ -130,9 +133,11 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  }
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
- if(state.superseded){
+ if(state.superseded&&follow){
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error('An unfinished organization cannot be superseded');
-  const successor=await readManifest(m.root,state.superseded);
+  const successor=await readManifest(state.successorRoot??m.root,state.superseded);
+  // A successor kept in another backup folder (the video-root layout's) must list this one in its signed manifest.
+  if(state.successorRoot&&!successor.libraries?.includes(m.root))throw new Error('Organization successor is not in a listed sibling backup folder');
   const destinations=new Set(m.entries.map(entry=>pathKey(entry.destination)));
   if(!successor.entries.some(next=>next.move&&next.source!==next.destination&&destinations.has(pathKey(next.source))))throw new Error('Organization successor does not relocate a prior destination');
   await readEvents(successor,chain);
@@ -293,11 +298,24 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
  const predecessors:Manifest[]=[];
- for(const id of await fs.readdir(path.join(m.root,storage))){
+ // Earlier journals in this backup folder and in the sibling backup folders this manifest lists
+ // (the video-root layout moves files between them).
+ const journals:[string,string][]=[];
+ for(const root of [m.root,...m.libraries??[]]){
+  if(root!==m.root){if(await fs.realpath(root).catch(()=>undefined)!==root)continue;await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);}
+  for(const id of await fs.readdir(path.join(root,storage)))journals.push([root,id]);
+ }
+ for(const [root,id] of journals){
   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
-  const prior=await readManifest(m.root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}));
-  if(state.superseded)continue;
-  if(!prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination))))continue;
+  const prior=await readManifest(root,id),read=(follow:boolean)=>readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),follow);
+  const overlaps=prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination)));
+  // A journal its own signed log already hands to a successor is skipped unless this plan
+  // overlaps it, so a successor's folder removed later (a sibling backup folder) never blocks
+  // unrelated organizations; the recovery listing still checks that successor in full.
+  // A successor is only read when the journal is superseded, so without one the first read is the whole state.
+  const state=await read(false);
+  if(state.superseded){if(overlaps)await read(true);continue;}
+  if(!overlaps)continue;
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error(`Finish organization ${id} before starting an overlapping organization`);
   if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
   // Supersession preserves historical originals without authorizing deletion.
@@ -308,7 +326,7 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  if(predecessors.length)for(const entry of m.entries){
   checkAbort(signal);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  }
- for(const prior of predecessors){checkAbort(signal);await checkpoint(prior,'superseded',undefined,{successor:m.id});}
+ for(const prior of predecessors){checkAbort(signal);await checkpoint(prior,'superseded',undefined,{successor:m.id,...(prior.root!==m.root?{successorRoot:m.root}:{})});}
 }
 const unsupportedLink=['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK'];
 /** The moved inode: same device, inode and size as reviewed, with its reviewed Modified
