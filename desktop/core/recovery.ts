@@ -7,15 +7,37 @@ export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { beneath, checkAbort, code, contained, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
 
-/** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none. */
-export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];}
+/** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
+ * released: retained duplicates removed right after a clean run (only when that was asked for). */
+export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;}
 /** rename: move each file on its volume with rename(2); copy: verified copy plus a retained original. */
 export type OrganizationStrategy='rename'|'copy';
 export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;}
 interface FileIdentity {dev:string;ino:string;size:string;mtime:string;ctime:string;}
 interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;}
 interface Manifest {version:1;id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];}
-const storage='.photo-importer-recovery';
+/** Visible on purpose: the app never creates hidden folders. */
+export const RECOVERY_FOLDER='Photo Importer Recovery';
+/** Where versions before RECOVERY_FOLDER kept their journals and originals. */
+export const LEGACY_RECOVERY_FOLDER='.photo-importer-recovery';
+const storage=RECOVERY_FOLDER;
+export const isRecoveryName=(name:string)=>[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].some(item=>item.toLowerCase()===name.toLowerCase());
+/** Move journals an earlier version kept in the hidden folder into the visible one, on the same volume. */
+async function adoptLegacyStorage(root:string):Promise<void>{
+ const legacy=path.join(root,LEGACY_RECOVERY_FOLDER),visible=path.join(root,storage);
+ const old=await fs.lstat(legacy).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
+ if(!old)return;if(!old.isDirectory()||old.isSymbolicLink())throw new Error('Unsafe recovery storage');
+ await contained(legacy,root);await contained(visible,root);
+ if(!await fs.lstat(visible).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;})){await fs.rename(legacy,visible);await syncDirectory(root);return;}
+ // Both exist: move each journal that the visible folder does not already hold.
+ for(const name of await fs.readdir(legacy)){
+  if(!uuid.test(name))continue;const target=path.join(visible,name);
+  if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;}))continue;
+  await fs.rename(path.join(legacy,name),target);
+ }
+ await syncDirectory(visible);await syncDirectory(legacy);
+ await fs.rmdir(legacy).catch(error=>{if(code(error)!=='ENOTEMPTY'&&code(error)!=='EEXIST')throw error;});await syncDirectory(root);
+}
 let hostKey:Buffer|undefined;
 /** Configure once from the host's private application data, never from a drive journal. */
 export function configureOrganizationRecovery(secret:Buffer|string):void {
@@ -62,11 +84,12 @@ async function ensureDirectory(folder:string,root:string):Promise<void> {
 }
 async function maybeStat(file:string):Promise<BigIntStats|undefined> {try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return;throw error;}}
 function jobPath(root:string,id:string):string {if(!uuid.test(id))throw new Error('Invalid recovery identifier');return path.join(root,storage,id);}
-interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;
+interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
  renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
-/** `onRead`: records read so far out of the journal's files, for journals written one file per event. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void):Promise<JournalState> {
+/** `onRead`: records read so far out of the journal's files, for journals written one file per event.
+ * `follow` false reads only this journal's own signed events, without checking its successor. */
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false};
  const apply=(record:Record<string,unknown>)=>{
@@ -74,8 +97,10 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   if(record.event==='complete'){state.complete=true;return;}
   if(record.event==='undo-complete'){state.undoComplete=true;return;}
   if(record.event==='superseded'){
-   if(typeof record.successor!=='string'||!uuid.test(record.successor)||record.successor===m.id||(state.superseded&&state.superseded!==record.successor))throw new Error('Invalid organization successor');
-   state.superseded=record.successor;return;
+   const successorRoot=record.successorRoot;
+   if(typeof record.successor!=='string'||!uuid.test(record.successor)||record.successor===m.id||(state.superseded&&(state.superseded!==record.successor||state.successorRoot!==successorRoot)))throw new Error('Invalid organization successor');
+   if(successorRoot!==undefined&&(typeof successorRoot!=='string'||path.resolve(successorRoot)!==successorRoot||successorRoot===m.root))throw new Error('Invalid organization successor folder');
+   state.superseded=record.successor;if(successorRoot!==undefined)state.successorRoot=successorRoot;return;
   }
   if(!Number.isSafeInteger(record.index)||(record.index as number)<0||(record.index as number)>=m.entries.length)throw new Error('Invalid recovery entry index');
   const index=record.index as number;
@@ -108,9 +133,11 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  }
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
- if(state.superseded){
+ if(state.superseded&&follow){
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error('An unfinished organization cannot be superseded');
-  const successor=await readManifest(m.root,state.superseded);
+  const successor=await readManifest(state.successorRoot??m.root,state.superseded);
+  // A successor kept in another backup folder (the video-root layout's) must list this one in its signed manifest.
+  if(state.successorRoot&&!successor.libraries?.includes(m.root))throw new Error('Organization successor is not in a listed sibling backup folder');
   const destinations=new Set(m.entries.map(entry=>pathKey(entry.destination)));
   if(!successor.entries.some(next=>next.move&&next.source!==next.destination&&destinations.has(pathKey(next.source))))throw new Error('Organization successor does not relocate a prior destination');
   await readEvents(successor,chain);
@@ -146,7 +173,7 @@ function validateManifest(value:unknown,root:string,id:string):Manifest {
  const sources=new Set<string>();
  for(const entry of m.entries) {
   if(!entry||(entry.captureTimeMs!==undefined&&(!Number.isFinite(entry.captureTimeMs)||Math.abs(entry.captureTimeMs)>8640000000000000))||typeof entry.source!=='string'||typeof entry.destination!=='string'||!beneath(entry.source,m.source)||path.resolve(entry.source)!==entry.source||!beneath(entry.destination,root)||path.resolve(entry.destination)!==entry.destination||typeof entry.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.digest)||!Number.isSafeInteger(entry.size)||entry.size<0||typeof entry.move!=='boolean'||!entry.stat||!entry.parents||typeof entry.parents!=='object')throw new Error('Invalid or unsafe organization recovery entry');
-  if(path.relative(m.source,entry.source).split(path.sep).some(p=>p.toLowerCase()===storage)||path.relative(root,entry.destination).split(path.sep).some(p=>p.toLowerCase()===storage))throw new Error('Unsafe recovery storage path in journal');
+  if(path.relative(m.source,entry.source).split(path.sep).some(p=>isRecoveryName(p))||path.relative(root,entry.destination).split(path.sep).some(p=>isRecoveryName(p)))throw new Error('Unsafe recovery storage path in journal');
   if(sources.has(pathKey(entry.source)))throw new Error('Duplicate recovery source');sources.add(pathKey(entry.source));
   const keys=Object.keys(entry.stat).sort().join(',');if(keys!=='ctime,dev,ino,mtime,size'||Object.entries(entry.stat).some(([key,v])=>typeof v!=='string'||!(key==='ino'?/^-?\d+$/:/^\d+$/).test(v))||entry.stat.size!==String(entry.size)||entry.stat.dev!==m.rootIdentity.split(':')[0])throw new Error('Invalid recovery source identity');
   const ancestors:string[]=[];for(let folder=path.dirname(entry.source);folder!==m.source;folder=path.dirname(folder)){if(!beneath(folder,m.source))throw new Error('Unsafe recovery source ancestor');ancestors.push(folder);}
@@ -228,9 +255,15 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
  await fs.rename(entry.destination,saved);await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(saved));return true;
 }
 async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
- await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root);await syncDirectory(path.dirname(entry.destination));
+ await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root,m.rootIdentity);await syncDirectory(path.dirname(entry.destination));
  const staged=path.join(jobPath(m.root,m.id),`stage-${randomUUID()}.partial`);
- const output=await fs.open(staged,'wx',0o600);const source=await regularHandle(input);
+ const output=await fs.open(staged,'wx',0o600);
+ // Stages are expendable verified copies: a failed or stopped copy removes its own.
+ try{await copyThroughStage(staged,output,entry,index,m,input,signal,onBytes);}
+ catch(error){try{await contained(staged,m.root);await fs.unlink(staged);}catch{/* Already gone, or left for the residue cleanup. */}throw error;}
+}
+async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
+ let source:fs.FileHandle;try{source=await regularHandle(input);}catch(error){await output.close();throw error;}
  try {
   const before=await source.stat({bigint:true}),hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);
   for(;;){checkAbort(signal);const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to write recovery stage');offset+=bytesWritten;}onBytes?.(bytesRead);}
@@ -242,7 +275,7 @@ async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:Abo
  try{await fs.link(staged,entry.destination);}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
  if(!await targetMatches(entry,m,signal))throw new Error('Destination disappeared after publication');
- // Stages are expendable verified copies. Retained originals are never unlinked.
+ // Retained originals are never unlinked; only the stage is.
  await contained(staged,m.root);await fs.unlink(staged);await checkpoint(m,'published',index);
 }
 /** Only reviewed obsolete source parents can be removed, and only by nonrecursive rmdir.
@@ -265,11 +298,24 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
  const predecessors:Manifest[]=[];
- for(const id of await fs.readdir(path.join(m.root,storage))){
+ // Earlier journals in this backup folder and in the sibling backup folders this manifest lists
+ // (the video-root layout moves files between them).
+ const journals:[string,string][]=[];
+ for(const root of [m.root,...m.libraries??[]]){
+  if(root!==m.root){if(await fs.realpath(root).catch(()=>undefined)!==root)continue;await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);}
+  for(const id of await fs.readdir(path.join(root,storage)))journals.push([root,id]);
+ }
+ for(const [root,id] of journals){
   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
-  const prior=await readManifest(m.root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}));
-  if(state.superseded)continue;
-  if(!prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination))))continue;
+  const prior=await readManifest(root,id),read=(follow:boolean)=>readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),follow);
+  const overlaps=prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination)));
+  // A journal its own signed log already hands to a successor is skipped unless this plan
+  // overlaps it, so a successor's folder removed later (a sibling backup folder) never blocks
+  // unrelated organizations; the recovery listing still checks that successor in full.
+  // A successor is only read when the journal is superseded, so without one the first read is the whole state.
+  const state=await read(false);
+  if(state.superseded){if(overlaps)await read(true);continue;}
+  if(!overlaps)continue;
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error(`Finish organization ${id} before starting an overlapping organization`);
   if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
   // Supersession preserves historical originals without authorizing deletion.
@@ -280,7 +326,7 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  if(predecessors.length)for(const entry of m.entries){
   checkAbort(signal);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  }
- for(const prior of predecessors){checkAbort(signal);await checkpoint(prior,'superseded',undefined,{successor:m.id});}
+ for(const prior of predecessors){checkAbort(signal);await checkpoint(prior,'superseded',undefined,{successor:m.id,...(prior.root!==m.root?{successorRoot:m.root}:{})});}
 }
 const unsupportedLink=['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK'];
 /** The moved inode: same device, inode and size as reviewed, with its reviewed Modified
@@ -314,8 +360,9 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
   // FAT and exFAT report ctime equal to mtime and cannot store dates before 1980.
   if(entry.captureTimeMs<earliestStorableDate&&current.ctimeNs===current.mtimeNs){note(`${path.basename(entry.destination)}: capture date before 1980 cannot be stored`);return;}
   try {
-   await applyFileTimestamps(handle,current,entry.captureTimeMs);await handle.sync();
+   const stored=await applyFileTimestamps(handle,current,entry.captureTimeMs);await handle.sync();
    await remember('timed',await handle.stat({bigint:true}));
+   if(!stored)note(`${path.basename(entry.destination)}: the drive cannot store its capture date`);
   } catch(error) {
    // A partly applied date still leaves the same inode; record what is there now.
    const now=await handle.stat({bigint:true});
@@ -352,7 +399,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
  if(!source||target||entry.size===0)return 'copy';
  await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  // Folders created for the destination are durable before the file is renamed into them.
- await makeParent(entry.destination,m.root);await syncParents(entry.destination,m.root);
+ await makeParent(entry.destination,m.root,m.rootIdentity);await syncParents(entry.destination,m.root);
  if(!state.renameIntent.has(index)){await checkpoint(m,'rename-intent',index);state.renameIntent.add(index);}
  checkAbort(signal);await roots(m);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  const appeared=()=>new Error(`Destination appeared during organization; nothing was overwritten: ${entry.destination}`);
@@ -441,17 +488,27 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  for(const [index,entry] of m.entries.entries())if(!state.finalizing.has(index)&&await savedOriginal(m,index,state).catch(()=>undefined)){result.retained++;result.retainedBytes+=entry.size;}
  return result;
 }
-export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[]):Promise<ReorganizationResult> {
+export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false):Promise<ReorganizationResult> {
  checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
  const id=randomUUID(),manifest:Manifest={version:1,id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,sourceIdentity:await identity(transfer.source),entries:[],...(strategy==='rename'?{strategy:'rename' as const}:{}),...(keepFolders?{keepFolders:true as const}:{}),...(libraries.length?{libraries}:{})};
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.source;folder=path.dirname(folder)){if(!beneath(folder,transfer.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
- validateManifest(manifest,transfer.root,id);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
+ validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
  // No destination publication or original relocation occurs until the complete
  // immutable review and containing directories have been synchronized.
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
- return locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress));
+ const result=await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress));
+ // Release re-verifies every destination by checksum before removing a kept original.
+ if(releaseDuplicates&&result.errors.length===0&&result.retained>0){
+  try{
+   const released=await finalizeOrganization(transfer.root,id,signal);
+   result.released=released.removed;result.releasedBytes=released.bytes;
+   result.retained=Math.max(0,result.retained-released.removed);result.retainedBytes=Math.max(0,result.retainedBytes-released.bytes);
+  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
+ }
+ return result;
 }
 export async function resumeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<ReorganizationResult> {
+ await adoptLegacyStorage(root);
  const job=jobPath(root,id);return locked(job,async()=>run(await readManifest(root,id),signal,onProgress));
 }
 /** Cached listing skips media reads; explicit recheck/resume always verifies full hashes. */
@@ -459,7 +516,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
- const folder=path.join(root,storage);await contained(folder,root);const stat=await maybeStat(folder);if(!stat)return[];if(!stat.isDirectory())throw new Error('Unsafe recovery storage');
+ await adoptLegacyStorage(root);const folder=path.join(root,storage);await contained(folder,root);const stat=await maybeStat(folder);if(!stat)return[];if(!stat.isDirectory())throw new Error('Unsafe recovery storage');
  const jobs:OrganizationRecovery[]=[];
  for(const id of(await fs.readdir(folder)).sort()) {
   if(!uuid.test(id))continue;const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
@@ -506,6 +563,7 @@ export interface OrganizationProgress {step:'checking'|'releasing'|'restoring';c
  * Repeating this call completes a durable deletion intent after interruption.
  */
 export async function finalizeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationFinalization>{
+ await adoptLegacyStorage(root);
  return locked(jobPath(root,id),async()=>{
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
@@ -563,6 +621,7 @@ export interface OrganizationUndo {restored:number;removed:number;}
  * both it and the restored original are verified. Released originals cannot come back,
  * so a finalized organization is refused. Nothing is overwritten or removed unchecked. */
 export async function undoOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationUndo>{
+ await adoptLegacyStorage(root);
  return locked(jobPath(root,id),async()=>{
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
@@ -571,7 +630,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   if(state.undoComplete)return result;
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
   const restore=async(from:string,to:string)=>{
-   await makeParent(to,m.source);
+   await makeParent(to,m.source,m.sourceIdentity);
    try{await fs.link(from,to);const a=await fs.lstat(from,{bigint:true}),b=await fs.lstat(to,{bigint:true});if(!sameHardLink(a,b))throw occupied(to);await fs.unlink(from);}
    catch(error){
     if(code(error)==='EEXIST')throw occupied(to);

@@ -7,7 +7,7 @@ import type { DestinationIndex } from './destination-index';
 import { beneath, checkAbort, code, contained, makeParent, pathKey, safeComponent, statKey, syncDirectory, syncParents } from './paths';
 
 export const DRIVE_BACKUPS='Drive backups';
-const marker='.photo-importer-drive.json', holding='.mirror-removed';
+const marker='.photo-importer-drive.json', holding='Removed by mirror';
 export interface Drive {name:string;identity:string;mirror:boolean;}
 /** A removal is bound to the exact inode and timestamps seen during review. */
 export interface ReviewedRemoval extends MirrorRemoval {stat:string;}
@@ -59,12 +59,12 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
   await walk(base);
   return {removals,known};
 }
-export async function claimDriveFolder(root:string,drive:NonNullable<TransferPlan['drive']>):Promise<void> {
+export async function claimDriveFolder(root:string,drive:NonNullable<TransferPlan['drive']>,rootIdentity?:string):Promise<void> {
   const file=path.join(root,DRIVE_BACKUPS,drive.folder,marker);await contained(file,root);
   const recorded=await owner(path.dirname(file));
   if(recorded===drive.identity) return;
   if(recorded!==undefined) throw new Error(`This backup folder was created without this drive's marker or belongs to another drive; review again: ${path.dirname(file)}`);
-  await makeParent(file,root);
+  await makeParent(file,root,rootIdentity);
   try {
     const handle=await fs.open(file,'wx',0o600);
     try { await handle.writeFile(JSON.stringify({identity:drive.identity,name:drive.name})); await handle.sync(); } finally { await handle.close(); }
@@ -76,17 +76,20 @@ export async function claimDriveFolder(root:string,drive:NonNullable<TransferPla
 }
 /** Move reviewed extras into a dated holding folder on the same destination.
  * Every file is checked before the first move; nothing is deleted. */
-export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal):Promise<number> {
+export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal,rootIdentity?:string):Promise<number> {
   const base=path.join(root,DRIVE_BACKUPS,drive.folder);
   for(const removal of removals) {
     checkAbort(signal);await contained(removal.path,root);
     const stat=await fs.lstat(removal.path,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
     if(!beneath(removal.path,base) || !stat?.isFile() || statKey(stat)!==removal.stat) throw new Error(`Destination file changed after review; review again: ${removal.path}`);
   }
+  // Earlier versions held removals in a hidden folder; make it visible before adding to it.
+  const legacy=path.join(root,DRIVE_BACKUPS,'.mirror-removed'),visible=path.join(root,DRIVE_BACKUPS,holding);
+  if(await fs.lstat(legacy).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink(),error=>{if(code(error)==='ENOENT')return false;throw error;})&&!await fs.lstat(visible).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})){await contained(legacy,root);await fs.rename(legacy,visible);await syncDirectory(path.dirname(visible));}
   const held=path.join(root,DRIVE_BACKUPS,holding,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,8)}`,drive.folder),parents=new Set<string>();
   for(const removal of removals) {
     checkAbort(signal);
-    const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root);
+    const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root,rootIdentity);
     if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) throw new Error(`Mirror holding path already exists: ${target}`);
     await fs.rename(removal.path,target);
     await syncDirectory(path.dirname(removal.path));await syncParents(target,root);

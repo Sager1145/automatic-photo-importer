@@ -13,6 +13,8 @@ Verifying copied files|正在验证已复制文件|正在驗證已複製檔案|�
 Drive path|存储位置|儲存位置|保存場所
 
 Drive details|详细信息|詳細資訊|詳細情報
+Needs {needed} of {free} free|需要 {needed}，可用 {free}|需要 {needed}，可用 {free}|必要 {needed}／空き {free}
+Needs {needed} of {free} free ({existing} already on the destination)|需要 {needed}，可用 {free}（{existing} 已在目标中）|需要 {needed}，可用 {free}（{existing} 已在目的地中）|必要 {needed}／空き {free}（{existing} は保存先にあります）
 
 Capture information|拍摄信息|拍攝資訊|撮影情報
 Capture date|拍摄日期|拍攝日期|撮影日
@@ -118,10 +120,10 @@ Mounted SD cards, CFexpress cards and camera storage appear here. Check your des
 Automatic import is watching for new connections.|自动导入正在监测新连接。|自動匯入正在監測新連接。|自動インポートで新しい接続を監視しています。
 Automatic import is off. Use Start when you’re ready.|自动导入已关闭，准备好后点击「开始」。|自動匯入已關閉，準備好後點選「開始」。|自動インポートはオフです。準備ができたら開始してください。
 Enable media folder selection|启用媒体文件夹选择|啟用媒體資料夾選擇|メディアフォルダーの選択を有効化
-Choose media folder…|选择媒体文件夹…|選擇媒體資料夾…|メディアフォルダーを選択…
+Choose media folders…|选择媒体文件夹…|選擇媒體資料夾…|メディアフォルダーを選択…
 Bring an entire drive, too.|也能备份整个磁盘。|也能備份整個磁碟。|ドライブ全体もバックアップ。
 Back up files in their original folders, including documents and other non-photo files.|按原有文件夹备份文件，包括文档和其他非照片文件。|依原有資料夾備份檔案，包括文件與其他非照片檔案。|文書などの写真以外のファイルも、元のフォルダー構造でバックアップします。
-Back up a drive or folder…|备份磁盘或文件夹…|備份磁碟或資料夾…|ドライブやフォルダーをバックアップ…
+Back up drives or folders…|备份磁盘或文件夹…|備份磁碟或資料夾…|ドライブやフォルダーをバックアップ…
 Backup files stay when originals disappear. Links and filesystem service files are skipped.|即使原文件消失，备份仍会保留。跳过链接和文件系统服务文件。|即使原始檔案消失，備份仍會保留。略過連結與檔案系統服務檔案。|元のファイルがなくなってもバックアップは残ります。リンクとファイルシステム用ファイルはスキップします。
 Ready to import|准备导入|準備匯入|インポート可能
 Discovering files|正在查找文件|正在尋找檔案|ファイルを検索中
@@ -363,15 +365,15 @@ Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバッ
 Additive|只增不删|只增不刪|追加のみ
 Mirror|镜像|鏡像|ミラー
 Keep files on the backup even after they're deleted from the drive.|即使文件已从驱动器删除，也保留在备份中。|即使檔案已從磁碟刪除，也保留在備份中。|ドライブから削除されたファイルもバックアップに残します。
-Make the backup match the drive. Files no longer on the drive, or changed since the last backup, are moved to Drive backups/.mirror-removed on that destination after you review them. Nothing is permanently deleted.|让备份与驱动器保持一致。驱动器上已不存在或自上次备份后已更改的文件，会在你审核后移到该目标的 Drive backups/.mirror-removed。不会永久删除任何文件。|讓備份與磁碟保持一致。磁碟上已不存在或自上次備份後已變更的檔案，會在你審核後移到該目的地的 Drive backups/.mirror-removed。不會永久刪除任何檔案。|バックアップをドライブと一致させます。ドライブにもう存在しないファイルや前回のバックアップ以降に変更されたファイルは、確認後にその保存先の Drive backups/.mirror-removed へ移動されます。完全に削除されるものはありません。
+Make the backup match the drive. Files no longer on the drive, or changed since the last backup, are moved to Drive backups/Removed by mirror on that destination after you review them. Nothing is permanently deleted.|让备份与驱动器保持一致。驱动器上已不存在或自上次备份后已更改的文件，会在你审核后移到该目标的 Drive backups/Removed by mirror。不会永久删除任何文件。|讓備份與磁碟保持一致。磁碟上已不存在或自上次備份後已變更的檔案，會在你審核後移到該目的地的 Drive backups/Removed by mirror。不會永久刪除任何檔案。|バックアップをドライブと一致させます。ドライブにもう存在しないファイルや前回のバックアップ以降に変更されたファイルは、確認後にその保存先の Drive backups/Removed by mirror へ移動されます。完全に削除されるものはありません。
 Mirror can’t be combined with Fill first, then second. Choose another copy policy to use Mirror.|镜像不能与“先存满第一块再用第二块”同时使用。请选择其他复制策略以使用镜像。|鏡像不能與「先存滿第一顆再用第二顆」同時使用。請選擇其他複製策略以使用鏡像。|ミラーは「1台目から順に保存」と併用できません。ミラーを使うには別のコピー方式を選択してください。
 Fill first, then second is unavailable while drive backups use Mirror.|驱动器备份使用镜像时，无法使用“先存满第一块再用第二块”。|磁碟備份使用鏡像時，無法使用「先存滿第一顆再用第二顆」。|ドライブのバックアップがミラーの間は「1台目から順に保存」は使用できません。
 Drive backups are saved in {path} on each destination.|驱动器备份保存在每个目标的 {path} 中。|磁碟備份儲存在每個目的地的 {path} 中。|ドライブのバックアップは各保存先の {path} に保存されます。
 Drive backups are saved here on each destination|驱动器备份保存在每个目标的此位置|磁碟備份儲存在每個目的地的此位置|ドライブのバックアップは各保存先のここに保存されます
-Mirror backup: the backup matches the drive. Removed or changed files move to .mirror-removed after you review them.|镜像备份：备份与驱动器保持一致。已删除或已更改的文件会在你审核后移到 .mirror-removed。|鏡像備份：備份與磁碟保持一致。已刪除或已變更的檔案會在你審核後移到 .mirror-removed。|ミラーバックアップ：バックアップをドライブと一致させます。削除・変更されたファイルは確認後に .mirror-removed へ移動します。
+Mirror backup: the backup matches the drive. Removed or changed files move to Removed by mirror after you review them.|镜像备份：备份与驱动器保持一致。已删除或已更改的文件会在你审核后移到 Removed by mirror。|鏡像備份：備份與磁碟保持一致。已刪除或已變更的檔案會在你審核後移到 Removed by mirror。|ミラーバックアップ：バックアップをドライブと一致させます。削除・変更されたファイルは確認後に Removed by mirror へ移動します。
 Review the files Mirror will move before this backup can continue.|请先审核镜像将要移动的文件，然后才能继续此备份。|請先審核鏡像將要移動的檔案，然後才能繼續此備份。|このバックアップを続行する前に、ミラーで移動されるファイルを確認してください。
-{count} files will be moved to .mirror-removed|{count} 个文件将移到 .mirror-removed|{count} 個檔案將移到 .mirror-removed|{count} 件のファイルが .mirror-removed へ移動されます
-Nothing is permanently deleted. Moved files stay in Drive backups/.mirror-removed on this destination.|不会永久删除任何文件。移动的文件保留在此目标的 Drive backups/.mirror-removed 中。|不會永久刪除任何檔案。移動的檔案保留在此目的地的 Drive backups/.mirror-removed 中。|完全に削除されるものはありません。移動したファイルはこの保存先の Drive backups/.mirror-removed に残ります。
+{count} files will be moved to Removed by mirror|{count} 个文件将移到 Removed by mirror|{count} 個檔案將移到 Removed by mirror|{count} 件のファイルが Removed by mirror へ移動されます
+Nothing is permanently deleted. Moved files stay in Drive backups/Removed by mirror on this destination.|不会永久删除任何文件。移动的文件保留在此目标的 Drive backups/Removed by mirror 中。|不會永久刪除任何檔案。移動的檔案保留在此目的地的 Drive backups/Removed by mirror 中。|完全に削除されるものはありません。移動したファイルはこの保存先の Drive backups/Removed by mirror に残ります。
 Drive folder: {folder}|驱动器文件夹：{folder}|磁碟資料夾：{folder}|ドライブフォルダー：{folder}
 Reason|原因|原因|理由
 No longer on the drive|驱动器上已不存在|磁碟上已不存在|ドライブにもう存在しません
@@ -482,13 +484,21 @@ Move existing files into your folder structure.|将现有文件移入你的文�
 No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）がありません。
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
+Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細
+{count} files without a camera model|{count} 个文件没有相机型号|{count} 個檔案沒有相機型號|カメラ機種のないファイル {count} 件
+No camera data from a scan yet. Scan this drive to see its cameras.|还没有扫描得到的相机数据。扫描此驱动器即可查看其相机。|尚無掃描得到的相機資料。掃描此磁碟即可查看其相機。|スキャンによるカメラ情報はまだありません。このドライブをスキャンするとカメラを確認できます。
 No saved rules.|没有已保存的规则。|沒有已儲存的規則。|保存されたルールはありません。
 Not available with Mirror.|镜像模式下不可用。|鏡像模式下不可用。|ミラーでは使用できません。
 Not photos or videos. Change this in Settings.|不是照片或视频。可在设置中更改。|不是照片或影片。可在設定中變更。|写真でも動画でもありません。設定で変更できます。
-Nothing is deleted; files go to .mirror-removed.|不会删除任何文件；文件会移到 .mirror-removed。|不會刪除任何檔案；檔案會移到 .mirror-removed。|何も削除されません。ファイルは .mirror-removed に移動します。
+Nothing is deleted; files go to Removed by mirror.|不会删除任何文件；文件会移到 Removed by mirror。|不會刪除任何檔案；檔案會移到 Removed by mirror。|何も削除されません。ファイルは Removed by mirror に移動します。
 Nothing moves until you apply.|应用之前不会移动任何文件。|套用之前不會移動任何檔案。|適用するまで何も移動しません。
 One verified copy.|一份校验过的副本。|一份驗證過的副本。|検証済みコピーを1つ保存します。
 Reads each copy back to confirm it. Off is faster.|重新读取每个副本以确认无误。关闭会更快。|重新讀取每個副本以確認無誤。關閉會更快。|各コピーを読み直して確認します。オフにすると速くなります。
+Skip files with errors and continue|跳过出错的文件并继续|略過出錯的檔案並繼續|エラーのファイルをスキップして続行
+A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.|无法读取或在检查时发生变化的文件会列入“所有错误”并被跳过，其余文件照常复制。关闭时，遇到这类文件会停止导入。|無法讀取或在檢查時發生變化的檔案會列入「所有錯誤」並被略過，其餘檔案照常複製。關閉時，遇到這類檔案會停止匯入。|読み取れないファイルや確認中に変更されたファイルは「すべてのエラー」に記録してスキップし、ほかのファイルはコピーを続けます。オフにすると、そのようなファイルでインポートを停止します。
+A file error stopped this import.|文件错误导致此次导入停止。|檔案錯誤導致此次匯入停止。|ファイルのエラーでこのインポートが停止しました。
+Skip and continue|跳过并继续|略過並繼續|スキップして続行
+Run again, skipping files with errors|重新运行，并跳过出错的文件|重新執行，並略過出錯的檔案|エラーのファイルをスキップしてもう一度実行
 Review what Mirror will move to continue.|请先审核镜像将移动的文件再继续。|請先審核鏡像將移動的檔案再繼續。|続行するには、ミラーで移動するファイルを確認してください。
 Settings are locked while importing or reviewing.|导入或审核期间设置已锁定。|匯入或審核期間設定已鎖定。|読み込み中または確認中は設定を変更できません。
 Showing 500 matches. Search to narrow.|显示 500 个匹配项，可搜索以缩小范围。|顯示 500 個符合項目，可搜尋以縮小範圍。|500件を表示中。検索で絞り込めます。
@@ -506,6 +516,8 @@ Waiting|等待中|等待中|待機中
 In progress|进行中|進行中|処理中
 Skipped|已跳过|已略過|スキップ
 Remove emptied source folders|删除已清空的来源文件夹|刪除已清空的來源資料夾|空になった元フォルダーを削除
+Remove confirmed duplicates|删除已确认的重复文件|刪除已確認的重複檔案|確認済みの重複ファイルを削除
+After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.|整理无错误完成后，再次校验已存在于目标位置的原文件，然后将其删除，而不是保留以供撤销。|整理無錯誤完成後，再次校驗已存在於目標位置的原始檔案，然後將其刪除，而不是保留以供復原。|整理がエラーなく完了したら、移動先に既にある元のファイルを再確認し、元に戻す用に残さず削除します。
 Folders left empty after organizing are removed. Folders with files are kept.|整理后变空的文件夹会被删除，仍有文件的文件夹会保留。|整理後變空的資料夾會被刪除，仍有檔案的資料夾會保留。|整理後に空になったフォルダーは削除します。ファイルが残るフォルダーは残します。
 Large sizes shrink to fit small windows.|窗口较小时，大字号会自动缩小以适应。|視窗較小時，大字級會自動縮小以符合。|ウィンドウが小さいときは大きな文字が自動で縮小されます。
 Choose whether to import this drive.|请选择是否导入此驱动器。|請選擇是否匯入此磁碟。|このドライブを読み込むか選んでください。
@@ -519,6 +531,10 @@ Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
 {completed} files found · {size}|已找到 {completed} 个文件 · {size}|已找到 {completed} 個檔案 · {size}|{completed} 件見つかりました · {size}
 {completed} of {total} files read · {size} of {totalSize}|已读取 {completed}/{total} 个文件 · {size}/{totalSize}|已讀取 {completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件を読み込み · {totalSize} 中 {size}
 Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
+Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
+Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
+Checking the destination: {completed} of {total} files|正在检查目标：{completed}/{total} 个文件|正在檢查目的地：{completed}/{total} 個檔案|保存先を確認中：{total} ファイル中 {completed} 件
+Confirming files already on the destination: {completed} of {total}|正在确认目标中已有的文件：{completed}/{total}|正在確認目的地中已有的檔案：{completed}/{total}|保存先にあるファイルを確認中：{total} 件中 {completed} 件
 Confirming files before moving: {completed} of {total}|移动前确认文件：{completed}/{total}|移動前確認檔案：{completed}/{total}|移動前にファイルを確認中：{total} 件中 {completed} 件
 Confirming|正在确认|正在確認|確認中
 Reading files|正在读取文件|正在讀取檔案|ファイルを読み込み中
@@ -549,6 +565,15 @@ Copy all details|复制全部详情|複製全部詳細資訊|すべての詳細�
 {count} issues|{count} 个问题|{count} 個問題|{count} 件の問題
 Show drive|显示驱动器|顯示磁碟|ドライブを表示
 Dismiss|关闭|關閉|閉じる
+Clear|清除|清除|消去
+Clear all|全部清除|全部清除|すべて消去
+Clear all errors|清除所有错误|清除所有錯誤|すべてのエラーを消去
+Clear error: {title}|清除错误：{title}|清除錯誤：{title}|エラーを消去：{title}
+Drive: {name}|驱动器：{name}|磁碟：{name}|ドライブ：{name}
+Show errors for {name}|显示 {name} 的错误|顯示 {name} 的錯誤|{name} のエラーを表示
+Errors for {name}|{name} 的错误|{name} 的錯誤|{name} のエラー
+Show all errors|显示所有错误|顯示所有錯誤|すべてのエラーを表示
+Clear all errors for {name}|清除 {name} 的所有错误|清除 {name} 的所有錯誤|{name} のエラーをすべて消去
 Details|详情|詳細資訊|詳細
 {count} new issues|{count} 个新问题|{count} 個新問題|{count} 件の新しい問題
 View|查看|查看|表示
@@ -561,10 +586,28 @@ Backup folder is in order.|备份文件夹已整理好。|備份資料夾已整�
 Misplaced files are moved into place after each import.|每次导入后，放错位置的文件会自动移到正确位置。|每次匯入後，放錯位置的檔案會自動移到正確位置。|読み込みのたびに、場所違いのファイルを正しい場所へ移動します。
 Checked after each import. You choose when to move files.|每次导入后检查，由你决定何时移动文件。|每次匯入後檢查，由你決定何時移動檔案。|読み込みのたびに確認し、移動するタイミングは自分で選べます。
 Not checked automatically.|不自动检查。|不自動檢查。|自動では確認しません。
+Leftover files|残留文件|殘留檔案|残ったファイル
+1 leftover file|1 个残留文件|1 個殘留檔案|残ったファイル 1 個
+{count} leftover files|{count} 个残留文件|{count} 個殘留檔案|残ったファイル {count} 個
+Looking for leftover files…|正在查找残留文件…|正在尋找殘留檔案…|残ったファイルを確認中…
+Not checked yet.|尚未检查。|尚未檢查。|まだ確認していません。
+No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファイルはありません。
+Clean up|清理|清理|クリーンアップ
+{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
+Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
+Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
 {completed} of {total} files read|已读取 {completed}/{total} 个文件|已讀取 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを読み込み
 {time} elapsed|已用时 {time}|已用時 {time}|経過時間 {time}
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
+Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
+{time} left|剩余{time}|剩餘{time}|残り{time}
+{time} left in this step|此步骤剩余{time}|此步驟剩餘{time}|このステップの残り{time}
+{time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）
+under a minute|不到 1 分钟|不到 1 分鐘|1 分未満
+about {minutes} min|约 {minutes} 分钟|約 {minutes} 分鐘|約 {minutes} 分
+about {hours} h {minutes} min|约 {hours} 小时 {minutes} 分钟|約 {hours} 小時 {minutes} 分鐘|約 {hours} 時間 {minutes} 分
+about {hours} h|约 {hours} 小时|約 {hours} 小時|約 {hours} 時間
 Move {name} to the top|将 {name} 移到最上方|將 {name} 移到最上方|{name} を一番上へ移動
 Move to the top|移到最上方|移到最上方|一番上へ移動
 Drive reconnected|驱动器已重新连接|磁碟已重新連接|ドライブが再接続されました

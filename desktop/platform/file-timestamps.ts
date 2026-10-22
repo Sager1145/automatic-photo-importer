@@ -23,11 +23,17 @@ export function captureTimestamp(value:string|undefined):number|undefined {
 
 /** Only call on exclusively owned writable descriptors, before publication.
  * Linux/Windows Node exposes mtime, but no writable filesystem creation time.
+ * Returns false when the destination cannot store the capture date (exFAT keeps 1980–2107,
+ * APFS about 1677–2262): the file then gets the source's own dates, as a file without a capture
+ * date does, so an unstorable date never stops a copy. Copy-time dates are never accepted.
  */
-export async function applyFileTimestamps(output:FileHandle,source:BigIntStats,captureTimeMs?:number):Promise<void>{
+export async function applyFileTimestamps(output:FileHandle,source:BigIntStats,captureTimeMs?:number):Promise<boolean>{
  if(captureTimeMs!==undefined&&(!Number.isFinite(captureTimeMs)||Math.abs(captureTimeMs)>8640000000000000))throw new Error('Invalid planned capture timestamp');
- const modified=captureTimeMs===undefined?Number(source.mtimeMs)/1000:captureTimeMs/1000;
- const created=captureTimeMs===undefined?Number(source.birthtimeMs)/1000:captureTimeMs/1000;
+ if(captureTimeMs!==undefined)try{await setDates(output,source,captureTimeMs/1000,captureTimeMs/1000);return true;}catch{/* Not storable here; the source's dates below. */}
+ await setDates(output,source,Number(source.birthtimeMs)/1000,Number(source.mtimeMs)/1000);
+ return captureTimeMs===undefined;
+}
+async function setDates(output:FileHandle,source:BigIntStats,created:number,modified:number):Promise<void>{
  const current=await output.stat();if(!current.isFile()||current.nlink!==1)throw new Error('Filesystem timestamps require an exclusively owned regular file');
  await output.utimes(Number(source.atimeMs)/1000,modified);
  if(process.platform!=='darwin')return;

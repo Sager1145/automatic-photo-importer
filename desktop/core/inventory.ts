@@ -18,7 +18,7 @@ function proxyOriginals(file:string):string[] {
   return names.map(item=>pathKey(path.join(folder,item)));
 }
 const audio=new Set('wav m4a mp3 aac'.split(' '));
-const artifacts=new Set(['.photo-importer-recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
+const artifacts=new Set(['.photo-importer-recovery','photo importer recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
 const importArtifact=/^\.import-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
 /** Filesystem service files and this app's own recovery artifacts. */
 export function ignoredName(name:string):boolean {return artifacts.has(name.toLowerCase()) || importArtifact.test(name) || name.startsWith('._') || name.startsWith('.photo-importer-index');}
@@ -44,7 +44,7 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   }
   return result;
 }
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number)=>void;reuse?:Inventory;exclude?:string[]}={},signal?:AbortSignal):Promise<Inventory> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number)=>void;reuse?:Inventory;exclude?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
@@ -106,7 +106,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); media.set(key,[...(media.get(key)??[]),file]); byPath.set(pathKey(file.path),file); }
   for(const file of files) {
     checkAbort(signal);
-    if(file.kind==='Other') file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size);
+    if(file.kind==='Other') try { file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size); } catch(error) { if(!options.onError) throw error; options.onError(file.path,error); }
     if(file.system) { file.included=!!options.backup; continue; }
     // Proxies (DJI LRF, GoPro and Insta360 LRV) contain real video and remain importable on their
     // own. An unambiguous original in the same directory supplies routing/family context.

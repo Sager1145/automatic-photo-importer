@@ -25,7 +25,7 @@ export async function removeRedundantFolders(library:string,folders:string[],kee
       const child=path.join(folder,entry.name);
       if(entry.isSymbolicLink()) removable=false;
       else if(entry.isDirectory()) {
-        if(kept.some(item=>within(child,item))||entry.name.toLowerCase()==='.photo-importer-recovery') removable=false;
+        if(kept.some(item=>within(child,item))||['.photo-importer-recovery','photo importer recovery'].includes(entry.name.toLowerCase())) removable=false;
         else if(!await sweep(child)) removable=false;
       } else if(entry.isFile()&&serviceFile(entry.name)) service.push(child);
       else removable=false;

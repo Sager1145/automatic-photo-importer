@@ -1,4 +1,4 @@
-import type { Preferences, Source } from './shared';
+import type { DriveCameraRecord, Preferences, Source } from './shared';
 
 type Remembered=NonNullable<Preferences['rememberedDevices']>;
 type Ignored=NonNullable<Preferences['ignoredDevices']>;
@@ -55,10 +55,14 @@ export class DeviceSelection {
 }
 
 /** Note a finished read-only scan or a verified import (including one that found everything
- * already imported) for a device that can be recognised again. Folders are not recorded. */
-export function recordDeviceHistory(history:History,source:Source,event:'scan'|'import',now:string):void {
+ * already imported) for a device that can be recognised again, with the cameras a scan read.
+ * Folders are not recorded. */
+export function recordDeviceHistory(history:History,source:Source,event:'scan'|'import',now:string,cameras?:DriveCameraRecord):void {
   const device=deviceId(source);
   if(device===undefined) return;
   const entry=history[device]={...history[device],name:source.name};
-  if(event==='scan') entry.lastScanCompleted=now; else entry.lastImportVerified=now;
+  if(event==='import') {entry.lastImportVerified=now;return;}
+  // A scan replaces the remembered cameras, so an older scan's cameras are never shown as current.
+  entry.lastScanCompleted=now;
+  if(cameras) entry.cameras=cameras; else delete entry.cameras;
 }

@@ -14,7 +14,7 @@ const destination = path.join(base,'destination');
 const library = path.join(base,'library');
 const original = path.join(library,'incoming','A.JPG');
 const target = path.join(library,'2024','202402','FixtureCamera','JPEG','A.JPG');
-const recovery = path.join(library,'.photo-importer-recovery');
+const recovery = path.join(library,'Photo Importer Recovery');
 const finallyMarker = path.join(base,`finally-${mode}`);
 const metadata = async()=>({camera:'FixtureCamera',date:'2024-02-03',fields:{}});
 const importOptions = {backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -58,6 +58,20 @@ async function run() {
       return result;
     };
   }
+  if (mode === 'organization-rename-link') {
+    fs.link = async(from,to)=>{
+      const result = await link(from,to);
+      if (String(to) === target) await checkpoint({file:target});
+      return result;
+    };
+  }
+  if (mode === 'organization-rename-unlink') {
+    fs.unlink = async(file)=>{
+      const result = await unlink(file);
+      if (String(file) === original) await checkpoint({file:target});
+      return result;
+    };
+  }
   if (mode === 'organization-stash') {
     fs.rename = async(from,to)=>{
       const result = await rename(from,to);
@@ -83,10 +97,12 @@ async function run() {
     const result = await core.execute(plan!,undefined,undefined,{exclusiveCopy:mode === 'import-exclusive'});
     return {result,target:plan!.entries[0]!.destination};
   }
+  if (mode === 'undo-organization') return {result:await core.undoOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   if (mode === 'resume-organization') return {result:await core.resumeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   if (mode === 'finalize-intent' || mode === 'finalize-unlink' || mode === 'retry-finalize') return {result:await core.finalizeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   const {plans:[plan]} = await core.plan(library,[library],organizationOptions,metadata);
-  return {result:await core.executeReorganization(plan!),jobs:await core.getOrganizationRecovery(library),target};
+  const strategy = mode.startsWith('organization-rename') ? 'rename' as const : 'copy' as const;
+  return {result:await core.executeReorganization(plan!,undefined,undefined,{strategy}),jobs:await core.getOrganizationRecovery(library),target};
 }
 try {
   let result;
