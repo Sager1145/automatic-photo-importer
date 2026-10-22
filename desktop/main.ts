@@ -1,4 +1,5 @@
-import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme,powerMonitor} from 'electron';
+import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme,powerMonitor,powerSaveBlocker} from 'electron';
+import {keepAwake} from './keep-awake';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -120,7 +121,9 @@ const errorLog=new ErrorLog();
 const etaTracker=new EtaTracker();
 // A stalled step sends no progress; republish so its time left can grow instead of freezing.
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
-const emit=()=>{stampJobs();stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+// Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
+const awake=keepAwake(powerSaveBlocker);
+const emit=()=>{stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 function progressEmit(){const now=Date.now();if(now-lastEmit>100){lastEmit=now;emit();}}
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
