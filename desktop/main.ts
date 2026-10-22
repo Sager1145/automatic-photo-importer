@@ -588,6 +588,7 @@ async function action(input:Action):Promise<void>{
    // Runs a job that ended with errors again, files it skipped included. Verified copies are recognised, not copied again.
    const failed=state.jobs.find(job=>job.id===input.jobId&&job.retryable&&job.phase==='error'&&!active.has(job.id));if(!failed)break;
    if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,exclude:undefined,skipErrors:undefined});delete failed.retryable;delete failed.skippablePath;break;}
+   if(!state.sources.some(source=>source.id===failed.source.id))throw new MessageError('error.sourceDisconnected');
    if(state.jobs.some(job=>job.source.id===failed.source.id&&['queued','discovering','verifying','copying'].includes(job.phase)))throw new MessageError('error.busy');
    enqueue(failed.source,failed.backup);if(state.jobs.some(job=>job.source.id===failed.source.id&&job.phase==='queued')){delete failed.retryable;delete failed.skippablePath;}pump();break;
   }
