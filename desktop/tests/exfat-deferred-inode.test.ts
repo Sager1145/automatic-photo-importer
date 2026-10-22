@@ -85,7 +85,8 @@ async function reattachOnce(d:Disk,root:string) {
   await fs.mkdir(otherMount);
   await run('hdiutil',['create','-quiet','-type','SPARSE','-size','64m','-fs','ExFAT','-volname','OTHER',other]);
   await d.detach();
-  await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',otherMount,other+'.sparseimage']);
+  // The dummy only tries to take the old disk number; if it cannot attach, the precondition check below decides.
+  await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',otherMount,other+'.sparseimage']).catch(()=>{});
   try { await d.attach(); } finally { await run('hdiutil',['detach','-quiet','-force',otherMount]).catch(()=>{}); }
   return {before,after:(await fs.stat(root,{bigint:true})).dev};
 }
