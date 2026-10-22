@@ -252,3 +252,20 @@ test('empty original slots are leftovers only in a finished journal, not a pendi
     assert.equal(await exists(slot),!finished,finished?'finished':'pending');
   }
 });
+
+test('a staged copy whose source device had to be rewritten is never classified stale: only Clean up removes it',async t=>{
+  // The receipt names another device number for the card's folder, as after a re-attach, or as when
+  // a different card is mounted at the same path: either way the volume is not proven to be the same card.
+  const moved=(record:Record<string,unknown>)=>{
+    const [dev,ino]=String(record.sourceIdentity).split(':'),other=String(BigInt(dev!)+7n);
+    return reseal({sourceIdentity:`${other}:${ino}`,sourceStat:{...(record.sourceStat as object),dev:other}})(record);
+  };
+  const f=await staged(t,moved);
+  await fs.appendFile(f.source,'edited on another card');
+  const found=await findResidue([f.root]);
+  assert.equal(found.items.find(item=>item.path===f.copy)?.kind,'kept');assert.equal(found.items.find(item=>item.path===f.receipt)?.kind,'kept');
+  const result=await cleanResidue(found,{keepResumable:true});
+  assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));assert.ok(await exists(f.receipt));
+  const manual=await cleanResidue(await findResidue([f.root]));
+  assert.equal(manual.removed.files,2);assert.ok(!await exists(f.copy));assert.ok(!await exists(f.receipt));
+});
