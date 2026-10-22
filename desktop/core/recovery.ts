@@ -302,20 +302,22 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  // (the video-root layout moves files between them).
  const journals:[string,string][]=[];
  for(const root of [m.root,...m.libraries??[]]){
-  if(root!==m.root){if(await fs.realpath(root).catch(()=>undefined)!==root)continue;await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);}
+  if(root!==m.root){
+   // A sibling folder that is gone has no journals; one that now resolves elsewhere is refused.
+   const real=await fs.realpath(root).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
+   if(real===undefined)continue;if(real!==root)throw new Error(`Unsafe sibling backup folder: ${root}`);
+   await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);}
   for(const id of await fs.readdir(path.join(root,storage)))journals.push([root,id]);
  }
  for(const [root,id] of journals){
   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
-  const prior=await readManifest(root,id),read=(follow:boolean)=>readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),follow);
-  const overlaps=prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination)));
-  // A journal its own signed log already hands to a successor is skipped unless this plan
-  // overlaps it, so a successor's folder removed later (a sibling backup folder) never blocks
-  // unrelated organizations; the recovery listing still checks that successor in full.
-  // A successor is only read when the journal is superseded, so without one the first read is the whole state.
-  const state=await read(false);
-  if(state.superseded){if(overlaps)await read(true);continue;}
-  if(!overlaps)continue;
+  // A journal its own signed log already hands to a successor is never written again, and it
+  // already refuses resume, undo and finalize, so its successor is not read here: a successor's
+  // folder removed later (a sibling backup folder) must not block organizing this one. The
+  // recovery listing, resume, undo and finalize still check that successor in full.
+  const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false);
+  if(state.superseded)continue;
+  if(!prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination))))continue;
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error(`Finish organization ${id} before starting an overlapping organization`);
   if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
   // Supersession preserves historical originals without authorizing deletion.

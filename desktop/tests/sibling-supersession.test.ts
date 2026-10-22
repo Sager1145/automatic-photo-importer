@@ -16,12 +16,13 @@ const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
 const log=(root:string,id:string)=>path.join(root,'Photo Importer Recovery',id,'event-log.jsonl');
 
-async function fixture(t:test.TestContext){
+async function fixture(t:test.TestContext,photo=false){
  const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'video-root-journal-')));
  t.after(()=>fs.rm(drive,{recursive:true,force:true}));
  const photos=path.join(drive,'photobackup'),videos=path.join(drive,'videobackup'),other=path.join(drive,'otherbackup');
  for(const folder of [photos,videos,other,path.join(drive,'2025')])await fs.mkdir(folder,{recursive:true});
  await fs.writeFile(path.join(drive,'2025','C0016.MOV'),'bytes of a Sony clip');
+ if(photo)await fs.writeFile(path.join(drive,'2025','A.JPG'),'a photo');
  // First: the year folder organized into photobackup, journaled there.
  const first=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
  assert.deepEqual((await core.executeReorganization(first,undefined,undefined,{strategy:'rename'})).errors,[]);
@@ -126,4 +127,17 @@ test('an unfinished journal in the photo folder blocks the video folder from mov
  const result=await core.executeReorganization(second!.videos!,undefined,undefined,{strategy:'rename'});
  assert.match(result.errors.join(' '),/Finish organization .* overlapping/);
  assert.deepEqual(await fs.readdir(videos).then(names=>names.filter(name=>name!=='Photo Importer Recovery')),[],'nothing moved into the video folder');
+});
+
+test('after the video folder is removed, the photo folder can still be re-templated over the earlier journal\'s files',async t=>{
+ // The earlier journal placed both the clip and A.JPG; only the clip moves on to videobackup.
+ const {drive,photos,videos,earlier}=await fixture(t,true);
+ await split(drive,photos,videos);
+ await fs.rm(videos,{recursive:true,force:true});
+ // A new template moves photobackup's files, including the folder the superseded journal recorded.
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ assert.ok(next.entries.length>0);
+ assert.deepEqual((await core.executeReorganization(next,undefined,undefined,{strategy:'rename'})).errors,[]);
+ await fs.access(path.join(photos,'2026/Sony A7/A.JPG'));
+ assert.ok((await core.getOrganizationRecovery(photos)).find(job=>job.id===earlier)?.error,'the earlier journal stays listed with its error');
 });
