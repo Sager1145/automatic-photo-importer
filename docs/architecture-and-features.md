@@ -110,7 +110,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 - 备份目录错位检查（默认 `ask`）在导入结束和目的地连接时对整个备份目录读取路由元数据。会话内有 stat 缓存，但应用重启后的第一次检查会对大型库运行 ExifTool。若大型库感到卡顿，可以把它的结果也纳入扫描记忆。
 - `validateDestination` 拒绝位于任何已连接源内的目的地（DST-04 的保守策略）。因此把整个备份盘（如 `/Volumes/A006`）选为“整盘备份”源时，该盘上的目的地会被拒绝。这和第 4 项修复的方向相反，属于策略取舍，本轮不改。
 - `main.ts` 仍承担编排、授权、偏好、生命周期。没有只为缩短文件而拆出转发层。
-- 仍以英文原文显示的低层消息（LOC-03 的剩余部分）：`executeDestinations` / `executeReorganization` / 恢复结果数组里的逐文件、逐目的地错误（如 `Destination 1: …`、`Staged file changed`、`Moved file changed…`）；`OrganizationRecovery.error`、`SourceCameraInfo.error`、元数据读取问题；`DestinationStatus.detail`（系统错误文本与 `Read-only filesystem`）；恢复密钥、`Invalid action` 等程序错误；`inspect` 授权错误；A006 硬件测试消息；原生选择对话框标题；整理任务的源名称（`Library organization`、`Organize <文件夹>` 等）。这些在“全部错误”里仍由 `explainError` 按模式（ENOSPC、EIO、Source changed 等）给出已翻译的标题与提示，详情保留原文。文件夹名（如 `editied`）与路径只作为参数，从不翻译。
+- 仍以英文原文显示的低层消息（LOC-03 的剩余部分）：`executeDestinations` / `executeReorganization` / 恢复结果数组里的逐文件、逐目的地错误（如 `Destination 1: …`、`Staged file changed`、`Moved file changed…`）以及整理结果附带的说明（如无法写入拍摄日期的 `… moved files kept their original dates …`）；`OrganizationRecovery.error`、`SourceCameraInfo.error`、元数据读取问题；`DestinationStatus.detail`（系统错误文本与 `Read-only filesystem`）；恢复密钥、`Invalid action` 等程序错误；`inspect` 授权错误；A006 硬件测试消息；原生选择对话框标题；整理任务的源名称（`Library organization`、`Organize <文件夹>` 等）。这些在“全部错误”里仍由 `explainError` 按模式（ENOSPC、EIO、Source changed 等）给出已翻译的标题与提示，详情保留原文。文件夹名（如 `editied`）与路径只作为参数，从不翻译。
 
 ## 用户需求逐项核对
 
@@ -150,7 +150,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 标题栏标题与按钮、总进度、全部错误、按钮式自动开关、侧栏到顶（UI-24–31） | 已实现 |
 | 移除“预览照片”入口（UI-32） | 已移除；审核行内的单文件预览保留（需求第 16 节记录了是否移除所有预览尚未澄清） |
 | 动画与减弱动态效果（UI-37/38） | 已实现 |
-| 四种语言（LOC-01–03） | 已实现：界面目录完整；main 发送消息 key + 参数（任务详情、进度、导入/整理/恢复结果、历史、主进程错误与常见 core/platform 错误），renderer 按所选语言翻译。少数低层错误仍显示英文原文，见“已识别但本轮不改” |
+| 四种语言（LOC-01–03） | 已实现：界面目录完整；main 发送消息 key + 参数（任务详情、整理/释放/撤销的逐步进度、规划进度、视频备份文件夹等布局错误、进度、导入/整理/恢复结果、历史、主进程错误与常见 core/platform 错误），renderer 按所选语言翻译。少数低层错误仍显示英文原文，见“已识别但本轮不改” |
 | 图标（ICON-01–04） | Icon Composer 资产保留；本轮未改 |
 | 一个功能一个实现、无臭抽象、修复层次与重复传输（ARCH-01–13） | 本轮见上表 1–7；未改项见上一节 |
 | Codex 快速集成测试（TEST-12） | 已实现 |
