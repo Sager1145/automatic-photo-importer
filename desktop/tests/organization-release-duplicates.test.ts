@@ -59,7 +59,7 @@ test('duplicates are not released when the organization reports an error',async 
  assert.ok(kept==='same bytes'||(job?.retainedFiles??0)>0,'the original is still on the drive');
 });
 
-test('releasing duplicates after organizing is an opt-in preference',()=>{
- assert.equal(normalizePreferences({}).releaseDuplicatesAfterOrganizing,false);
- assert.equal(normalizePreferences({releaseDuplicatesAfterOrganizing:true}).releaseDuplicatesAfterOrganizing,true);
+test('releasing duplicates after organizing is on by default and can be turned off',()=>{
+ assert.equal(normalizePreferences({}).releaseDuplicatesAfterOrganizing,true);
+ assert.equal(normalizePreferences({releaseDuplicatesAfterOrganizing:false}).releaseDuplicatesAfterOrganizing,false);
 });

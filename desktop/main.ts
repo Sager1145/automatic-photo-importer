@@ -323,7 +323,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.phase='copying';
   const verified:Record<string,{sha256:string;identity:string}>={};
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes}=await executeDestinations(plans,{
-   signal,reorganize,strategy:'rename',verify:prefs.verifyCopies!==false,keepSourceFolders:prefs.removeEmptySourceFolders===false,releaseDuplicates:prefs.releaseDuplicatesAfterOrganizing===true,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
+   signal,reorganize,strategy:'rename',verify:prefs.verifyCopies!==false,keepSourceFolders:prefs.removeEmptySourceFolders===false,releaseDuplicates:prefs.releaseDuplicatesAfterOrganizing!==false,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=message('job.destinationFile',{index:index+1,count:plans.length,file:path.basename(progress.file)});progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
