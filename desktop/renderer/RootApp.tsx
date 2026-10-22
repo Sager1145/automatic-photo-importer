@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom';
 import {createStateReceiver} from '../state-channel';
-import {driveName,gatherErrors} from '../error-log';
+import {driveName,gatherErrors,type Severity} from '../error-log';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
@@ -250,15 +250,15 @@ export default function RootApp() {
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
   // Window-only errors clear here; the rest ask the main process, which leaves every job as it is.
-  const clearErrorItems = (ids?: string[]) => {
-    const local = new Set((ids ?? errors.flatMap(error => error.id?.startsWith('local:') ? [error.id] : [])).filter(id => id.startsWith('local:')).map(id => id.slice(6)));
+  const clearErrorItems = (ids?: string[], severity?: Severity) => {
+    const local = new Set((ids ?? errors.flatMap(error => error.id?.startsWith('local:') && (!severity || error.severity === severity) ? [error.id] : [])).filter(id => id.startsWith('local:')).map(id => id.slice(6)));
     for (const detail of local) localErrorTimes.current.delete(detail);
     if (local.has(connectionError)) setConnectionError('');
     setInspectionErrors(list => list.filter(detail => !local.has(detail)));
-    if (!ids) act({ type: 'clearErrors' }); else for (const id of ids) if (!id.startsWith('local:')) act({ type: 'clearError', id });
+    if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else for (const id of ids) if (!id.startsWith('local:')) act({ type: 'clearError', id, ...(severity ? { severity } : {}) });
   };
   return <I18nProvider language={language}><div className="app-shell">
-    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.length} errorLevel={errors.some(error => explainError(error.message, error.kind).severity === 'error') ? 'error' : errors.length ? 'warning' : undefined} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
+    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.filter(error => error.severity === 'error').length} warningCount={errors.filter(error => error.severity === 'warning').length} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
@@ -362,7 +362,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; sourceId?: string; jobId?: string; formatSourceId?: string};
+type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -375,10 +375,11 @@ export function errorsFor(errors: DisplayError[], target: ErrorTarget): DisplayE
 }
 function SidebarErrors({ errors, target, onErrors }: { errors?: DisplayError[]; target: ErrorTarget; onErrors?: (target: ErrorTarget) => void }) {
   const { t, formatNumber } = useTranslation();
-  const own = errors ? errorsFor(errors, target) : [];
-  if (!own.length) return null;
-  const level = own.some(error => explainError(error.message, error.kind).severity === 'error') ? 'error' : 'warning';
-  return <button type="button" className="sidebar-error-badge" data-testid="sidebar-errors" data-level={level} aria-label={t("{count} errors", { count: formatNumber(own.length) })} title={t("Show errors for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={CircleAlert} size={13} /><span>{formatNumber(own.length)}</span></button>;
+  const all = errors ? errorsFor(errors, target) : [];
+  const own = all.filter(error => error.severity === 'error'), warnings = all.filter(error => error.severity === 'warning');
+  if (!all.length) return null;
+  // Errors get the red count; warnings only a small amber mark that never competes with it.
+  return <>{warnings.length > 0 && <button type="button" className="sidebar-warning-indicator" data-testid="sidebar-warnings" aria-label={t("{count} warnings", { count: formatNumber(warnings.length) })} title={t("Show warnings for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={Info} size={13} /></button>}{own.length > 0 && <button type="button" className="sidebar-error-badge" data-testid="sidebar-errors" data-level="error" aria-label={t("{count} errors", { count: formatNumber(own.length) })} title={t("Show errors for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={CircleAlert} size={13} /><span>{formatNumber(own.length)}</span></button>}</>;
 }
 type ErrorExplanation = { title: string; hint?: string; severity: 'error' | 'warning' };
 // Turns a raw technical message into a plain title, a next step and a severity. Keys are translated at render time.
@@ -398,13 +399,13 @@ export function explainError(message: Message, kind: ErrorKind = 'app', language
 }
 export function collectErrors(state: AppState, extra: (string | LocalError | undefined)[] = []): DisplayError[] {
   const result: DisplayError[] = [];
-  for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', ...(local.at ? { at: local.at } : {}) }); }
+  for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', severity: 'error', ...(local.at ? { at: local.at } : {}) }); }
   const cleared = new Set(state.errorLog?.cleared ?? []);
   for (const error of gatherErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
   const t = createTranslator(state.preferences.language);
   for (const {source,inventory,backup} of sourceInventories(state)) {
     if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
-      result.push({source:source.name,drive:driveName(source.path,source.name),message:text(t("Unknown file formats")),kind:'format',sourceId:source.id,formatSourceId:source.id});
+      result.push({source:source.name,drive:driveName(source.path,source.name),message:text(t("Unknown file formats")),kind:'format',severity:'warning',sourceId:source.id,formatSourceId:source.id});
     }
   }
   return result;
@@ -428,12 +429,14 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
     known.current = new Set(keys);
     if (added.length && !hidden) setFresh(added);
   }, [errors, hidden]);
-  useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, 7000); return () => window.clearTimeout(timer); }, [fresh]);
+  useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, fresh.some(error => error.severity === 'error') ? 7000 : 4000); return () => window.clearTimeout(timer); }, [fresh]);
   // The toast lives in the top layer, above the page, the sidebar, the titlebar and any sheet already open.
   useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) node.showPopover(); });
   if (!fresh.length || hidden) return null;
-  const first = explainError(fresh[0]!.message, fresh[0]!.kind, language);
-  return <div ref={toast} popover="manual" data-error-layer className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
+  // Errors take the toast; warnings alone get a calmer one that dismisses itself sooner.
+  const newErrors = fresh.filter(error => error.severity === 'error'), shown = newErrors.length ? newErrors : fresh, severity: Severity = newErrors.length ? 'error' : 'warning';
+  const first = explainError(shown[0]!.message, shown[0]!.kind, language);
+  return <div ref={toast} popover="manual" data-error-layer className={`error-toast is-${severity}`} data-severity={severity} role="status" data-testid={severity === 'error' ? 'error-toast' : 'warning-toast'}><Icon icon={severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{shown.length > 1 ? t(severity === 'error' ? "{count} new issues" : "{count} new warnings", { count: formatNumber(shown.length) }) : t(first.title)}</strong>{shown[0]!.source && <span>{shown[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
 }
 
 /** Copying, planning a review, showing one, or scanning sources: pages lock the settings these depend on. */
@@ -442,9 +445,9 @@ function organizeBusy(state: AppState): boolean { return !!state.review || !!sta
 function organizationDestinationIndex(preferences: Preferences, selected: number): number { return preferences.destinations[selected] ? selected : 0; }
 
 /** Each page's own actions, then All errors on every page. */
-export function TitlebarControls({state, act, page = 'desk', organizationDestination = 0, errorCount, onErrors, errorLevel}: {state: AppState; act: Dispatch; page?: Page; organizationDestination?: number; errorCount: number; onErrors: () => void; errorLevel?: 'error' | 'warning'}) {
+export function TitlebarControls({state, act, page = 'desk', organizationDestination = 0, errorCount, warningCount = 0, onErrors, errorLevel}: {state: AppState; act: Dispatch; page?: Page; organizationDestination?: number; errorCount: number; warningCount?: number; onErrors: () => void; errorLevel?: 'error' | 'warning'}) {
   const { t, formatNumber } = useTranslation();
-  const errorsButton = <Button icon={CircleAlert} data-testid="show-errors" title={t("All errors")} aria-label={t("All errors")} onClick={onErrors}><span className="titlebar-label">{t("All errors")}</span><span key={errorCount} className="error-count" data-count={errorCount} data-level={errorLevel} aria-label={t("{count} errors", {count:formatNumber(errorCount)})}>{formatNumber(errorCount)}</span></Button>;
+  const errorsButton = <Button icon={CircleAlert} data-testid="show-errors" title={t("All errors")} aria-label={t("All errors")} onClick={onErrors}><span className="titlebar-label">{t("All errors")}</span><span key={errorCount} className="error-count" data-count={errorCount} data-level={errorLevel} aria-label={t("{count} errors", {count:formatNumber(errorCount)})}>{formatNumber(errorCount)}</span>{warningCount > 0 && <span key={`w${warningCount}`} className="error-count warning-count" data-testid="warning-count" data-count={warningCount} aria-label={t("{count} warnings", {count:formatNumber(warningCount)})}>{formatNumber(warningCount)}</span>}</Button>;
   if (page === 'drives') return <div className="titlebar-actions" aria-label={t("Drive controls")}>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" data-testid="refresh-drives" title={t("Refresh drives")} aria-label={t("Refresh drives")} onClick={() => act({type:'refresh'})} /></div>;
   if (page === 'organization') {
     const destinationIndex = organizationDestinationIndex(state.preferences, organizationDestination);
@@ -464,35 +467,43 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
 }
 
-export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSource, onClear, target, onShowAll}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[]) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
+export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSource, onClear, target, onShowAll}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[], severity?: Severity) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
   const { t, formatNumber, language } = useTranslation();
   const errors = useMemo(() => target ? errorsFor(allErrors, target) : allErrors, [allErrors, target]);
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useAnimatedClose(dialog,onClose);
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
-  const groups = useMemo(() => { const map = new Map<string, DisplayError[]>(); for (const error of errors) map.set(error.source, [...(map.get(error.source) ?? []), error]); return [...map]; }, [errors]);
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
-  const report = () => errors.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n');
-  const clear = onClear ?? ((ids?: string[]) => { if (!ids) act({ type: 'clearErrors' }); else for (const id of ids) act({ type: 'clearError', id }); });
-  const clearable = errors.some(error => error.id);
-  const clearShown = () => target ? clear(errors.flatMap(error => error.id ? [error.id] : [])) : clear();
+  const report = (items: DisplayError[]) => items.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n');
+  const clear = onClear ?? ((ids?: string[], severity?: Severity) => { const extra = severity ? { severity } : {}; if (!ids) act({ type: 'clearErrors', ...extra }); else for (const id of ids) act({ type: 'clearError', id, ...extra }); });
+  const section = (severity: Severity) => {
+    const items = errors.filter(error => error.severity === severity), plural = severity === 'error' ? 'errors' : 'warnings';
+    const map = new Map<string, DisplayError[]>(); for (const error of items) map.set(error.source, [...(map.get(error.source) ?? []), error]);
+    const clearable = items.some(error => error.id);
+    const clearShown = () => target ? clear(items.flatMap(error => error.id ? [error.id] : []), severity) : clear(undefined, severity);
+    const label = severity === 'error' ? (target ? t("Clear all errors for {name}", { name: target.name }) : t("Clear all errors")) : (target ? t("Clear all warnings for {name}", { name: target.name }) : t("Clear all warnings"));
+    return <section className={`error-section is-${severity}`} data-testid={`${plural}-section`} data-severity={severity} aria-labelledby={`${plural}-heading`}>
+      <div className="error-section-heading"><h3 id={`${plural}-heading`}>{severity === 'error' ? t("Errors") : t("Warnings")}<span className="error-section-count" data-testid={`${plural}-section-count`}>{formatNumber(items.length)}</span></h3><div className="card-actions">{items.length > 0 && <Button kind="quiet" icon={Copy} data-testid={`${plural}-copy-all`} onClick={() => copy(report(items))}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid={`${plural}-clear-all`} aria-label={label} onClick={clearShown}>{t("Clear all")}</Button>}</div></div>
+      {items.length ? <div className="error-groups">{[...map].map(([source, list]) => <section key={source || 'app'} className="error-group">
+        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}</div>
+        <ul className="all-errors">{list.map((error, index) => {
+          if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
+          const explained = explainError(error.message, error.kind, language);
+          const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
+          const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
+          return <li key={index} className={`error-item is-${error.severity}`} data-severity={error.severity}>
+            <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
+            {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
+            <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
+          </li>;
+        })}</ul>
+      </section>)}</div> : <p className="error-empty"><Icon icon={severity === 'error' ? CheckCircle2 : Info} size={16} />{severity === 'error' ? t("No errors to show.") : t("No warnings to show.")}</p>}
+    </section>;
+  };
   return <dialog className="activity-dialog" ref={dialog} data-error-layer aria-labelledby="activity-heading" data-testid="activity-panel" onCancel={event => {event.preventDefault();close();}}>
-    <div className="dialog-heading"><h2 id="activity-heading">{t("All errors")}</h2><div className="card-actions">{errors.length > 0 && <Button kind="quiet" icon={Copy} onClick={() => copy(report())}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid="errors-clear-all" aria-label={target ? t("Clear all errors for {name}", { name: target.name }) : t("Clear all errors")} onClick={clearShown}>{t("Clear all")}</Button>}<Button kind="quiet" icon={X} data-testid="activity-close" aria-label={t("Close panel")} onClick={close} /></div></div>
+    <div className="dialog-heading"><h2 id="activity-heading">{t("All errors")}</h2><div className="card-actions"><Button kind="quiet" icon={X} data-testid="activity-close" aria-label={t("Close panel")} onClick={close} /></div></div>
     {target && <p className="error-filter" data-testid="errors-filter"><Icon icon={HardDrive} size={14} /><span>{t("Errors for {name}", { name: target.name })}</span>{onShowAll && <Button kind="quiet" onClick={onShowAll}>{t("Show all errors")}</Button>}</p>}
-    <div className="activity-content">{errors.length ? <div className="error-groups">{groups.map(([source, items]) => <section key={source || 'app'} className="error-group">
-      <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(items.length) })}</span>{items[0]!.sourceId && onOpenSource && !items[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(items[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}</div>
-      <ul className="all-errors">{items.map((error, index) => {
-        if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
-        const explained = explainError(error.message, error.kind, language);
-        const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
-        const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
-        return <li key={index} className={`error-item is-${explained.severity}`} data-severity={explained.severity}>
-          <div className="error-summary"><Icon icon={explained.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!])}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
-          {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
-          <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
-        </li>;
-      })}</ul>
-    </section>)}</div> : <p className="error-empty"><Icon icon={CheckCircle2} size={16} />{t("No errors to show.")}</p>}</div>
+    <div className="activity-content">{section('error')}{section('warning')}</div>
   </dialog>;
 }
 

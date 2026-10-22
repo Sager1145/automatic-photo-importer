@@ -602,6 +602,14 @@ Show all errors|显示所有错误|顯示所有錯誤|すべてのエラーを�
 Clear all errors for {name}|清除 {name} 的所有错误|清除 {name} 的所有錯誤|{name} のエラーをすべて消去
 Details|详情|詳細資訊|詳細
 {count} new issues|{count} 个新问题|{count} 個新問題|{count} 件の新しい問題
+{count} new warnings|{count} 条新警告|{count} 則新警告|新しい警告 {count} 件
+Errors|错误|錯誤|エラー
+Warnings|警告|警告|警告
+{count} warnings|{count} 条警告|{count} 則警告|警告 {count} 件
+No warnings to show.|暂无警告。|目前沒有警告。|警告はありません。
+Clear all warnings|清除所有警告|清除所有警告|警告をすべて消去
+Clear all warnings for {name}|清除 {name} 的所有警告|清除 {name} 的所有警告|{name} の警告をすべて消去
+Show warnings for {name}|显示 {name} 的警告|顯示 {name} 的警告|{name} の警告を表示
 View|查看|查看|表示
 Off|关|關|オフ
 Ask|询问|詢問|確認する
