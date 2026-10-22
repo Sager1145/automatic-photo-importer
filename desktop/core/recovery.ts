@@ -89,7 +89,9 @@ async function readEvents(m:Manifest,chain=new Set<string>()):Promise<JournalSta
  };
  // Events are lines of one append-only log; journals written before it hold one file per event.
  // A line or file cut short by an interrupted write carries no event.
- const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(authenticated(value));};
+ // Identities recorded under an earlier mount are read as this mount's, like the manifest's.
+ const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
+ const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
  for(const name of await fs.readdir(jobPath(m.root,m.id))) {
   const file=path.join(jobPath(m.root,m.id),name);
   if(name===eventLog){
@@ -153,7 +155,23 @@ async function readManifest(root:string,id:string):Promise<Manifest> {
  if(path.resolve(root)!==root||await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');
  const job=jobPath(root,id),file=path.join(job,'manifest.json');await contained(file,root);
  const handle=await regularHandle(file);let value:unknown;try{if((await handle.stat()).size>64*1024*1024)throw new Error('Recovery journal is too large');value=JSON.parse(await handle.readFile('utf8'));}finally{await handle.close();}
- const manifest=validateManifest(authenticated(value),root,id);await roots(manifest);return manifest;
+ const manifest=validateManifest(authenticated(value),root,id);await rebaseMount(manifest);await roots(manifest);return manifest;
+}
+/** The mount each journal was read under: a device number names a mount, not a disk. */
+const mountDevices=new WeakMap<Manifest,string>();
+/** A device number names the disk node a volume is mounted from, which can change between mounts
+ * (and can come back), so a journal or its later events may record another mount's. While the
+ * recovery root is still the same directory (same inode; the caller has already matched the
+ * volume's UUID), every recorded device number is read as this mount's. Everything else is
+ * checked as strictly as before. */
+async function rebaseMount(m:Manifest):Promise<void>{
+ const [recorded,inode]=m.rootIdentity.split(':'),now=await fs.lstat(m.root,{bigint:true});
+ if(String(now.ino)!==inode)return;
+ const dev=String(now.dev);mountDevices.set(m,dev);
+ if(dev===recorded)return;
+ const rebase=(identity:string)=>identity.replace(/^\d+:/,`${dev}:`);
+ m.rootIdentity=rebase(m.rootIdentity);m.sourceIdentity=rebase(m.sourceIdentity);
+ for(const entry of m.entries){entry.stat.dev=dev;for(const folder of Object.keys(entry.parents))entry.parents[folder]=rebase(entry.parents[folder]!);}
 }
 // The cap stays well below the longest string a log can be read into.
 const eventLog='event-log.jsonl',maxEventLog=256*1024*1024,appending=new Map<string,Promise<void>>(),syncedLogs=new Set<string>();
