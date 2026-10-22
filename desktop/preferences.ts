@@ -1,4 +1,4 @@
-import type {MediaLayout,Preferences} from './shared';
+import type {DriveCameraRecord,MediaLayout,Preferences} from './shared';
 
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
@@ -13,6 +13,18 @@ const strings=(value:unknown,fallback:string[]):string[]=>Array.isArray(value)?A
 function records<T extends Record<string,string>>(value:unknown,fields:(keyof T)[]):Record<string,T> {
  if(!value||typeof value!=='object')return {};
  return Object.fromEntries(Object.entries(value).filter(([,item])=>!!item&&typeof item==='object'&&fields.every(field=>typeof (item as Record<string,unknown>)[field as string]==='string'))) as Record<string,T>;
+}
+
+const counts=(value:unknown):value is number=>Number.isSafeInteger(value)&&(value as number)>=0;
+const tallies=(value:unknown)=>Array.isArray(value)?value.filter(item=>typeof item?.name==='string'&&counts(item.files)&&counts(item.bytes)).map(({name,files,bytes})=>({name,files,bytes})):[];
+// Saved by an earlier scan; anything malformed is dropped rather than shown.
+function cameraRecord(value:unknown):DriveCameraRecord|undefined {
+ const item=value as Partial<DriveCameraRecord>|undefined;
+ if(!item||typeof item!=='object'||typeof item.scanned!=='string'||!['complete','stopped','error'].includes(item.status as string)||!counts(item.checked)||!counts(item.total)||!counts(item.unknown)||!Array.isArray(item.models))return undefined;
+ return {scanned:item.scanned,status:item.status!,checked:item.checked,total:item.total,unknown:item.unknown,models:tallies(item.models),...(Array.isArray(item.lenses)?{lenses:tallies(item.lenses)}:{})};
+}
+function history(value:unknown):NonNullable<Preferences['deviceHistory']> {
+ return Object.fromEntries(Object.entries(records<{name:string}>(value,['name'])).map(([id,entry])=>{const {cameras,...rest}=entry as NonNullable<Preferences['deviceHistory']>[string];const record=cameraRecord(cameras);return [id,record?{...rest,cameras:record}:rest];}));
 }
 
 /** The single set of preference rules, for settings read from disk and for every change the
@@ -46,7 +58,7 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   unknownDefault:oneOf(value.unknownDefault,['skip','other','ask'] as const,base.unknownDefault??'skip'),
   rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected']),
   ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt']),
-  deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:records<{name:string}>(value.deviceHistory,['name']) as Preferences['deviceHistory'],
+  deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:history(value.deviceHistory),
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
   editedFolder:text(value.editedFolder,base.editedFolder??'editied'),
  };

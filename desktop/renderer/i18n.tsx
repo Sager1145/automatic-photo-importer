@@ -480,6 +480,9 @@ Move existing files into your folder structure.|将现有文件移入你的文�
 No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）がありません。
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
+Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細
+{count} files without a camera model|{count} 个文件没有相机型号|{count} 個檔案沒有相機型號|カメラ機種のないファイル {count} 件
+No camera data from a scan yet. Scan this drive to see its cameras.|还没有扫描得到的相机数据。扫描此驱动器即可查看其相机。|尚無掃描得到的相機資料。掃描此磁碟即可查看其相機。|スキャンによるカメラ情報はまだありません。このドライブをスキャンするとカメラを確認できます。
 No saved rules.|没有已保存的规则。|沒有已儲存的規則。|保存されたルールはありません。
 Not available with Mirror.|镜像模式下不可用。|鏡像模式下不可用。|ミラーでは使用できません。
 Not photos or videos. Change this in Settings.|不是照片或视频。可在设置中更改。|不是照片或影片。可在設定中變更。|写真でも動画でもありません。設定で変更できます。

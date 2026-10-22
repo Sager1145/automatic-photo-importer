@@ -4,13 +4,14 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {Action,AppState,Preferences,Job,Source,TransferPlan,DestinationStatus,Inventory,Progress,Review} from './shared';
+import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review} from './shared';
 import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,configureOrganizationRecovery,removeOrganizedFolders} from './core';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {destinationEntries,destinationParts,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
-import {backupDriveIdentity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
+import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
+import {driveCameraRecord} from './source-cameras';
 import {backupFolders,destinationRoots,sourceInsideBackup} from './platform/destination-roots';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
@@ -72,8 +73,15 @@ function loadRememberedScans(){
   });
  }
 }
-/** Remember that a device finished a scan or a verified import, for the reconnection notice. */
-function noteDevice(source:Source,event:'scan'|'import'){if(qa)return;recordDeviceHistory(state.preferences.deviceHistory??={},source,event,new Date().toISOString());void save().catch(()=>{});}
+/** Remember that a device finished a scan (with the cameras it read) or a verified import, for the reconnection notice and Drives. */
+function noteDevice(source:Source,event:'scan'|'import',cameras?:SourceCameraInfo){if(qa)return;const now=new Date().toISOString();recordDeviceHistory(state.preferences.deviceHistory??={},source,event,now,driveCameraRecord(cameras,now));void save().catch(()=>{});}
+/** A chosen folder shows the capacity of the volume it lives on. */
+async function updateFolderCapacity(source:Source){
+ if(source.transport!=='folder')return;
+ const capacity=await folderCapacity(source.path),entry=folders.get(source.id);
+ if(entry)entry.source={...entry.source,...capacity};
+ state.sources=state.sources.map(item=>item.id===source.id?{...item,...capacity}:item);
+}
 function publishDevices(){state.newDevices=[...selection.newDevices];state.reconnectedDevices=[...selection.reconnectedDevices];}
 const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.sourceInventories?.[source.id]??rememberedScans.get(source.id);
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
@@ -137,7 +145,7 @@ async function scanSource(source:Source){
  if(scanControls.has(source.id))return;
  if(source.transport==='camera')throw new MessageError('error.cameraScan');
  const control=new AbortController();scanControls.set(source.id,control);state.scanningSources=[...scanControls.keys()];emit();
- try{await scanSourceInWorker(source,control.signal,result=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes)=>{(state.scanProgress??={})[source.id]={files,bytes};progressEmit();},primeRouting,{reuse:reusableScan(source),routing:routingEntries().filter(([key])=>key.startsWith(source.path+path.sep))});rememberScan(source,state.sourceInventories?.[source.id]);noteDevice(source,'scan');}
+ try{await scanSourceInWorker(source,control.signal,result=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes)=>{(state.scanProgress??={})[source.id]={files,bytes};progressEmit();},primeRouting,{reuse:reusableScan(source),routing:routingEntries().filter(([key])=>key.startsWith(source.path+path.sep))});rememberScan(source,state.sourceInventories?.[source.id]);noteDevice(source,'scan',state.sourceCameraInfo?.[source.id]);await updateFolderCapacity(source);}
  catch(error){const info=state.sourceCameraInfo?.[source.id];if(info)state.sourceCameraInfo![source.id]={...info,status:control.signal.aborted?'stopped':'error',...(!control.signal.aborted?{error:errorText(error)}:{})};if(!control.signal.aborted)throw error;}
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();}
@@ -421,7 +429,7 @@ async function action(input:Action):Promise<void>{
   }
   case 'chooseDestination':{if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');if(input.index!==0&&input.index!==1)throw new Error('Invalid destination');const result=await dialog.showOpenDialog(window!,{title:`Choose destination ${input.index+1}`,properties:['openDirectory','createDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const info=await validateDestination(root,state.sources);if(!info.volumeId)throw new MessageError('error.destinationUnidentified');state.preferences.destinations[input.index]=root;(state.preferences.destinationIds??=[])[input.index]=info.volumeId;approved.add(root);await save();await refresh();}break;}
   case 'removeDestination':{if(busy()||state.review||state.busyReview)throw new MessageError('error.busy');state.preferences.destinations.splice(input.index,1);state.preferences.destinationIds?.splice(input.index,1);await save();await refresh();break;}
-  case 'chooseSource':{if(!input.backup&&!state.preferences.allowFolderSource)throw new MessageError('error.folderSourcesOff');const result=await dialog.showOpenDialog(window!,{title:input.backup?'Choose a drive or folder to back up':'Choose media source',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const inside=sourceInsideBackup(root,state.preferences.destinations,backupFolders(state.preferences));if(inside)throw new MessageError(inside.key,inside.params);approved.add(root);const source:Source=state.sources.find(s=>s.path===root)??{id:`folder:${root}`,name:path.basename(root),path:root,transport:'folder'};folders.set(source.id,{source,backup:input.backup});selection.select(source,true,state.preferences.rememberedDevices??={},new Date().toISOString(),state.preferences.ignoredDevices??={});state.sources=selection.apply([...state.sources.filter(s=>s.id!==source.id&&s.path!==root),source],state.preferences.rememberedDevices,state.preferences.ignoredDevices,state.preferences.deviceHistory??={});publishDevices();await save();}break;}
+  case 'chooseSource':{if(!input.backup&&!state.preferences.allowFolderSource)throw new MessageError('error.folderSourcesOff');const result=await dialog.showOpenDialog(window!,{title:input.backup?'Choose a drive or folder to back up':'Choose media source',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const inside=sourceInsideBackup(root,state.preferences.destinations,backupFolders(state.preferences));if(inside)throw new MessageError(inside.key,inside.params);approved.add(root);const source:Source=state.sources.find(s=>s.path===root)??{id:`folder:${root}`,name:path.basename(root),path:root,transport:'folder',...await folderCapacity(root)};folders.set(source.id,{source,backup:input.backup});selection.select(source,true,state.preferences.rememberedDevices??={},new Date().toISOString(),state.preferences.ignoredDevices??={});state.sources=selection.apply([...state.sources.filter(s=>s.id!==source.id&&s.path!==root),source],state.preferences.rememberedDevices,state.preferences.ignoredDevices,state.preferences.deviceHistory??={});publishDevices();await save();}break;}
   case 'start':{
    if(state.review){await applyReview();break;}
    if(input.sourceId)selection.dismissReconnected(input.sourceId);else for(const source of state.sources)if(source.selected)selection.dismissReconnected(source.id);publishDevices();

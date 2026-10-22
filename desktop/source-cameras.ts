@@ -1,4 +1,4 @@
-import type { Inventory, InventoryFile, Metadata, Source, SourceCameraInfo } from './shared';
+import type { DriveCameraRecord, Inventory, InventoryFile, Metadata, Source, SourceCameraInfo } from './shared';
 
 type CameraHint = SourceCameraInfo['hints'][number];
 const vendors:Record<string,string> = {
@@ -96,4 +96,11 @@ export async function analyzeSourceCameras(
   const result = summary(signal?.aborted ? 'stopped' : failures ? 'error' : 'complete');
   onUpdate?.(result);
   return result;
+}
+
+/** The part of a finished camera scan worth remembering for the drive: no paths, hints or errors. */
+export function driveCameraRecord(info:SourceCameraInfo|undefined, scanned:string):DriveCameraRecord|undefined {
+  if (!info || info.status === 'reading') return undefined;
+  const {status,checked,total,unknown,models,lenses} = info;
+  return {scanned,status,checked,total,unknown,models:models.map(model=>({...model})),...(lenses ? {lenses:lenses.map(lens=>({...lens}))} : {})};
 }

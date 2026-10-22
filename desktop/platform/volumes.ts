@@ -194,6 +194,11 @@ export async function backupDriveIdentity(target:string, volumes?:MountedVolume[
   try {volume=(volumes??await mountedVolumes()).filter(v=>within(resolved,v.path)).sort((a,b)=>b.path.length-a.path.length)[0];} catch {}
   return driveIdentity(resolved,volume);
 }
+/** Total and free space of the volume a chosen source folder lives on; empty when it cannot be read. */
+export async function folderCapacity(folder:string):Promise<{total?:number;free?:number}> {
+  try {const capacity=await statfs(folder);return {total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};}
+  catch {return {};}
+}
 export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promise<DestinationStatus> {
   try {
     await requireMountedRoot(target);
