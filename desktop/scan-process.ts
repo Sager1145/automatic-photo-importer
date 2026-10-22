@@ -11,7 +11,7 @@ export function scanSourceInWorker(...args:Parameters<typeof startScan>):Promise
   const forget=()=>{inFlight.delete(work);};work.then(forget,forget);
   return work;
 }
-function startScan(source:Source,signal:AbortSignal,onInventory:(value:Inventory)=>void,onCameras:(value:SourceCameraInfo)=>void,options:{unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}={},onListing?:(files:number,bytes:number)=>void,onRouting?:(entries:[string,Metadata][])=>void,memory:{reuse?:Inventory;routing?:[string,Metadata][]}={}):Promise<void>{
+function startScan(source:Source,signal:AbortSignal,onInventory:(value:Inventory)=>void,onCameras:(value:SourceCameraInfo)=>void,options:{unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}={},onListing?:(files:number,bytes:number,file?:string,top?:{done:number;total:number})=>void,onRouting?:(entries:[string,Metadata][])=>void,memory:{reuse?:Inventory;routing?:[string,Metadata][]}={}):Promise<void>{
  signal.throwIfAborted();
  return new Promise((resolve,reject)=>{
   const child=utilityProcess.fork(path.join(__dirname,'scan-worker.cjs'),[JSON.stringify(source),JSON.stringify(options)],{serviceName:'Photo Importer read-only scan',stdio:'ignore'});
@@ -23,7 +23,7 @@ function startScan(source:Source,signal:AbortSignal,onInventory:(value:Inventory
   signal.addEventListener('abort',abort,{once:true});
   // Sent after spawn rather than in argv: a large card's listing exceeds argument limits.
   child.once('spawn',()=>{try{child.postMessage({type:'start',reuse:memory.reuse,routing:memory.routing??[]});}catch{finish(new Error('The read-only scanner could not start.'));}});
-  child.on('message',(message:{type:string;inventory?:Inventory;info?:SourceCameraInfo;error?:string;files?:number;bytes?:number;entries?:[string,Metadata][]})=>{if(settled)return;if(message.type==='progress'){onListing?.(message.files??0,message.bytes??0);return;}if(message.type==='routing'){onRouting?.(message.entries??[]);return;}if(message.type==='inventory'&&message.inventory)onInventory(message.inventory);else if(message.type==='cameras'&&message.info)onCameras(message.info);else if(message.type==='done')finish();else if(message.type==='error')finish(new Error(message.error||'Could not scan this source.'));});
+  child.on('message',(message:{type:string;inventory?:Inventory;info?:SourceCameraInfo;error?:string;files?:number;bytes?:number;file?:string;top?:{done:number;total:number};entries?:[string,Metadata][]})=>{if(settled)return;if(message.type==='progress'){onListing?.(message.files??0,message.bytes??0,message.file,message.top);return;}if(message.type==='routing'){onRouting?.(message.entries??[]);return;}if(message.type==='inventory'&&message.inventory)onInventory(message.inventory);else if(message.type==='cameras'&&message.info)onCameras(message.info);else if(message.type==='done')finish();else if(message.type==='error')finish(new Error(message.error||'Could not scan this source.'));});
   child.on('exit',code=>{exit();if(!settled)finish(new Error(`The read-only scanner exited (${code}). Reconnect the source and try again.`));});
   child.on('error',()=>{if(!child.pid)exit();finish(new Error('The read-only scanner could not start.'));});
  });

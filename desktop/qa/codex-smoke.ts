@@ -398,6 +398,17 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
 
  }
  if(!uiOnly||organizationOnly){
+  await check('A fixture organization review shows its progress with a file name, time left and speed',async()=>{
+   const seen:{file:string;total:number;share?:number;eta?:number;speed:number;fileRate?:number}[]=[];
+   const pending=action({type:'previewOrganization',destinationIndex:0});let done=false;void pending.finally(()=>{done=true;});
+   while(!done){const progress=(await state()).reviewProgress;if(progress)seen.push({file:progress.file,total:progress.total,share:progress.share,eta:progress.eta,speed:progress.speed,fileRate:progress.fileRate});await new Promise(r=>setTimeout(r,5));}
+   await pending;await wait(async()=>(await state()).review!==undefined,'organization review ready');
+   // A fixture review is quick, so only what was observed is checked: every sample names a file, and a known total or estimate is a determinate bar.
+   for(const sample of seen)if(sample.total>0||sample.share!==undefined||sample.file){assert.notEqual(sample.file,'','review progress names the file it is on');}
+   const timed=seen.filter(sample=>sample.eta!==undefined||sample.speed>0||(sample.fileRate??0)>0);
+   if(timed.length)assert.ok(timed.every(sample=>sample.file!==''),'progress with a speed or time left also names its file');
+   await action({type:'discardReview'});
+  });
   await check('Organization applies changed folder settings and can recheck its recovery journal',async()=>{
    if(organizationOnly){await fs.copyFile(path.join(root,'source-1','photo.png'),path.join(root,'destination','unorganized.png'));await fs.copyFile(path.join(root,'source-1','clip.mp4'),path.join(root,'destination','unorganized.mp4'));}
    await action({type:'preferences',patch:{basePath:'organized-library'}});

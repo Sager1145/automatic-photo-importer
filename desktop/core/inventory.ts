@@ -45,13 +45,13 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   }
   return result;
 }
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number)=>void;reuse?:Inventory;exclude?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;reuse?:Inventory;exclude?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
   // Listing a large card takes a while; report what has been found so far.
-  let listedBytes=0,reported=0,reportedAt=0;
-  const report=(final=false)=>{if(!options.onProgress||(!final&&files.length-reported<500&&performance.now()-reportedAt<100))return;reported=files.length;reportedAt=performance.now();options.onProgress(files.length,listedBytes);};
+  let listedBytes=0,reported=0,reportedAt=0,topDone=0,topTotal=0;
+  const report=(final=false)=>{if(!options.onProgress||(!final&&files.length-reported<500&&performance.now()-reportedAt<100))return;reported=files.length;reportedAt=performance.now();options.onProgress(files.length,listedBytes,topTotal>0?{done:topDone,total:topTotal}:undefined,files.at(-1)?.relative);};
   const listedFolders:[string,string,string[]?][]=[];
   const folderKey=(stat:import('node:fs').BigIntStats)=>`${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;
   // The last listing of the same scope, per folder: a folder whose identity is
@@ -70,7 +70,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   const add=(file:string,size:number)=>{files.push({path:file,relative:path.relative(root,file),size,kind:mediaKindForPath(file),included:false});listedBytes+=size;report();};
   // Folders never listed, such as a backup folder inside the chosen source.
   const excluded=new Set((options.exclude??[]).map(folder=>pathKey(path.resolve(folder))));
-  async function walk(folder:string):Promise<void> {
+  async function walk(folder:string,isRoot=false):Promise<void> {
     checkAbort(signal);
     if(excluded.has(pathKey(folder)))return;
     await contained(path.join(folder,'.inventory-path-check'),root);
@@ -80,28 +80,31 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       listedFolders.push([relative,key,names]);
       // Same name order as a fresh listing.
       const children=[...known!.files.map(file=>({name:path.basename(file.relative),file})),...known!.folders.map(child=>({name:path.basename(child),file:undefined}))].sort((a,b)=>a.name.localeCompare(b.name));
-      for(const child of children) {checkAbort(signal);if(child.file)add(path.join(folder,child.name),child.file.size);else await walk(path.join(folder,child.name));}
+      if(isRoot)topTotal=children.filter(child=>!child.file).length;
+      for(const child of children) {checkAbort(signal);if(child.file)add(path.join(folder,child.name),child.file.size);else{await walk(path.join(folder,child.name));if(isRoot){topDone++;report(true);}}}
     };
     if(known && known.key===key) return reuse(known.names);
     const entries=await fs.readdir(folder,{withFileTypes:true}),names=entries.map(entry=>entry.name).sort();
     if(known?.names && known.names.length===names.length && known.names.every((name,index)=>name===names[index])) return reuse(names);
     listedFolders.push([relative,key,names]);
     entries.sort((a,b)=>a.name.localeCompare(b.name));
+    if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name)).length;
     for(const entry of entries) {
       checkAbort(signal);
       if(ignoredName(entry.name) || entry.isSymbolicLink()) continue;
       if(!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name)) continue;
       const file=path.join(folder,entry.name), stat=await fs.lstat(file);
       if(stat.isSymbolicLink()) continue;
-      if(stat.isDirectory()) await walk(file);
+      if(stat.isDirectory()){await walk(file);if(isRoot){topDone++;report(true);}}
       else if(stat.isFile()) add(file,stat.size);
     }
   }
   if(options.folders){
     const selected:string[]=[];
     for(const relative of options.folders){validateRelative(relative);const requested=path.join(root,relative);await contained(path.join(requested,'.inventory-scope-check'),root);const folder=await directory(requested);if(!selected.some(parent=>folder===parent||folder.startsWith(parent+path.sep))){for(let index=selected.length-1;index>=0;index--)if(selected[index].startsWith(folder+path.sep))selected.splice(index,1);selected.push(folder);}}
-    for(const folder of selected)await walk(folder);
-  }else await walk(root);
+    topTotal=selected.length;
+    for(const folder of selected){await walk(folder);topDone++;report(true);}
+  }else await walk(root,true);
   report(true);
   const media=new Map<string,InventoryFile[]>(),byPath=new Map<string,InventoryFile>();
   for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); media.set(key,[...(media.get(key)??[]),file]); byPath.set(pathKey(file.path),file); }

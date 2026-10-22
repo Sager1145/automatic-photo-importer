@@ -120,7 +120,7 @@ function copyState(state:JournalState):JournalState{
 /** `onRead`: records read so far out of the journal's files, for journals written one file per event.
  * `follow` false reads only this journal's own signed events, without checking its successor.
  * `folder`: where the journal's folder is now, when it differs from its recorded root only by case. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true,folder=m.root):Promise<JournalState> {
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number,name?:string)=>void,follow=true,folder=m.root):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState=emptyState();
  const apply=(record:Record<string,unknown>)=>{
@@ -220,7 +220,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   const name=names[position]!;
   if(name===eventLog){log=await readLog(0);texts[position]=log.lines;}
   else if(legacyEvent.test(name)){const text=await readLegacy(name);legacy.set(name,text);texts[position]=text;}
-  onRead?.(++read,names.length);
+  onRead?.(++read,names.length,name);
  };
  await Promise.all(Array.from({length:Math.min(32,names.length)},async()=>{while(next<names.length)await readOne(next++);}));
  for(const text of texts){
@@ -753,7 +753,8 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
  * pass in this session (the files' identities and the entry's journal state). */
 const verifiedPasses=new Map<string,Map<number,string>>();
 async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean}={}):Promise<ReorganizationResult> {
- const state=await readEvents(m);
+ // A journal written one file per event can hold tens of thousands: its first read reports how many are read.
+ const state=await readEvents(m,undefined,(completed,total,name)=>onProgress?.({phase:'verifying',step:'history',completed,total,bytes:0,totalBytes:0,speed:0,file:name??m.id}));
  if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
  if(state.undoComplete||state.undone.size)throw new Error(`Organization ${m.id} was undone`);
  // A recheck reads file contents again only for entries that changed since they were last verified in

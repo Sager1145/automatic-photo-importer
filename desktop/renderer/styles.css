@@ -1130,6 +1130,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .progress-elapsed{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.3rem;color:var(--label-tertiary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
 .progress-elapsed>svg{flex:none}
 .progress-eta{color:var(--label-tertiary);font-size:var(--text-caption);font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
+.progress-file{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--label-tertiary);font-size:var(--text-caption);white-space:nowrap}
 .progress-speed{color:var(--label-tertiary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
 .dashboard-total .progress-elapsed{flex:none}
 .drive-history{display:grid;gap:.25rem;margin:0;padding:0;list-style:none;font-size:var(--text-footnote);color:var(--label-secondary)}

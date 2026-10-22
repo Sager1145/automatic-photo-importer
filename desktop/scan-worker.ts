@@ -15,7 +15,7 @@ async function scan(reuse:Inventory|undefined,routing:[string,Metadata][]){
  const known=new Set(routing.map(([key])=>key)),learned=()=>routingEntries().filter(([key])=>!known.has(key));
  try{
   primeRouting(routing);
-  const result=await inventory(source.path,{...options,reuse,onProgress:(files,bytes)=>process.parentPort.postMessage({type:'progress',files,bytes})},signal.signal);
+  const result=await inventory(source.path,{...options,reuse,onProgress:(files,bytes,top,file)=>process.parentPort.postMessage({type:'progress',files,bytes,file,top})},signal.signal);
   process.parentPort.postMessage({type:'inventory',inventory:result});
   await analyzeSourceCameras(source,result,file=>metadata(file,{preview:false,details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
   process.parentPort.postMessage({type:'routing',entries:learned()});

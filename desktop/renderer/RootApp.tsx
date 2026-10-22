@@ -57,6 +57,16 @@ function PathPreview({ label, parts, testId }: { label: string; parts: string[];
   return <div className="folder-preview" data-testid={testId}><span><Icon icon={Folder} size={17} />{label}</span><div>{parts.map((part, index) => <span key={`${index}-${part}`}>{index > 0 && <Icon icon={ChevronRight} size={13} />}<span>{part}</span></span>)}</div></div>;
 }
 function driveBackupFolder(basePath: string): string { return [...basePath.split(/[\\/]/).filter(Boolean), 'Drive backups', '<drive name>'].join('/'); }
+/** A long path cut in the middle so both its folder and its file name stay readable. */
+export function truncateMiddle(value: string, max = 56): string {
+  if (value.length <= max) return value;
+  const keep = max - 1, head = Math.ceil(keep * .4), tail = keep - head;
+  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
+}
+/** The file a step is on, as the path relative to the source root, with its full path as the tooltip. */
+function ProgressFile({ file }: { file?: string }) {
+  return file ? <span className="progress-file" data-testid="progress-file" title={file}>{truncateMiddle(file)}</span> : null;
+}
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
 function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
   return <IconComponent size={size} strokeWidth={1.8} aria-hidden="true" className={className} />;
@@ -914,6 +924,8 @@ export function shownPercent(fraction: number, finished: boolean): number {
 }
 function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
   const files = progress.total ? progress.completed / progress.total : undefined, data = progress.totalBytes ? progress.bytes / progress.totalBytes : undefined;
+  // A listing's total is an estimate: its share stays below 100% until the listing ends and the next step begins.
+  if (progress.phase === 'planning' && progress.step === 'listing') { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
   return progress.phase === 'verifying' ? files ?? data : data ?? files;
 }
@@ -922,6 +934,7 @@ function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typ
   // While listing, the size found so far is the only other measure.
   if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
   if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
+  if (progress.step === 'history') return t("Reading organization history: {completed} of {total} files", counts);
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
@@ -1020,6 +1033,7 @@ function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): s
   if (job.phase === 'complete') return t("Complete");
   if (job.phase === 'stopped') return job.paused ? t("Paused") : t("Stopped");
   if (job.phase === 'discovering' || job.progress?.step === 'listing') return t("Listing files");
+  if (job.progress?.step === 'history') return t("Reading history");
   if (job.progress?.step === 'earlier' || job.progress?.step === 'confirming') return t("Confirming");
   return job.progress?.phase === 'planning' ? (job.progress.step === 'reading' ? t("Reading files") : t("Checking files")) : t("Organizing");
 }
@@ -1056,8 +1070,9 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const fraction = organizationFraction(job);
   const label = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : !progress ? (job.phase === 'queued' ? t("Queued") : t("Preparing organization…")) : progressCount(progress, t, formatNumber, true, formatBytes);
   return <div className="organization-progress" data-testid="organization-progress">
-    <div className="organization-progress-line"><span>{label}</span><JobTiming job={job} />{activePhases.includes(job.phase) && progress?.phase === 'planning' && <ProgressSpeed progress={progress} />}{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
+    <div className="organization-progress-line"><span>{label}</span><JobTiming job={job} />{activePhases.includes(job.phase) && progress && hasSpeed(progress) && <ProgressSpeed progress={progress} />}{fraction !== undefined && <strong>{formatNumber(shownPercent(fraction, job.phase === 'complete'))}%</strong>}{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</div>
     {(running || paused) && <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} copy progress", { name: job.source.name })} />}
+    {activePhases.includes(job.phase) && progress && <ProgressFile file={progress.file} />}
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
@@ -1072,15 +1087,15 @@ export function scanTotalBytes(source: Source, previous?: Inventory): number | u
 export function PlanningProgress({ progress, label }: { progress: Progress; label: string }) {
   const { t, formatNumber } = useTranslation();
   const fraction = progressFraction(progress);
-  return <div className="source-progress" data-testid="planning-progress"><ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={label} /><div><span>{progress.total ? progressCount(progress, t, formatNumber) : t("Listing files…")}</span><ProgressTiming startedAt={progress.startedAt} left={progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 ? t("Estimating time left…") : undefined} /><ProgressSpeed progress={progress} /><strong>{filename(progress.file)}</strong></div></div>;
+  return <div className="source-progress" data-testid="planning-progress"><ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={label} /><div><span>{progress.total || progress.share !== undefined ? progressCount(progress, t, formatNumber) : t("Listing files…")}</span><ProgressTiming startedAt={progress.startedAt} left={progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 ? t("Estimating time left…") : undefined} /><ProgressSpeed progress={progress} /><ProgressFile file={progress.file} /></div></div>;
 }
 // Listing: share of the drive's used space already listed. Metadata: share of media files read.
 export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; usedBytes?: number }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
-  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : undefined;
+  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
   return <div className="source-scan-progress" data-testid="scan-progress" aria-live="polite">
-    <div><span>{reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : t("Listing files…")}{fraction !== undefined && <b className="scan-percent"> {t("{percent}% scanned", { percent: formatNumber(Math.floor(fraction * 100)) })}</b>}</span><ProgressTiming startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined} />{reading && <ProgressSpeed progress={{ speed: 0, fileRate: cameraInfo.fileRate }} />}{!reading && listing && <strong>{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong>}</div>
+    <div><span>{reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : t("Listing files…")}{fraction !== undefined && <b className="scan-percent"> {t("{percent}% scanned", { percent: formatNumber(Math.floor(fraction * 100)) })}</b>}</span><ProgressTiming startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined} />{reading && <ProgressSpeed progress={{ speed: 0, fileRate: cameraInfo.fileRate }} />}{!reading && listing && <ProgressSpeed progress={{ speed: 0, fileRate: listing.fileRate }} />}{!reading && <ProgressFile file={listing?.file} />}{!reading && listing && <strong>{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong>}</div>
     <ProgressBar value={fraction ?? 0} indeterminate={fraction === undefined} label={t("{name} scanning", { name: sourceName })} />
   </div>;
 }
@@ -1110,7 +1125,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {already && <div className="source-progress source-progress-calm" data-testid="already-imported"><ProgressBar value={1} label={t("{name} copy progress", { name: source.name })} /><div><span>{progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")}</span></div></div>}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
-    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <JobTiming job={job} />}<strong>{hasSpeed(progress) && active ? <ProgressSpeed progress={progress} /> : job?.phase === 'complete' ? t("Verified") : '—'}</strong></div></div>}
+    {progress && !already && <div className="source-progress"><ProgressBar value={progressFraction(progress) ?? 0} label={t("{name} copy progress", { name: source.name })} /><div><span>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</span>{job && <JobTiming job={job} />}<strong>{hasSpeed(progress) && active ? <ProgressSpeed progress={progress} /> : job?.phase === 'complete' ? t("Verified") : '—'}</strong>{active && progress.phase === 'planning' && <ProgressFile file={progress.file} />}</div></div>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
