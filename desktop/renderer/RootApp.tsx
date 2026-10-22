@@ -110,50 +110,46 @@ function ProgressBar({ value, label, indeterminate = false }: { value: number; l
   return <div className={`progress-track ${indeterminate ? 'progress-discovering' : ''}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} {...(!indeterminate ? { 'aria-valuenow': Math.round(Math.max(0, Math.min(1, value)) * 100) } : {})}><span style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, value))})` }} /></div>;
 }
 
-// Page changes slide in the direction of travel; other interface swaps crossfade.
+// Motion: one set of durations and curves, defined in styles.css (:root) and read here. See docs/motion-audit.md.
+export function reducedMotion(): boolean { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+function motionToken(name: '--quick' | '--base' | '--slow' | '--ease-ios'): string { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const motionMs = (name: '--quick' | '--base' | '--slow') => parseFloat(motionToken(name)) || 0;
+/** Pages slide in the direction of travel, Settings panels rise or fall, cards morph to their new place, everything else crossfades. */
+export type InterfaceChange = 'crossfade' | 'layout' | 'forward' | 'back' | 'category-forward' | 'category-back';
 let interfaceTransition: ViewTransition | undefined;
-// When items in a list change order, each glides from its old position to the new one (FLIP).
-export function useReorderAnimation(container: RefObject<HTMLElement | null>, selector: string, key: string) {
-  const previous = useRef(new Map<string, DOMRect>());
-  useLayoutEffect(() => {
-    const root = container.current; if (!root) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const origin = root.getBoundingClientRect(), next = new Map<string, DOMRect>();
-    for (const item of root.querySelectorAll<HTMLElement>(selector)) {
-      const id = item.dataset.sourceId ?? item.dataset.key; if (!id) continue;
-      const box = item.getBoundingClientRect(), rect = new DOMRect(box.left - origin.left, box.top - origin.top, box.width, box.height);
-      next.set(id, rect);
-      const before = previous.current.get(id);
-      if (!reduce && before && (Math.abs(before.x - rect.x) > 1 || Math.abs(before.y - rect.y) > 1)) {
-        item.animate([{ transform: `translate(${before.x - rect.x}px, ${before.y - rect.y}px)` }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
-      }
-    }
-    previous.current = next;
-  }, [key]);
+/** Runs a DOM change as a View Transition; a newer change skips the running one, and reduced motion applies it directly. */
+export function animateInterfaceChange(change: () => void, kind: InterfaceChange = 'crossfade') {
+  if (!document.startViewTransition || reducedMotion()) { change(); return; }
+  document.documentElement.dataset.transition = kind;
+  const transition = interfaceTransition = document.startViewTransition(() => flushSync(change));
+  void transition.finished.catch(() => {}).then(() => { if (interfaceTransition === transition) { interfaceTransition = undefined; delete document.documentElement.dataset.transition; } });
 }
-
-function animateInterfaceChange(change: () => void, kind: 'fade' | 'forward' | 'back' = 'fade') {
-  if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    document.documentElement.dataset.transition = kind;
-    const transition = interfaceTransition = document.startViewTransition(() => flushSync(change));
-    void transition.finished.catch(() => {}).then(() => { if (interfaceTransition === transition) { interfaceTransition = undefined; delete document.documentElement.dataset.transition; } });
-  } else change();
+const interfaceSettled = () => interfaceTransition?.finished.catch(() => {}) ?? Promise.resolve();
+/** Which importer updates are interface swaps, and how they animate. Progress ticks are not: they render directly. */
+export function interfaceChangeKind(previous: AppState, next: AppState): InterfaceChange | undefined {
+  const a = previous.preferences, b = next.preferences;
+  if (a.language !== b.language || a.appearance !== b.appearance || a.accent !== b.accent) return 'crossfade';
+  // Cards and rows that come, go or move: drives, organizations, the overview, destination slots, the review.
+  const layout = (state: AppState) => [state.sources.map(source => source.id).join('|'), [...new Set(state.jobs.map(job => `${job.organization ? 'organization' : 'source'}:${job.source.id}`))].sort().join('|'), state.preferences.sourceLayout ?? 'list', state.preferences.showDashboard !== false, state.preferences.copyMode, state.preferences.destinations.join('|'), state.review?.id ?? !!state.busyReview].join('\n');
+  return layout(previous) !== layout(next) ? 'layout' : undefined;
 }
 // A sheet opened mid-transition would render beneath the page snapshots, so finish the transition first.
 function showSheet(dialog: HTMLDialogElement | null) {
   interfaceTransition?.skipTransition();
   dialog?.showModal();
 }
-function useDialogClose(dialog: React.RefObject<HTMLDialogElement | null>, onClose: () => void) {
+/** Plays the exit of something React is about to remove (a sheet, the toast), then removes it. onClose returns false when new content arrived meanwhile: the element then stays, fully shown. */
+function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose: () => void | false) {
   const closing = useRef(false);
   return useCallback(() => {
     if (closing.current) return;
     closing.current = true;
-    const element = dialog.current;
-    if (!element || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { onClose(); return; }
-    const animation = element.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(10px) scale(.97)'}],{duration:220,easing:'cubic-bezier(0.32, 0.72, 0, 1)',fill:'forwards'});
-    void animation.finished.catch(() => {}).then(onClose);
-  },[dialog,onClose]);
+    const done = () => { closing.current = false; if (onClose() === false) for (const animation of element.current?.getAnimations() ?? []) animation.cancel(); };
+    const node = element.current;
+    if (!node || reducedMotion()) { done(); return; }
+    const animation = node.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(10px) scale(.97)'}],{duration:motionMs('--quick'),easing:motionToken('--ease-ios'),fill:'forwards'});
+    void animation.finished.catch(() => {}).then(done);
+  },[element,onClose]);
 }
 
 export default function RootApp() {
@@ -165,7 +161,7 @@ export default function RootApp() {
   // Sidebar source links jump to that source's card on the Import desk.
   const openSource = (sourceId: string) => {
     if (page !== 'desk') navigate('desk');
-    window.setTimeout(() => { const card = document.querySelector<HTMLElement>(`article.source-row[data-source-id="${CSS.escape(sourceId)}"]`); card?.scrollIntoView({ behavior: 'smooth', block: 'center' }); card?.animate([{ boxShadow: '0 0 0 4px var(--accent-ring)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: 900, easing: 'ease-out' }); }, page === 'desk' ? 0 : 450);
+    void interfaceSettled().then(() => { const card = document.querySelector<HTMLElement>(`article.source-row[data-source-id="${CSS.escape(sourceId)}"]`); const still = reducedMotion(); card?.scrollIntoView({ behavior: still ? 'instant' : 'smooth', block: 'center' }); if (!still) card?.animate([{ boxShadow: '0 0 0 4px var(--accent-ring)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: motionMs('--slow') * 3, easing: 'ease-out' }); });
   };
   const navigate = (next: Page) => { if (next === page) return; animateInterfaceChange(() => { setPage(next); window.scrollTo({ top: 0, behavior: 'instant' }); }, pageOrder.indexOf(next) > pageOrder.indexOf(page) ? 'forward' : 'back'); };
   const [errorsOpen, setErrorsOpen] = useState(false);
@@ -177,13 +173,21 @@ export default function RootApp() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const previewSequence = useRef(0);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const shown = useRef<AppState | null>(null);
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const change = () => setSystemDark(media.matches);
+    const change = () => animateInterfaceChange(() => setSystemDark(media.matches));
     media.addEventListener('change', change);
     let alive = true;
-    const unsubscribe = window.importer.subscribe(update => { const next=stateReceiver.apply(update); if (alive && next) setState(next); });
-    window.importer.state().then(update => { const next=stateReceiver.apply(update); if (alive && next) setState(next); }).catch(error => { if (alive) setConnectionError(String(error)); });
+    // Interface swaps animate as their state arrives; the transition renders the newest state, not the one that started it.
+    const show = (next: AppState | null | undefined) => {
+      if (!alive || !next) return;
+      const kind = shown.current ? interfaceChangeKind(shown.current, next) : undefined;
+      shown.current = next;
+      if (kind) animateInterfaceChange(() => setState(shown.current), kind); else setState(next);
+    };
+    const unsubscribe = window.importer.subscribe(update => show(stateReceiver.apply(update)));
+    window.importer.state().then(update => show(stateReceiver.apply(update))).catch(error => { if (alive) setConnectionError(String(error)); });
     return () => { alive = false; unsubscribe(); media.removeEventListener('change', change); };
   }, []);
   useEffect(() => {
@@ -198,9 +202,10 @@ export default function RootApp() {
   const preferences = state?.preferences;
   const language = preferences?.language ?? 'en';
   const t = createTranslator(language);
-  useEffect(() => { document.documentElement.lang = language; }, [language]);
+  // Layout effects, so a crossfade's new snapshot already has the new language and colours.
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const dark = preferences?.appearance === 'dark' || (preferences?.appearance !== 'light' && systemDark);
-  useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.accent = preferences?.accent ?? 'coral'; }, [dark, preferences?.accent]);
+  useLayoutEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.accent = preferences?.accent ?? 'coral'; }, [dark, preferences?.accent]);
   useEffect(() => { document.documentElement.style.setProperty('--text-scale', String(preferences?.textScale ?? 1.25)); }, [preferences?.textScale]);
   const act = useCallback<Dispatch>(action => {
     window.importer.action(action).then(() => setConnectionError('')).catch(error => setConnectionError(error instanceof Error ? error.message : String(error)));
@@ -264,11 +269,9 @@ function MiniSteps({ states }: { states: StepState[] }) {
 
 export function SidebarSources({ state, onOpen }: { state: AppState; onOpen: (sourceId: string) => void }) {
   const { t } = useTranslation();
-  const list = useRef<HTMLUListElement>(null);
-  useReorderAnimation(list, 'li[data-source-id]', state.sources.map(source => source.id).join('|'));
   const verifyOff = state.preferences.verifyCopies === false;
   return <section className="sidebar-section" aria-labelledby="sidebar-sources"><h2 id="sidebar-sources">{t("Sources")}</h2>
-    {state.sources.length ? <ul ref={list}>{state.sources.map(source => {
+    {state.sources.length ? <ul>{state.sources.map(source => {
       const job = state.jobs.find(item => !item.organization && item.source.id === source.id);
       const scanning = !!state.scanningSources?.includes(source.id);
       const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
@@ -344,6 +347,12 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   const { t, formatNumber, language } = useTranslation();
   const known = useRef<Set<string> | null>(null);
   const [fresh, setFresh] = useState<DisplayError[]>([]);
+  const toast = useRef<HTMLDivElement>(null);
+  // Issues that arrive while the toast is leaving keep it on screen.
+  const latest = useRef(fresh), leaving = useRef(fresh);
+  latest.current = fresh;
+  const exit = useAnimatedClose(toast, () => latest.current === leaving.current ? setFresh([]) : false);
+  const dismiss = () => { leaving.current = latest.current; exit(); };
   useEffect(() => {
     const keys = errors.map(error => `${error.source}|${JSON.stringify(error.message)}`);
     if (known.current === null) { known.current = new Set(keys); return; }
@@ -351,10 +360,10 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
     known.current = new Set(keys);
     if (added.length && !hidden) setFresh(added);
   }, [errors, hidden]);
-  useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(() => setFresh([]), 7000); return () => window.clearTimeout(timer); }, [fresh]);
+  useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, 7000); return () => window.clearTimeout(timer); }, [fresh]);
   if (!fresh.length || hidden) return null;
   const first = explainError(fresh[0]!.message, fresh[0]!.kind, language);
-  return <div className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={() => setFresh([])} /></div>;
+  return <div ref={toast} className={`error-toast is-${first.severity}`} role="status" data-testid="error-toast"><Icon icon={first.severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{fresh.length > 1 ? t("{count} new issues", { count: formatNumber(fresh.length) }) : t(first.title)}</strong>{fresh[0]!.source && <span>{fresh[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
 }
 
 export function TitlebarControls({state, act, errorCount, onErrors, errorLevel}: {state: AppState; act: Dispatch; errorCount: number; onErrors: () => void; errorLevel?: 'error' | 'warning'}) {
@@ -370,7 +379,7 @@ export function TitlebarControls({state, act, errorCount, onErrors, errorLevel}:
 export function ActivityPanel({state, errors, act, onClose, onOpenSource}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void}) {
   const { t, formatNumber, language } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
-  const close = useDialogClose(dialog,onClose);
+  const close = useAnimatedClose(dialog,onClose);
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   const groups = useMemo(() => { const map = new Map<string, DisplayError[]>(); for (const error of errors) map.set(error.source, [...(map.get(error.source) ?? []), error]); return [...map]; }, [errors]);
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
@@ -433,7 +442,16 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
   const { t, formatNumber } = useTranslation();
   const [open, setOpen] = useState<SettingsCategory>(savedCategory);
   const tabs = useRef<HTMLDivElement>(null);
-  const choose = (id: SettingsCategory, focus = false) => { setOpen(id); try { sessionStorage.setItem('settings-category', id); } catch {} if (focus) tabs.current?.querySelector<HTMLElement>(`#settings-tab-${id}`)?.focus(); };
+  // The panel rises or falls in list order while the selection glides to the new category.
+  // Rapid keys step from the latest choice, which may not have rendered yet.
+  const chosen = useRef(open);
+  const choose = (id: SettingsCategory, focus = false) => {
+    const from = chosen.current;
+    chosen.current = id;
+    try { sessionStorage.setItem('settings-category', id); } catch {}
+    const select = () => { setOpen(id); if (focus) tabs.current?.querySelector<HTMLElement>(`#settings-tab-${id}`)?.focus(); };
+    if (id === from) select(); else animateInterfaceChange(select, settingsCategories.indexOf(id) > settingsCategories.indexOf(from) ? 'category-forward' : 'category-back');
+  };
   const copyModes: Record<CopyMode, string> = { single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") };
   const backupCheck = { off: t("Off"), ask: t("Ask"), auto: t("Automatic") }[p.autoOrganizeBackup ?? 'ask'];
   const categories: { id: SettingsCategory; icon: LucideIcon; title: string; summary: string }[] = [
@@ -487,10 +505,10 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
     if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); choose(settingsCategories[event.key === 'Home' ? 0 : settingsCategories.length - 1], true); return; }
     if (!step) return;
     event.preventDefault();
-    choose(settingsCategories[(settingsCategories.indexOf(open) + step + settingsCategories.length) % settingsCategories.length], true);
+    choose(settingsCategories[(settingsCategories.indexOf(chosen.current) + step + settingsCategories.length) % settingsCategories.length], true);
   };
   return <div className="settings-page settings-layout">
-    <nav className="settings-nav" aria-label={t("Settings categories")}><div ref={tabs} role="tablist" aria-orientation="vertical" onKeyDown={onKeyDown}>{categories.map(category => <button type="button" role="tab" key={category.id} id={`settings-tab-${category.id}`} data-testid={`settings-tab-${category.id}`} aria-selected={open === category.id} aria-controls={`settings-panel-${category.id}`} tabIndex={open === category.id ? 0 : -1} onClick={() => choose(category.id)}><span className="settings-nav-icon"><Icon icon={category.icon} size={16} /></span><span className="settings-nav-text"><strong>{category.title}</strong><small>{category.summary}</small></span></button>)}</div></nav>
+    <nav className="settings-nav" aria-label={t("Settings categories")}><div ref={tabs} role="tablist" aria-orientation="vertical" onKeyDown={onKeyDown}>{categories.map(category => <button type="button" role="tab" key={category.id} id={`settings-tab-${category.id}`} data-testid={`settings-tab-${category.id}`} aria-selected={open === category.id} aria-controls={`settings-panel-${category.id}`} tabIndex={open === category.id ? 0 : -1} onClick={() => choose(category.id)}>{open === category.id && <span className="settings-indicator" aria-hidden="true" />}<span className="settings-nav-icon"><Icon icon={category.icon} size={16} /></span><span className="settings-nav-text"><strong>{category.title}</strong><small>{category.summary}</small></span></button>)}</div></nav>
     <div className="settings-panels">{categories.map(category => <section key={category.id} className="settings-panel" role="tabpanel" id={`settings-panel-${category.id}`} aria-labelledby={`settings-tab-${category.id}`} data-testid={`settings-panel-${category.id}`} hidden={open !== category.id}><h2 className="settings-panel-title">{category.title}</h2>{panels[category.id]}</section>)}</div>
   </div>;
 }
@@ -498,11 +516,9 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
 // Drives tab: choose which connected drives are imported, and manage remembered and ignored drives.
 export function DrivesPage({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatBytes: bytes } = useTranslation();
-  const list = useRef<HTMLUListElement>(null);
-  useReorderAnimation(list, 'li[data-source-id]', state.sources.map(source => source.id).join('|'));
   return <div className="drives-page">
     <section className="settings-section" aria-labelledby="connected-drives"><CardHeader icon={Usb} id="connected-drives" title={t("Connected drives")} /><div className="settings-section-content">
-      {state.sources.length ? <ul ref={list} className="drive-list">{state.sources.map(source => <li key={source.id} data-source-id={source.id} className={sourceSelected(source) ? 'is-selected' : 'is-unselected'}><Icon icon={source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save} size={18} /><div><strong>{source.name}</strong><small>{[source.total ? bytes(source.total) : '', source.path].filter(Boolean).join(' · ')}</small></div><SelectionChip source={source} act={act} disabled={state.jobs.some(job => !job.organization && job.source.id === source.id && (activePhases.includes(job.phase) || job.phase === 'queued'))} /></li>)}</ul> : <p className="muted">{t("No sources connected")}</p>}
+      {state.sources.length ? <ul className="drive-list">{state.sources.map(source => <li key={source.id} data-source-id={source.id} className={sourceSelected(source) ? 'is-selected' : 'is-unselected'}><Icon icon={source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save} size={18} /><div><strong>{source.name}</strong><small>{[source.total ? bytes(source.total) : '', source.path].filter(Boolean).join(' · ')}</small></div><SelectionChip source={source} act={act} disabled={state.jobs.some(job => !job.organization && job.source.id === source.id && (activePhases.includes(job.phase) || job.phase === 'queued'))} /></li>)}</ul> : <p className="muted">{t("No sources connected")}</p>}
     </div></section>
     <RememberedDrives preferences={state.preferences} act={act} />
     <IgnoredDrives preferences={state.preferences} act={act} />
@@ -555,7 +571,7 @@ export function RetainedOriginals({ job, act, busy }: { job: NonNullable<AppStat
 export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
-  const close = useDialogClose(dialog, onCancel);
+  const close = useAnimatedClose(dialog, onCancel);
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="release-heading" data-testid="release-confirm" onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id="release-heading">{t("Release {size}?", { size })}</h2></div>
@@ -625,22 +641,20 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   // Starting one drive queues behind the others; only an open review blocks it.
   const startBlocked = !!state.busyReview || !!state.review;
   const unanswered = (id: string) => needsChoice.includes(id) && newDeviceIds(state).includes(id);
-  const ledger = useRef<HTMLDivElement>(null);
   // Cards follow the source order, so Move to top puts a card first.
   const position = (id: string) => { const index = state.sources.findIndex(source => source.id === id); return index < 0 ? Infinity : index; };
   const cards = [...latestJobs.map(job => ({ id: job.source.id, job, source: job.source })), ...idleSources.map(source => ({ id: source.id, job: undefined as Job | undefined, source }))].sort((a, b) => position(a.id) - position(b.id));
   const movable = (card: typeof cards[number], index: number) => index > 0 && sourceSelected(card.source) && (!card.job || card.job.phase === 'queued' || (card.job.phase === 'stopped' && !!card.job.paused));
-  useReorderAnimation(ledger, 'article.source-row', cards.map(card => card.id).join('|') + (state.preferences.sourceLayout ?? 'list'));
   const requiredDestinations = state.preferences.copyMode==='single'?1:2;
   const readyDestinations=(state.destinationStatus??[]).filter(disk=>disk.available&&state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
   return <div className="desk-page">
     {state.preferences.showDashboard !== false && <ImportDashboard state={state} act={act} />}
     <div className="workbench-columns"><div className="source-workspace">
       <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions">{state.preferences.showDashboard === false && <Button kind="quiet" icon={Gauge} data-testid="show-dashboard-desk" aria-label={t("Show the import overview")} title={t("Show the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: true } })} />}<div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout ?? 'list') === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div><label className="parallel-source-control" title={t("Current copies finish before a lower limit takes effect.")}><span className="parallel-source-label">{t("Parallel sources")}</span><input id="parallel-source-limit" aria-label={t("Maximum parallel sources")} type="range" min={1} max={10} step={1} value={state.preferences.parallel} onChange={event => act({type:'preferences',patch:{parallel:Number(event.target.value)}})} /><output htmlFor="parallel-source-limit">{t("{count} of 10",{count:state.preferences.parallel})}</output></label><span className="connected-count">{t("{count} connected", { count: state.sources.length })}</span><Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scanSources' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button></div></div>
-        <div ref={ledger} className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
+        <div className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
           {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
           {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
-          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => setSelectedJobId(job.id)} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
+          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
           <div className="source-footer"><Switch label={t("Enable media folder selection")} checked={state.preferences.allowFolderSource} disabled={active.length > 0 || !!state.review || !!state.busyReview} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folder…")}</Button></div>
         </div>
       </section>
@@ -673,14 +687,17 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
   const connected = (id: string) => state.sources.some(source => source.id === id);
   const rows = [...seen.current.values()].filter(drive => shown.includes(drive.id) || !connected(drive.id));
   const actionable = rows.filter(drive => connected(drive.id) && shown.includes(drive.id));
-  const close = useDialogClose(dialog, () => {
+  const close = useAnimatedClose(dialog, () => {
     for (const drive of actionable) if (back.includes(drive.id)) act({ type: 'dismissReconnected', sourceId: drive.id });
     onDismiss?.(actionable.filter(drive => pending.includes(drive.id)).map(drive => drive.id));
   });
+  const unanswered = useRef(0);
+  unanswered.current = actionable.length;
+  const finish = useAnimatedClose(dialog, () => unanswered.current ? false : onDone?.());
   const choosing = rows.some(drive => !back.includes(drive.id));
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   // Nothing left to answer (all answered or unplugged): close by itself after a moment.
-  useEffect(() => { if (actionable.length) return; const timer = window.setTimeout(() => onDone?.(), rows.length ? 2200 : 0); return () => window.clearTimeout(timer); }, [actionable.length, rows.length]);
+  useEffect(() => { if (actionable.length) return; const timer = window.setTimeout(finish, rows.length ? 2200 : 0); return () => window.clearTimeout(timer); }, [actionable.length, rows.length]);
   return <dialog className="activity-dialog new-drive-dialog" ref={dialog} aria-labelledby="new-drive-heading" data-testid="new-drive-prompt" onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><div><span className="dialog-kicker"><Icon icon={Usb} size={15} />{choosing ? t("Choose drives to import") : t("Drives")}</span><h2 id="new-drive-heading">{choosing ? (rows.length > 1 ? t("New drives connected") : t("New drive connected")) : rows.length > 1 ? t("Drives reconnected") : t("Drive reconnected")}</h2></div><Button kind="quiet" icon={X} data-testid="new-drive-close" aria-label={t("Decide later")} title={t("Decide later")} onClick={close} /></div>
     <div className="activity-content"><ul className="new-drives">{rows.map(drive => {
@@ -771,7 +788,7 @@ function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): s
 export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
-    <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
+    <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
     <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}</p>
     <OrganizationProgress job={job} act={act} />
   </article>;
@@ -830,8 +847,9 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
   const mirrorReview = job?.phase === 'error' && job.errors.some(error => error.key === 'error.mirrorReview');
   const statusIcon = job?.phase === 'error' ? CircleAlert : job?.phase === 'complete' ? CheckCircle2 : queued ? Clock3 : active ? ArrowDownToLine : CheckCircle2;
   const included = sourceSelected(source), excluded = !included && !job;
+  const statusText = excluded ? t("Not selected · won't be imported") : paused ? t("Paused") : already ? t("Already imported") : status;
   return <article data-source-id={source.id} className={`source-row ${selected ? 'source-selected' : ''} ${job?.phase === 'error' ? 'source-error' : ''} ${excluded ? 'source-unselected' : selectionKnown(source) ? 'source-included' : ''} ${already ? 'source-already' : ''} ${needsChoice ? 'source-needs-choice' : ''}`}>
-    <div className="source-row-top"><div className="source-device"><Icon icon={icon} size={21} /></div><div className="source-identity"><h3 title={source.name}>{source.name}</h3><span className={`source-status ${excluded ? 'unselected' : paused ? 'paused' : already ? 'already' : job?.phase ?? 'ready'}`}><Icon icon={excluded ? Pause : paused ? Pause : already ? CheckCheck : statusIcon} size={13} /><span className="source-status-text">{excluded ? t("Not selected · won't be imported") : paused ? t("Paused") : already ? t("Already imported") : status}</span>{job?.backup && <span className="small-tag">{t("Folder backup")}</span>}</span></div><div className="source-row-actions">{canMoveUp && <Button kind="quiet" icon={ArrowUpToLine} data-testid="move-to-top" aria-label={t("Move {name} to the top", { name: source.name })} title={t("Move to the top")} onClick={() => act({ type: 'moveToTop', sourceId: source.id })} />}{selectionKnown(source) && <SelectionChip source={source} act={act} disabled={active || queued} />}<Button kind="quiet" icon={scanning ? LoaderCircle : ScanLine} disabled={excluded || source.transport === 'camera' || reviewBusy || active || queued || scanning} aria-label={t("Scan media on {name}", { name: source.name })} title={source.transport === 'camera' ? t("Use Review for USB cameras.") : t("Read photo and video formats without copying files")} onClick={() => act({ type: 'scanSource', sourceId: source.id })}>{scanning ? t("Scanning…") : t("Scan media")}</Button>{!active && !queued && <Button kind={mirrorReview ? 'primary' : 'quiet'} icon={Eye} disabled={excluded || !configured || reviewBusy} aria-label={t("Review import from {name}", { name: source.name })} title={t("Review files before copying")} onClick={() => act({ type: 'preview', sourceId: source.id })}>{t("Review")}</Button>}{active || queued ? <><Button icon={Pause} aria-label={t("Pause {name}", { name: source.name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} aria-label={t("Stop source")} title={t("Stop source")} onClick={() => act({ type: 'stop', jobId: job!.id })} /></> : <Button icon={paused ? Play : ArrowDownToLine} kind={paused ? 'primary' : 'secondary'} disabled={excluded || !configured || startBlocked} onClick={() => act({ type: 'start', sourceId: source.id })}>{paused ? t("Continue") : t("Import")}</Button>}</div></div>
+    <div className="source-row-top"><div className="source-device"><Icon icon={icon} size={21} /></div><div className="source-identity"><h3 title={source.name}>{source.name}</h3><span className={`source-status ${excluded ? 'unselected' : paused ? 'paused' : already ? 'already' : job?.phase ?? 'ready'}`}><Icon icon={excluded ? Pause : paused ? Pause : already ? CheckCheck : statusIcon} size={13} /><span key={statusText} className="source-status-text">{statusText}</span>{job?.backup && <span className="small-tag">{t("Folder backup")}</span>}</span></div><div className="source-row-actions">{canMoveUp && <Button kind="quiet" icon={ArrowUpToLine} data-testid="move-to-top" aria-label={t("Move {name} to the top", { name: source.name })} title={t("Move to the top")} onClick={() => act({ type: 'moveToTop', sourceId: source.id })} />}{selectionKnown(source) && <SelectionChip source={source} act={act} disabled={active || queued} />}<Button kind="quiet" icon={scanning ? LoaderCircle : ScanLine} disabled={excluded || source.transport === 'camera' || reviewBusy || active || queued || scanning} aria-label={t("Scan media on {name}", { name: source.name })} title={source.transport === 'camera' ? t("Use Review for USB cameras.") : t("Read photo and video formats without copying files")} onClick={() => act({ type: 'scanSource', sourceId: source.id })}>{scanning ? t("Scanning…") : t("Scan media")}</Button>{!active && !queued && <Button kind={mirrorReview ? 'primary' : 'quiet'} icon={Eye} disabled={excluded || !configured || reviewBusy} aria-label={t("Review import from {name}", { name: source.name })} title={t("Review files before copying")} onClick={() => act({ type: 'preview', sourceId: source.id })}>{t("Review")}</Button>}{active || queued ? <><Button icon={Pause} aria-label={t("Pause {name}", { name: source.name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} aria-label={t("Stop source")} title={t("Stop source")} onClick={() => act({ type: 'stop', jobId: job!.id })} /></> : <Button icon={paused ? Play : ArrowDownToLine} kind={paused ? 'primary' : 'secondary'} disabled={excluded || !configured || startBlocked} onClick={() => act({ type: 'start', sourceId: source.id })}>{paused ? t("Continue") : t("Import")}</Button>}</div></div>
     {already && <div className="source-progress source-progress-calm" data-testid="already-imported"><ProgressBar value={1} label={t("{name} copy progress", { name: source.name })} /><div><span>{progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")}</span></div></div>}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{t("Your backup folder is left out of this drive")}</p>}
@@ -1003,7 +1021,7 @@ export function Organization({ state, act, busy }: { state: AppState; act: Dispa
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
     {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
-    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizeBusy || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => setSelectedDestination(Number(event.target.value))}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
+    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizeBusy || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => setSelectedDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
     <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")}><Button icon={FolderOpen} disabled={organizeBusy} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></CardHeader></section>
     {state.busyReview && <div role="status" aria-live="polite"><p className="notice"><Icon icon={LoaderCircle} />{state.reviewProgress ? t("Checking organization files: {count} · {file}", { count: formatNumber(state.reviewProgress.completed), file: state.reviewProgress.file }) : t("Preparing organization review…")}</p>{state.reviewProgress && <PlanningProgress progress={state.reviewProgress} label={t("Organization review progress")} />}</div>}
     </div>
@@ -1073,7 +1091,7 @@ function metadataText(value: unknown): string {
 export function MetadataDialog({ preview, onClose, act }: { preview: Preview; onClose: () => void; act: Dispatch }) {
   const { t, formatNumber, language } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
-  const close = useDialogClose(dialog,onClose);
+  const close = useAnimatedClose(dialog,onClose);
   const [query, setQuery] = useState('');
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   useEffect(() => { setQuery(''); }, [preview.path]);
@@ -1144,5 +1162,5 @@ function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dispatch; 
   const pageSize = 100;
   const lastPage = Math.max(0, Math.ceil(visible.length / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
-  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div><div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
+  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div><div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
 }

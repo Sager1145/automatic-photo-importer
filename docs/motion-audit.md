@@ -27,7 +27,7 @@ Four mechanisms, each with one job:
 3. **CSS transitions with `@starting-style`**: entrances of anything that appears inside a page (notices, progress blocks, rows, badges), plus colour and transform changes. They retarget smoothly when interrupted.
 4. **`useAnimatedClose(ref, onClose)`**: exits for elements React would otherwise remove at once (sheets, the error toast).
 
-Rules: durations stay between 120 and 300 ms (the spring's long tail is imperceptible); only `transform`, `opacity`, colour and the View Transition snapshots move, so nothing re-lays out per frame; a new transition skips the running one, so every change is interruptible; `prefers-reduced-motion: reduce` turns off all of the above: no View Transitions, no WAAPI, CSS durations zeroed.
+Rules: durations stay between 120 and 300 ms (the spring's long tail is imperceptible); only `transform`, `opacity`, colour and the View Transition snapshots move, so nothing re-lays out per frame; a new transition skips the running one, so every change is interruptible; the transition overlay ignores the pointer, so a click during a transition reaches the live control underneath; an exit that is overtaken by new content (a new issue for the toast, a new drive for the prompt) is cancelled and the element stays; `prefers-reduced-motion: reduce` turns off all of the above: no View Transitions, no WAAPI, CSS durations zeroed.
 
 Deliberately not animated: direct manipulation (sliders, typing in search fields, the text-size slider, drag-resizing the window), where the interface must follow the hand without lag; repeating numbers (speed, counts, percentages), which use tabular figures and update in place so they stay readable.
 
