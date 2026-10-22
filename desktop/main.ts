@@ -521,10 +521,11 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('summary.json',{producer:'desktop-app',passed:errors.length===0&&failed.length===0,failedCount:failed.length,retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=job.errors.length?'error':'complete';
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
-  if(!reorganize&&job.phase==='complete'&&job.source.transport==='folder'&&!prepared.stage&&failed.length===0){
+  // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
+  if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
    const entries=plans.flatMap(item=>destinationEntries(item)),files:VerifiedOriginal[]=[];
    for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
-   if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;}
+   if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,job.errors.length),failed.length>0&&message('job.skippedErrors',{count:failed.length}),!!released&&message('job.releasedDuplicates',{count:released,size:gigabytes(releasedBytes??0)}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),notes.length>0&&text(notes[0]!)):job.alreadyImported?message('job.alreadyImported',{count:entries}):joined(message('job.copied',{copied,skipped}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),removed&&message('job.mirrorRemoved',{count:removed}),message('job.errors',{count:job.errors.length}),prefs.copyMode==='mirror'&&message(job.errors.length?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail);
@@ -556,7 +557,7 @@ async function applyReview(){
  * checksum is confirmed again, now, at every backup copy are removed; anything else stays. Each file is reported. */
 async function removeOriginals(jobId:string){
  const job=state.jobs.find(item=>item.id===jobId),kept=importedOriginals.get(jobId);
- if(!job||!kept||job.phase!=='complete'||!job.verifiedOriginals)throw new MessageError('error.originalsStale');
+ if(!job||!kept||(job.phase!=='complete'&&job.phase!=='error')||!job.verifiedOriginals)throw new MessageError('error.originalsStale');
  if(job.deletingOriginals||state.jobs.some(item=>item.source.id===job.source.id&&item.id!==job.id&&(item.phase==='queued'||['discovering','verifying','copying'].includes(item.phase))))throw new MessageError('error.originalsBusy');
  job.deletingOriginals={completed:0,total:kept.files.length};state.originalsSize=undefined;emit();
  const control=new AbortController();
