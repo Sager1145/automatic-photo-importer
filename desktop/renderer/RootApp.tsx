@@ -502,10 +502,12 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const jobs = state.jobs, active = jobs.filter(job => activePhases.includes(job.phase)), queued = jobs.filter(job => job.phase === 'queued');
   const latestJobs = jobs.filter((job,index) => jobs.findIndex(item => item.source.id === job.source.id) === index);
   // Bytes count only once copying starts: planning measures the source, not the transfer.
-  const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning');
+  const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning' && !job.progress.renames);
   const transferred = transferring.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = transferring.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
   // Transfers only: planning reads the source, it moves nothing.
   const speed = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.speed ?? 0),0);
+  // Steps that only rename or check files report files per second instead of bytes.
+  const fileRate = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.fileRate ?? 0),0);
   const startedAt = active.map(job => job.startedAt).filter(Boolean).sort()[0];
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   const remaining = active.length && active.every(job => job.eta !== undefined) ? Math.max(...active.map(job => job.eta!)) : undefined;
@@ -523,7 +525,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       <dl className="dashboard-metrics">
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
-        <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
+        <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
         <div><dt><Icon icon={CheckCheck} size={16}/>{t("Files checked")}</dt><dd>{latestJobs.reduce((sum,job)=>sum+(job.progress?.completed??0),0).toLocaleString(language)}</dd><small>{t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
@@ -927,7 +929,7 @@ function progressFraction(progress: NonNullable<Job['progress']>): number | unde
   // A listing's total is an estimate: its share stays below 100% until the listing ends and the next step begins.
   if (progress.phase === 'planning' && progress.step === 'listing') { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
-  return progress.phase === 'verifying' ? files ?? data : data ?? files;
+  return progress.phase === 'verifying' || progress.renames ? files ?? data : data ?? files;
 }
 function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
   const counts = { completed: formatNumber(progress.completed), total: formatNumber(progress.total) };
@@ -940,7 +942,7 @@ function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typ
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
-  return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
+  return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : progress.renames ? "{completed} of {total} files moved" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, sec = String(seconds % 60).padStart(2, '0');
@@ -990,11 +992,15 @@ function Speed({ value }: { value: number }) {
 }
 const hasSpeed = (progress: Progress) => progress.speed > 0 || (progress.fileRate ?? 0) > 0;
 /** How fast a step reads: bytes per second, or files per second while checking metadata. */
-function ProgressSpeed({ progress }: { progress: Pick<Progress, 'speed' | 'fileRate'> }) {
+function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
+  return <>{t("{count} files/s", { count: numberIn(value, language, { maximumSignificantDigits: 3 }) })}</>;
+}
+function ProgressSpeed({ progress }: { progress: Pick<Progress, 'speed' | 'fileRate'> }) {
+  const { t } = useTranslation();
   if (progress.speed > 0) return <span className="progress-speed" data-testid="speed"><Speed value={progress.speed} /></span>;
   if (!progress.fileRate || progress.fileRate <= 0) return null;
-  return <span className="progress-speed" data-testid="speed">{t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) })}</span>;
+  return <span className="progress-speed" data-testid="speed"><FileRate value={progress.fileRate} /></span>;
 }
 /** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */
 function organizationFraction(job: Job): number | undefined {
@@ -1035,6 +1041,7 @@ function organizationStatus(job: Job, t: ReturnType<typeof createTranslator>): s
   if (job.phase === 'discovering' || job.progress?.step === 'listing') return t("Listing files");
   if (job.progress?.step === 'history') return t("Reading history");
   if (job.progress?.step === 'earlier' || job.progress?.step === 'confirming') return t("Confirming");
+  if (job.progress?.renames && job.progress.step === 'moving') return t("Moving files");
   return job.progress?.phase === 'planning' ? (job.progress.step === 'reading' ? t("Reading files") : t("Checking files")) : t("Organizing");
 }
 /** An organization in Sources & queue: what it reads, the step it is on and its progress. */
@@ -1112,7 +1119,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
-  const status = !job ? t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
+  const status = !job ? t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
   const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
   const paused = job?.phase === 'stopped' && !!job.paused;
   const already = job?.phase === 'complete' && !!job.alreadyImported;
