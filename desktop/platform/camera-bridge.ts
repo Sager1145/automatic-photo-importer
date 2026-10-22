@@ -13,8 +13,15 @@ let starting:Promise<boolean>|undefined;
 let stdout='';let stderr='';let staging=0;let cached:Source[]=[];
 const pending=new Map<string,Pending>();
 function failed(error:Error) {for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();cached=[];}
-export function closeCameraBridge():void {
-  const current=child;child=undefined;stdout='';stderr='';current?.kill();failed(new Error('The native camera session closed.'));
+/** Ends the helper (SIGTERM, then SIGKILL after 2 s); resolves once it has exited. */
+export function closeCameraBridge():Promise<void> {
+  const current=child;child=undefined;stdout='';stderr='';failed(new Error('The native camera session closed.'));
+  if(!current || current.exitCode!==null || current.signalCode!==null) return Promise.resolve();
+  return new Promise<void>(resolve=>{
+    const force=setTimeout(()=>{try{current.kill('SIGKILL');}catch{/* Already gone. */}},2000);
+    current.once('exit',()=>{clearTimeout(force);resolve();});
+    try{current.kill('SIGTERM');}catch{clearTimeout(force);resolve();}
+  });
 }
 export async function nativeCameraHelperPath():Promise<string|undefined> {
   if(process.platform!=='darwin')return undefined;
@@ -30,7 +37,7 @@ async function startBridge():Promise<boolean> {
   current.stdout.setEncoding('utf8');
   current.stdout.on('data',(text:string)=>{
     if(child!==current)return;stdout+=text;
-    if(stdout.length>4*1024*1024){closeCameraBridge();return;}
+    if(stdout.length>4*1024*1024){void closeCameraBridge();return;}
     let newline:number;
     while((newline=stdout.indexOf('\n'))>=0){
       const line=stdout.slice(0,newline);stdout=stdout.slice(newline+1);
@@ -57,7 +64,7 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   signal?.throwIfAborted();
   const current=child!;const id=randomUUID();
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{if(pending.has(id)){closeCameraBridge();reject(new Error('The native camera request timed out.'));}},timeout);
+    const timer=setTimeout(()=>{if(pending.has(id)){void closeCameraBridge();reject(new Error('The native camera request timed out.'));}},timeout);
     pending.set(id,{resolve,reject,timer,progress});
     current.stdin.write(`${JSON.stringify({...command,id})}\n`,error=>{if(error){clearTimeout(timer);pending.delete(id);reject(error);}});
   });
@@ -76,7 +83,7 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
   const cameraID=decodeURIComponent(source.path.slice('camera://'.length));
   const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-camera-'));
   const cleanup=()=>rm(scratch,{recursive:true,force:true});
-  const abort=()=>closeCameraBridge();signal?.addEventListener('abort',abort,{once:true});staging++;
+  const abort=()=>{void closeCameraBridge();};signal?.addEventListener('abort',abort,{once:true});staging++;
   try {
     signal?.throwIfAborted();
     const result=await request({command:'stage',cameraID,directory:scratch},30*60*1000,onProgress,signal) as {path?:unknown};

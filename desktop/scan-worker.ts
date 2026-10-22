@@ -9,7 +9,7 @@ const options: {unknownRules?:Preferences['unknownRules'];unknownDefault?:Prefer
 const signal=new AbortController();
 // The parent sends what it remembers about this source (last listing, metadata
 // already read) in a start message; any other message stops the scan.
-process.parentPort.on('message',event=>{const data=event.data as {type?:string;reuse?:Inventory;routing?:[string,Metadata][]};if(data?.type==='start'){void scan(data.reuse,data.routing??[]);return;}signal.abort();void closeMetadata();});
+process.parentPort.on('message',event=>{const data=event.data as {type?:string;reuse?:Inventory;routing?:[string,Metadata][]};if(data?.type==='start'){void scan(data.reuse,data.routing??[]);return;}signal.abort();void closeMetadata().catch(()=>{}).finally(()=>process.exit(0));});
 async function scan(reuse:Inventory|undefined,routing:[string,Metadata][]){
  // Only reads made here go back: the parent already holds what it sent.
  const known=new Set(routing.map(([key])=>key)),learned=()=>routingEntries().filter(([key])=>!known.has(key));

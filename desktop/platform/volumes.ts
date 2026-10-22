@@ -141,25 +141,43 @@ async function enumerateVolumes():Promise<MountedVolume[]> {
   if(process.platform==='linux')return linuxVolumes();
   return [{path:path.parse(process.cwd()).root}];
 }
-async function classifyMounted(volume:MountedVolume):Promise<ReturnType<typeof classifyVolume>&{layoutUnavailable?:boolean}> {
+type Classification=ReturnType<typeof classifyVolume>&{layoutUnavailable?:boolean};
+/** Names of the folders at the top of a volume. */
+async function listFolders(volume:MountedVolume):Promise<string[]> {
+  // macOS privacy checks can block a directory open indefinitely. Keep these
+  // probes outside Node's shared filesystem pool so one volume cannot freeze
+  // all drive discovery, settings writes and shutdown.
+  if(process.platform==='darwin') {
+    const {stdout}=await exec('/bin/ls',['-1AF','--',volume.path],{...commandOptions,timeout:1500,killSignal:'SIGKILL',env:{...process.env,LC_ALL:'C',CLICOLOR:'',CLICOLOR_FORCE:''}});
+    return stdout.split('\n').filter(name=>name.endsWith('/')).map(name=>name.slice(0,-1));
+  }
+  return (await readdir(volume.path,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name);
+}
+/** What was found at each mount, valid while the mount is provably the same filesystem: a
+ * card is read once when it appears, not on every refresh (each read wakes the drive). */
+const classified=new Map<string,{fingerprint:string;result:Classification}>();
+export interface ClassifyDeps {list?:(volume:MountedVolume)=>Promise<string[]>;fingerprint?:(mount:string)=>Promise<string|undefined>;cache?:Map<string,{fingerprint:string;result:Classification}>;}
+export async function classifyMounted(volume:MountedVolume,deps:ClassifyDeps={}):Promise<Classification> {
   const baseline=classifyVolume(volume,[]);
   if(volume.diskImage || volume.path==='/' || (volume.external===false&&volume.removable!==true))return baseline;
+  const cache=deps.cache??classified,print=await (deps.fingerprint??mountFingerprint)(volume.path),fingerprint=print&&`${volume.volumeId??''}|${print}`;
+  const known=fingerprint?cache.get(volume.path):undefined;
+  if(known&&known.fingerprint===fingerprint)return known.result;
   try {
-    // macOS privacy checks can block a directory open indefinitely. Keep these
-    // probes outside Node's shared filesystem pool so one volume cannot freeze
-    // all drive discovery, settings writes and shutdown.
-    if(process.platform==='darwin') {
-      const {stdout}=await exec('/bin/ls',['-1AF','--',volume.path],{...commandOptions,timeout:1500,killSignal:'SIGKILL',env:{...process.env,LC_ALL:'C',CLICOLOR:'',CLICOLOR_FORCE:''}});
-      return classifyVolume(volume,stdout.split('\n').filter(name=>name.endsWith('/')).map(name=>name.slice(0,-1)));
-    }
-    return classifyVolume(volume,(await readdir(volume.path,{withFileTypes:true})).filter(e=>e.isDirectory()).map(e=>e.name));
+    const result=classifyVolume(volume,await (deps.list??listFolders)(volume));
+    if(fingerprint)cache.set(volume.path,{fingerprint,result});
+    return result;
   }catch{return {...baseline,layoutUnavailable:true};}
 }
-export async function getSources(volumes:MountedVolume[]):Promise<Source[]> {
+/** `destinations`: drives and folders chosen as destinations are never sources, so they are not read at all. */
+export async function getSources(volumes:MountedVolume[],options:ClassifyDeps&{destinations?:Pick<DestinationStatus,'path'|'volumeId'>[]}={}):Promise<Source[]> {
+  const cache=options.cache??classified,present=new Set(volumes.map(volume=>volume.path));
+  for(const mount of [...cache.keys()])if(!present.has(mount))cache.delete(mount);
   const sources=await Promise.all(volumes.map(async volume=>{
     // The operating system root is never an automatic camera source.
     if(volume.path===path.parse(volume.path).root && process.platform!=='win32')return null;
-    const classification=await classifyMounted(volume); if(!classification.source)return null;
+    if(options.destinations?.some(d=>(d.volumeId&&d.volumeId===(volume.volumeId||volume.path))||within(volume.path,d.path)||within(d.path,volume.path)))return null;
+    const classification=await classifyMounted(volume,options); if(!classification.source)return null;
     try {
       const capacity=await statfs(volume.path);return {id:volume.volumeId||volume.path,name:volume.name||path.basename(volume.path),path:volume.path,transport:'storage' as const,camera:classification.camera,total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};
     } catch {return null;}
