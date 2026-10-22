@@ -136,8 +136,9 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  if(state.superseded&&follow){
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error('An unfinished organization cannot be superseded');
   const successor=await readManifest(state.successorRoot??m.root,state.superseded);
-  // A successor kept in another backup folder (the video-root layout's) must list this one in its signed manifest.
-  if(state.successorRoot&&!successor.libraries?.includes(m.root))throw new Error('Organization successor is not in a listed sibling backup folder');
+  // A successor kept in another backup folder (the video-root layout's, or a later single-folder
+  // organization that pulled files out of this one) is named by this journal's own signed record and
+  // must, like any successor, relocate one of its destinations; neither manifest need list the other.
   const destinations=new Set(m.entries.map(entry=>pathKey(entry.destination)));
   if(!successor.entries.some(next=>next.move&&next.source!==next.destination&&destinations.has(pathKey(next.source))))throw new Error('Organization successor does not relocate a prior destination');
   await readEvents(successor,chain);
@@ -291,12 +292,44 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
   try{await fs.rmdir(folder);await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
  }
 }
-/** Publish successor links before touching media. Repeating this preflight after
- * a crash finishes any links not yet written alongside the durable new manifest.
- */
+const pointerName=/^journal-(.+)\.json$/;
+/** In each sibling backup folder a journal lists, a signed pointer naming the journal and its
+ * folder, written before anything moves, so an organization of that sibling (which may list no
+ * other folder and hold no journal of its own) finds and checks this journal. A pointer to a
+ * finished or undone journal is harmless: the scan reads the journal and finds nothing it owns. */
+async function writeSiblingPointers(m:Manifest):Promise<void>{
+ for(const library of m.libraries??[]){
+  // A sibling that is gone or now resolves elsewhere gets no pointer; the scan refuses the latter.
+  if(await fs.realpath(library).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;})!==library)continue;
+  const folder=path.join(library,storage),file=path.join(folder,`journal-${m.id}.json`);
+  await ensureDirectory(folder,library);
+  // Kept only when it is exactly this journal's signed pointer; a torn or wrong one is replaced.
+  if(await siblingPointer(library,path.basename(file)).then(root=>root===m.root,()=>false))continue;
+  // Written aside and renamed into place, so a full disk or power cut never leaves a torn pointer.
+  const temporary=path.join(folder,`.journal-${m.id}-${randomUUID()}.tmp`);
+  await jsonFile(temporary,signed({kind:'sibling-journal',library,root:m.root,id:m.id}));
+  await fs.rename(temporary,file);await syncDirectory(folder);
+ }
+}
+/** The journal folder a pointer in `root`'s recovery folder names, or undefined for any other entry. */
+async function siblingPointer(root:string,name:string):Promise<string|undefined>{
+ const id=name.match(pointerName)?.[1];if(id===undefined)return undefined;
+ const file=path.join(root,storage,name);
+ // Unreadable or unauthenticated stops the organization; resuming the journal it names rewrites it.
+ const damaged=(reason:string)=>new Error(`Damaged sibling journal pointer ${file} (${reason}): resume organization ${id} to repair it`);
+ if(!uuid.test(id))throw damaged('name');
+ await contained(file,root);const handle=await regularHandle(file);let value:unknown;
+ try{if((await handle.stat()).size>4096)throw damaged('size');try{value=JSON.parse(await handle.readFile('utf8'));}catch(error){if(error instanceof SyntaxError)throw damaged('unreadable');throw error;}}finally{await handle.close();}
+ const pointer=authenticated(value);
+ if(pointer.kind!=='sibling-journal'||pointer.library!==root||pointer.id!==id||typeof pointer.root!=='string'||path.resolve(pointer.root)!==pointer.root||pointer.root===root)throw damaged('contents');
+ return pointer.root;
+}
 /** Work a journal still owns: not finished, a finalize not completed, or an undo stopped part-way.
  * A fully undone journal owns nothing: its files are back where it found them. */
 const unfinished=(state:JournalState)=>!state.undoComplete&&(!state.complete||state.finalizing.size!==state.finalized.size||state.undone.size>0);
+/** Publish successor links before touching media. Repeating this preflight after
+ * a crash finishes any links not yet written alongside the durable new manifest.
+ */
 async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<void>{
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
@@ -312,18 +345,24 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
   if(root!==m.root){
    // A folder that is gone has no journals. A listed sibling that now resolves elsewhere is
    // refused; a folder known only as an earlier successor's is then skipped like a gone one.
+   // Renamed only by case, it still holds those journals, so it is refused too.
    const real=await fs.realpath(root).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
-   if(real!==root&&real!==undefined&&listed.includes(root))throw new Error(`Unsafe sibling backup folder: ${root}`);
+   if(real!==root&&real!==undefined&&(listed.includes(root)||pathKey(real)===pathKey(root)))throw new Error(`Unsafe sibling backup folder: ${root}`);
    if(real!==root)continue;
    await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);
   }
   for(const id of await fs.readdir(path.join(root,storage))){
-   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
+   checkAbort(signal);
+   // A pointer to a journal kept in another backup folder that lists this one: check it there too.
+   const pointed=await siblingPointer(root,id);if(pointed!==undefined){if(pointed!==m.root)folders.push(pointed);continue;}
+   if(id===m.id||!uuid.test(id))continue;
    // A journal its own signed log already hands to a successor is never written again, and it
    // already refuses resume, undo and finalize, so its successor is not read here: a successor's
    // folder removed later (a sibling backup folder) must not block organizing this one. The
    // recovery listing, resume, undo and finalize still check that successor in full.
    const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false);
+   // The backup folders that journal was organized together with may hold its live partners.
+   folders.push(...prior.libraries??[]);
    // Superseded journals are skipped even if their log shows unfinished work (left by a
    // version that did not lock): nothing can resume, undo or finalize them any more.
    if(state.superseded){if(state.successorRoot)folders.push(state.successorRoot);continue;}
@@ -451,7 +490,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  const progress=(file:string)=>onProgress?.({step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
-  await roots(m);await supersedePriorOrganizations(m,signal,onProgress);
+  await roots(m);await writeSiblingPointers(m);await supersedePriorOrganizations(m,signal,onProgress);
   // Moves cannot wait for a later check: confirm every file that will move, by stat
   // only, before the first one does. Any change stops the run with nothing moved.
   if(m.strategy==='rename')for(const [index,entry] of m.entries.entries()){
