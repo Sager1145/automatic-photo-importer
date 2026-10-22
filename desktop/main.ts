@@ -165,16 +165,45 @@ async function scanSource(source:Source){
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();void releaseIfIdle();}
 }
-async function refreshOrganizations(){
+let organizationListing:Promise<void>|undefined,organizationListingAgain=false;
+/** One listing at a time. A request while one runs gets one more listing right after it, so a
+ * change made meanwhile (an undo or resume that just finished) is always shown. */
+function refreshOrganizations():Promise<void>{
+ if(organizationListing){organizationListingAgain=true;return organizationListing;}
+ return organizationListing=(async()=>{do{organizationListingAgain=false;await listOrganizations();}while(organizationListingAgain);})().finally(()=>{organizationListing=undefined;});
+}
+async function listOrganizations(){
  const destinations=state.preferences.destinations;
  const locations=[...organizationLocations];
- for(let index=0;index<destinations.length;index++){const destination=destinations[index];for(const folder of backupFolders(state.preferences)){const root=path.resolve(destination,folder);if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId:state.preferences.destinationIds?.[index]??''});}}
- const recoveries=[];
- for(const location of locations){
-  // A folder organized in place is listed while its own drive is present and unchanged.
-  const status=location.folder?await volumeInfo(location.destination):destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
-  if(!status?.available||status.volumeId!==location.volumeId)continue;try{recoveries.push(...await getOrganizationRecovery(location.root,{verifyContents:false}));}catch(error){state.error=toMessage(error);}}
- state.organizationRecovery=recoveries;
+ const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
+ // Every backup folder on each destination, whatever the current layout: a journal may be in either.
+ for(let index=0;index<destinations.length;index++){const destination=destinations[index];for(const folder of new Set([...backupFolders(state.preferences),state.preferences.basePath,state.preferences.videoBasePath]))add(path.resolve(destination,folder),destination,state.preferences.destinationIds?.[index]??'');}
+ // A large journal from an earlier version can take minutes to read on a USB drive. The previous list
+ // stays until each folder is read again, and is replaced folder by folder.
+ const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
+ for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
+ const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
+ const listed=new Set<string>();state.organizationRecoveryLoading=true;emit();
+ try{
+  for(let position=0;position<locations.length;position++){
+   const location=locations[position]!;
+   // A folder organized in place is listed while its own drive is present and unchanged.
+   const status=location.folder?await volumeInfo(location.destination):destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
+   if(!status?.available||status.volumeId!==location.volumeId)continue;
+   listed.add(location.root);
+   try{
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false});byRoot.set(location.root,found);
+    // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
+    if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
+    // The sibling backup folders those journals list are read too, on the same drive.
+    for(const library of found.flatMap(job=>job.libraries??[]))if(!location.folder)add(library,location.destination,location.volumeId);
+   }catch(error){state.error=toMessage(error);}
+   publish();
+  }
+  // Folders not listed this time (drive away, or no longer configured) leave the list.
+  for(const root of [...byRoot.keys()])if(!listed.has(root))byRoot.delete(root);
+  publish();
+ }finally{state.organizationRecoveryLoading=false;emit();}
 }
 async function rememberOrganization(root:string,prefs:Preferences){
  const destination=prefs.destinations[0],volumeId=prefs.destinationIds?.[0];if(!destination||!volumeId||!within(root,destination))throw new MessageError('error.organizationDestination');
@@ -202,8 +231,8 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  void settle((async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
-  if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.released',{count:released.removed,size:gigabytes(released.bytes)});addHistory(message('history.organization'),job.detail);}
-  else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.undone',{restored:undone.restored,removed:undone.removed});addHistory(message('history.organizationUndone'),job.detail);}
+  if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message('history.organization'),job.detail);}
+  else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message('history.organizationUndone'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.

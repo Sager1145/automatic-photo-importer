@@ -85,14 +85,17 @@ async function ensureDirectory(folder:string,root:string):Promise<void> {
 async function maybeStat(file:string):Promise<BigIntStats|undefined> {try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return;throw error;}}
 function jobPath(root:string,id:string):string {if(!uuid.test(id))throw new Error('Invalid recovery identifier');return path.join(root,storage,id);}
 interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
- renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;}
+ renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;
+ /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;}
+/** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
+interface HandOff {successor:string;successorRoot:string;destination:string;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobPath(m.root,m.id),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
 /** `onRead`: records read so far out of the journal's files, for journals written one file per event.
  * `follow` false reads only this journal's own signed events, without checking its successor.
  * `folder`: where the journal's folder is now, when it differs from its recorded root only by case. */
 async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number)=>void,follow=true,folder=m.root):Promise<JournalState> {
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
- const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false};
+ const state:JournalState={slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false,handedOff:new Map()};
  const apply=(record:Record<string,unknown>)=>{
   if(record.id!==m.id||record.root!==m.root)throw new Error('Invalid recovery event scope');
   if(record.event==='complete'){state.complete=true;return;}
@@ -111,6 +114,13 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   if(record.event==='rename-fallback')state.fallback.add(index);
   if(record.event==='published')state.published.add(index);
   if(record.event==='undone')state.undone.add(index);
+  if(record.event==='handed-off'){
+   const handOff={successor:record.successor,successorRoot:record.successorRoot,destination:record.destination};
+   const canonical=(value:unknown)=>typeof value==='string'&&path.resolve(value)===value;
+   if(typeof handOff.successor!=='string'||!uuid.test(handOff.successor)||handOff.successor===m.id||!canonical(handOff.successorRoot)||!canonical(handOff.destination))throw new Error('Invalid organization hand-off');
+   const known=state.handedOff.get(index);if(known&&JSON.stringify(known)!==JSON.stringify(handOff))throw new Error('Invalid organization hand-off');
+   state.handedOff.set(index,handOff as HandOff);
+  }
   if(record.event==='renamed'||record.event==='timed'){const stat=record.stat as FileIdentity;if(!stat||['dev','ino','size','mtime','ctime'].some(key=>typeof (stat as unknown as Record<string,unknown>)[key]!=='string'))throw new Error('Invalid moved file identity');state.renamed.set(index,stat);state.dated.set(index,new Set([...(state.dated.get(index)??[]),stat.mtime]));}
   if(record.event==='exclusive-created'){const stat=record.stat as FileIdentity;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');state.exclusive.set(index,[...(state.exclusive.get(index)??[]),stat]);}
  };
@@ -120,20 +130,31 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
  const names=await fs.readdir(jobPath(folder,m.id));let read=0;
- for(const name of names) {
-  onRead?.(++read,names.length);
-  const file=path.join(jobPath(folder,m.id),name);
+ // Journals from before the event log hold one small file per event (tens of thousands on a large
+ // organization); on a USB drive these are read several at a time, then applied in folder order.
+ const texts:(string|string[]|undefined)[]=new Array(names.length);let next=0;
+ const readOne=async(position:number)=>{
+  const name=names[position]!,file=path.join(jobPath(folder,m.id),name);
   if(name===eventLog){
    await contained(file,folder);const handle=await regularHandle(file);
-   try{if((await handle.stat()).size>maxEventLog)throw new Error('Recovery journal is too large');for(const line of (await handle.readFile('utf8')).split('\n')){if(line.length>2048)throw new Error('Invalid recovery event');if(line)parse(line);}}finally{await handle.close();}
-   continue;
+   try{if((await handle.stat()).size>maxEventLog)throw new Error('Recovery journal is too large');texts[position]=(await handle.readFile('utf8')).split('\n');}finally{await handle.close();}
+  } else if(/^event-[a-f0-9-]+\.json$/.test(name)){
+   await contained(file,folder);const handle=await regularHandle(file);
+   try{if((await handle.stat()).size>2048)throw new Error('Invalid recovery event');texts[position]=await handle.readFile('utf8');}finally{await handle.close();}
   }
-  if(!/^event-[a-f0-9-]+\.json$/.test(name))continue;
-  await contained(file,folder);const handle=await regularHandle(file);
-  try{if((await handle.stat()).size>2048)throw new Error('Invalid recovery event');parse(await handle.readFile('utf8'));}finally{await handle.close();}
+  onRead?.(++read,names.length);
+ };
+ await Promise.all(Array.from({length:Math.min(32,names.length)},async()=>{while(next<names.length)await readOne(next++);}));
+ for(const text of texts){
+  if(Array.isArray(text)){for(const line of text){if(line.length>2048)throw new Error('Invalid recovery event');if(line)parse(line);}}
+  else if(text!==undefined)parse(text);
  }
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
+ // Each hand-off names a signed journal that really moved this entry's file on from its destination.
+ // One that no longer checks out (the later journal is gone or changed) is set aside: that entry is then
+ // treated as if it had never been handed off, and its usual checks report what is wrong.
+ if(follow){const manifests=new Map<string,Promise<Manifest|undefined>>();for(const [index,handOff] of [...state.handedOff])if(!await handOffMatches(m,index,handOff,manifests))state.handedOff.delete(index);}
  if(state.superseded&&follow){
   if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error('An unfinished organization cannot be superseded');
   const successor=await readManifest(state.successorRoot??m.root,state.superseded);
@@ -293,6 +314,63 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
   try{await fs.rmdir(folder);await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
  }
 }
+/** The folders next to `root` on the same drive (none when `root` is a drive's top folder, so the
+ * other mounted volumes are never read), skipping hidden ones. */
+async function neighbourFolders(root:string):Promise<string[]>{
+ const parent=path.dirname(root),[own,above]=await Promise.all([root,parent].map(folder=>fs.lstat(folder).catch(()=>undefined)));
+ if(!own||!above||own.dev!==above.dev)return [];
+ return (await fs.readdir(parent,{withFileTypes:true}).catch(()=>[])).filter(entry=>entry.isDirectory()&&!entry.name.startsWith('.')).map(entry=>path.join(parent,entry.name));
+}
+/** Whether `handOff` names a signed journal with a move of exactly this entry's file, from its
+ * destination to `handOff.destination`, with the same size and SHA-256. */
+async function handOffMatches(m:Manifest,index:number,handOff:HandOff,manifests:Map<string,Promise<Manifest|undefined>>):Promise<boolean>{
+ const entry=m.entries[index]!,key=`${handOff.successorRoot}\0${handOff.successor}`;
+ if(!manifests.has(key))manifests.set(key,readManifest(handOff.successorRoot,handOff.successor).catch(()=>undefined));
+ const successor=await manifests.get(key)!;
+ return !!successor?.entries.some(next=>next.move&&pathKey(next.source)===pathKey(entry.destination)&&pathKey(next.destination)===pathKey(handOff.destination)&&next.digest===entry.digest&&next.size===entry.size);
+}
+/** Later journals that could have moved this journal's files on: in its own folder, the folders it
+ * lists or leaves pointers in, and the folders next to its own. Read once per operation. */
+type Successors=Map<string,{root:string;m:Manifest;state:JournalState;index:number}>;
+async function laterMoves(m:Manifest):Promise<Successors>{
+ const moves:Successors=new Map(),neighbours=await neighbourFolders(m.root);
+ for(const folder of new Set([m.root,...pointerFolders(m),...neighbours])){
+  const names=await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[]);
+  for(const id of names){
+   if(id===m.id||!uuid.test(id))continue;
+   // Only a finished, never undone journal can have taken a file over for good.
+   const later=await readManifest(folder,id).catch(()=>undefined);if(!later)continue;
+   const state=await readEvents(later,undefined,undefined,false).catch(()=>undefined);
+   if(!state?.complete||state.undone.size||state.undoComplete)continue;
+   for(const [index,entry] of later.entries.entries())if(entry.move&&state.renamed.has(index))moves.set(pathKey(entry.source),{root:folder,m:later,state,index});
+  }
+ }
+ return moves;
+}
+/** The hand-off for an entry whose file is gone from its destination: a later complete journal moved
+ * that very file (same inode for a moved entry, same size and SHA-256) and it is still where that
+ * journal put it, with the identity that journal recorded. */
+async function findHandOff(m:Manifest,index:number,state:JournalState,moves:Successors):Promise<HandOff|undefined>{
+ const entry=m.entries[index]!,later=moves.get(pathKey(entry.destination));if(!later)return;
+ const next=later.m.entries[later.index]!,moved=state.renamed.get(index);
+ if(next.digest!==entry.digest||next.size!==entry.size||(moved&&moved.ino!==next.stat.ino))return;
+ const there=await maybeStat(next.destination);
+ if(!there?.isFile()||!movedIdentity(there,next,later.state.dated.get(later.index)))return;
+ return {successor:later.m.id,successorRoot:later.root,destination:next.destination};
+}
+/** Whether this journal put the entry's file at its destination: moved there, or copied there (a
+ * published copy, or one whose original was kept or released; older journals record no 'published'). */
+const placed=(state:JournalState,index:number)=>state.renamed.has(index)||state.published.has(index)||!!state.slots.get(index)?.length||state.finalizing.has(index);
+/** Record, before anything moves, each entry a later complete journal has taken over. */
+async function recordHandOffs(m:Manifest,state:JournalState):Promise<void>{
+ let moves:Successors|undefined;
+ for(const [index,entry] of m.entries.entries()){
+  if(state.handedOff.has(index)||!placed(state,index)||await maybeStat(entry.destination))continue;
+  moves??=await laterMoves(m);
+  const handOff=await findHandOff(m,index,state,moves);if(!handOff)continue;
+  await checkpoint(m,'handed-off',index,{...handOff});state.handedOff.set(index,handOff);
+ }
+}
 const pointerName=/^journal-(.+)\.json$/,pointerTemporary=new RegExp(`^\\.?journal-${UUID_PATTERN}-${UUID_PATTERN}\\.tmp$`);
 /** The folders a journal leaves a pointer in: the sibling backup folders it lists, and the top-level
  * folders (beneath its source) that its files move out of when they lie outside its own folder. */
@@ -369,8 +447,7 @@ async function siblingPointer(root:string,name:string):Promise<string|undefined>
  * and `root`'s neighbours, when that journal's own manifest puts a pointer in `root`. The pointer is
  * then rewritten. Otherwise the organization stops, naming the file. */
 async function repairPointer(root:string,damaged:DamagedPointer,known:string[]):Promise<string>{
- const parent=path.dirname(root);
- const neighbours=(await fs.readdir(parent,{withFileTypes:true}).catch(()=>[])).filter(entry=>entry.isDirectory()&&!entry.name.startsWith('.')).map(entry=>path.join(parent,entry.name));
+ const neighbours=await neighbourFolders(root);
  for(const candidate of new Set([...known,...neighbours])){
   if(candidate===root||!uuid.test(damaged.id))continue;
   // A neighbour that cannot be read, or holds a copy of the journal, is not where it lives.
@@ -412,8 +489,9 @@ const unfinished=(state:JournalState)=>!state.undoComplete&&(!state.complete||st
 /** Publish successor links before touching media. Repeating this preflight after
  * a crash finishes any links not yet written alongside the durable new manifest.
  */
-async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<void>{
+async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,state?:JournalState):Promise<void>{
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
+ const started=!!state&&(state.renamed.size>0||state.renameIntent.size>0||state.slots.size>0||state.published.size>0||state.handedOff.size>0||state.exclusive.size>0||state.complete);
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
  const predecessors:Manifest[]=[];
  const overlapping=(prior:Manifest)=>prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination)));
@@ -456,13 +534,20 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
    if(state.undoComplete||!overlapping(prior))continue;
    if(unfinished(state))throw finish(id);
    if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
+   // Links are only made before the first file moves, by the newest journal. A resumed or rechecked
+   // journal that has already moved something never takes on new predecessors: one it finds now may be
+   // newer than it, and either way that journal's kept originals would be stranded.
+   if(started)continue;
    // Supersession preserves historical originals without authorizing deletion.
    // Current bytes (including intentional edits) belong to the new review and
    // are verified by its normal copy/stash path, not the predecessor's digest.
    predecessors.push(prior);
   }
  }
- if(predecessors.length)for(const entry of m.entries){
+ // Only entries still waiting at their original path are checked there; a resumed or rechecked
+ // journal has already moved, kept or handed off the rest.
+ if(predecessors.length)for(const [index,entry] of m.entries.entries()){
+  if(state&&(state.renamed.has(index)||state.handedOff.has(index)||state.slots.get(index)?.length||state.finalizing.has(index)))continue;
   checkAbort(signal);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  }
  // Each record is written under the predecessor's own lock, after checking again that a finalize
@@ -577,17 +662,19 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  const progress=(file:string)=>onProgress?.({step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
-  await roots(m);await writeSiblingPointers(m);await supersedePriorOrganizations(m,signal,onProgress);
+  await roots(m);await writeSiblingPointers(m);await recordHandOffs(m,state);await supersedePriorOrganizations(m,signal,onProgress,state);
   // Moves cannot wait for a later check: confirm every file that will move, by stat
   // only, before the first one does. Any change stops the run with nothing moved.
   if(m.strategy==='rename')for(const [index,entry] of m.entries.entries()){
    checkAbort(signal);
    onProgress?.({phase:'verifying',step:'confirming',completed:index+1,total:m.entries.length,bytes:0,totalBytes:0,speed:0,file:path.basename(entry.source)});
-   if(!entry.move||state.renamed.has(index)||state.renameIntent.has(index)||state.fallback.has(index)||state.finalizing.has(index)||state.slots.get(index)?.length)continue;
+   if(!entry.move||state.handedOff.has(index)||state.renamed.has(index)||state.renameIntent.has(index)||state.fallback.has(index)||state.finalizing.has(index)||state.slots.get(index)?.length)continue;
    await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
   }
   for(const [index,entry]of m.entries.entries()) {
    checkAbort(signal);
+   // A later organization took this file over; it stays where that one put it.
+   if(state.handedOff.has(index)){if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;}
    if(state.finalized.has(index)){
     if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');
     if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;
@@ -608,7 +695,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    completed++;progress(path.basename(entry.source));
   }
   for(const [index,entry]of m.entries.entries()) {
-   checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index))continue;await roots(m);let saved=await savedOriginal(m,index,state);
+   checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index))continue;await roots(m);let saved=await savedOriginal(m,index,state);
    if(saved){await validateOriginal(saved,entry,m.root,true,signal);if(await maybeStat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable');continue;}
    await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal);if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable');
    await syncFile(entry.destination);await syncParents(entry.destination,m.root);
@@ -669,18 +756,31 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const jobs:OrganizationRecovery[]=[];
  for(const id of(await fs.readdir(folder)).sort()) {
   if(!uuid.test(id))continue;const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;let all=true;const state=await readEvents(m);if(state.superseded||state.undoComplete)continue;
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m);if(state.superseded||state.undoComplete)continue;
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
-   job.undoable=!released;
+   job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
+    // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
+    if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m))){
+     // Any kept original of it stays, but is not among those a finalize would release.
+     job.completed++;continue;
+    }
     if(state.renamed.has(index)){
      const target=await maybeStat(entry.destination);
-     if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index))||(verifyContents&&await digest(entry.destination)!==entry.digest))throw new Error(`Moved file changed or is missing: ${entry.destination}`);
+     if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index))||(verifyContents&&await digest(entry.destination)!==entry.digest)){
+      // A finished organization's file that is gone with no later organization accounting for it may be
+      // the only copy: every such file is counted and the job stays pending, without stopping the listing.
+      if(state.complete&&!await maybeStat(entry.source)&&!target){job.missing=(job.missing??0)+1;all=false;continue;}
+      throw new Error(`Moved file changed or is missing: ${entry.destination}`);
+     }
      job.completed++;continue;
     }
     if(state.renameIntent.has(index)&&!state.fallback.has(index)&&!state.slots.get(index)?.length){all=false;continue;}
-    if(state.finalized.has(index)){if(!await targetMatches(entry,m,undefined,verifyContents))throw new Error('Finalized destination unavailable');job.completed++;continue;}
+    if(state.finalized.has(index)){
+     if(!await targetMatches(entry,m,undefined,verifyContents)){if(state.complete&&!await maybeStat(entry.destination)){job.missing=(job.missing??0)+1;all=false;continue;}throw new Error('Finalized destination unavailable');}
+     job.completed++;continue;
+    }
     const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
     if(state.finalizing.has(index)){
      if(entry.move&&source)throw new Error('Original path reappeared after finalization');
@@ -701,7 +801,8 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
 }
 
 
-export interface OrganizationFinalization {removed:number;bytes:number;finalized:number;}
+/** handedOff: entries a later organization took over; their kept originals stay. */
+export interface OrganizationFinalization {removed:number;bytes:number;finalized:number;handedOff:number;}
 /** Finalize and undo first check every entry, then change them: `completed` is the entry being
  * handled, 1-based, out of `total` journal entries. */
 export interface OrganizationProgress {step:'checking'|'releasing'|'restoring';completed:number;total:number;file:string;}
@@ -718,12 +819,15 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
   // A finalize in progress still owns its files: its pointers stay until it finishes.
-  await writeSiblingPointers(m);
+  await writeSiblingPointers(m);await recordHandOffs(m,state);
   // Check every entry before authorizing the first deletion, including entries
   // that stay at their original paths and previously finalized destinations.
   for(const [index,entry]of m.entries.entries()){
    checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
    if(state.undone.size)throw new Error('This organization was undone');
+   // A later organization took this file over: its kept original, if any, is kept, not released
+   // (unless an interrupted finalize had already started releasing it).
+   if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
    if(state.renamed.has(index)){const target=await maybeStat(entry.destination);if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');continue;}
    const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!entry.move)await parents(entry,m);
@@ -734,9 +838,10 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    }else if(!state.finalizing.has(index))await validateOriginal(entry.source,entry,m.source,false,signal);
    if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable; retained originals preserved');
   }
-  const result:OrganizationFinalization={removed:0,bytes:0,finalized:0};
+  const result:OrganizationFinalization={removed:0,bytes:0,finalized:0,handedOff:0};
   for(const [index,entry]of m.entries.entries()){
    checkAbort(signal);onProgress?.({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
+   if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index))){result.handedOff++;continue;}
    // A moved file has no kept duplicate to release.
    if(state.renamed.has(index))continue;
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');result.finalized++;continue;}
@@ -766,7 +871,8 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
  });
 }
 
-export interface OrganizationUndo {restored:number;removed:number;}
+/** handedOff: files a later organization moved on, left where that one put them. */
+export interface OrganizationUndo {restored:number;removed:number;handedOff:number;}
 /** Put every organized file back where it was reviewed, for a finished, stopped or
  * partly undone organization. Moved files are renamed back; copied entries get their
  * kept original back, and only a copy this organization published is removed, after
@@ -778,10 +884,12 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(state.finalizing.size||state.finalized.size)throw new Error('Kept originals were already released, so this organization cannot be undone');
-  const result:OrganizationUndo={restored:0,removed:0};
+  const result:OrganizationUndo={restored:0,removed:0,handedOff:0};
   if(state.undoComplete)return result;
   // Until the undo completes, the folders it restores into must be found by other organizations.
-  await writeSiblingPointers(m);
+  await writeSiblingPointers(m);await recordHandOffs(m,state);
+  // A file a later organization took over stays with it: undoing that one brings it back first.
+  const handedOff=async(index:number)=>{const handOff=state.handedOff.get(index);return !!handOff&&!await maybeStat(m.entries[index]!.destination)&&!!await maybeStat(handOff.destination);};
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
   const restore=async(from:string,to:string)=>{
    await makeParent(to,m.source,m.sourceIdentity);
@@ -810,18 +918,24 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    return 'none';
   };
   const moved=(index:number)=>state.renamed.has(index)||(state.renameIntent.has(index)&&!state.fallback.has(index)&&!state.slots.get(index)?.length);
-  // Check everything before the first change, then undo in reverse order.
+  // Check everything before the first change, then undo in reverse order. Moved files that are gone
+  // from both places are all named, and nothing is changed.
+  const missing:string[]=[];
   for(const [index,entry] of m.entries.entries()){
    checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});if(state.undone.has(index))continue;
    await contained(entry.source,m.source);await contained(entry.destination,m.root);
-   if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))throw new Error(`Moved file is missing: ${entry.destination}`);continue;}
+   if(await handedOff(index))continue;
+   if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
    const saved=await savedOriginal(m,index,state);
    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,m.root,true,signal);}
   }
+  if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
   for(const [step,index] of [...m.entries.keys()].reverse().entries()){
    checkAbort(signal);onProgress?.({step:'restoring',completed:step+1,total:m.entries.length,file:m.entries[index]!.source});if(state.undone.has(index))continue;await roots(m);
-   const entry=m.entries[index]!;
-   if(moved(index)){
+   const entry=m.entries[index]!,handed=await handedOff(index);if(handed)result.handedOff++;
+   // A moved file a later organization took over is left with it; a kept original still comes back.
+   if(handed&&moved(index)){}
+   else if(moved(index)){
     const where=await movedState(index,entry);
     if(where==='pair'){await fs.unlink(entry.destination);await syncParents(entry.destination,m.root);}
     else if(where==='moved')await restore(entry.destination,entry.source);

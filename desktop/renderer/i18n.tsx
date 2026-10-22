@@ -482,6 +482,8 @@ Mirror doesn't work with “Fill first, then second”.|镜像不能与“先存
 Mirror is on: removed files are moved aside after review.|镜像已开启：已删除的文件会在审核后被移开。|鏡像已開啟：已刪除的檔案會在審核後被移開。|ミラーがオン：削除されたファイルは確認後に移動されます。
 Move existing files into your folder structure.|将现有文件移入你的文件夹结构。|將現有檔案移入你的資料夾結構。|既存のファイルをフォルダー構成に合わせて移動します。
 No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）がありません。
+{count} organized files are no longer where this organization put them.|{count} 个已整理的文件已不在此次整理放置的位置。|{count} 個已整理的檔案已不在此次整理放置的位置。|整理したファイルのうち {count} 件は、この整理で置いた場所にありません。
+Reading organization history…|正在读取整理记录…|正在讀取整理記錄…|整理の履歴を読み込み中…
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
 Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細

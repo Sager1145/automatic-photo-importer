@@ -61,7 +61,7 @@ test('the successor journal can also be finalized from the sibling folder',async
  const {drive,photos,videos,earlier}=await fixture(t);
  // Copy-and-keep leaves the moved clip's original in the video folder's recovery store to release.
  const later=await split(drive,photos,videos,'copy');
- assert.deepEqual(await core.finalizeOrganization(videos,later),{removed:1,bytes:Buffer.byteLength('bytes of a Sony clip'),finalized:1});
+ assert.deepEqual(await core.finalizeOrganization(videos,later),{removed:1,bytes:Buffer.byteLength('bytes of a Sony clip'),finalized:1,handedOff:0});
  await assert.rejects(core.finalizeOrganization(photos,earlier),/superseded by/);
 });
 
