@@ -767,7 +767,8 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   passed.set(index,signature);return verified.get(index)!==signature;
  };
  const result:ReorganizationResult={copied:0,skipped:0,errors:[],moved:0,retained:0,retainedBytes:0};const undated:string[]=[];let completed=0,bytes=0;const started=performance.now(),totalBytes=m.entries.reduce((n,e)=>n+e.size,0);
- const progress=(file:string)=>onProgress?.({step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file});
+ const renames=m.strategy==='rename'?{renames:true as const}:{};
+ const progress=(file:string)=>onProgress?.({step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file,...renames});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
   await roots(m);await writeSiblingPointers(m);await recordHandOffs(m,state);await supersedePriorOrganizations(m,signal,onProgress,state);
@@ -775,7 +776,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   // only, before the first one does. Any change stops the run with nothing moved.
   if(m.strategy==='rename')for(const [index,entry] of m.entries.entries()){
    checkAbort(signal);
-   onProgress?.({phase:'verifying',step:'confirming',completed:index+1,total:m.entries.length,bytes:0,totalBytes:0,speed:0,file:path.basename(entry.source)});
+   onProgress?.({phase:'verifying',step:'confirming',completed:index+1,total:m.entries.length,bytes:0,totalBytes:0,speed:0,file:path.basename(entry.source),renames:true});
    if(!entry.move||state.handedOff.has(index)||state.renamed.has(index)||state.renameIntent.has(index)||state.fallback.has(index)||state.finalizing.has(index)||state.slots.get(index)?.length)continue;
    await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
   }

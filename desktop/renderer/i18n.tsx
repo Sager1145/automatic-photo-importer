@@ -7,6 +7,7 @@ export const languages = Object.keys(localeNames) as Language[];
 // English keys are also the fallback. Placeholder names and user data never pass through translation.
 const rows = `
 Copying files|正在复制文件|正在複製檔案|ファイルをコピー中
+Moving files|正在移动文件|正在移動檔案|ファイルを移動中
 Stopping…|正在停止…|正在停止…|停止しています…
 Pausing…|正在暂停…|正在暫停…|一時停止しています…
 Verifying copied files|正在验证已复制文件|正在驗證已複製檔案|コピーしたファイルを検証中
@@ -564,6 +565,7 @@ Confirming|正在确认|正在確認|確認中
 Reading files|正在读取文件|正在讀取檔案|ファイルを読み込み中
 Reconnect it to choose.|重新连接后即可选择。|重新連接後即可選擇。|再接続すると選べます。
 Unplugged|已拔出|已拔出|取り外し済み
+{completed} of {total} files moved|已移动 {completed}/{total} 个文件|已移動 {completed}/{total} 個檔案|{total} 件中 {completed} 件を移動済み
 {completed} of {total} files organized|已整理 {completed}/{total} 个文件|已整理 {completed}/{total} 個檔案|{total} 件中 {completed} 件を整理済み
 {percent}% scanned|已扫描 {percent}%|已掃描 {percent}%|{percent}% スキャン済み
 Not enough space on the destination.|目标空间不足。|目的地空間不足。|保存先の空き容量が足りません。

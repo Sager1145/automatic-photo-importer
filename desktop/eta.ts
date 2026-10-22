@@ -174,13 +174,20 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  const used=(source:Source)=>source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:undefined;
  const stepOnly=(id:string,progress:EtaInput,context:EtaContext)=>{live.push(id);return tracker.observe(id,progress,context,now).step;};
  const since=(id:string)=>{live.push(id);return tracker.since(id,now);};
- // Reading files (organization), comparing with the destination and verifying report no speed of their own;
- // metadata checking reads only headers, so it counts files per second.
+ // Every step that moves or reads data gets bytes per second from a rolling window over its running total;
+ // steps that only rename or check files (no data read) get files per second (fileRate) and speed 0.
+ // Copying and moving keep the average the transfer itself reported until the window has a measure.
  const speeds=(id:string,progress:Progress)=>{
   const key=stageKey(progress);live.push(id);
-  if(key==='planning:reading'||key==='planning:comparing')progress.speed=tracker.measure(id,key,progress.bytes,now)??0;
-  else if(key==='verifying:'&&progress.total)progress.speed=tracker.measure(id,key,progress.totalBytes*Math.min(1,progress.completed/progress.total),now)??0;
-  else if(key==='planning:checking'||key==='planning:listing'||key==='verifying:history'||key==='verifying:earlier')progress.fileRate=tracker.measure(id,key,progress.completed,now);
+  const bytesOf=(value:number)=>tracker.measure(id,key+':bytes',value,now),filesOf=(value:number)=>tracker.measure(id,key+':files',value,now);
+  if(key==='planning:reading'||key==='planning:comparing')progress.speed=bytesOf(progress.bytes)??0;
+  else if(key==='copying:')progress.speed=bytesOf(progress.bytes)??(progress.bytes>0?progress.speed:0);
+  else if(key==='copying:moving'){
+   if(progress.renames&&!progress.bytes){progress.speed=0;progress.fileRate=filesOf(progress.completed);}
+   else progress.speed=bytesOf(progress.bytes)??(progress.bytes>0?progress.speed:0);
+  }
+  else if(key==='verifying:'&&progress.total)progress.speed=bytesOf(progress.totalBytes*Math.min(1,progress.completed/progress.total))??0;
+  else if(key==='planning:checking'||key==='planning:listing'||key==='verifying:history'||key==='verifying:earlier'||key==='verifying:confirming'||key==='verifying:checking'||key==='copying:releasing'||key==='copying:restoring')progress.fileRate=filesOf(progress.completed);
   else tracker.measure(id,key,0,now);
  };
  for(const job of state.jobs){
@@ -190,7 +197,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   const destinations=job.organization||state.preferences.copyMode==='single'?1:Math.max(1,state.preferences.destinations.length);
   const eta=tracker.observe(job.id,job.progress,{kind,destinations,verify,listingTotalBytes:job.organization?undefined:used(job.source)},now);
   job.progress.eta=eta.step;job.eta=eta.job;
-  if(job.progress.phase!=='copying')speeds('speed:'+job.id,job.progress);
+  speeds('speed:'+job.id,job.progress);
  }
  if(state.reviewProgress){state.reviewProgress.eta=stepOnly('review',state.reviewProgress,{kind:'import',destinations:1,verify});state.reviewProgress.startedAt=since('start:review');speeds('speed:review',state.reviewProgress);}
  for(const [destination,progress] of Object.entries(state.misplacedProgress??{})){progress.eta=stepOnly('misplaced:'+destination,progress,{kind:'organization',destinations:1,verify});progress.startedAt=since('start:misplaced:'+destination);speeds('speed:misplaced:'+destination,progress);}
