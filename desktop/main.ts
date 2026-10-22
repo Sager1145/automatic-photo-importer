@@ -21,6 +21,7 @@ import {scanSourceInWorker} from './scan-process';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
+import {EtaTracker,stampEstimates} from './eta';
 import {normalizePreferences} from './preferences';
 import {joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 
@@ -101,7 +102,10 @@ function stampJobs(){
 }
 // Drives moved to the top (this session): their cards come first and their queued jobs start first.
 let sourceOrder:string[]=[];
-const emit=()=>{stampJobs();state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const etaTracker=new EtaTracker();
+// A stalled step sends no progress; republish so its time left can grow instead of freezing.
+setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
+const emit=()=>{stampJobs();stampEstimates(state,etaTracker,Date.now());state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 function progressEmit(){const now=Date.now();if(now-lastEmit>100){lastEmit=now;emit();}}
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}

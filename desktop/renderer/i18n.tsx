@@ -563,6 +563,14 @@ Not checked automatically.|不自动检查。|不自動檢查。|自動では確
 {completed} of {total} files read|已读取 {completed}/{total} 个文件|已讀取 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを読み込み
 {time} elapsed|已用时 {time}|已用時 {time}|経過時間 {time}
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
+Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
+{time} left|剩余{time}|剩餘{time}|残り{time}
+{time} left in this step|此步骤剩余{time}|此步驟剩餘{time}|このステップの残り{time}
+{time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）
+under a minute|不到 1 分钟|不到 1 分鐘|1 分未満
+about {minutes} min|约 {minutes} 分钟|約 {minutes} 分鐘|約 {minutes} 分
+about {hours} h {minutes} min|约 {hours} 小时 {minutes} 分钟|約 {hours} 小時 {minutes} 分鐘|約 {hours} 時間 {minutes} 分
+about {hours} h|约 {hours} 小时|約 {hours} 小時|約 {hours} 時間
 Move {name} to the top|将 {name} 移到最上方|將 {name} 移到最上方|{name} を一番上へ移動
 Move to the top|移到最上方|移到最上方|一番上へ移動
 Drive reconnected|驱动器已重新连接|磁碟已重新連接|ドライブが再接続されました
