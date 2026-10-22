@@ -37,6 +37,18 @@ const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JS
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
 const recordPattern=/^\.import-(?:stage|intent)-[a-f0-9-]+\.json$/;
 
+/** A leftover receipt, authenticated with this host's key (it throws otherwise): whether its file
+ * is still there, whether the receipt still binds it, and for a stage, whether that copy could
+ * continue from its unchanged source. */
+export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean}>{
+ const {record}=await readRecord(journal,root);
+ const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
+ const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
+ const bound=!!stat?.isFile()&&fileIdentity(stat)===record.fileIdentity;
+ const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false);
+ return {kind:record.kind,file,present:!!stat,bound,resumable};
+}
+
 /** Record exclusive creation durably before the first byte is written. */
 export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<OwnedPartial> {
  await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(file,transfer.root);await contained(entry.source,transfer.source);
