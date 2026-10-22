@@ -294,41 +294,61 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
 /** Publish successor links before touching media. Repeating this preflight after
  * a crash finishes any links not yet written alongside the durable new manifest.
  */
+/** Work a journal still owns: not finished, a finalize not completed, or an undo stopped part-way.
+ * A fully undone journal owns nothing: its files are back where it found them. */
+const unfinished=(state:JournalState)=>!state.undoComplete&&(!state.complete||state.finalizing.size!==state.finalized.size||state.undone.size>0);
 async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<void>{
  const touched=new Set(m.entries.flatMap(entry=>[pathKey(entry.source),pathKey(entry.destination)]));
  const moved=new Set(m.entries.filter(entry=>entry.move&&entry.source!==entry.destination).map(entry=>pathKey(entry.source)));
  const predecessors:Manifest[]=[];
- // Earlier journals in this backup folder and in the sibling backup folders this manifest lists
- // (the video-root layout moves files between them).
- const journals:[string,string][]=[];
- for(const root of [m.root,...m.libraries??[]]){
+ const overlapping=(prior:Manifest)=>prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination)));
+ const finish=(id:string)=>new Error(`Finish organization ${id} before starting an overlapping organization`);
+ // Earlier journals in this backup folder, in the sibling backup folders this manifest lists
+ // (the video-root layout moves files between them), and in any folder a journal found here
+ // was superseded into, so an unfinished successor there is seen even when this plan lists none.
+ const listed=[m.root,...m.libraries??[]],folders=[...listed],scanned=new Set<string>();
+ for(let position=0;position<folders.length;position++){
+  const root=folders[position]!;if(scanned.has(root))continue;scanned.add(root);
   if(root!==m.root){
-   // A sibling folder that is gone has no journals; one that now resolves elsewhere is refused.
+   // A folder that is gone has no journals. A listed sibling that now resolves elsewhere is
+   // refused; a folder known only as an earlier successor's is then skipped like a gone one.
    const real=await fs.realpath(root).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
-   if(real===undefined)continue;if(real!==root)throw new Error(`Unsafe sibling backup folder: ${root}`);
-   await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);}
-  for(const id of await fs.readdir(path.join(root,storage)))journals.push([root,id]);
- }
- for(const [root,id] of journals){
-  checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
-  // A journal its own signed log already hands to a successor is never written again, and it
-  // already refuses resume, undo and finalize, so its successor is not read here: a successor's
-  // folder removed later (a sibling backup folder) must not block organizing this one. The
-  // recovery listing, resume, undo and finalize still check that successor in full.
-  const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false);
-  if(state.superseded)continue;
-  if(!prior.entries.some(entry=>touched.has(pathKey(entry.source))||touched.has(pathKey(entry.destination))))continue;
-  if(!state.complete||state.finalizing.size!==state.finalized.size)throw new Error(`Finish organization ${id} before starting an overlapping organization`);
-  if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
-  // Supersession preserves historical originals without authorizing deletion.
-  // Current bytes (including intentional edits) belong to the new review and
-  // are verified by its normal copy/stash path, not the predecessor's digest.
-  predecessors.push(prior);
+   if(real!==root&&real!==undefined&&listed.includes(root))throw new Error(`Unsafe sibling backup folder: ${root}`);
+   if(real!==root)continue;
+   await adoptLegacyStorage(root);if(!await maybeStat(path.join(root,storage)))continue;await contained(path.join(root,storage),root);
+  }
+  for(const id of await fs.readdir(path.join(root,storage))){
+   checkAbort(signal);if(id===m.id||!uuid.test(id))continue;
+   // A journal its own signed log already hands to a successor is never written again, and it
+   // already refuses resume, undo and finalize, so its successor is not read here: a successor's
+   // folder removed later (a sibling backup folder) must not block organizing this one. The
+   // recovery listing, resume, undo and finalize still check that successor in full.
+   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false);
+   // Superseded journals are skipped even if their log shows unfinished work (left by a
+   // version that did not lock): nothing can resume, undo or finalize them any more.
+   if(state.superseded){if(state.successorRoot)folders.push(state.successorRoot);continue;}
+   if(state.undoComplete||!overlapping(prior))continue;
+   if(unfinished(state))throw finish(id);
+   if(!prior.entries.some(entry=>moved.has(pathKey(entry.destination))))continue;
+   // Supersession preserves historical originals without authorizing deletion.
+   // Current bytes (including intentional edits) belong to the new review and
+   // are verified by its normal copy/stash path, not the predecessor's digest.
+   predecessors.push(prior);
+  }
  }
  if(predecessors.length)for(const entry of m.entries){
   checkAbort(signal);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  }
- for(const prior of predecessors){checkAbort(signal);await checkpoint(prior,'superseded',undefined,{successor:m.id,...(prior.root!==m.root?{successorRoot:m.root}:{})});}
+ // Each record is written under the predecessor's own lock, after checking again that a finalize
+ // or undo of it has not started meanwhile.
+ for(const prior of predecessors){
+  checkAbort(signal);
+  await locked(jobPath(prior.root,prior.id),async()=>{
+   const state=await readEvents(prior,undefined,undefined,false);
+   if(state.superseded||state.undoComplete)return;if(unfinished(state))throw finish(prior.id);
+   await checkpoint(prior,'superseded',undefined,{successor:m.id,...(prior.root!==m.root?{successorRoot:m.root}:{})});
+  });
+ }
 }
 const unsupportedLink=['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK'];
 /** The moved inode: same device, inode and size as reviewed, with its reviewed Modified
