@@ -58,6 +58,20 @@ async function run() {
       return result;
     };
   }
+  if (mode === 'organization-rename-link') {
+    fs.link = async(from,to)=>{
+      const result = await link(from,to);
+      if (String(to) === target) await checkpoint({file:target});
+      return result;
+    };
+  }
+  if (mode === 'organization-rename-unlink') {
+    fs.unlink = async(file)=>{
+      const result = await unlink(file);
+      if (String(file) === original) await checkpoint({file:target});
+      return result;
+    };
+  }
   if (mode === 'organization-stash') {
     fs.rename = async(from,to)=>{
       const result = await rename(from,to);
@@ -83,10 +97,12 @@ async function run() {
     const result = await core.execute(plan!,undefined,undefined,{exclusiveCopy:mode === 'import-exclusive'});
     return {result,target:plan!.entries[0]!.destination};
   }
+  if (mode === 'undo-organization') return {result:await core.undoOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   if (mode === 'resume-organization') return {result:await core.resumeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   if (mode === 'finalize-intent' || mode === 'finalize-unlink' || mode === 'retry-finalize') return {result:await core.finalizeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   const {plans:[plan]} = await core.plan(library,[library],organizationOptions,metadata);
-  return {result:await core.executeReorganization(plan!),jobs:await core.getOrganizationRecovery(library),target};
+  const strategy = mode.startsWith('organization-rename') ? 'rename' as const : 'copy' as const;
+  return {result:await core.executeReorganization(plan!,undefined,undefined,{strategy}),jobs:await core.getOrganizationRecovery(library),target};
 }
 try {
   let result;
