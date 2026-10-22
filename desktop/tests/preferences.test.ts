@@ -34,9 +34,11 @@ test('one unreadable destination entry keeps the others and their positions',()=
 
 test('the former media-type switch becomes a media layout',()=>{
  assert.equal(normalizePreferences({separateMedia:true}).mediaLayout,'format');
- assert.equal(normalizePreferences({separateMedia:false}).mediaLayout,'flat');
+ // The old switch was off by default, which never meant a choice: it gets today's default.
+ assert.equal(normalizePreferences({separateMedia:false}).mediaLayout,'video-root');
  assert.equal(normalizePreferences({separateMedia:true,mediaLayout:'video-root'}).mediaLayout,'video-root','a saved layout wins');
- assert.equal(normalizePreferences({mediaLayout:'sideways'}).mediaLayout,'flat');
+ assert.equal(normalizePreferences({mediaLayout:'sideways'}).mediaLayout,'video-root');
+ assert.equal(normalizePreferences({mediaLayout:'flat'}).mediaLayout,'flat','a layout chosen in Settings is kept');
  assert.equal('separateMedia' in normalizePreferences({layout:'format' as const}),false);
  const current={...defaultPreferences,mediaLayout:'type-format' as const};
  assert.equal(normalizePreferences({...current,mediaLayout:'??'},current).mediaLayout,'type-format');
@@ -57,4 +59,10 @@ test('up to ten drives import in parallel, five by default, and a saved choice i
  assert.equal(normalizePreferences({parallel:8}).parallel,8);
  assert.equal(normalizePreferences({parallel:2}).parallel,2,'a saved value is not migrated');
  assert.equal(normalizePreferences({parallel:0.2}).parallel,1);
+});
+
+test('photos and videos go to separate photobackup and videobackup folders by default',()=>{
+ assert.equal(defaultPreferences.mediaLayout,'video-root');
+ assert.equal(normalizePreferences(undefined).mediaLayout,'video-root');
+ assert.equal(normalizePreferences({}).mediaLayout,'video-root');
 });

@@ -42,7 +42,9 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   const calendar=info.date?.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
   const candidate=calendar ? new Date(`${calendar[1]}-${calendar[2]}-${calendar[3]}T00:00:00Z`):null;
   const validCalendar=!!candidate && Number.isFinite(candidate.getTime()) && candidate.toISOString().slice(0,10)===calendar![0].slice(0,10);
-  const capture=validCalendar?candidate!:mtime;
+  // Without a capture date, the file's modified time is read on this Mac's calendar, as
+  // the camera's clock would have shown it, not in UTC.
+  const capture=validCalendar?candidate!:new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
   const year=String(capture.getUTCFullYear()).padStart(4,'0'), month=String(capture.getUTCMonth()+1).padStart(2,'0'), day=String(capture.getUTCDate()).padStart(2,'0');
   // Month names are English whatever the app language; the number first keeps calendar order.
   const monthName=`${month} ${MONTHS[capture.getUTCMonth()]}`;

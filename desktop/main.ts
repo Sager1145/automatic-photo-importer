@@ -178,7 +178,9 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.released',{count:released.removed,size:gigabytes(released.bytes)});addHistory(message('history.organization'),job.detail);}
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.undone',{restored:undone.restored,removed:undone.removed});addHistory(message('history.organizationUndone'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase='copying';job.detail=message('job.resuming');progressEmit();});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
- }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}finally{active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();}})().finally(()=>{resumingOrganizations.delete(operation);});
+ }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}finally{active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
+  // Undo puts files back where they were, so the backup folder check runs again.
+  if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleMisplacedCheck(true);}})().finally(()=>{resumingOrganizations.delete(operation);});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
 }
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */

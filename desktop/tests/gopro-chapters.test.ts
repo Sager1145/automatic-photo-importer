@@ -27,3 +27,14 @@ test('GoPro chapters of one recording stay together, routed by the first chapter
  assert.match(path.dirname(entry('GX010043.MP4').destination),/202402/,'another recording routes by its own time');
  assert.notEqual(entry('GX010043.MP4').family,entry('GX010042.MP4').family);
 });
+
+test('a file without capture metadata is filed by the local calendar day it was last modified',async t=>{
+ const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'local-mtime-')));
+ t.after(()=>fs.rm(base,{recursive:true,force:true}));
+ const card=path.join(base,'card'),root=path.join(base,'photobackup'),clip=path.join(card,'DCIM','CLIP0001.MP4');
+ await fs.mkdir(path.dirname(clip),{recursive:true});await fs.mkdir(root);await fs.writeFile(clip,'video');
+ // 23:50 on 31 January where the camera was: in UTC this may already be February.
+ const evening=new Date(2024,0,31,23,50);await fs.utimes(clip,evening,evening);
+ const reviewed=(await plan(card,[root],options,async()=>({fields:{}}))).plans[0]!;
+ assert.match(path.relative(root,reviewed.entries[0]!.destination),/^2024\/202401\//);
+});
