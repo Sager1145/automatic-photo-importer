@@ -9,7 +9,7 @@ const transitions:(string|undefined)[]=[];
 const root={dataset:{} as Record<string,string>};
 Object.assign(globalThis,{
  window:{matchMedia:(query:string)=>({matches:query.includes('reduce')&&reduce})},
- document:{documentElement:root,querySelector:(selector:string)=>selector==='dialog[open]'&&sheetOpen?{}:null,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){}};}},
+ document:{documentElement:root,querySelector:(selector:string)=>selector.includes('dialog[open]')&&sheetOpen?{}:null,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){}};}},
 });
 
 test('an interface change runs as a View Transition of its kind',()=>{
@@ -28,7 +28,7 @@ test('reduced motion applies the change directly, without a transition',()=>{
  reduce=false;
 });
 
-test('under an open sheet the change applies directly, so nothing is lifted above its backdrop',()=>{
+test('under an open sheet or error message the change applies directly, so nothing covers them',()=>{
  sheetOpen=true;transitions.length=0;let applied=0;
  animateInterfaceChange(()=>{applied++;},'layout');
  assert.deepEqual(transitions,[]);assert.equal(applied,1);

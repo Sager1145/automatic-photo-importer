@@ -22,6 +22,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const settle=async()=>{await new Promise(r=>setTimeout(r,50));await wait(()=>js<boolean>("!document.documentElement.dataset.transition&&document.getAnimations().every(a=>a.playState!=='running'||a.timeline!==document.timeline||a.effect?.getTiming().iterations===Infinity)"),'interface settled');};
  // capturePage cannot draw a View Transition mid-flight, so screenshots wait for the interface to settle.
  const shot=async(name:string)=>{await new Promise(r=>setTimeout(r,100));await settle();await fs.writeFile(path.join(report,name+'.png'),(await window.webContents.capturePage()).toPNG());};
+ // An error toast suspends transitions (errors stay on top), so motion checks clear it first.
+ const clearToast=async()=>{await js("document.querySelector('[data-testid=error-toast] button[aria-label=Dismiss]')?.click();true");await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast]')===null"),'error toast dismissed');};
  // Settings shows one category panel at a time; open the one a check needs.
  const settingsTab=async(id:string)=>{await js(`document.querySelector('#settings-tab-${id}').click()`);await wait(()=>js<boolean>(`document.querySelector('#settings-tab-${id}')?.getAttribute('aria-selected')==='true'`),`settings category ${id}`);};
  const check=async(name:string,run:()=>Promise<void>)=>{try{await run();checks.push({name,passed:true});console.log(`QA PASS: ${name}`);}catch(e){console.error(e);checks.push({name,passed:false,error:String(e)});throw e;}};
@@ -70,7 +72,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    const scan=(await state()).sourceInventories!['fixture:1'];assert.equal(scan.media,2);assert.equal((await state()).jobs.length,before);
    await wait(()=>js<boolean>("document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')!==null"),'scanned card content');
    const layout:{label:string;rows:{sourceId:string;height:number;width:number;controlsFit:boolean}[]}[]=[];
-   const measure=async(label:string)=>{const rows=await js<{sourceId:string;height:number;width:number;controlsFit:boolean}[]>(`Array.from(document.querySelectorAll('article.source-row')).map(card=>{const box=card.getBoundingClientRect();return {sourceId:card.dataset.sourceId,height:box.height,width:box.width,controlsFit:Array.from(card.querySelectorAll('button, details.source-disclosure > summary')).filter(control=>control.checkVisibility()).every(control=>{const bounds=control.getBoundingClientRect();return bounds.left>=box.left-1&&bounds.right<=box.right+1&&bounds.top>=box.top-1&&bounds.bottom<=box.bottom+1;})};})`);layout.push({label,rows});await fs.writeFile(path.join(report,'source-card-layout.json'),JSON.stringify({viewport:await js<{width:number;height:number}>('({width:innerWidth,height:innerHeight})'),measurements:layout},null,2));assert.ok(rows.every(row=>row.controlsFit),`Card controls overflow at ${label}: ${JSON.stringify(rows)}`);return rows;};
+   const measure=async(label:string)=>{const rows=await js<{sourceId:string;height:number;width:number;controlsFit:boolean}[]>(`Array.from(document.querySelectorAll('article.source-row')).map(card=>{const box=card.getBoundingClientRect();return {sourceId:card.dataset.sourceId,height:box.height,width:box.width,controlsFit:Array.from(card.querySelectorAll('button, details.source-disclosure > summary')).filter(control=>control.checkVisibility()).every(control=>{const bounds=control.getBoundingClientRect();return bounds.left>=box.left-1&&bounds.right<=box.right+1&&bounds.top>=box.top-1&&bounds.bottom<=box.bottom+1;}),outside:Array.from(card.querySelectorAll('button, details.source-disclosure > summary')).filter(control=>{if(!control.checkVisibility())return false;const bounds=control.getBoundingClientRect();return !(bounds.left>=box.left-1&&bounds.right<=box.right+1&&bounds.top>=box.top-1&&bounds.bottom<=box.bottom+1);}).map(control=>(control.getAttribute('aria-label')||control.textContent||'').trim().slice(0,40)+' '+JSON.stringify(control.getBoundingClientRect())+' card '+JSON.stringify(box))};})`);layout.push({label,rows});await fs.writeFile(path.join(report,'source-card-layout.json'),JSON.stringify({viewport:await js<{width:number;height:number}>('({width:innerWidth,height:innerHeight})'),measurements:layout},null,2));assert.ok(rows.every(row=>row.controlsFit),`Card controls overflow at ${label}: ${JSON.stringify(rows)}`);return rows;};
    const compact=await measure('compact-125');await shot('source-cards-compact');
    assert.equal(await js<boolean>("Array.from(document.querySelectorAll('article.source-row')).every((card,index,cards)=>{const style=getComputedStyle(card);return parseFloat(style.borderTopWidth)>0&&parseFloat(style.borderBottomWidth)>0&&(!index||card.getBoundingClientRect().top>cards[index-1].getBoundingClientRect().bottom);})"),true,'Each source has a separate bordered surface and gap');
    assert.equal(await js<boolean>("document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')?.checkVisibility()"),false);
@@ -148,6 +150,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   });
   await check('Every page and Settings category switch animates through the motion helper, and reduced motion skips it',async()=>{
    const reduced=await js<boolean>("matchMedia('(prefers-reduced-motion: reduce)').matches");
+   await clearToast();
    // Record the kind of each View Transition the renderer starts.
    await js("window.qaTransitions=[];window.qaStartViewTransition=document.startViewTransition;document.startViewTransition=function(update){window.qaTransitions.push(document.documentElement.dataset.transition);return window.qaStartViewTransition.call(document,update);};true");
    const go=async(label:string,title=label)=>{await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click()`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(title)}`),`page ${label}`);};
@@ -166,6 +169,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   });
   await check('Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet',async()=>{
    const reduced=await js<boolean>("matchMedia('(prefers-reduced-motion: reduce)').matches");
+   await clearToast();
    // While each transition runs, record what its layers look like.
    await js("window.qaLayers=[];window.qaStartViewTransition=document.startViewTransition;document.startViewTransition=function(update){const t=window.qaStartViewTransition.call(document,update);t.ready.then(()=>{const bar=document.querySelector('.window-titlebar');window.qaLayers.push({kind:document.documentElement.dataset.transition,labels:Array.from(document.querySelectorAll('.nav-item>:not(.nav-indicator)')).every(e=>getComputedStyle(e).viewTransitionName!=='none'),tabLabels:Array.from(document.querySelectorAll('.settings-nav [role=tab]>:not(.settings-indicator)')).every(e=>getComputedStyle(e).viewTransitionName!=='none'),titlebarOpaque:getComputedStyle(bar).backgroundColor.match(/[\\d.]+/g).length===3||parseFloat(getComputedStyle(bar).backgroundColor.match(/[\\d.]+/g)[3])===1,shadowHidden:getComputedStyle(bar,'::after').display==='none'});}).catch(()=>{});return t;};true");
    const go=async(label:string,title=label)=>{await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click();true`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(title)}`),`page ${label}`);await settle();};
@@ -183,6 +187,29 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    if(reduced){assert.deepEqual(layers,[]);return;}
    assert.deepEqual(layers.map(layer=>layer.kind),['forward','category-forward','category-back','back']);
    for(const layer of layers){assert.ok(layer.labels&&layer.titlebarOpaque&&layer.shadowHidden,JSON.stringify(layer));if(layer.kind.startsWith('category'))assert.ok(layer.tabLabels,JSON.stringify(layer));}
+  });
+  await check('Errors stay on top: at 200% the error toast is the topmost element at its centre, also on the frames after each page switch',async()=>{
+   const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();
+   // The toast is hit first at its centre and sits in the top layer; no transition is running over it.
+   const probe="(()=>{const t=document.querySelector('[data-testid=error-toast]');if(!t)return {present:false};const r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {present:true,topLayer:t.matches(':popover-open'),topmost:!!hit&&t.contains(hit),transition:!!document.documentElement.dataset.transition};})()";
+   // Switch pages and probe two frames later, when a transition would already be drawing.
+   const go=async(label:string)=>js<Record<string,unknown>>(`(async()=>{Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return ${probe};})()`);
+   const onTop={present:true,topLayer:true,topmost:true,transition:false};
+   let settled:Record<string,unknown>,during:Record<string,unknown>[]=[];
+   try{
+    window.setContentSize(1000,720);await action({type:'preferences',patch:{textScale:2}});await wait(()=>js<boolean>("getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()==='2'"),'200 percent text');
+    await clearToast();await go('Import desk');await settle();
+    await action({type:'preferences',patch:{unknownDefault:'ask'}});
+    await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')===true"),'error toast in the top layer');
+    await settle();settled=await js(probe);await shot('error-toast-on-top-200');
+    for(const page of ['Drives','Organization','Import desk'])during.push(await go(page));
+   }finally{
+    await action({type:'preferences',patch:{unknownDefault:'skip',textScale:original}});window.setContentSize(width,height);
+    await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click();true");await settle();
+   }
+   assert.deepEqual(settled,onTop);
+   for(const item of during)if(item.present)assert.deepEqual(item,onTop);
+   assert.ok(during.some(item=>item.present),'The toast was on screen while pages switched');
   });
   await check('Settings provides live, persistent text sizing with a readable default',async()=>{
    await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Settings').click()`);await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Settings'"),'navigation committed');

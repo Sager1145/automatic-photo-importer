@@ -915,7 +915,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .error-empty{display:flex;align-items:center;gap:.45rem;color:var(--label-secondary)}
 .error-empty svg{color:var(--success)}
 .error-count[data-level=warning]:not([data-count="0"]){background:var(--warning);color:#fff}
-.error-toast{position:fixed;right:1.25rem;bottom:1.25rem;z-index:60;display:flex;align-items:center;gap:.6rem;max-width:min(26rem,calc(100vw - 2.5rem));padding:.6rem .5rem .6rem .9rem;border-radius:var(--radius-lg);background:var(--surface-elevated);border:1px solid var(--separator);box-shadow:var(--shadow-3),inset 3px 0 0 var(--danger);transition:opacity var(--base) var(--ease-out),translate var(--slow) var(--ease-ios)}
+/* A popover in the top layer: the default popover box (centred, bordered, scrolling) is replaced by the toast's own. */
+.error-toast:not(:popover-open){display:none}
+.error-toast{position:fixed;inset:auto 1.25rem 1.25rem auto;margin:0;overflow:visible;color:var(--label);display:flex;align-items:center;gap:.6rem;max-width:min(26rem,calc(100vw - 2.5rem));padding:.6rem .5rem .6rem .9rem;border-radius:var(--radius-lg);background:var(--surface-elevated);border:1px solid var(--separator);box-shadow:var(--shadow-3),inset 3px 0 0 var(--danger);transition:opacity var(--base) var(--ease-out),translate var(--slow) var(--ease-ios)}
 .error-toast.is-warning{box-shadow:var(--shadow-3),inset 3px 0 0 var(--warning)}
 @starting-style{.error-toast{opacity:0;translate:0 12px}}
 .error-toast>svg{flex:none;color:var(--danger)}
@@ -1024,8 +1026,6 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 ::view-transition-group(nav-indicator){animation-duration:var(--spring-duration);animation-timing-function:var(--spring)}
 /* Every other group crossfades or morphs on the same timing */
 ::view-transition-group(*){animation-duration:var(--base);animation-timing-function:var(--ease-ios)}
-/* Transitions never swallow a click: it reaches the live interface underneath */
-::view-transition{pointer-events:none}
 /* Layout changes: cards and rows morph to their new place; ones that arrive or leave fade where they are */
 :root[data-transition=layout] :is(.source-row,.sidebar-drive,.drive-list li,.destination-slot,.import-dashboard,.review-panel){view-transition-name:match-element;view-transition-class:item}
 /* Settings categories: the panel rises (next) or falls (previous) while the selection glides */
