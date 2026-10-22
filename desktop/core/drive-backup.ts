@@ -59,12 +59,12 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
   await walk(base);
   return {removals,known};
 }
-export async function claimDriveFolder(root:string,drive:NonNullable<TransferPlan['drive']>):Promise<void> {
+export async function claimDriveFolder(root:string,drive:NonNullable<TransferPlan['drive']>,rootIdentity?:string):Promise<void> {
   const file=path.join(root,DRIVE_BACKUPS,drive.folder,marker);await contained(file,root);
   const recorded=await owner(path.dirname(file));
   if(recorded===drive.identity) return;
   if(recorded!==undefined) throw new Error(`This backup folder was created without this drive's marker or belongs to another drive; review again: ${path.dirname(file)}`);
-  await makeParent(file,root);
+  await makeParent(file,root,rootIdentity);
   try {
     const handle=await fs.open(file,'wx',0o600);
     try { await handle.writeFile(JSON.stringify({identity:drive.identity,name:drive.name})); await handle.sync(); } finally { await handle.close(); }
@@ -76,7 +76,7 @@ export async function claimDriveFolder(root:string,drive:NonNullable<TransferPla
 }
 /** Move reviewed extras into a dated holding folder on the same destination.
  * Every file is checked before the first move; nothing is deleted. */
-export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal):Promise<number> {
+export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferPlan['drive']>,removals:ReviewedRemoval[],signal?:AbortSignal,rootIdentity?:string):Promise<number> {
   const base=path.join(root,DRIVE_BACKUPS,drive.folder);
   for(const removal of removals) {
     checkAbort(signal);await contained(removal.path,root);
@@ -89,7 +89,7 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
   const held=path.join(root,DRIVE_BACKUPS,holding,`${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,8)}`,drive.folder),parents=new Set<string>();
   for(const removal of removals) {
     checkAbort(signal);
-    const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root);
+    const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root,rootIdentity);
     if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) throw new Error(`Mirror holding path already exists: ${target}`);
     await fs.rename(removal.path,target);
     await syncDirectory(path.dirname(removal.path));await syncParents(target,root);

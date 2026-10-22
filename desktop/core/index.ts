@@ -422,7 +422,7 @@ interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<
 const sourceChanged=(entry:PlanEntry)=>new MessageError('error.sourceChanged',{path:entry.source});
 async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promise<OpenStage> {
   const {entry,transfer,recovery}=target;
-  checkAbort(signal); await rootUnchanged(transfer.root,transfer.rootIdentity); await contained(entry.source,transfer.source); await makeParent(entry.destination,transfer.root);
+  checkAbort(signal); await rootUnchanged(transfer.root,transfer.rootIdentity); await contained(entry.source,transfer.source); await makeParent(entry.destination,transfer.root,transfer.rootIdentity);
   const candidate=await findPartial('stage',entry,transfer.root,recovery,signal);
   const recovered=candidate&&!claimedStages.has(candidate.file)?candidate:undefined;
   if(recovered)claimedStages.add(recovered.file);
@@ -554,7 +554,7 @@ export interface ExecutionOptions {
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
 async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal):Promise<import('node:fs').BigIntStats|undefined> {
-  await rootUnchanged(transfer.root,transfer.rootIdentity); await makeParent(destination,transfer.root); await contained(staged.file,transfer.root);
+  await rootUnchanged(transfer.root,transfer.rootIdentity); await makeParent(destination,transfer.root,transfer.rootIdentity); await contained(staged.file,transfer.root);
   const verified=staged.verifiedStat;
   if(!verified || !sameStat(verified,await fs.lstat(staged.file,{bigint:true}))) throw new Error(`Staged file changed: ${entry.source}`);
   const publicationEntry={...entry,destination};
@@ -639,8 +639,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       const removals=mirrorReviews.get(transfer);
       if(transfer.removals&&(!removals||!transfer.drive))throw new Error('Mirror changes require the reviewed backup plan.');
       run.index=await destinationIndex(transfer.root,transfer.rootIdentity);
-      if(transfer.drive){const drive=transfer.drive;await exclusive(()=>claimDriveFolder(transfer.root,drive));}
-      if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal)):0;for(const removal of removals)run.index.forget(removal.path);}
+      if(transfer.drive){const drive=transfer.drive;await exclusive(()=>claimDriveFolder(transfer.root,drive,transfer.rootIdentity));}
+      if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal,transfer.rootIdentity)):0;for(const removal of removals)run.index.forget(removal.path);}
       for(const batch of run.batches) try {
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);

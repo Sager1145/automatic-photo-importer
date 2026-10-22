@@ -255,7 +255,7 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
  await fs.rename(entry.destination,saved);await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(saved));return true;
 }
 async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
- await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root);await syncDirectory(path.dirname(entry.destination));
+ await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root,m.rootIdentity);await syncDirectory(path.dirname(entry.destination));
  const staged=path.join(jobPath(m.root,m.id),`stage-${randomUUID()}.partial`);
  const output=await fs.open(staged,'wx',0o600);
  // Stages are expendable verified copies: a failed or stopped copy removes its own.
@@ -399,7 +399,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
  if(!source||target||entry.size===0)return 'copy';
  await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  // Folders created for the destination are durable before the file is renamed into them.
- await makeParent(entry.destination,m.root);await syncParents(entry.destination,m.root);
+ await makeParent(entry.destination,m.root,m.rootIdentity);await syncParents(entry.destination,m.root);
  if(!state.renameIntent.has(index)){await checkpoint(m,'rename-intent',index);state.renameIntent.add(index);}
  checkAbort(signal);await roots(m);await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal,false);
  const appeared=()=>new Error(`Destination appeared during organization; nothing was overwritten: ${entry.destination}`);
@@ -630,7 +630,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   if(state.undoComplete)return result;
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
   const restore=async(from:string,to:string)=>{
-   await makeParent(to,m.source);
+   await makeParent(to,m.source,m.sourceIdentity);
    try{await fs.link(from,to);const a=await fs.lstat(from,{bigint:true}),b=await fs.lstat(to,{bigint:true});if(!sameHardLink(a,b))throw occupied(to);await fs.unlink(from);}
    catch(error){
     if(code(error)==='EEXIST')throw occupied(to);

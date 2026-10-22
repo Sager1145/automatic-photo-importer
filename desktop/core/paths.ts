@@ -75,17 +75,34 @@ export async function contained(file:string,root:string):Promise<void> {
   // replaced by a link after its own check still resolves outside `root` here.
   if(deepest) try { if(!beneath(await fs.realpath(deepest),root)) throw new Error(`Unsafe resolved path: ${deepest}`); } catch(error) { if(code(error)!=='ENOENT') throw error; }
 }
-export async function makeParent(file:string,root:string):Promise<void> {
+/** With rootIdentity, every folder is created only while the root is still that volume: a drive
+ * unmounted mid-run leaves an empty mount folder on the system disk, and nothing may be written there.
+ * Folders this call created are removed again (empty only) when it fails. */
+export async function makeParent(file:string,root:string,rootIdentity?:string):Promise<void> {
   await contained(file,root);
   const parts=path.relative(root,path.dirname(file)).split(path.sep).filter(Boolean);
+  const rootDevice=rootIdentity?.split(':')[0],created:string[]=[];
   let current=root;
-  for(const part of parts) {
-    current=path.join(current,part);
-    try { await fs.mkdir(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
-    // Ancestors were checked a step earlier; the whole chain is checked again below.
-    const stat=await fs.lstat(current);
-    if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);
-    if(!stat.isDirectory()) throw new Error(`Unsafe parent: ${current}`);
+  try {
+    for(const part of parts) {
+      current=path.join(current,part);
+      if(rootIdentity) await rootUnchanged(root,rootIdentity);
+      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
+      // Ancestors were checked a step earlier; the whole chain is checked again below.
+      const stat=await fs.lstat(current,{bigint:true});
+      if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);
+      if(!stat.isDirectory()) throw new Error(`Unsafe parent: ${current}`);
+      // The volume can vanish between the check and mkdir: the new folder must be on the root's device.
+      if(rootIdentity) {
+        await rootUnchanged(root,rootIdentity);
+        // The root is still the same volume, so a folder on another device is a volume mounted inside it.
+        if(String(stat.dev)!==rootDevice) throw new Error(`A folder inside the destination is on another volume: ${current}`);
+      }
+    }
+  } catch(error) {
+    // Only when the volume left: removing a fresh folder after any other error could fail another job's file in it.
+    if(rootIdentity&&await rootUnchanged(root,rootIdentity).then(()=>false,()=>true)) for(const folder of created.reverse()) await fs.rmdir(folder).catch(()=>undefined);
+    throw error;
   }
   await contained(file,root);
 }
