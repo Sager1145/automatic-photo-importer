@@ -234,6 +234,15 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .sidebar-item svg[class*=lucide-loader]{color:var(--accent)}
 .sidebar-item .connection-dot{flex:none}
 .sidebar-drive{display:grid;grid-template-columns:minmax(0,1fr);gap:.2rem;padding-bottom:.45rem}
+.sidebar-row{display:flex;align-items:center;gap:.25rem;min-width:0}
+.sidebar-row>.sidebar-item{flex:1;min-width:0}
+.sidebar-error-badge{flex:none;display:inline-flex;align-items:center;gap:.2rem;height:1.35rem;padding:0 .45rem;border-radius:var(--radius-capsule);background:var(--danger);color:#fff;font-size:var(--text-caption);font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer}
+.sidebar-error-badge[data-level=warning]{background:var(--warning)}
+.sidebar-error-badge:hover{filter:brightness(1.08)}
+.sidebar-error-badge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sidebar-row>.sidebar-error-badge{margin-right:.5rem}
+.error-filter{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:var(--text-callout);font-weight:600}
+.error-filter>span{flex:1;min-width:0;overflow-wrap:anywhere}
 .sidebar-meta{display:flex;align-items:center;gap:.5rem;margin:0 .75rem 0 2.35rem;min-width:0}
 .sidebar-capacity{display:block;flex:1;min-width:1.5rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
 .sidebar-capacity.is-unknown{background:repeating-linear-gradient(90deg,var(--fill-2) 0 4px,transparent 4px 7px)}
@@ -895,6 +904,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .error-summary>div{flex:1;min-width:0;display:grid;gap:.15rem}
 .error-title{font-weight:600}
 .error-hint{font-size:var(--text-footnote);color:var(--label-secondary)}
+.error-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .8rem;padding-left:calc(16px + .55rem);font-size:var(--text-caption);color:var(--label-secondary)}
+.error-meta>span,.error-meta>time{display:inline-flex;align-items:center;gap:.3rem;min-width:0;overflow-wrap:anywhere}
+.error-meta svg{flex:none}
 .error-details>summary{width:max-content;font-size:var(--text-caption);font-weight:600;color:var(--accent);cursor:pointer}
 .error-details>div{display:flex;align-items:flex-start;gap:.5rem;margin-top:.35rem}
 .error-details p{flex:1;min-width:0;font-family:var(--font-mono);font-size:var(--text-caption);color:var(--label-secondary);overflow-wrap:anywhere;user-select:text}
