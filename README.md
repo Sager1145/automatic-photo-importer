@@ -96,6 +96,6 @@ The app icon was created and verified in Apple Icon Composer. Its editable `Icon
 
 ## Architecture and actual feature coverage
 
-See [实际功能、接口与架构审查](docs/architecture-and-features.md) for every production interface, data flow, fixes, validation and known feature gaps. UI labels support four languages; dynamic backend messages are not fully localized. Mirror drive backups move removed files aside rather than deleting them; two-destination copying is a separate copy policy, not a mirror.
+See [实际功能、接口与架构审查](docs/architecture-and-features.md) for every production interface, data flow, fixes, validation and known feature gaps. UI labels and dynamic backend messages (job progress, results, history and common errors) support four languages; rare low-level errors keep their original English text. Mirror drive backups move removed files aside rather than deleting them; two-destination copying is a separate copy policy, not a mirror.
 
 The product has one Electron entry point and one Node planning/copy implementation. The superseded SwiftUI app was removed; only the macOS ImageCaptureCore camera bridge remains native (see [historical implementation](docs/legacy-implementation.md)).
