@@ -1176,12 +1176,14 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
   }, [inventory]);
   const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system && (file.included || file.size > 0)), [inventory]);
   const copied = unknown.filter(file => file.included).length, skipped = unknown.length - copied;
+  const emptyPrimary = (inventory.skipped ?? []).filter(item => item.reason === 'emptyPrimary');
   const system = inventory.system ?? 0, empty = inventory.empty ?? 0;
-  if (!system && !unknown.length && !empty) return null;
+  if (!system && !unknown.length && !empty && !emptyPrimary.length) return null;
   const names = systemKinds.slice(0, 2).map(kind => `${kind.vendor} ${kind.label}`).join(', ') + (systemKinds.length > 2 ? ', …' : '');
   const summary = [
     system > 0 && t("Skipped {count} camera system files ({names})", { count: formatNumber(system), names }),
     empty > 0 && t(message('inventory.emptySkipped', { count: empty })),
+    emptyPrimary.length > 0 && t(message('inventory.emptyPrimarySkipped', { count: emptyPrimary.length })),
     skipped > 0 && t("{count} unknown files skipped", { count: formatNumber(skipped) }),
     copied > 0 && t("{count} unknown files copied to other folders", { count: formatNumber(copied) }),
   ].filter(Boolean).join(' · ');
@@ -1190,6 +1192,7 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     <div className="skipped-files-content">
       {systemKinds.length > 0 && <div><h4>{t("Camera system files")}</h4><p>{t("Index files the camera writes. Not needed.")}</p><dl>{systemKinds.map(kind => <div key={`${kind.vendor}-${kind.label}`}><dt>{kind.label}<small>{kind.vendor}</small></dt><dd>{formatNumber(kind.count)}</dd></div>)}</dl></div>}
       {empty > 0 && <div><h4>{t(message('inventory.emptyFile'))}</h4><dl>{(inventory.skipped ?? []).filter(item => item.reason === 'empty').slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
+      {emptyPrimary.length > 0 && <div><h4>{t(message('inventory.emptyPrimaryFile'))}</h4><dl>{emptyPrimary.slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
       {unknown.length > 0 && <div><h4>{t("Unknown files")}</h4><p>{t("Not photos or videos. Change this in Settings.")}</p><dl>{Object.entries(inventory.unknownExtensions).sort(([, a], [, b]) => b - a).map(([extension, count]) => <div key={extension}><dt className="extension-name">{extension ? `.${extension}` : t("No extension")}</dt><dd>{formatNumber(count)}</dd></div>)}</dl></div>}
     </div>
   </details>;

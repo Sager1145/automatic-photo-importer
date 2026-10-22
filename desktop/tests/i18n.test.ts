@@ -269,6 +269,24 @@ test('unknown files are skipped quietly by default and only become errors when t
   assert.equal(renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SkippedFilesNotice,{inventory:{...inventory,files:[],unknown:0,unknownExtensions:{},system:0,systemKinds:{}}})})),'');
 });
 
+test('companions of empty primary files are listed with a localized skipped summary', async () => {
+  const { SkippedFilesNotice } = await import('../renderer/RootApp');
+  const inventory = { files: [], media: 0, companions: 0, unknown: 0, unknownExtensions: {}, bytes: 0, elapsedMs: 0,
+    skipped: [{ path: '/card/DCIM/100NIKON/DSC_0001.XMP', reason: 'emptyPrimary' }] } as Inventory;
+  const summaries = {
+    en: '1 skipped: companion to an empty file',
+    'zh-Hans': '已跳过 1 个：空文件的伴随文件',
+    'zh-Hant': '已略過 1 個：空檔案的隨附檔案',
+    ja: '1 件をスキップ：空のファイルの関連ファイル',
+  } as const;
+  for (const language of languages) {
+    const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SkippedFilesNotice, { inventory }) }));
+    assert.ok(markup.includes(summaries[language]), `${language}: localized empty-primary summary`);
+    assert.ok(markup.includes('DSC_0001.XMP'), `${language}: companion filename`);
+    if (language !== 'en') assert.ok(!markup.includes(summaries.en), `${language}: no English fallback`);
+  }
+});
+
 test('drive details list camera and lens names from EXIF without counts in every language', async () => {
   const { SourceCameraInformation } = await import('../renderer/RootApp');
   const info = { status: 'complete', hints: [], checked: 4, total: 4, unknown: 0,
