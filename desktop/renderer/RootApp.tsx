@@ -17,6 +17,8 @@ import { formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
+import { shortCapacity, sidebarFit } from './sidebar-fit';
+import { settingsLocked } from '../settings-lock';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
 const pageOrder: Page[] = ['desk', 'drives', 'organization', 'history', 'settings'];
@@ -223,6 +225,9 @@ export default function RootApp() {
       .catch(error => { const detail=`${path}: ${String(error)}`; setInspectionErrors(errors => errors.includes(detail) ? errors : [...errors,detail]); if (request === previewSequence.current) setPreview({ path, loading: false, error: String(error) }); });
   }, []);
   function closePreview() { ++previewSequence.current; setPreview(null); }
+  // Hooks stay above the early return below, so every render calls the same hooks.
+  const sidebarRef = useRef<HTMLElement>(null);
+  useSidebarFit(sidebarRef);
   if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
@@ -236,7 +241,7 @@ export default function RootApp() {
   };
   return <I18nProvider language={language}><div className="app-shell">
     <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.length} errorLevel={errors.some(error => explainError(error.message, error.kind).severity === 'error') ? 'error' : errors.length ? 'warning' : undefined} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
-    <aside className="sidebar">
+    <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
         {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
@@ -251,7 +256,7 @@ export default function RootApp() {
         {page === 'desk' && <ImportDesk state={state} act={act} needsChoice={dismissedDrives} inspect={inspect} onOrganization={() => navigate('organization')} onSettings={() => navigate('settings')} />}
         {page === 'organization' && <Organization state={state} act={act} busy={busy} selectedDestination={organizationDestination} onSelectDestination={setOrganizationDestination} />}
         {page === 'drives' && <DrivesPage state={state} act={act} />}
-        {page === 'settings' && <SettingsPage state={state} act={act} busy={busy} />}
+        {page === 'settings' && <SettingsPage state={state} act={act} busy={busy || settingsLocked(state)} />}
         {page === 'history' && <HistoryPage state={state} onDesk={() => navigate('desk')} />}
       </main>
     </div>
@@ -270,8 +275,26 @@ function SidebarCapacity({ total, free, unavailable, status }: { total?: number;
   const used = known ? Math.min(1, Math.max(0, 1 - free! / total!)) : 0;
   return <>
     <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${used > .9 ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
-    <small className="sidebar-capacity-text">{known ? t("{free} free of {total}", { free: bytes(free), total: bytes(total) }) : unavailable}</small>
+    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(free), total: bytes(total) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{shortCapacity(free!, total!, bytes)}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
   </>;
+}
+
+// The sidebar widens to fit "342.9 GB free of 2.00 TB" when the window has room; a line that
+// still does not fit switches to "342.9 GB/2.00 TB". Measured after every render and on resize,
+// and applied to the DOM directly so measuring never re-renders.
+function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
+  const fit = useCallback(() => {
+    const aside = sidebar.current; if (!aside) return;
+    const root = document.documentElement, texts = [...aside.querySelectorAll<HTMLElement>('.sidebar-capacity-text')].filter(text => text.querySelector('.capacity-full'));
+    if (!texts.length) { root.style.removeProperty('--sidebar-width'); return; }
+    const current = aside.getBoundingClientRect().width;
+    const lines = texts.map(text => ({ natural: text.querySelector<HTMLElement>('.capacity-full')!.getBoundingClientRect().width, available: text.clientWidth }));
+    const result = sidebarFit({ lines, chrome: current - Math.min(...lines.map(line => line.available)), minimum: 190, maximum: Math.min(360, window.innerWidth * .28), current });
+    root.style.setProperty('--sidebar-width', `${result.width}px`);
+    texts.forEach((text, index) => text.classList.toggle('is-compact', result.compact[index]!));
+  }, [sidebar]);
+  useLayoutEffect(fit);
+  useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
 }
 
 function MiniSteps({ states }: { states: StepState[] }) {
@@ -534,7 +557,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
     { id: 'drives', icon: Usb, title: t("Drives"), summary: t("{count} remembered", { count: formatNumber(Object.keys(p.rememberedDevices ?? {}).length) }) },
     { id: 'general', icon: Settings2, title: t("General"), summary: `${localeNames[p.language] ?? p.language} · ${Math.round(p.textScale * 100)}%` },
   ];
-  const locked = busy && <div className="notice"><Icon icon={Info} />{t("Settings are locked while importing or reviewing.")}</div>;
+  const locked = busy && <div className="notice"><Icon icon={Info} />{t("Settings are locked while an import, organization or review is running, queued or paused. Stop it completely to change them.")}</div>;
   const panels: Record<SettingsCategory, ReactNode> = {
     importing: <>
       <SettingsSection title={t("Starting imports")} icon={Radio}>
@@ -745,7 +768,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
           {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
           {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
           {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
-          <div className="source-footer"><Switch label={t("Enable media folder selection")} checked={state.preferences.allowFolderSource} disabled={active.length > 0 || !!state.review || !!state.busyReview} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folders…")}</Button></div>
+          <div className="source-footer"><Switch label={t("Enable media folder selection")} checked={state.preferences.allowFolderSource} disabled={settingsLocked(state)} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folders…")}</Button></div>
         </div>
       </section>
       {selectedJob?.inventory && <InventoryPanel inventory={selectedJob.inventory} sourceName={selectedJob.source.name} backup={selectedJob.backup} inspect={inspect} act={act} />}
@@ -1168,7 +1191,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
     {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
-    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
+    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")}><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></CardHeader>{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={p.removeEmptySourceFolders !== false} disabled={busy || settingsLocked(state)} onChange={removeEmptySourceFolders => act({ type: 'preferences', patch: { removeEmptySourceFolders } })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}</section>
     <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")}><Button icon={FolderOpen} disabled={organizing} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></CardHeader></section>
     {state.busyReview && <div role="status" aria-live="polite"><p className="notice"><Icon icon={LoaderCircle} />{state.reviewProgress ? t("Checking organization files: {count} · {file}", { count: formatNumber(state.reviewProgress.completed), file: state.reviewProgress.file }) : t("Preparing organization review…")}</p>{state.reviewProgress && <PlanningProgress progress={state.reviewProgress} label={t("Organization review progress")} />}</div>}
     </div>
