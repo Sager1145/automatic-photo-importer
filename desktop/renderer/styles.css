@@ -227,7 +227,7 @@ input[type=range]:focus-visible{outline:2.5px solid var(--accent-fill);outline-o
 .sidebar-section li{position:relative;min-width:0}
 .sidebar-item{display:flex;align-items:center;gap:.6rem;width:100%;min-height:2.2rem;padding:0 .75rem;border-radius:var(--radius-md);text-align:left;font-size:var(--text-callout);color:var(--label);transition:background-color var(--quick) var(--ease-out),opacity var(--quick) var(--ease-out)}
 .sidebar-item>svg{flex:none;color:var(--label-secondary)}
-.sidebar-item>span:not(.mini-steps){flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sidebar-item>span:not(.mini-steps){flex:1;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
 button.sidebar-item:hover{background:var(--fill-3)}
 .sidebar-item-off{opacity:.55}
 .sidebar-value{flex:none!important;font-size:var(--text-caption);font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
@@ -327,7 +327,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
   .source-row-actions .button-quiet{font-size:0;gap:0;padding:0;width:var(--control-height)}
   .selection-chip{padding:0 .6rem}
   .source-row-actions .button-quiet>svg{transform:none}
-  .source-compact-capacity .storage-legend{flex-wrap:nowrap;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
   .source-compact-capacity .storage-legend span{flex:none}
 }
 .source-progress{display:grid;gap:.45rem;margin-top:.9rem}
@@ -542,16 +541,17 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .desk-page>.import-dashboard .dashboard-metrics dt{font-size:var(--text-caption);gap:.3rem;line-height:1.2}
 .desk-page>.import-dashboard .dashboard-metrics dt svg{width:13px;height:13px}
 .desk-page>.import-dashboard .dashboard-metrics dd{font-size:clamp(1rem,.8rem + 1.2cqi,1.3rem);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.desk-page>.import-dashboard .dashboard-metrics small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desk-page>.import-dashboard .dashboard-metrics small{overflow-wrap:anywhere}
 .desk-page>.import-dashboard .metric-optional{display:none}
 .desk-page>.import-dashboard .dashboard-next-step{grid-column:1/-1;padding:.5rem .75rem;border-radius:var(--radius-md);box-shadow:none;font-size:var(--text-footnote)}
 .desk-page>.import-dashboard .dashboard-next-step p{font-size:var(--text-footnote)}
 .desk-page>.import-dashboard>.progress-jobs{grid-column:1/-1}
 .dashboard-total{grid-column:1/-1;display:grid;gap:.4rem}
-.dashboard-total>div{display:flex;align-items:baseline;gap:.6rem;white-space:nowrap;min-width:0}
+.dashboard-total>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem;min-width:0}
+.dashboard-total>div>:not(small){white-space:nowrap}
 .dashboard-total strong{font-size:var(--text-footnote);font-weight:650}
 .dashboard-total span{font-size:var(--text-headline);font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
-.dashboard-total small{min-width:0;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.dashboard-total small{min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .dashboard-total .progress-track{height:.5rem}
 
 /* Mirror backup removals in a review */
@@ -1216,7 +1216,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .settings-panel>.settings-fieldset{display:grid;gap:1rem;min-width:0;margin:0;padding:0;border:0}
 @container settings (max-width:46.25rem){
   .settings-nav{flex-basis:100%;max-width:none;position:static}
-  .settings-nav [role=tablist]{display:flex;overflow-x:auto;scrollbar-width:none}
+  .settings-nav [role=tablist]{display:flex;flex-wrap:wrap}
   .settings-nav [role=tab]{width:auto;flex:none;padding:.45rem .7rem}
   .settings-nav-text small{display:none}
   .settings-nav-icon{width:1.6rem;height:1.6rem}
