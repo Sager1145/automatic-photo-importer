@@ -65,7 +65,7 @@ test('the successor journal can also be finalized from the sibling folder',async
  await assert.rejects(core.finalizeOrganization(photos,earlier),/superseded by/);
 });
 
-test('a successor in a folder its journal does not list as a sibling is refused',async t=>{
+test('a successor in another folder that relocates none of the journal\'s files is refused',async t=>{
  const {drive,photos,other,earlier}=await fixture(t);
  // A real, signed journal in another backup folder that never listed photobackup.
  await fs.mkdir(path.join(drive,'2024'));await fs.writeFile(path.join(drive,'2024','B.JPG'),'another photo');
@@ -74,8 +74,8 @@ test('a successor in a folder its journal does not list as a sibling is refused'
  const [stranger]=await core.getOrganizationRecovery(other);
  await supersededEvent(photos,earlier,{successor:stranger!.id,successorRoot:other});
  const visible=(await core.getOrganizationRecovery(photos)).find(job=>job.id===earlier);
- assert.equal(visible!.id,earlier);assert.match(visible!.error!,/not in a listed sibling backup folder/);
- for(const operation of [core.resumeOrganization,core.undoOrganization,core.finalizeOrganization])await assert.rejects(operation(photos,earlier),/not in a listed sibling backup folder/);
+ assert.equal(visible!.id,earlier);assert.match(visible!.error!,/does not relocate a prior destination/);
+ for(const operation of [core.resumeOrganization,core.undoOrganization,core.finalizeOrganization])await assert.rejects(operation(photos,earlier),/does not relocate a prior destination/);
 });
 
 for(const root of ['own','relative','unknown-journal'] as const)test(`a successor ${root==='unknown-journal'?'with no journal in its folder':root==='own'?'in the journal\'s own folder':'given as a relative folder'} is refused`,async t=>{
@@ -185,7 +185,7 @@ test('a superseded journal an older version left unfinished never blocks later o
  assert.deepEqual(result.errors,[]);assert.ok(result.moved>0);
 });
 
-test('a successor folder renamed by case or replaced since is skipped, not refused, when this plan does not list it',async t=>{
+test('a successor folder replaced by a link since is skipped, not refused, when this plan does not list it',async t=>{
  const {drive,photos,videos}=await clips(t);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
  for(const part of [split!.videos!,split!])assert.deepEqual((await core.executeReorganization(part,undefined,undefined,{strategy:'rename'})).errors,[]);
@@ -226,4 +226,119 @@ test('a sibling backup folder that now resolves elsewhere stops the organization
  await fs.rm(videos,{recursive:true});await fs.symlink(elsewhere,videos);
  const resumed=await core.resumeOrganization(photos,job.id);
  assert.match(resumed.errors.join(' '),/Unsafe sibling backup folder/);assert.equal(resumed.moved,0);
+});
+
+/** Files imported straight into photobackup, so no organization journal is there yet. */
+async function imported(t:test.TestContext){
+ const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'video-root-journal-')));
+ t.after(()=>fs.rm(drive,{recursive:true,force:true}));
+ const photos=path.join(drive,'photobackup'),videos=path.join(drive,'videobackup');
+ for(const folder of [photos,videos])await fs.mkdir(folder,{recursive:true});
+ for(const name of ['C0016.MOV','C0017.MOV','A.JPG','B.JPG'])await fs.writeFile(path.join(photos,name),'bytes of '+name);
+ return {drive,photos,videos};
+}
+for(const photoFirst of [true,false])test(`a stopped video-folder journal blocks a photo-folder organization ${photoFirst?'found through the photo journal\'s sibling list':'found through its pointer, with no photo journal'}`,async t=>{
+ const {drive,photos,videos}=await imported(t);
+ // App order: the photo part completes first, listing videobackup; here also the case with no photo journal.
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ if(photoFirst)assert.deepEqual((await core.executeReorganization(split!,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const stop=stopAfterFirstMove();
+ await assert.rejects(core.executeReorganization(split!.videos!,stop.signal,stop.progress,{strategy:'rename'}),{name:'AbortError'});
+ const [stopped]=await core.getOrganizationRecovery(videos);
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ const result=await core.executeReorganization(next,undefined,undefined,{strategy:'rename'});
+ assert.match(result.errors.join(' '),new RegExp(`Finish organization ${stopped!.id}`));
+ assert.equal(result.moved,0);
+ const blocked=(await core.getOrganizationRecovery(photos)).find(job=>job.status==='pending')!;
+ await core.undoOrganization(photos,blocked.id);
+ assert.deepEqual((await core.resumeOrganization(videos,stopped!.id)).errors,[]);
+ for(const name of ['C0016.MOV','C0017.MOV'])assert.equal(await fs.readFile(path.join(videos,camera,name),'utf8'),'bytes of '+name);
+ // Once finished, the video journal no longer blocks the photo folder.
+ const after=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ assert.deepEqual((await core.executeReorganization(after,undefined,undefined,{strategy:'rename'})).errors,[]);
+});
+
+test('a sibling folder renamed only by case is refused, not skipped',async t=>{
+ const {drive,photos,videos}=await imported(t);
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ const stop=stopAfterFirstMove();
+ await assert.rejects(core.executeReorganization(split!.videos!,stop.signal,stop.progress,{strategy:'rename'}),{name:'AbortError'});
+ const renamed=path.join(drive,'VideoBackup');await fs.rename(videos,renamed);
+ if(await fs.realpath(videos).catch(()=>undefined)!==renamed){t.skip('case-sensitive filesystem');return;}
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ const result=await core.executeReorganization(next,undefined,undefined,{strategy:'rename'});
+ assert.match(result.errors.join(' '),/Unsafe sibling backup folder/);assert.equal(result.moved,0);
+});
+
+for(const kind of ['undo','finalize'] as const)test(`a ${kind} of the earlier journal racing a new organization never loses a file`,async t=>{
+ const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'video-root-journal-')));
+ t.after(()=>fs.rm(drive,{recursive:true,force:true}));
+ const photos=path.join(drive,'photobackup');
+ for(const folder of [photos,path.join(drive,'2025')])await fs.mkdir(folder,{recursive:true});
+ const names=['A.JPG','B.JPG','C.JPG'];for(const name of names)await fs.writeFile(path.join(drive,'2025',name),'bytes of '+name);
+ const strategy=kind==='finalize'?'copy':'rename';
+ const first=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
+ assert.deepEqual((await core.executeReorganization(first,undefined,undefined,{strategy})).errors,[]);
+ const [prior]=await core.getOrganizationRecovery(photos);
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ // Starts while the new organization is checking earlier journals, before it takes the earlier journal's lock.
+ let raced:Promise<unknown>|undefined;
+ const result=await core.executeReorganization(next,undefined,value=>{if(value.step==='earlier'&&!raced)raced=(kind==='undo'?core.undoOrganization(photos,prior!.id):core.finalizeOrganization(photos,prior!.id)).then(value=>value,error=>error);},{strategy:'rename'});
+ const other=await raced;assert.ok(other!==undefined,'the race was started');
+ if(kind==='undo'){
+  // The undo wins: the files are back on the card folder, and the new organization moved nothing.
+  assert.ok(!(other instanceof Error),String(other));assert.equal(result.moved,0);
+  for(const name of names)assert.equal(await fs.readFile(path.join(drive,'2025',name),'utf8'),'bytes of '+name);
+ } else {
+  // Finalizing a finished journal and then superseding it are both safe.
+  assert.ok(!(other instanceof Error),String(other));assert.deepEqual(result.errors,[]);
+  for(const name of names)assert.equal(await fs.readFile(path.join(photos,'2026/Sony A7',name),'utf8'),'bytes of '+name);
+ }
+ // Every photo exists exactly once outside the recovery store.
+ const all=(await fs.readdir(drive,{recursive:true})).map(String).filter(file=>!file.includes('Photo Importer Recovery')&&names.includes(path.basename(file)));
+ assert.equal(all.length,names.length,all.join(', '));
+});
+
+test('a tampered sibling pointer stops the organization instead of hiding a journal',async t=>{
+ const {drive,photos,videos}=await imported(t);
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ const stop=stopAfterFirstMove();
+ await assert.rejects(core.executeReorganization(split!.videos!,stop.signal,stop.progress,{strategy:'rename'}),{name:'AbortError'});
+ const folder=path.join(photos,'Photo Importer Recovery'),[name]=(await fs.readdir(folder)).filter(item=>item.startsWith('journal-'));
+ const file=path.join(folder,name!),pointer=JSON.parse(await fs.readFile(file,'utf8'));
+ await fs.writeFile(file,JSON.stringify({...pointer,root:path.join(drive,'elsewhere')}));
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ const result=await core.executeReorganization(next,undefined,undefined,{strategy:'rename'});
+ assert.match(result.errors.join(' '),/authentication/);assert.equal(result.moved,0);
+});
+
+test('a single-folder organization that pulls files out of the video folder supersedes its journal cleanly',async t=>{
+ const {drive,photos,videos}=await imported(t);
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ for(const part of [split!,split!.videos!])assert.deepEqual((await core.executeReorganization(part,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const [video]=await core.getOrganizationRecovery(videos);
+ // Back to one folder: everything, videos included, moves into photobackup. This plan lists no sibling.
+ const back=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['photobackup','videobackup']},metadata)).plans[0]!;
+ assert.deepEqual((await core.executeReorganization(back,undefined,undefined,{strategy:'rename'})).errors,[]);
+ for(const name of ['C0016.MOV','C0017.MOV'])await fs.access(path.join(photos,camera,name));
+ assert.deepEqual((await core.getOrganizationRecovery(videos)).filter(job=>job.error),[],'the video journal is superseded, not broken');
+ assert.ok(!(await core.getOrganizationRecovery(videos)).some(job=>job.id===video!.id));
+ await assert.rejects(core.undoOrganization(videos,video!.id),/superseded by/);
+});
+
+test('a torn sibling pointer is rewritten by its own journal and names that journal while damaged',async t=>{
+ const {drive,photos,videos}=await imported(t);
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ const stop=stopAfterFirstMove();
+ await assert.rejects(core.executeReorganization(split!.videos!,stop.signal,stop.progress,{strategy:'rename'}),{name:'AbortError'});
+ const [stopped]=await core.getOrganizationRecovery(videos);
+ // As a full disk or power cut while writing could leave it.
+ const pointer=path.join(photos,'Photo Importer Recovery',`journal-${stopped!.id}.json`);await fs.writeFile(pointer,'');
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ const blocked=await core.executeReorganization(next,undefined,undefined,{strategy:'rename'});
+ assert.match(blocked.errors.join(' '),new RegExp(`resume organization ${stopped!.id}`));assert.equal(blocked.moved,0);
+ await core.undoOrganization(photos,(await core.getOrganizationRecovery(photos)).find(job=>job.status==='pending')!.id);
+ // Resuming the video journal repairs its pointer and finishes.
+ assert.deepEqual((await core.resumeOrganization(videos,stopped!.id)).errors,[]);
+ assert.ok((await fs.readFile(pointer,'utf8')).includes('sibling-journal'));
 });
