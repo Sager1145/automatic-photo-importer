@@ -249,3 +249,16 @@ test('P1: a pointer whose journal\'s library folder is not there (renamed or unp
  assert.ok(await exists(legacyPointer(f.photos,f.id)),'kept');
  assert.ok(result.problems.some(problem=>problem.includes(`journal-${f.id}.json`)),result.problems.join('; '));
 });
+
+test('F: a set-aside deletion holding anything but journal files (a kept original, a user file) is kept and reported',async t=>{
+ const root=await drive(t,'migrate-folders-');
+ const storage=path.join(root,'Photo Importer Recovery');
+ const proven=path.join(storage,`deleting-${randomUUID()}-${randomUUID()}`);await fs.mkdir(path.join(proven,'originals','0',randomUUID()),{recursive:true});
+ await fs.writeFile(path.join(proven,'manifest.json'),'{}');await fs.writeFile(path.join(proven,'event-log.jsonl'),'');
+ const original=path.join(storage,`deleting-${randomUUID()}-${randomUUID()}`,'originals','0',randomUUID(),'DSC_0001.NEF');
+ await fs.mkdir(path.dirname(original),{recursive:true});await fs.writeFile(original,'a kept original');
+ const result=await migrateDrive([root]);
+ assert.equal(await exists(proven),false,'only journal files and empty folders: removed');
+ assert.equal(await fs.readFile(original,'utf8'),'a kept original');
+ assert.ok(result.problems.some(problem=>problem.includes(path.basename(path.dirname(path.dirname(path.dirname(path.dirname(original))))))),result.problems.join('; '));
+});
