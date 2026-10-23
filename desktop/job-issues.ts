@@ -1,5 +1,6 @@
 import {MAX_GROUP_ITEMS,type ExecutionIssue,type Job,type JobIssueGroup} from './shared';
 import {codeOf,severityOf} from './error-log';
+import type {AppleDoubleReport} from './core/appledouble';
 
 /** Per job: group lookup by `${severity}|${code}` and every path by code. Appending is O(1): no scan, sort or formatting beyond the capped samples. */
 interface Index {groups:Map<string,JobIssueGroup>;full:Map<string,string[]>;}
@@ -47,4 +48,13 @@ export function reportSummary(errors:string[],warnings:ExecutionIssue[],failedCo
 export function throttled(emit:()=>void,interval:number|(()=>number)=100,now:()=>number=Date.now){
  let last=-Infinity;
  return ()=>{const time=now();if(time-last>(typeof interval==='function'?interval():interval)){last=time;emit();}};
+}
+
+/** The "._" files an import or organization kept, and those (or folders) it could not look at or remove, as warnings: they never fail a job. */
+export function appleDoubleIssues(report:AppleDoubleReport|undefined):ExecutionIssue[]{
+ if(!report)return [];
+ return [
+  ...report.keptFiles.map((path):ExecutionIssue=>({code:'appledouble-kept',severity:'warning',path,detail:'May hold tags or other data, so it was kept'})),
+  ...report.failures.map((failure):ExecutionIssue=>({code:'appledouble-failed',severity:'warning',path:failure.path,detail:failure.folder?`Folder could not be read: ${failure.detail}`:failure.detail}))
+ ];
 }

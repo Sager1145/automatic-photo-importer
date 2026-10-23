@@ -41,7 +41,7 @@ import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
 import {ErrorLog,clearErrorIds,clearErrors,createErrorLogCache} from './error-log';
 import {acknowledgeJob,acknowledgeSummary} from './acknowledge';
-import {errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
+import {appleDoubleIssues,errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
 import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
@@ -586,6 +586,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
+  recordIssues(job,appleDoubleIssues(appleDouble));
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
   // Folders the organized files came from that now hold only service files (or nothing).

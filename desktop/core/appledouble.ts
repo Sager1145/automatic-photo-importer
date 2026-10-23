@@ -78,14 +78,19 @@ export interface AppleDoubleReport {
   warnings:string[];
   /** Folders the sweep could not read. */
   folderWarnings:string[];
+  /** Per-file detail for the job's grouped issues: the "._" files kept (the first MAX_DETAILS) and those or folders that failed. */
+  keptFiles:string[];
+  failures:{path:string;detail:string;folder?:boolean}[];
 }
-const MAX_WARNINGS=20;
-export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,warnings:[],folderWarnings:[]});
+const MAX_WARNINGS=20,MAX_DETAILS=1000;
+export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,warnings:[],folderWarnings:[],keptFiles:[],failures:[]});
 export function addAppleDoubleReport(total:AppleDoubleReport,part:AppleDoubleReport|undefined):void {
   if(!part)return;
   total.removed+=part.removed;total.kept+=part.kept;total.orphans+=part.orphans;
   for(const warning of part.warnings)if(total.warnings.length<MAX_WARNINGS)total.warnings.push(warning);
   for(const warning of part.folderWarnings)if(total.folderWarnings.length<MAX_WARNINGS)total.folderWarnings.push(warning);
+  for(const file of part.keptFiles)if(total.keptFiles.length<MAX_DETAILS)total.keptFiles.push(file);
+  for(const failure of part.failures)if(total.failures.length<MAX_DETAILS)total.failures.push(failure);
 }
 export const appleDoubleActivity=(report:AppleDoubleReport)=>report.removed+report.kept+report.orphans+report.warnings.length+report.folderWarnings.length>0;
 
@@ -107,14 +112,15 @@ export class AppleDoubleCleaner {
     return path.relative(root,path.dirname(file)).split(path.sep).some(part=>this.protectedNames.has(part.toLowerCase()));
   }
   /** A "._" file that could not be judged or removed: it stays. */
-  warn(file:string,error:unknown){if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);}
+  warn(file:string,error:unknown){if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:file,detail:text(error)});}
+  private keep(sidecar:string){this.report.kept++;if(this.report.keptFiles.length<MAX_DETAILS)this.report.keptFiles.push(sidecar);}
   /** A folder that could not be read, so its "._" files were not looked at. */
-  warnFolder(folder:string,error:unknown){this.report.folderWarnings.push(`${folder}: ${text(error)}`);this.report.folderWarnings.splice(MAX_WARNINGS);}
+  warnFolder(folder:string,error:unknown){this.report.folderWarnings.push(`${folder}: ${text(error)}`);this.report.folderWarnings.splice(MAX_WARNINGS);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:folder,detail:text(error),folder:true});}
   /** Import: call before the file is created. A "._" already there is not ours (an orphan from earlier): it is kept, counted, and never removed by this job. */
   async noteExisting(file:string):Promise<void> {
     const sidecar=sidecarOf(file);
     if(!sidecar||this.existed.has(sidecar))return;
-    try{await fs.lstat(sidecar);this.existed.add(sidecar);this.report.kept++;}
+    try{await fs.lstat(sidecar);this.existed.add(sidecar);this.keep(sidecar);}
     catch(error){if(code(error)!=='ENOENT')this.warn(sidecar,error);}
   }
   /** Removes the "._" file beside `file` while `file` is still the one just placed: `placed` judges its current stat. */
@@ -176,18 +182,18 @@ export class AppleDoubleCleaner {
     try{
       const before=await fs.lstat(sidecar,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
       if(!before)return;
-      if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)){this.report.kept++;return;}
+      if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)){this.keep(sidecar);return;}
       await contained(sidecar,root);
       const handle=await fs.open(sidecar,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
       let verdict:AppleDoubleVerdict;
       try{
         const opened=await handle.stat({bigint:true});
-        if(!opened.isFile()||!sameStat(before,opened)){this.report.kept++;return;}
+        if(!opened.isFile()||!sameStat(before,opened)){this.keep(sidecar);return;}
         verdict=inspectAppleDouble(await handle.readFile());
       }finally{await handle.close();}
-      if(!verdict.safe){this.report.kept++;return;}
+      if(!verdict.safe){this.keep(sidecar);return;}
       // Unchanged since it was read, so what is removed is what was judged.
-      if(!sameStat(before,await fs.lstat(sidecar,{bigint:true}))){this.report.kept++;return;}
+      if(!sameStat(before,await fs.lstat(sidecar,{bigint:true}))){this.keep(sidecar);return;}
       await fs.unlink(sidecar);
       this.report[count]++;
       markFolderChanged(path.dirname(sidecar));

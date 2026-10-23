@@ -594,6 +594,8 @@ export function groupInfo(code: string, count: number, drive: string, t: Transla
     case 'zero-byte': return { title: one ? t("1 empty file was left out") : t("{count} empty files were left out", { count: n }), text: t("Empty files hold no photo data.") };
     case 'copy-failed': return { title: one ? t("1 file could not be copied") : t("{count} files could not be copied", { count: n }), text: t("These files are not in the backup yet. Retry runs the job again.") };
     case 'file-skipped': return { title: one ? t("1 file was skipped because it failed") : t("{count} files were skipped because they failed", { count: n }), text: t("The other files were copied. Retry runs the job again, including these files.") };
+    case 'appledouble-kept': return { title: one ? t("1 macOS ._ file was kept") : t("{count} macOS ._ files were kept", { count: n }), text: t("A ._ file may hold tags or comments, so it was left in place. Your photos are not affected.") };
+    case 'appledouble-failed': return { title: one ? t("1 macOS ._ file or folder could not be checked") : t("{count} macOS ._ files or folders could not be checked", { count: n }), text: t("These were left as they are. Your photos are not affected.") };
     default: return { title: one ? t("1 issue needs attention") : t("{count} issues need attention", { count: n }) };
   }
 }

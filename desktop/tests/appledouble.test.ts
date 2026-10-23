@@ -295,3 +295,16 @@ test('Stop during the sweep still leaves a complete organization',async t=>{
   assert.equal((await getOrganizationRecovery(root))[0]!.status,'complete');
   assert.ok(await fs.lstat(path.join(root,'2024')).then(()=>true,()=>false)||(await fs.readdir(root)).length>0);
 });
+
+test('kept and failed "._" files become grouped warnings, never errors',async()=>{
+  const {appleDoubleIssues,errorTotal,recordIssues}=await import('../job-issues');
+  const {emptyAppleDoubleReport}=await import('../core/appledouble');
+  const report=emptyAppleDoubleReport();
+  report.keptFiles.push('/lib/._A.JPG','/lib/._B.JPG');
+  report.failures.push({path:'/lib/._C.JPG',detail:'EACCES'},{path:'/lib/x',detail:'EPERM',folder:true});
+  const job={errors:[],groups:undefined as any} as any;
+  recordIssues(job,appleDoubleIssues(report));
+  assert.deepEqual(job.groups.map((g:any)=>[g.code,g.severity,g.count]),[['appledouble-kept','warning',2],['appledouble-failed','warning',2]]);
+  assert.equal(errorTotal(job),0);
+  assert.deepEqual(appleDoubleIssues(undefined),[]);
+});

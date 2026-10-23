@@ -33,6 +33,12 @@ These files are not in the backup yet. Retry runs the job again.|这些文件尚
 The other files were copied. Retry runs the job again, including these files.|其他文件已复制。“重试”会重新运行任务，包括这些文件。|其他檔案已複製。「重試」會重新執行工作，包括這些檔案。|他のファイルはコピーされました。「再試行」でこれらも含めてジョブを再実行します。
 {count} issues need attention|有 {count} 个问题需要留意|有 {count} 個問題需要留意|{count} 件の確認が必要です
 1 issue needs attention|有 1 个问题需要留意|有 1 個問題需要留意|1 件の確認が必要です
+1 macOS ._ file was kept|已保留 1 个 macOS ._ 文件|已保留 1 個 macOS ._ 檔案|macOS の ._ ファイルを 1 件残しました
+{count} macOS ._ files were kept|已保留 {count} 个 macOS ._ 文件|已保留 {count} 個 macOS ._ 檔案|macOS の ._ ファイルを {count} 件残しました
+A ._ file may hold tags or comments, so it was left in place. Your photos are not affected.|._ 文件可能包含标签或注释，因此已原样保留。你的照片不受影响。|._ 檔案可能包含標籤或註解，因此已原樣保留。你的照片不受影響。|._ ファイルにはタグやコメントが含まれている場合があるため、そのまま残しました。写真には影響しません。
+1 macOS ._ file or folder could not be checked|有 1 个 macOS ._ 文件或文件夹无法检查|有 1 個 macOS ._ 檔案或資料夾無法檢查|macOS の ._ ファイルまたはフォルダ 1 件を確認できませんでした
+{count} macOS ._ files or folders could not be checked|有 {count} 个 macOS ._ 文件或文件夹无法检查|有 {count} 個 macOS ._ 檔案或資料夾無法檢查|macOS の ._ ファイルまたはフォルダ {count} 件を確認できませんでした
+These were left as they are. Your photos are not affected.|这些内容已保持原样。你的照片不受影响。|這些內容已保持原樣。你的照片不受影響。|これらはそのまま残しました。写真には影響しません。
 Copy details|复制详情|複製詳細資訊|詳細をコピー
 Clear group|清除此组|清除此群組|グループを消去
 Retry all|全部重试|全部重試|すべて再試行
