@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary} from './shared';
+import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary} from './shared';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning} from './shared';
 import {organizesAfterImport} from './after-import';
 import {checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
@@ -31,7 +31,7 @@ import {loadScanMemory,saveScanMemory,loadImported,rememberImported,rememberingV
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {loadPlacement,placedMatches,placementId,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
-import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
+import {metadata,closeMetadata,primeRouting,routingEntriesUnder,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
@@ -43,7 +43,7 @@ import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplic
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
-import {scanSourceInWorker,scansSettled} from './scan-process';
+import {startScan,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
 import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,memoryRange,MB} from './resource-limits';
 import {runCodexSmoke} from './qa/codex-smoke';
@@ -117,23 +117,28 @@ const approved=new Set<string>();
 /** Remaining bytes each job may still write, by destination index. */
 const reservations=new Map<string,{volume:string;bytes:number}[]>();
 const selection=new DeviceSelection(),pausing=new Set<string>();
-// Scans remembered across restarts, per card UUID. Loaded once per connection, verified before reuse.
-const rememberedScans=new Map<string,Inventory>(),scanMemoryLoaded=new Set<string>();
+// The last whole-source listing of each connected source, for the next listing to reuse: this session's, or for a card
+// the one remembered across restarts under its UUID (loaded once per connection, verified folder by folder before reuse).
+const listings=new Map<string,Listing>(),scanMemoryLoaded=new Set<string>();
 const memoryVolume=(source:Source)=>source.transport==='storage'?deviceId(source):undefined;
-function rememberScan(source:Source,inventory:Inventory|undefined){
- const volume=memoryVolume(source);if(!volume||!inventory?.listing||qa)return;
- rememberedScans.set(source.id,inventory);
- void saveScanMemory(app.getPath('userData'),volume,source.path,inventory,routingEntries()).catch(()=>{/* Only a cache. */});
+function keepListing(source:Source,listing:Listing|undefined){
+ if(!listing)return;
+ listings.set(source.id,listing);
+ const volume=memoryVolume(source);if(!volume||qa)return;
+ void saveScanMemory(app.getPath('userData'),volume,source.path,listing,routingEntriesUnder(source.path)).catch(()=>{/* Only a cache. */});
 }
 function loadRememberedScans(){
  const connected=new Set(state.sources.map(source=>source.id));
- for(const id of [...scanMemoryLoaded])if(!connected.has(id)){scanMemoryLoaded.delete(id);rememberedScans.delete(id);}
+ for(const id of [...listings.keys()])if(!connected.has(id))listings.delete(id);
+ for(const id of [...scanMemoryLoaded])if(!connected.has(id))scanMemoryLoaded.delete(id);
  for(const source of state.sources){
   const volume=memoryVolume(source);if(!volume||qa||scanMemoryLoaded.has(source.id))continue;
   scanMemoryLoaded.add(source.id);
   void loadScanMemory(app.getPath('userData'),volume,source.path).then(memory=>{
    if(!memory||!state.sources.some(item=>item.id===source.id&&item.path===source.path))return;
-   rememberedScans.set(source.id,memory.inventory);primeRouting(memory.routing);
+   // A listing made since connecting is newer.
+   if(!listings.has(source.id))listings.set(source.id,memory.listing);
+   primeRouting(memory.routing);
   });
  }
 }
@@ -151,7 +156,9 @@ async function updateFolderCapacity(source:Source){
  for(const job of state.jobs)if(same(job.source))job.source={...job.source,...capacity};
 }
 function publishDevices(){state.newDevices=[...selection.newDevices];state.reconnectedDevices=[...selection.reconnectedDevices];}
-const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.sourceInventories?.[source.id]??rememberedScans.get(source.id);
+const reusableScan=(source:Source)=>source.transport==='camera'?undefined:listings.get(source.id);
+/** The used bytes of a whole drive (not a folder or a camera), which a listing of it is measured against when nothing better is known. */
+const usedBytes=(source:Source)=>source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
 /** Reserved destination plans for one source. A review holds one until applied. */
 interface Prepared {/** The job this plan was parked from: its id (log lines), and whether it was an organization, so Continue keeps it one. */origin?:{jobId:string;organization?:boolean;folders?:string[]};/** What this was planned from, to plan again with file dates. */request:RunRequest;useFileDate?:boolean;/** Unknown files planning left or filed apart (all of them; the review carries a capped list). */noMetadata?:NoMetadataSummary;/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;/** An import: files already in the backup under older folder rules (skipped there) and families copied whole because only some members were. */elsewhere?:{files:number;partialFamilies:number;skipped:{size:number;candidates:number}[]};}
@@ -255,7 +262,11 @@ async function scanSource(source:Source){
  if(scanControls.has(source.id))return;
  if(source.transport==='camera')throw new MessageError('error.cameraScan');
  const control=new AbortController();cancelAutomaticChecks();scanControls.set(source.id,control);state.scanningSources=[...scanControls.keys()];emit();
- try{await scanSourceInWorker(source,control.signal,result=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes,file,top)=>{(state.scanProgress??={})[source.id]={files,bytes,...(file?{file}:{}),...(top?.total?{topShare:listingEstimate(undefined,{files,bytes},top).share}:{})};progressEmit();},primeRouting,{reuse:reusableScan(source),routing:routingEntries().filter(([key])=>key.startsWith(source.path+path.sep))});rememberScan(source,state.sourceInventories?.[source.id]);noteDevice(source,'scan',state.sourceCameraInfo?.[source.id]);await updateFolderCapacity(source);}
+ try{
+  const previous=reusableScan(source),hint=await listingHint(source.path,undefined,false,scopeHint(previous?.files),usedBytes(source));let listing:Listing|undefined;
+  await startScan(source,control.signal,(result,found)=>{listing=found;if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceInventories??={})[source.id]=result;emit();}},summary=>{if(state.sources.some(item=>item.id===source.id&&item.path===source.path)){(state.sourceCameraInfo??={})[source.id]=summary;progressEmit();}},{unknownRules:{...state.preferences.unknownRules,...sessionRules},unknownDefault:state.preferences.unknownDefault},(files,bytes,file,top)=>{const {share}=listingEstimate(hint,{files,bytes},top);(state.scanProgress??={})[source.id]={files,bytes,...(file?{file}:{}),...(share!==undefined?{share}:{})};progressEmit();},primeRouting,{reuse:previous,routing:routingEntriesUnder(source.path),volume:volumeOf(mounts,source.path)});
+  keepListing(source,listing);noteDevice(source,'scan',state.sourceCameraInfo?.[source.id]);await updateFolderCapacity(source);
+ }
  catch(error){const info=state.sourceCameraInfo?.[source.id];if(info)state.sourceCameraInfo![source.id]={...info,status:control.signal.aborted?'stopped':'error',...(!control.signal.aborted?{error:errorText(error)}:{})};if(!control.signal.aborted)throw error;}
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();void releaseIfIdle();}
@@ -381,9 +392,14 @@ const recordSteps=['history','later','earlier','cleaning','measuring'];
 function planningProgress(count:number,file:string,detail?:Parameters<PlanProgress>[2]):Progress{return {phase:'planning',step:detail?.step??'checking',completed:count,total:detail?.total??0,bytes:detail?.bytes??0,totalBytes:detail?.totalBytes??0,...(detail?.share!==undefined?{share:detail.share}:{}),speed:0,file};}
 /** Files staged from a USB camera so far (the camera reports counts, not bytes or names). */
 function downloadProgress(done:number,total:number):Progress{return {phase:'planning',step:'downloading',completed:done,total,bytes:0,totalBytes:0,speed:0,file:''};}
-/** What to estimate a listing by: the last completed listing of this scope, else (an import) the drive's used bytes. Remembers the new size when the listing ends. */
-async function listingOptions(root:string,folders:string[]|undefined,backup:boolean,fallback?:ListingHint):Promise<{listingHint?:ListingHint;onListed:(files:number,bytes:number)=>void}>{
- const store=app.getPath('userData'),remembered=await loadListingHint(store,root,folders,backup).catch(()=>undefined),hint=remembered??fallback;
+/** What a listing is measured against, in this order: what this source's last listing found in the scope (`known`), else the
+ * remembered size of the last listing of the scope, else the used bytes of the drive (`used`, a whole drive only). */
+async function listingHint(root:string,folders:string[]|undefined,backup:boolean,known?:ListingHint,used=0):Promise<ListingHint|undefined>{
+ return known??await loadListingHint(app.getPath('userData'),root,folders,backup).catch(()=>undefined)??(used>0?{bytes:used}:undefined);
+}
+/** The listing hint (see listingHint), and remembering the new size when the listing ends. */
+async function listingOptions(root:string,folders:string[]|undefined,backup:boolean,known?:ListingHint,used?:number):Promise<{listingHint?:ListingHint;onListed:(files:number,bytes:number)=>void}>{
+ const store=app.getPath('userData'),hint=await listingHint(root,folders,backup,known,used);
  return {...(hint?{listingHint:hint}:{}),onListed:(files,bytes)=>{void rememberListing(store,root,folders,backup,files,bytes).catch(()=>{/* Only an estimate. */});}};
 }
 /** English text of an error, for reports and dialogs outside the renderer. */
@@ -660,10 +676,9 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const skipErrors=request.skipErrors===true||prefs.skipFileErrors!==false;
   // An earlier listing of this scope sizes the estimate; failing that a card's or drive's used space, or the files of its last scan.
   // Selected folders are sized from the files an earlier scan found inside them; the whole drive's used space would overestimate them.
-  const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
-  const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
-  const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
-  const {inventory,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
+  const previous=reorganize?undefined:reusableScan(source);
+  const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,scopeHint(previous?.files,sourceFolders),reorganize||sourceFolders?.length?0:usedBytes(source));
+  const {inventory,listing:listed,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
    // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.
    const {kept,bytes}=fillFirst(first,availableFor(owner,infos)[0]!);reservations.set(owner,[{volume:infos[0]!.volumeId??infos[0]!.path,bytes}]);return kept;
   }}:{}),...listing},p=>metadata(p,{details:false}),signal,onProgress);
@@ -675,7 +690,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   log('detailed','plan','space-check',{destinations:infos.map((info,index)=>({path:info.path,freeBytes:info.free,availableAfterReservations:available[index],neededBytes:needed[index]})),reorganize});
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
   const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
-  if(!reorganize&&!stage&&!backup)rememberScan(source,inventory);
+  if(!reorganize&&!stage&&!backup)keepListing(source,listed);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
   return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
  }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}

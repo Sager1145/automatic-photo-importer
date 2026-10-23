@@ -359,7 +359,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  if(state.residue?.progress)alone('residue',state.residue.progress);
  if(state.organizationRecoveryProgress)alone('recovery-listing',state.organizationRecoveryProgress);
  // A scan lists the files, then reads their metadata: one clock for both.
- for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0,...(listing.topShare!==undefined&&!used(source)?{share:listing.topShare}:{})},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);listing.fileRate=tracker.measure('speed:scan:'+id,'listing',listing.files,now);live.push('speed:scan:'+id);}
+ for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0,...(listing.share!==undefined?{share:listing.share}:{})},{kind:'import',destinations:1,verify});listing.startedAt=since('start:scan:'+id);listing.fileRate=tracker.measure('speed:scan:'+id,'listing',listing.files,now);live.push('speed:scan:'+id);}
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
   if(info.status!=='reading'){info.eta=info.fileRate=info.startedAt=undefined;continue;}
   info.eta=stepOnly('camera:'+id,{phase:'planning',step:'checking',completed:info.checked,total:info.total,bytes:0,totalBytes:0},{kind:'import',destinations:1,verify});

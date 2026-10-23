@@ -115,7 +115,7 @@ test('every progress display shows elapsed time and time left together, and the 
     const scanning = render(createElement(ScanProgress, { sourceName: 'Card', cameraInfo: { status: 'reading', hints: [], models: [], checked: 10, total: 100, unknown: 0, eta: 480, startedAt: ago(723_000), fileRate: 8.5 } }));
     together(scanning, left(480), 'scan');
     assert.ok(scanning.includes(t('{count} files/s', { count: '8.5' })), `${language}: metadata read rate`);
-    const listing = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 10, bytes: 1e6, eta: 480, startedAt: ago(723_000) }, usedBytes: 1e9 }));
+    const listing = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 10, bytes: 1e6, share: 1e-3, eta: 480, startedAt: ago(723_000) } }));
     together(listing, left(480), 'listing');
   }
 });

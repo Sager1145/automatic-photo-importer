@@ -116,6 +116,11 @@ export function rememberVolumes(mounts:string[],results:PromiseSettledResult<Mou
     return fingerprint&&remembered?.fingerprint===fingerprint?remembered.volume:{path:mount,name:path.basename(mount)};
   });
 }
+/** Take over volumes another process described (the main process hands a scan its source's), so a lookup here
+ * does not describe that mount again: remembered like this process's own answers, while the mount is the same filesystem. */
+export async function adoptVolumes(volumes:readonly MountedVolume[],fingerprint=mountFingerprint,memory=describedVolumes):Promise<void> {
+  for(const volume of volumes){const print=await fingerprint(volume.path);if(print)memory.set(volume.path,{fingerprint:print,volume});}
+}
 /** Free bytes of a mount from statfs, which is cheap; diskutil's figure is only as fresh as its last run. */
 async function freeBytes(mount:string):Promise<number|undefined> {
   try { const space=await statfs(mount,{bigint:true}); return Number(space.bavail*space.bsize); } catch { return undefined; }

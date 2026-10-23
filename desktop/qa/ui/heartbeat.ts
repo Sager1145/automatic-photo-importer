@@ -19,7 +19,7 @@ export function pulses(state:AppState,held:ReadonlySet<string>=new Set()):Pulse[
   if(job.deletingOriginals)out.push({key:`delete originals ${job.id}`,value:JSON.stringify([job.deletingOriginals.completed,job.deletingOriginals.bytes])});
  }
  if(state.busyReview)out.push({key:'review',value:beat(state.reviewProgress)});
- for(const id of state.scanningSources??[]){const scan=state.scanProgress?.[id],info=state.sourceCameraInfo?.[id];out.push({key:`scan ${id}`,value:JSON.stringify([scan?.files,scan?.bytes,scan?.file,scan?.topShare,info?.checked,info?.status])});}
+ for(const id of state.scanningSources??[]){const scan=state.scanProgress?.[id],info=state.sourceCameraInfo?.[id];out.push({key:`scan ${id}`,value:JSON.stringify([scan?.files,scan?.bytes,scan?.file,scan?.share,info?.checked,info?.status])});}
  if(state.duplicates&&(state.duplicates.status==='scanning'||state.duplicates.status==='removing'))out.push({key:'duplicates',value:state.duplicates.status+beat(state.duplicates.progress)});
  if(state.residue?.checking)out.push({key:'leftover files',value:beat(state.residue.progress)});
  for(const [destination,progress] of Object.entries(state.misplacedProgress??{}))out.push({key:`backup folder check ${destination}`,value:beat(progress)});

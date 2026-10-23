@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {ExifTool} from 'exiftool-vendored';
-import {metadata,closeMetadata,routingEntries,primeRouting} from '../platform/metadata';
+import {metadata,closeMetadata,routingEntriesUnder,primeRouting} from '../platform/metadata';
 
 async function scratch(t:test.TestContext){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'routing-metadata-'));
@@ -69,7 +69,7 @@ test('metadata read during a scan is handed to the import and used only while th
  let reads=0;
  t.mock.method(ExifTool.prototype,'readRaw',async()=>{reads++;return {'IFD0:Model':`Camera ${reads}`};});
  await metadata(file,{details:false});
- const entries=routingEntries();assert.ok(entries.some(([key])=>key.startsWith(file+'\0')));
+ const entries=routingEntriesUnder(root);assert.ok(entries.some(([key])=>key.startsWith(file+'\0')));
  primeRouting(entries.map(([key,value])=>[key,{...value,camera:'From scan'}]));
  assert.equal((await metadata(file,{details:false})).camera,'From scan');assert.equal(reads,1);
  await fs.writeFile(file,'changed after the scan');

@@ -318,16 +318,33 @@ export function carryRouting(from:string,reviewed:{dev:string;ino:string;size:st
   if(cached)remember(statKey(path.resolve(to),now),structuredClone(cached));
 }
 const statKey=(file:string,info:import('node:fs').BigIntStats)=>`${file}\0${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
-/** Routing results from this process, keyed by path and exact stat, so a scan's
- * reads can be handed to the import that follows it. */
-export function routingEntries():[string,Metadata][] {return [...routingCache];}
-/** Accept another process's routing results; a key only matches an unchanged file. */
+/** Routing results for files under `root`, keyed by path and exact stat, so a scan's
+ * reads can be handed to the import that follows it (and remembered for the card). */
+export function routingEntriesUnder(root:string):[string,Metadata][] {
+  const resolved=path.resolve(root),prefix=resolved.endsWith(path.sep)?resolved:resolved+path.sep,found:[string,Metadata][]=[];
+  for(const entry of routingCache) if(entry[0].startsWith(prefix)) found.push(entry);
+  return found;
+}
+/** Accept routing results from another process or from disk; a key only matches an unchanged file.
+ * The cache takes the entries over: every caller passes values just deserialized (IPC or JSON) and keeps none. */
 export function primeRouting(entries:[string,Metadata][]):void {
   for(const entry of Array.isArray(entries)?entries:[]) {
     const [key,value]=Array.isArray(entry)?entry:[];
     if(typeof key!=='string'||!key.includes('\0')||!value||typeof value!=='object'||typeof value.fields!=='object')continue;
-    remember(key,structuredClone(value));
+    remember(key,value);
   }
+}
+/** Results read in this process while a capture is open, by key: a scan sends them to the parent as it goes. */
+let captured:Map<string,Metadata>|undefined;
+/** Start collecting the routing results this process reads from now on (not primed seeds, cache hits or carried results).
+ * take() returns those since the last take and forgets them; close() ends the capture and drops what was not taken. One at a time. */
+export function beginRoutingCapture():{take():[string,Metadata][];close():void} {
+  if(captured) throw new Error('A routing capture is already open.');
+  const pending=new Map<string,Metadata>();captured=pending;
+  return {
+    take(){const entries=[...pending];pending.clear();return entries;},
+    close(){pending.clear();if(captured===pending)captured=undefined;},
+  };
 }
 /** Files read by one ExifTool request. ExifTool re-parses its arguments and filters for every request,
  * so a request for 16 files is much cheaper than 16 requests (measured about 1.7x faster). 1 reads each file alone. */
@@ -426,6 +443,6 @@ export async function metadata(filename:string, options:{details?:boolean}={}):P
   // Admitted through the memory governor: above 90% of the limit a new read waits for the running ones.
   const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
-  if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key)remember(key,structuredClone(result));
+  if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key){const kept=structuredClone(result);remember(key,kept);captured?.set(key,kept);}
   return result;
 }

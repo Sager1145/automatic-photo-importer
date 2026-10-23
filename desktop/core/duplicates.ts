@@ -5,6 +5,7 @@ import type { BigIntStats } from 'node:fs';
 import type { DuplicateExif, DuplicateFile, DuplicateGroup, InventoryFile, MediaKind, Metadata, Progress } from '../shared';
 import { buildGroups, candidates } from '../duplicate-rules';
 import { inventory } from './inventory';
+import { listingEstimate } from '../listing-estimate';
 import { DRIVE_BACKUPS } from './drive-backup';
 import { APP_DATA_FOLDER, LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './legacy-names';
 import { PROBLEM_FILES_FOLDER } from '../shared';
@@ -151,7 +152,7 @@ const isAbort=(error:unknown)=>(error as Error)?.name==='AbortError';
 export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanOptions={}):Promise<ScanResult> {
   const root=await directory(rootPath),rootIdentity=await identity(root),store=await duplicateStore(root,rootIdentity),signal=options.signal;
   const report=(progress:Omit<Progress,'phase'|'bytes'|'totalBytes'|'speed'>)=>options.onProgress?.({phase:'planning',bytes:0,totalBytes:0,speed:0,...progress});
-  const listed=await inventory(root,{backup:true,excludeNames:APP_FOLDERS,onProgress:(found,_bytes,top,latest)=>report({step:'listing',completed:found,total:0,file:latest??'',...(top?.total?{share:top.done/top.total}:{})})},signal);
+  const listed=await inventory(root,{backup:true,excludeNames:APP_FOLDERS,onProgress:(found,bytes,top,latest)=>{const {share}=listingEstimate(undefined,{files:found,bytes},top);report({step:'listing',completed:found,total:0,file:latest??'',...(share!==undefined?{share}:{})});}},signal);
   const media=listed.files.filter((item:InventoryFile)=>item.kind!=='Other'&&!item.companionOf);
   const companions=new Map<string,string[]>();
   for(const item of listed.files) if(item.companionOf) { const primary=relativeOf(root,item.companionOf); companions.set(primary,[...companions.get(primary)??[],relativeOf(root,item.path)]); }

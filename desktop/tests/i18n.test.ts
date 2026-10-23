@@ -560,7 +560,7 @@ test('scans show a percentage of used space, organizations show n of x with %, a
   const org = (progress?: Job['progress']): Job => ({ id: 'o', source: { id: 'library:/b', name: 'Library organization', path: '/b', transport: 'folder' }, organization: true, phase: 'copying', errors: [], backup: false, ...(progress ? { progress } : {}) });
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
-    const scan = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 500, bytes: 10e9 }, usedBytes: 40e9 }));
+    const scan = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 500, bytes: 10e9, share: .25 } }));
     assert.ok(scan.includes('25%') && scan.includes('aria-valuenow="25"'), `${language}: listing % of used space`);
     const planning = render(createElement(OrganizationProgress, { job: org() }));
     assert.ok(planning.includes(t('Starting…')), `${language}: planning label`);
@@ -725,19 +725,17 @@ test('the folder builder shows the saved path, and a hand-written template opens
 });
 
 test('scans, reviews and the backup folder check show a progress bar', async () => {
-  const { PlanningProgress, scanTotalBytes, ScanProgress } = await import('../renderer/RootApp');
+  const { PlanningProgress, ScanProgress } = await import('../renderer/RootApp');
   const render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: child }));
   const checking = render(createElement(PlanningProgress, { label: 'Review progress', progress: { phase: 'planning', step: 'checking', completed: 50, total: 200, bytes: 0, totalBytes: 0, speed: 0, file: '/card/DCIM/DSC_0050.NEF' } }));
   assert.ok(checking.includes('aria-valuenow="25"') && checking.includes('50 of 200 files checked') && checking.includes('DSC_0050.NEF'));
   const listing = render(createElement(PlanningProgress, { label: 'Checking the backup folder', progress: { phase: 'planning', step: 'checking', completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, file: '' } }));
   assert.ok(listing.includes('progress-discovering'), 'no total yet: indeterminate');
-  const folder = { id: 'folder:/Users/me/Pictures', name: 'Pictures', path: '/Users/me/Pictures', transport: 'folder' as const, total: 1e12, free: 4e11 };
-  const previous: Inventory = { files: [{ path: '/Users/me/Pictures/a.JPG', relative: 'a.JPG', size: 3e9, kind: 'JPEG', included: true }, { path: '/Users/me/Pictures/b.txt', relative: 'b.txt', size: 1e9, kind: 'Other', included: false }], media: 1, companions: 0, unknown: 1, bytes: 3e9, unknownExtensions: {}, elapsedMs: 0 };
-  assert.equal(scanTotalBytes(folder, previous), 4e9, 'a folder is measured against its last listing, not the whole volume');
-  assert.equal(scanTotalBytes(folder), undefined);
-  assert.equal(scanTotalBytes({ ...folder, id: 'card', transport: 'storage' }), 6e11, 'a drive is measured against its used space');
-  const scan = render(createElement(ScanProgress, { sourceName: 'Pictures', listing: { files: 10, bytes: 2e9 }, usedBytes: scanTotalBytes(folder, previous) }));
+  // The bar shows the share the main process measured, the same one the time left uses.
+  const scan = render(createElement(ScanProgress, { sourceName: 'Pictures', listing: { files: 10, bytes: 2e9, share: .5 } }));
   assert.ok(scan.includes('aria-valuenow="50"'));
+  const unknown = render(createElement(ScanProgress, { sourceName: 'Pictures', listing: { files: 10, bytes: 2e9 } }));
+  assert.ok(unknown.includes('progress-discovering') || !unknown.includes('aria-valuenow'), 'nothing to measure against: no made-up share');
 });
 
 test('Settings is organized into categories with live summaries, one open panel, and every setting in its place', async () => {

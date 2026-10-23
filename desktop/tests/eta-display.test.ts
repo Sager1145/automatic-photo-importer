@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createTranslator, I18nProvider, languages } from '../renderer/i18n';
 import { EtaTracker, stampEstimates } from '../eta';
+import { listingEstimate } from '../listing-estimate';
 import type { AppState, Job } from '../shared';
 
 const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
@@ -46,7 +47,7 @@ test('estimates are stamped on running jobs and cleared when they stop', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 0, total: 100, bytes: 0, totalBytes: 10e9, speed: 0, file: '' } };
   const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', scanProgress: { card: { files: 10, bytes: 1e9 } } };
-  for (let t = 0; t <= 20; t++) { job.progress = { ...job.progress!, completed: t * 2, bytes: t * 100e6 }; state.scanProgress!.card = { files: t * 100, bytes: t * 1e9 }; stampEstimates(state, tracker, t * 1000); }
+  for (let t = 0; t <= 20; t++) { job.progress = { ...job.progress!, completed: t * 2, bytes: t * 100e6 }; state.scanProgress!.card = { files: t * 100, bytes: t * 1e9, share: listingEstimate({ bytes: card.total! - card.free! }, { files: t * 100, bytes: t * 1e9 }).share }; stampEstimates(state, tracker, t * 1000); }
   assert.ok(job.progress!.eta! > 60 && job.progress!.eta! < 120, `copy step ${job.progress!.eta}`);
   assert.ok(job.eta! > job.progress!.eta!, 'the job adds verification');
   assert.ok(state.scanProgress!.card!.eta! > 50 && state.scanProgress!.card!.eta! < 80, `listing against used space ${state.scanProgress!.card!.eta}`);

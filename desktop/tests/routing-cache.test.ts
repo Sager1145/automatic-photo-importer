@@ -4,12 +4,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as core from '../core/index';
-import {metadata,closeMetadata,routingEntries,setRoutingLimit,carryRouting} from '../platform/metadata';
+import {metadata,closeMetadata,routingEntriesUnder,setRoutingLimit,carryRouting} from '../platform/metadata';
 import type {Metadata} from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const routing=(file:string)=>metadata(file,{details:false});
-const keys=()=>routingEntries().map(([key])=>key.split('\0')[0]!);
+const keys=()=>routingEntriesUnder(path.sep).map(([key])=>key.split('\0')[0]!);
 const identity=(stat:import('node:fs').BigIntStats)=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 
 test('the routing cache drops the least recently used result, not everything at once',async t=>{
@@ -47,7 +47,7 @@ test('a moved file keeps its routing result under the new path and stat, only un
  carryRouting(from,{...reviewed,size:'999'},to,now);
  assert.ok(!keys().includes(to),'a stat that does not match the cached read is not carried');
  carryRouting(from,reviewed,to,now);
- const carried=routingEntries().find(([key])=>key.startsWith(to+'\0'));
+ const carried=routingEntriesUnder(path.sep).find(([key])=>key.startsWith(to+'\0'));
  assert.deepEqual(carried?.[1],result);
  assert.equal(carried![0],`${to}\0${now.dev}:${now.ino}:${now.size}:${now.mtimeNs}:${now.ctimeNs}`);
 });
@@ -72,4 +72,37 @@ test('an organization that moves files tells the observer where each went, with 
   const stat=await fs.lstat(call.to,{bigint:true});
   assert.equal(call.now,`${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`,'the final stat is what a later read sees');
  }
+});
+
+test('a routing capture hands over only results read here, once each; seeds, hits and LRU touches are not sent',async t=>{
+ const {beginRoutingCapture,primeRouting}=await import('../platform/metadata');
+ const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'routing-capture-')));
+ t.after(async()=>{await closeMetadata();await fs.rm(root,{recursive:true,force:true});});
+ const seeded=path.join(root,'seed.jpg'),earlier=path.join(root,'earlier.jpg'),fresh=path.join(root,'fresh.jpg'),late=path.join(root,'late.jpg');
+ for(const file of [seeded,earlier,fresh,late])await fs.writeFile(file,'not an image '+file);
+ const stat=await fs.lstat(seeded,{bigint:true});
+ const seedKey=`${seeded}\0${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+ await routing(earlier);
+ const capture=beginRoutingCapture();
+ try{
+  primeRouting([[seedKey,{camera:'Seeded',fields:{}}]]);
+  assert.equal((await routing(seeded)).camera,'Seeded','the seed is a hit');
+  await routing(earlier);                     // a hit moves its entry in the LRU order
+  await routing(fresh);await routing(fresh);
+  const first=capture.take().map(([key])=>key.split('\0')[0]);
+  assert.deepEqual(first,[fresh],'only the new local read, once');
+  assert.deepEqual(capture.take(),[],'take drains');
+  await routing(late);
+  assert.deepEqual(capture.take().map(([key])=>key.split('\0')[0]),[late]);
+ }finally{capture.close();}
+ const after=path.join(root,'after.jpg');await fs.writeFile(after,'not an image');
+ await routing(after);
+ const again=beginRoutingCapture();
+ try{assert.deepEqual(again.take(),[],'a closed capture keeps nothing, and reads after it are not queued');}finally{again.close();}
+});
+
+test('routing results under a folder come from the cache without copying the rest',async t=>{
+ const {primeRouting,routingEntriesUnder}=await import('../platform/metadata');
+ primeRouting([[`/Volumes/CARD/DCIM/a.jpg\0s1`,{camera:'A',fields:{}}],[`/Volumes/CARD 1/b.jpg\0s2`,{camera:'B',fields:{}}],[`/Volumes/CARDS/c.jpg\0s3`,{camera:'C',fields:{}}]]);
+ assert.deepEqual(routingEntriesUnder('/Volumes/CARD').map(([,value])=>value.camera),['A']);
 });

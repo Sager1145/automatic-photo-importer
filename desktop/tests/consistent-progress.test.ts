@@ -128,7 +128,7 @@ test('every progress location renders the shared ProgressDisplay',()=>{
   ['organization card',render(createElement(OrganizationCard,{job,act:()=>{}}))],
   ['dashboard total',render(createElement(ImportDashboard,{state:stateWith({jobs:[sourceJob]}),act:()=>{}}))],
   ['planning steps',render(createElement(PlanningProgress,{progress:listing,label:'x'}))],
-  ['source scan',render(createElement(ScanProgress,{sourceName:'Card',listing:{files:5,bytes:1e9,fileRate:10},usedBytes:8e10}))],
+  ['source scan',render(createElement(ScanProgress,{sourceName:'Card',listing:{files:5,bytes:1e9,fileRate:10,share:1e9/8e10}}))],
   ['leftover files',render(createElement(LeftoverFiles,{state:stateWith({residue:{files:0,bytes:0,resumable:{files:0,bytes:0},checking:true,progress:{...listing,step:'scanning'}}}),act:()=>{},busy:false}))],
   ['backup folder check',render(createElement(Organization,{state:stateWith({misplacedProgress:{'/Volumes/A006':{...listing,step:'checking',total:100}}}),act:()=>{},busy:false}))],
   ['organization recovery listing',render(createElement(Organization,{state:stateWith({organizationRecoveryLoading:true,organizationRecoveryProgress:{...listing,step:'scanning'}}),act:()=>{},busy:false}))],

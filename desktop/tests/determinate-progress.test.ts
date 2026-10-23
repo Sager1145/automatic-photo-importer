@@ -95,7 +95,7 @@ test('a long path is cut in the middle',()=>{
  assert.equal(truncateMiddle('a/b.jpg'),'a/b.jpg');
 });
 test('the scanning card shows the file, speed and time left',()=>{
- const markup=render(createElement(ScanProgress,{sourceName:'A006',listing:{files:1200,bytes:3e9,file:'DCIM/100NIKON/DSC_0001.NEF',fileRate:850,eta:120,startedAt:new Date(0).toISOString()},usedBytes:12e9}));
+ const markup=render(createElement(ScanProgress,{sourceName:'A006',listing:{files:1200,bytes:3e9,file:'DCIM/100NIKON/DSC_0001.NEF',fileRate:850,eta:120,startedAt:new Date(0).toISOString(),share:.25}}));
  assert.ok(markup.includes('DCIM/100NIKON/DSC_0001.NEF'),markup);
  assert.ok(markup.includes('850'),markup);assert.ok(/left/.test(markup),markup);assert.ok(markup.includes('25%')&&markup.includes('aria-valuenow="25"'));
 });

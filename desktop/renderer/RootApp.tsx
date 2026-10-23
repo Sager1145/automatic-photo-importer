@@ -24,7 +24,6 @@ import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 import { validNoMetadataFolder } from '../no-metadata';
-import { listingShare } from '../listing-estimate';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
 import { BrandLogo } from './BrandLogo';
 import { markAppReady } from './Boot';
@@ -1660,21 +1659,15 @@ export function OrganizationProgress({ job, act, showFile = true }: { job: Job; 
   </div>;
 }
 
-/** What a listing is measured against: a drive's used space, or for a folder the bytes its last listing found. */
-export function scanTotalBytes(source: Source, previous?: Inventory): number | undefined {
-  if (source.transport !== 'folder' && source.total !== undefined && source.free !== undefined) return source.total - source.free;
-  const listed = previous?.files.reduce((sum, file) => sum + file.size, 0);
-  return listed ? listed : undefined;
-}
 /** Files checked (or read) before anything is written: import and organization reviews, the backup folder check. */
 export function PlanningProgress({ progress, label }: { progress: Progress; label: string }) {
   return <OperationProgress progress={progress} label={label} testId="planning-progress" className="progress-planning" />;
 }
-// Listing: share of the drive's used space already listed. Metadata: share of media files read.
-export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; usedBytes?: number }) {
+// Listing: the estimated share listed (main measures it, see listing-estimate.ts). Metadata: share of media files read.
+export function ScanProgress({ sourceName, listing, cameraInfo }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
-  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? listingShare(listing.bytes, usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
+  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing?.share;
   const count = reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : listing ? t("Listing files…") : undefined;
   return <ProgressDisplay testId="scan-progress" className="progress-scan" step={reading ? 'read' : 'scan'} label={t("{name} scanning", { name: sourceName })} fraction={fraction}
     count={count}
@@ -1741,7 +1734,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
       <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
     </div>
     {job?.space && !already && (job.phase === 'queued' || isRunning(job)) && <SourceSpace space={job.space} />}
-    {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
+    {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
