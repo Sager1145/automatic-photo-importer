@@ -43,12 +43,19 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   let checked = 0;
   const checking = (file: string) => options.onProgress?.({ phase: 'verifying', step: 'checking', completed: checked, total, bytes: 0, totalBytes: 0, speed: 0, file });
   const stat = async (file: string) => { await contained(file, root); const found = await fs.lstat(file, { bigint: true }); return found.isFile() && !found.isSymbolicLink() ? found : undefined; };
+  // A file kept in one group is never removed by another, and a group that keeps everything keeps all its files.
+  const never = new Set<string>();
+  for (const item of resolved) if (item.keep === 'all') for (const file of item.group.files) never.add(abs(file.path)); else if (item.keep) never.add(abs(item.keep));
+  // The files of a lookalike group are not proven identical by content, so the scan's inode and modified time must still hold.
+  const moved = (file: { ino?: string; mtimeNs?: string }, found: { ino: bigint; mtimeNs: bigint }) => (file.ino !== undefined && file.ino !== String(found.ino)) || (file.mtimeNs !== undefined && file.mtimeNs !== String(found.mtimeNs));
   let groups = 0;
   for (const item of work) {
     checkAbort(signal);
     const keepPath = abs(item.keep!), kept = await stat(keepPath).catch(() => undefined);
     const context = { group: item.group.id, strength: item.group.strength, kept: item.keep! };
     if (!kept) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'the copy to keep is missing' }); checked += item.remove.length; continue; }
+    const keptFile = item.group.files.find(file => file.path === item.keep);
+    if (item.group.strength !== 'sha' && keptFile && moved(keptFile, kept)) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'changed since scan' }); checked += item.remove.length; continue; }
     const keeperSha = await digest(keepPath, signal);
     let any = false;
     for (const file of item.remove) {
@@ -57,6 +64,9 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       const entry = { ...context, role: 'primary' as const, file: file.path, size: file.size };
       checked++;
       if (!found || found.size !== BigInt(file.size)) { report.push({ ...entry, result: 'left', reason: 'the file changed or is gone since the scan' }); continue; }
+      if (item.group.strength !== 'sha' && moved(file, found)) { report.push({ ...entry, result: 'left', reason: 'changed since scan' }); continue; }
+      if (found.ino !== 0n && found.dev === kept.dev && found.ino === kept.ino) { report.push({ ...entry, result: 'left', reason: 'it is the same file as the copy to keep (a link)' }); continue; }
+      if (never.has(source)) { report.push({ ...entry, result: 'left', reason: 'it is the copy kept in another group' }); continue; }
       const sha = await digest(source, signal);
       // Identical groups are proven again by content now; a lookalike group is the user's decision, made on the previews.
       if (item.group.strength === 'sha' && sha !== keeperSha) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it no longer matches the copy to keep' }); continue; }

@@ -33,7 +33,7 @@ export interface DuplicateExif {date?:string;camera?:string;serial?:string;shutt
 export type DuplicateStrength='sha'|'exif'|'exif-size'|'similar';
 export type DuplicateLevel=1|2|3;
 /** A media file of a library: `path` is relative to the library root. birth and ctime are milliseconds. */
-export interface DuplicateFile {path:string;size:number;kind:MediaKind;sha256?:string;exif?:DuplicateExif;edited:boolean;birth:number;ctime:number;}
+export interface DuplicateFile {path:string;size:number;kind:MediaKind;sha256?:string;exif?:DuplicateExif;edited:boolean;birth:number;ctime:number;/** Inode and modified time (ns) when the scan saw the file; a removal that finds others skips the file. */ino?:string;mtimeNs?:string;}
 export interface DuplicateGroup {id:string;strength:DuplicateStrength;files:DuplicateFile[];}
 /** A preview picture. via embedded: the system could not decode the file, so the camera's own preview is shown (`problem` says why). */
 export interface Thumbnail {src?:string;via:'system'|'embedded'|'none';problem?:'raw-unsupported'|'unreadable'|'video';}

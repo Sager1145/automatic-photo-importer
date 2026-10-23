@@ -190,3 +190,43 @@ test('a sidecar shared by the kept and the removed copy (IMG_1.JPG and IMG_1.jpe
   assert.equal((await finalizeOrganization(root, removal.id!)).removed, 1);
   assert.equal(await fs.readFile(path.join(root, 'a/IMG_1.xmp'), 'utf8'), 'edits');
 });
+
+test('a file kept in one group is never removed by another group (hand-built overlapping groups)', async t => {
+  const root = await library(t);
+  for (const name of ['a', 'b', 'c']) await write(root, `x/${name}.JPG`, 'identical bytes');
+  const { groups, companions } = await scan(root);
+  const files = new Map(groups.flatMap(item => item.files).map(item => [path.basename(item.path), item]));
+  const first = group('sha', 'g1', files.get('a.JPG')!, files.get('b.JPG')!), second = group('sha', 'g2', files.get('b.JPG')!, files.get('c.JPG')!);
+  const resolved = resolveGroups([first, second], 1, { g1: 'x/a.JPG', g2: 'x/b.JPG' });
+  const removal = await removeDuplicates(root, resolved, companions);
+  assert.deepEqual(removal.result?.errors ?? [], []);
+  assert.equal(await exists(path.join(root, 'x/b.JPG')), true, 'b is kept by the second group, so the first cannot remove it');
+  assert.equal(await exists(path.join(root, 'x/c.JPG')), false);
+  assert.match(removal.report.find(line => line.file === 'x/b.JPG')!.reason!, /another group/);
+});
+test('a file hard-linked to the copy to keep is refused', async t => {
+  const root = await library(t);
+  await write(root, 'a/one.JPG', 'identical bytes'); await fs.link(path.join(root, 'a/one.JPG'), path.join(root, 'a/two.JPG'));
+  const { groups, companions } = await scan(root);
+  assert.equal(groups.length, 1);
+  const removal = await removeDuplicates(root, resolveGroups(groups, 2), companions);
+  assert.equal(removal.removed, 0); assert.match(removal.report[0]!.reason!, /link/);
+  assert.equal(await exists(path.join(root, 'a/one.JPG')), true); assert.equal(await exists(path.join(root, 'a/two.JPG')), true);
+});
+test('a lookalike (EXIF) group is removed only while the inode and modified time of the scan still hold', async t => {
+  const root = await library(t);
+  await write(root, 'a/one.JPG', 'bytes one'); await write(root, 'b/two.JPG', 'bytes two!');
+  const same = exif({ date: '2024-05-06T07:08:09.12' });
+  const { groups, companions } = await scan(root, { 'one.JPG': same, 'two.JPG': same });
+  assert.equal(groups[0]!.strength, 'exif-size');
+  const choice = { [groups[0]!.id]: 'a/one.JPG' };
+  // Same size and bytes replaced in place with another modified time: the size check alone would pass.
+  await write(root, 'b/two.JPG', 'bytes TWO!');
+  const later = new Date(Date.now() + 60000); await fs.utimes(path.join(root, 'b/two.JPG'), later, later);
+  const refused = await removeDuplicates(root, resolveGroups(groups, 1, choice), companions);
+  assert.equal(refused.removed, 0); assert.equal(refused.report[0]!.reason, 'changed since scan');
+  assert.equal(await exists(path.join(root, 'b/two.JPG')), true);
+  const next = await scan(root, { 'one.JPG': same, 'two.JPG': same });
+  const done = await removeDuplicates(root, resolveGroups(next.groups, 1, { [next.groups[0]!.id]: 'a/one.JPG' }), next.companions);
+  assert.equal(done.removed, 1);
+});

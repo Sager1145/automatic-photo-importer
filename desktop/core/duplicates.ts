@@ -76,7 +76,7 @@ export class DuplicateStore {
   }
 }
 function asFile(relative:string,record:FileRecord,stat:BigIntStats):DuplicateFile {
-  return {path:relative,size:Number(stat.size),kind:record.kind,...(record.sha256?{sha256:record.sha256}:{}),...(record.exif?{exif:record.exif}:{}),edited:record.edited,birth:record.birth,ctime:record.ctime};
+  return {path:relative,size:Number(stat.size),kind:record.kind,...(record.sha256?{sha256:record.sha256}:{}),...(record.exif?{exif:record.exif}:{}),edited:record.edited,birth:record.birth,ctime:record.ctime,ino:record.ino,mtimeNs:record.mtimeNs};
 }
 const stores=new Map<string,Promise<DuplicateStore>>();
 /** One store per library root and identity for this session. */
