@@ -49,6 +49,22 @@ test('comparing reports the bytes it reads when a same-size file already sits at
  assert.equal(events.filter(event=>event.step==='comparing').at(-1)!.bytes,50);
 });
 
+test('comparing reports the bytes it will read from the start, and the files found identical',async t=>{
+ const {source,roots}=await fixture(t);
+ const different=path.join(roots[0]!,'2024/202402/Sony A7/A.JPG'),same=path.join(roots[0]!,'2024/202402/Sony A7/B.JPG');
+ await fs.mkdir(path.dirname(different),{recursive:true});await fs.writeFile(different,'X'.repeat(50));await fs.writeFile(same,'B.JPG'.repeat(10));
+ const events:{totalBytes:number;matched?:number;matchedBytes?:number}[]=[];
+ await plan(source,roots,options,metadata,undefined,(_count,_file,detail)=>{if(detail?.step==='comparing')events.push(detail);});
+ assert.ok(events.length>0);
+ const sized=events.filter(event=>event.totalBytes>0);
+ assert.ok(sized.length>0&&sized.length<=events.length);
+ assert.ok(sized.every(event=>event.totalBytes===100),'two same-size files of 50 bytes, known before any is read');
+ assert.equal(events.at(-1)!.totalBytes,100);
+ assert.ok(events.slice(0,events.length-sized.length).every(event=>event.totalBytes===0));
+ assert.deepEqual([events.at(-1)!.matched,events.at(-1)!.matchedBytes],[1,50]);
+ for(let index=1;index<events.length;index++)assert.ok(events[index]!.matched!>=events[index-1]!.matched!);
+});
+
 test('the copy first reports the check of existing destination files, then copies',async t=>{
  const {source,roots}=await fixture(t);
  const {plans}=await plan(source,roots,options,metadata);

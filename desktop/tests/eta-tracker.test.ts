@@ -124,3 +124,19 @@ test('jobs sharing a destination drive finish together sooner only when the driv
  b.eta=undefined;
  assert.equal(overviewEta([a,b],tracker),undefined,'undefined while a job is still estimating');
 });
+
+test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time left falls as files match',()=>{
+ const tracker=new EtaTracker(),files=43000,bytes=500e9,sameSize=200e9;
+ tracker.plan('j',{kind:'import',verify:true,publish:'link',...drives});
+ let t=0;
+ for(;t<=60;t++)tracker.observe('j',{phase:'planning',step:'checking',completed:Math.round(files*t/60),total:files,bytes:bytes*t/60,totalBytes:bytes},context,t*1000);
+ const fractions:number[]=[],etas:number[]=[];
+ for(let s=0;s<=300;s++,t++){
+  const share=s/300,compared=Math.round(files*share),read=sameSize*share;
+  const eta=tracker.observe('j',{phase:'planning',step:'comparing',completed:compared,total:files,bytes:read,totalBytes:sameSize,matched:Math.round(compared*0.9),matchedBytes:read*0.9},context,t*1000);
+  if(s>=10&&s%5===0){fractions.push(tracker.view('j').fraction!);etas.push(eta.job!);}
+ }
+ for(let i=1;i<fractions.length;i++)assert.ok(fractions[i]!>fractions[i-1]!,`fraction at sample ${i}: ${fractions[i-1]} -> ${fractions[i]}`);
+ for(let i=1;i<etas.length;i++)assert.ok(etas[i]!<=etas[i-1]!,`eta at sample ${i}: ${etas[i-1]} -> ${etas[i]}`);
+ assert.ok(etas.at(-1)!<etas[0]!*0.8,`eta ${etas[0]} -> ${etas.at(-1)}`);
+});

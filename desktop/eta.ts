@@ -84,7 +84,7 @@ export class RateMeter {
 }
 
 /** A job's progress as the tracker needs it (the shape of Progress). */
-export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;work?:Progress['work'];}
+export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;work?:Progress['work'];matched?:number;matchedBytes?:number;}
 /** listingTotalBytes: the used space of the drive being listed, when known. shared: another running job writes to the same destination drive. */
 export interface EtaContext {kind:JobKind;destinations:number;verify:boolean;listingTotalBytes?:number;shared?:boolean;}
 export interface JobEta {step?:number;job?:number;/** The low and high end of `job` while the estimate is still wide. */low?:number;high?:number;}
@@ -199,13 +199,19 @@ export class EtaTracker {
   return {files:progress.completed,bytes:progress.bytes,totalFiles:progress.total,totalBytes:progress.totalBytes};
  }
  /** The totals of the steps still ahead, from what the job has shown so far, for any the plan did not set. */
- private learn(state:JobState,step:string,total:{files:number;bytes:number},context:EtaContext){
+ private learn(state:JobState,step:string,total:{files:number;bytes:number},context:EtaContext,progress?:EtaInput){
   const {model,fixed}=state,copies=Math.max(1,context.destinations),set=(name:string,value:StepTotal)=>{if(!fixed.has(model.resolve(name)))model.setTotal(name,value);};
   switch(state.plan.kind){
    case 'import':
     if(step==='checking'){
+     state.known.files=total.files;state.known.bytes=total.bytes;
      set('comparing',{files:total.files*copies,bytes:total.bytes*copies,bytesKnown:false});set('existing',{files:total.files*copies,bytes:0});
      set('copying',{files:total.files*copies,bytes:total.bytes*copies});set('verifying',{files:total.files*copies,bytes:total.bytes*copies});
+    }
+    // Files that turned out identical at the destination are not copied or verified: the later steps shrink as they are found.
+    if(step==='comparing'&&progress?.matched!==undefined&&state.known.files!==undefined){
+     const files=Math.max(0,state.known.files*copies-progress.matched),bytes=Math.max(0,(state.known.bytes??0)*copies-(progress.matchedBytes??0));
+     set('copying',{files,bytes});set('verifying',{files,bytes});
     }
     if(step==='copying')set('verifying',{files:total.files,bytes:total.bytes});
     break;
@@ -230,12 +236,12 @@ export class EtaTracker {
   let done={files:work?.files??progress.completed,bytes:work?.bytes??progress.bytes},total={files:work?.totalFiles??progress.total,bytes:work?.totalBytes??progress.totalBytes};
   if(!work&&step==='verifying'&&total.files>0)done={files:done.files,bytes:total.bytes*Math.min(1,done.files/total.files)};
   if(work?.publishCopy){state.model.setPublish('copy');for(const id_ of this.destinationsOf(id))this.copyPublishing.add(id_);}
-  const bytesUnknown=unknownBytes.has(step);
+  const bytesUnknown=unknownBytes.has(step)&&!(step==='comparing'&&total.bytes>0);
   if(state.key!==key){
    if(state.key!==undefined&&state.current!==undefined)this.record(state,now);
    state.key=key;state.current=state.model.resolve(step);state.legacy=undefined;state.stepSmoother=new EtaSmoother();
   }
-  this.learn(state,state.model.resolve(step),total,context);
+  this.learn(state,state.model.resolve(step),total,context,progress);
   const resolved=state.model.resolve(step),span=state.shared.get(resolved)??{shared:0,total:0};
   if(state.last!==undefined){const dt=Math.max(0,now-state.last);span.total+=dt;if(context.shared)span.shared+=dt;}
   state.shared.set(resolved,span);state.last=now;

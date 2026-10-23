@@ -190,9 +190,9 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
  * (metadata and identity, without reading contents); library organization then reads the files
  * that will move to checksum them. */
 /** step 'listing': files found so far (total and share are estimates, see listing-estimate.ts); 'checking': metadata of every file; 'reading': files organization moves;
- * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, totalBytes 0);
+ * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, of totalBytes: the size of the files with a same-size file at a destination; matched, matchedBytes: files found identical there, which are not copied);
  * 'locating': files to copy looked for elsewhere in the backup, by content (an import after the folder rules changed). */
-export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number})=>void;
+export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number;matched?:number;matchedBytes?:number})=>void;
 async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
@@ -496,11 +496,11 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Each file is compared once per destination; the count runs across all of them.
   // bytes: source data read to compare with same-size files already there (how much is not known ahead).
   const comparingTotal=prepared.length*destinations.length;
-  let compared=0;
+  let compared=0,compareBytes=0,matched=0,matchedBytes=0;
   let lastCompared=files.at(-1)?.relative??'';
   // While files are looked for elsewhere, the reads that settle them count under that step instead.
   let lookingUp=false;
-  const comparing=(file:string)=>{if(lookingUp)return;if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:readToCompare,totalBytes:0});}
+  const comparing=(file:string)=>{if(lookingUp)return;if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:readToCompare,totalBytes:compareBytes,matched,matchedBytes});}
   async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity,(read,total)=>onProgress?.(read,path.basename(destinationRoot),{step:'index',total,bytes:read,totalBytes:total}));
     const mine=prepared.reduce((count,item)=>count+(item.root===kind?1:0),0);let made=0;
@@ -520,6 +520,14 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
     // allocation below then reuses those digests unless a file changed in between.
     // This is where the comparison spends its time, so each file counts as compared here.
+    // Which files have a same-size neighbour (and so are read) is known up front, so the step has a size to measure against.
+    await pool(pending,STREAM_CONCURRENCY,async entry=>{
+      checkAbort(signal);
+      if(mirror?.known.has(pathKey(entry.destination))) return;
+      const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
+      if(existing?.isFile()&&existing.size===BigInt(entry.size)) compareBytes+=entry.size;
+    });
+    comparing('');
     await pool(pending,STREAM_CONCURRENCY,async entry=>{
       checkAbort(signal);
       try {
@@ -533,6 +541,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         try {
           await Promise.allSettled([resolve(entry,local.signal).catch(fail),index.hinted.digestOf(entry.destination,local.signal).catch(fail)]);
           if(first) throw first.error;
+          if(await resolve(entry,local.signal)===await index.hinted.digestOf(entry.destination,local.signal)){matched++;matchedBytes+=entry.size;}
         } finally { signal?.removeEventListener('abort',stopLocal); }
       }
       catch(error) { if(isAbort(error)) throw error; /* Allocation checks it again and reports it where it always has. */ }
