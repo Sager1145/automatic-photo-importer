@@ -1354,6 +1354,17 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .drive-sparkline-area{fill:var(--accent);opacity:.15}
 .drive-activity-rates{display:flex;justify-content:space-between;gap:.5rem;color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .drive-activity-rates>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.sidebar-dest-status{display:grid;gap:.15rem;margin:0 .75rem 0 2.35rem;min-width:0;font-variant-numeric:tabular-nums}
+.sidebar-dest-line{display:flex;align-items:baseline;gap:.4rem;min-width:0}
+.sidebar-dest-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);font-weight:650;color:var(--step,var(--label-secondary))}
+.sidebar-dest-label:not([data-step]){color:var(--label-secondary)}
+.sidebar-dest-label[data-kind=offline]{color:var(--danger)}
+.sidebar-dest-from{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary)}
+.sidebar-dest-percent{flex:none;margin-left:auto;font-size:var(--text-caption);font-weight:650;color:var(--label-secondary);white-space:nowrap}
+.sidebar-dest-progress{display:grid;gap:.15rem;min-width:0}
+.sidebar-dest-bar{display:block;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
+.sidebar-dest-bar>span{display:block;height:100%;background:var(--step,var(--accent));transition:width var(--slow) var(--ease-out)}
+.sidebar-dest-detail{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);line-height:1.25;color:var(--label-secondary)}
 .sidebar-activity{display:flex;align-items:center;gap:.5rem;margin:.1rem .75rem 0 2.35rem;min-width:0}
 .sidebar-activity>small{flex:none;font-size:var(--text-caption);color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .sidebar-activity-bar{flex:1;min-width:1.5rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
