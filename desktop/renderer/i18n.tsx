@@ -1099,6 +1099,19 @@ from {name} (+{count} more)|来自 {name}（另有 {count} 个）|來自 {name}�
 {completed} of {total} files · {size} of {totalSize}|{completed}/{total} 个文件 · {size}/{totalSize}|{completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件 · {totalSize} 中 {size}
 Destination status|目标磁盘状态|目標磁碟狀態|保存先の状態
 Destination progress|目标磁盘进度|目標磁碟進度|保存先の進行状況
+Diagnostics|诊断|診斷|診断
+Log detail|日志详细程度|記錄詳細程度|ログの詳細度
+Detailed|详细|詳細|詳細
+Trace|跟踪|追蹤|トレース
+Nothing is recorded.|不记录任何内容。|不記錄任何內容。|何も記録しません。
+Records settings changes, job phases, every file the app deletes, and errors.|记录设置更改、任务阶段、应用删除的每个文件以及错误。|記錄設定變更、工作階段、App 刪除的每個檔案以及錯誤。|設定の変更、ジョブの段階、アプリが削除したすべてのファイル、エラーを記録します。
+Also records each file's steps and decisions, drives, memory and timing.|同时记录每个文件的处理步骤和决定、驱动器、内存及耗时。|同時記錄每個檔案的處理步驟與決定、磁碟機、記憶體及耗時。|各ファイルの処理手順と判断、ドライブ、メモリ、所要時間も記録します。
+Also records every routing decision and journal entry. Large; for troubleshooting.|同时记录每次归类决定和日志条目。体积较大，用于排查问题。|同時記錄每次歸類決定與日誌項目。體積較大，用於疑難排解。|すべての振り分け判断とジャーナルの項目も記録します。大きくなるため、問題の調査用です。
+Open log folder|打开日志文件夹|開啟記錄檔資料夾|ログフォルダを開く
+Copy latest log path|拷贝最新日志路径|拷貝最新記錄檔路徑|最新のログのパスをコピー
+Export logs…|导出日志…|匯出記錄檔…|ログを書き出す…
+Log size: {size}|日志大小：{size}|記錄檔大小：{size}|ログのサイズ：{size}
+Logs stay on this Mac. They never include file contents or recovery keys.|日志只保存在这台 Mac 上，不含文件内容或恢复密钥。|記錄檔只保存在這台 Mac 上，不含檔案內容或復原金鑰。|ログはこの Mac にのみ保存され、ファイルの内容や復元キーは含まれません。
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {

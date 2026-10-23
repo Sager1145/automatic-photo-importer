@@ -4,6 +4,7 @@ import {LISTING_KNEE,listingShare} from './listing-estimate';
 import {DisplayHold,remainingRange} from './eta-format';
 import {FractionHold,JobModel,defaultBook,sharedDriveTotal,type JobKind,type PriorBook,type StepTotal} from './eta-model';
 import {PriorTable,layeredBook,type DriveInfo,type PriorContext,type PriorStore} from './eta-priors';
+import {log} from './logger';
 
 export interface EtaSample {files:number;bytes:number;totalFiles:number;totalBytes:number;}
 /** perFileBytes: the cost of one file in bytes, added to bytes (data stages); absent counts files only (metadata stages).
@@ -274,6 +275,7 @@ export class EtaTracker {
   if(!state.context)return;
   const span=state.shared.get(ended.step),shared=span&&span.total>0?span.shared/span.total:0,day=new Date(now).toISOString().slice(0,10);
   const result={a:ended.a,b:ended.b,T:ended.T,F:ended.F,G:ended.G,observed:ended.observed,shared};
+  log('trace','eta','fit',{kind:state.plan.kind,step:ended.step,a:ended.a,b:ended.b,T:ended.T,F:ended.F,G:ended.G,observed:ended.observed,sharedShare:Math.round(shared*100)/100,destinations:state.context.destinations.length});
   this.session.update(ended.step,state.context,result,day);
   this.store?.table.update(ended.step,state.context,result,day);
  }

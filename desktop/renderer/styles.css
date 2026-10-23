@@ -701,6 +701,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .settings-row>.button{justify-self:start}
 .text-size-control{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;min-width:0}
 .settings-row-note{grid-column:2;font-size:var(--text-caption);color:var(--label-secondary)}
+.diagnostics-note{margin:0;padding:.1rem 0 .55rem;font-size:var(--text-caption);color:var(--label-secondary);overflow-wrap:anywhere}
+.diagnostics-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;padding:.35rem 0 .55rem;min-width:0}
+.diagnostics-size{flex:1 0 100%;color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums}
 .performance-readout{grid-column:1;color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums}
 .text-size-control input{flex:1 1 6rem;min-width:6rem}
 .text-size-control strong{font-variant-numeric:tabular-nums;color:var(--accent);min-width:3ch}

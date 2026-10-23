@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {defaultPreferences,normalizePreferences} from '../preferences';
+import {acceptedPreferences,lockedPreferenceKeys} from '../settings-lock';
 
 test('saved settings and live changes pass through the same rules',()=>{
  const loaded=normalizePreferences({textScale:9,parallel:'17',language:'fr',copyMode:'raid',backupMode:'x',verifyCopies:0,autoOrganizeBackup:'sometimes',unknownDefault:'never',sourceLayout:'table'});
@@ -65,4 +66,15 @@ test('photos and videos go to separate photobackup and videobackup folders by de
  assert.equal(defaultPreferences.mediaLayout,'video-root');
  assert.equal(normalizePreferences(undefined).mediaLayout,'video-root');
  assert.equal(normalizePreferences({}).mediaLayout,'video-root');
+});
+
+test('the log level defaults to normal, persists, rejects unknown values, and is never locked by a running job',()=>{
+ assert.equal(defaultPreferences.logLevel,'normal');
+ assert.equal(normalizePreferences({}).logLevel,'normal');
+ for(const level of ['off','normal','detailed','trace'] as const)assert.equal(normalizePreferences(JSON.parse(JSON.stringify({logLevel:level}))).logLevel,level);
+ const detailed=normalizePreferences({logLevel:'detailed'});
+ assert.equal(normalizePreferences({logLevel:'verbose'},detailed).logLevel,'detailed','an invalid value keeps the current choice');
+ assert.equal(normalizePreferences({logLevel:7}).logLevel,'normal');
+ assert.deepEqual(lockedPreferenceKeys({logLevel:'trace'}),[]);
+ assert.deepEqual(acceptedPreferences({logLevel:'trace'},true),{logLevel:'trace'},'applies while jobs run');
 });

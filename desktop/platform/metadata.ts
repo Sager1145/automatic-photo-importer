@@ -7,6 +7,7 @@ import type { DuplicateExif, Exposure, Metadata } from '../shared';
 import { djiProduct } from './dji-models';
 import { streams, STREAMS } from '../core/devices';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
+import { log } from '../logger';
 
 let reader:ExifTool|undefined;
 /** Today's formula (2 to 6, half the cores), capped by the CPU thread limit. */
@@ -385,14 +386,15 @@ function requestLimit(file:string,dev:bigint):Promise<number> {
   return limit;
 }
 async function run(group:Waiting[]):Promise<void> {
-  let found:Map<string,RawTags>|undefined;
-  if(group.length>1)try{found=await readBatch(group.map(item=>item.file));}catch{/* Each file is read alone below. */}
+  let found:Map<string,RawTags>|undefined,fellBack=false,failed=0;const began=performance.now();
+  if(group.length>1)try{found=await readBatch(group.map(item=>item.file));}catch(error){fellBack=true;log('detailed','metadata','batch-failed',{files:group.length,error});/* Each file is read alone below. */}
   await Promise.all(group.map(async item=>{
     try{
       const tags=found?.get(item.file);
       item.resolve(tags??await readSingle(item.file));
-    }catch(error){item.reject(error);}
+    }catch(error){failed++;item.reject(error);}
   }));
+  log('detailed','metadata','batch',{files:group.length,batched:group.length>1,fellBackToSingle:fellBack,failed,ms:Math.round(performance.now()-began),exiftoolProcs:exiftoolProcs(),first:group[0]?.file});
 }
 function pump():void {
   for(;;){
