@@ -20,7 +20,8 @@ const flush=()=>{const entries=capture.take();if(entries.length)process.parentPo
 process.parentPort.on('message',event=>{
  const data=event.data as {type?:string;reuse?:Listing;routing?:[string,Metadata][];volume?:MountedVolume};
  if(data?.type==='start'){void scan(data.reuse,data.routing??[],data.volume);return;}
- flush();signal.abort();void closeMetadata().catch(()=>{}).finally(()=>process.exit(0));
+ // Reads that finish while ExifTool closes are sent too.
+ flush();signal.abort();void closeMetadata().catch(()=>{}).finally(()=>{flush();process.exit(0);});
 });
 async function scan(reuse:Listing|undefined,routing:[string,Metadata][],volume:MountedVolume|undefined){
  const timer=setInterval(flush,1000);

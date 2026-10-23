@@ -111,3 +111,16 @@ test('a remembered folder whose names are unchanged is reused even when its time
  const later=await inventory(source,{reuse:same.listing});
  assert.ok(later.files.some(file=>file.relative.endsWith('DSC7.JPG')));
 });
+
+test('a file emptied in place after the scan is not planned from the old listing',async t=>{
+ const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'scan-emptied-')));
+ t.after(()=>fs.rm(base,{recursive:true,force:true}));
+ const source=path.join(base,'card'),root=path.join(base,'disk'),photo=path.join(source,'DCIM','DSC0.JPG');
+ await fs.mkdir(path.dirname(photo),{recursive:true});await fs.mkdir(root);await fs.writeFile(photo,'a photo');
+ const scan=await inventory(source,{});
+ await fs.writeFile(photo,'');
+ const {plan}=await import('../core');
+ const {plans:[transfer],failures}=await plan(source,[root],{backup:false,template:'{year}',layout:'flat' as const,unknownRules:{},reuse:scan.listing,skipErrors:true},async()=>({fields:{}}));
+ assert.ok(!transfer!.entries.some(entry=>entry.source===photo),'an empty file is never imported');
+ assert.ok(failures.some(failure=>failure.path===photo),'it is reported as changed');
+});

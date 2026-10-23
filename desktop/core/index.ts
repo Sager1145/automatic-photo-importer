@@ -273,19 +273,22 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }
   // A file rewritten in place leaves its folder's identity and names unchanged, so a reused listing can hold a stale size.
   // A folder that came from the record is read again then (once): its files take their current sizes, and this plan goes on.
+  // A file that became empty, or stopped being empty, keeps its old size: whether it is imported was decided by it, so it fails as changed.
   const reusedFolders=new Set(options.reuse?.folders.map(folder=>folder.relative)),reread=new Map<string,Promise<void>>();
-  const kept=new Map(listing?.files.map(file=>[file.relative,file]));
+  // Built at the first re-read: the listed files by folder, those this plan checks, and the record's entries.
+  let byFolder:Map<string,InventoryFile[]>|undefined,checks:Set<InventoryFile>|undefined,kept:Map<string,Listing['files'][number]>|undefined;
   const readAgain=(folder:string)=>{
     let reading=reread.get(folder);
     if(!reading){
       reading=(async()=>{
+        if(!byFolder){byFolder=new Map();for(const file of scan.files){const parent=path.dirname(file.path);const list=byFolder.get(parent);if(list)list.push(file);else byFolder.set(parent,[file]);}checks=new Set(files);kept=new Map(listing?.files.map(file=>[file.relative,file]));}
         const names=new Set(await fs.readdir(folder));
-        for(const file of scan.files){
-          if(path.dirname(file.path)!==folder||!names.has(path.basename(file.path)))continue;
-          const stat=await fs.lstat(file.path);
-          if(!stat.isFile()||stat.size===file.size)continue;
-          if(file.included){scan.bytes+=stat.size-file.size;if(files.includes(file))listedBytes+=stat.size-file.size;}
-          file.size=stat.size;const record=kept.get(file.relative);if(record)record.size=stat.size;
+        for(const file of byFolder.get(folder)??[]){
+          // A file that cannot be looked at fails at its own turn.
+          const stat=names.has(path.basename(file.path))?await fs.lstat(file.path).catch(()=>undefined):undefined;
+          if(!stat?.isFile()||stat.size===file.size||(stat.size>0)!==(file.size>0))continue;
+          if(file.included){scan.bytes+=stat.size-file.size;if(checks!.has(file))listedBytes+=stat.size-file.size;}
+          file.size=stat.size;const record=kept?.get(file.relative);if(record)record.size=stat.size;
         }
       })();
       reread.set(folder,reading);

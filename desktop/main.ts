@@ -121,10 +121,11 @@ const selection=new DeviceSelection(),pausing=new Set<string>();
 // the one remembered across restarts under its UUID (loaded once per connection, verified folder by folder before reuse).
 const listings=new Map<string,Listing>(),scanMemoryLoaded=new Set<string>();
 const memoryVolume=(source:Source)=>source.transport==='storage'?deviceId(source):undefined;
-function keepListing(source:Source,listing:Listing|undefined){
+/** `save`: also remember it across restarts (a card's import listing). */
+function keepListing(source:Source,listing:Listing|undefined,save=true){
  if(!listing)return;
  listings.set(source.id,listing);
- const volume=memoryVolume(source);if(!volume||qa)return;
+ const volume=memoryVolume(source);if(!save||!volume||qa)return;
  void saveScanMemory(app.getPath('userData'),volume,source.path,listing,routingEntriesUnder(source.path)).catch(()=>{/* Only a cache. */});
 }
 function loadRememberedScans(){
@@ -690,7 +691,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   log('detailed','plan','space-check',{destinations:infos.map((info,index)=>({path:info.path,freeBytes:info.free,availableAfterReservations:available[index],neededBytes:needed[index]})),reorganize});
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
   const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
-  if(!reorganize&&!stage&&!backup)keepListing(source,listed);
+  if(!stage)keepListing(source,listed,!reorganize&&!backup);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
   return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
  }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}
