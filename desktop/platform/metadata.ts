@@ -189,6 +189,12 @@ export function duplicateFingerprint(entries:TagEntries,camera:string|undefined,
   const width=dimension(entries,['ExifImageWidth','ImageWidth','SourceImageWidth']),height=dimension(entries,['ExifImageHeight','ImageHeight','SourceImageHeight']);
   if(width&&height){fingerprint.width=width;fingerprint.height=height;}
   const lens=lensModel(entries);if(lens)fingerprint.lens=lens;
+  for(const [field,name] of [['exposureTime','ExposureTime'],['aperture','FNumber'],['iso','ISO'],['exposureCompensation','ExposureCompensation']] as const)
+    for(const [key,value] of entries){
+      if(tagName(key)!==name)continue;
+      const number=typeof value==='number'?value:typeof value==='string'&&value.trim()!==''?Number(value):NaN;
+      if(Number.isFinite(number)){fingerprint[field]=String(number);break;}
+    }
   return fingerprint;
 }
 /** Pure interpretation keeps maker-note counter rules testable without camera hardware. */
@@ -283,6 +289,7 @@ const routingTags=[
   'Encoder','LensModel','Error','Warning',
   'SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber','ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3','ImageNumber','FileNumber',
   'ExifImageWidth','ExifImageHeight','ImageWidth','ImageHeight','SourceImageWidth','SourceImageHeight',
+  'ExposureTime','FNumber','ISO','ExposureCompensation',
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();

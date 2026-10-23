@@ -187,3 +187,20 @@ test('stage 1 runs for imports only, and reuses a hash remembered for the source
   const organized = await plan(root, [root], { ...options, reorganize: true }, reader(table));
   assert.equal(organized.duplicates, undefined);
 });
+
+test('an all-zero sub-second is no discriminator, and exposure tells bracket and burst frames apart', () => {
+  const bare = { date: '2024-05-06T07:08:09.00', camera: 'Nikon Z f', width: 6048, height: 4032 };
+  assert.equal(exifKey(bare), undefined, 'a body that records .00 for every frame proves nothing');
+  assert.equal(exifKey({ ...bare, date: '2024-05-06T07:08:09.000' }), undefined);
+  assert.ok(exifKey({ ...bare, date: '2024-05-06T07:08:09.05' }), 'a real fraction still counts');
+  assert.ok(exifKey({ ...bare, shutterCount: '12' }), 'a shutter count still counts');
+  // A constant sub-second: frames that differ in exposure never share a key.
+  const frame = (patch: Partial<DuplicateExif>) => exifKey({ ...bare, date: '2024-05-06T07:08:09.50', ...patch });
+  assert.notEqual(frame({ exposureTime: '0.004' }), frame({ exposureTime: '0.008' }));
+  assert.notEqual(frame({ aperture: '2.8' }), frame({ aperture: '4' }));
+  assert.notEqual(frame({ iso: '100' }), frame({ iso: '400' }));
+  assert.notEqual(frame({ exposureCompensation: '0' }), frame({ exposureCompensation: '-2' }));
+  assert.equal(frame({ exposureTime: '0.004', iso: '100' }), frame({ exposureTime: '0.004', iso: '100' }));
+  const bracket = [file('b1.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '-2' } }), file('b2.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '0' } })];
+  assert.deepEqual(candidates(bracket), [], 'a bracket is not a candidate set');
+});

@@ -29,7 +29,7 @@ export interface Inventory {issues?:{path:string;message:string}[];files:Invento
 /** Capture units: f-number, ISO, seconds, millimeters and EV respectively. */
 export interface Exposure {lens?:string;aperture?:number;iso?:number;exposureTime?:number;focalLength?:number;exposureCompensation?:number;}
 /** What decides whether two files are the same capture: all read from EXIF, never from file names. */
-export interface DuplicateExif {date?:string;camera?:string;serial?:string;shutterCount?:string;imageNumber?:string;width?:number;height?:number;lens?:string;}
+export interface DuplicateExif {date?:string;camera?:string;serial?:string;shutterCount?:string;imageNumber?:string;width?:number;height?:number;lens?:string;/** Exposure, so frames of a bracket or burst from a body with a constant sub-second never look alike. */exposureTime?:string;aperture?:string;iso?:string;exposureCompensation?:string;}
 export type DuplicateStrength='sha'|'exif'|'exif-size'|'similar';
 export type DuplicateLevel=1|2|3;
 /** A media file of a library: `path` is relative to the library root. birth and ctime are milliseconds. */
