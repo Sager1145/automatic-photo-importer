@@ -1069,6 +1069,16 @@ JPEG|JPEG|JPEG|JPEG
 Lossy JPEG (DNG)|有损 JPEG（DNG）|有損 JPEG（DNG）|非可逆 JPEG（DNG）
 Flash fired|闪光灯已闪光|閃光燈已閃光|フラッシュ発光
 No flash|未闪光|未閃光|フラッシュなし
+Checking…|检查中…|檢查中…|確認中…
+Receiving files|正在接收文件|正在接收檔案|ファイルを受信中
+Checking folder layout|正在检查文件夹结构|正在檢查資料夾結構|フォルダー構成を確認中
+Cleaning up|正在清理|正在清理|クリーンアップ中
+from {name}|来自 {name}|來自 {name}|{name} から
+from {name} (+{count} more)|来自 {name}（另有 {count} 个）|來自 {name}（另有 {count} 個）|{name} から（ほか {count} 件）
+{completed} of {total} files|{completed}/{total} 个文件|{completed}/{total} 個檔案|{total} 件中 {completed} 件
+{completed} of {total} files · {size} of {totalSize}|{completed}/{total} 个文件 · {size}/{totalSize}|{completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件 · {totalSize} 中 {size}
+Destination status|目标磁盘状态|目標磁碟狀態|保存先の状態
+Destination progress|目标磁盘进度|目標磁碟進度|保存先の進行状況
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {

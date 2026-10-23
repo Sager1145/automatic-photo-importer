@@ -306,6 +306,11 @@ export default function RootApp() {
     if (page !== 'desk') navigate('desk');
     void interfaceSettled().then(() => { const card = document.querySelector<HTMLElement>(`article.source-row[data-source-id="${CSS.escape(sourceId)}"]`); const still = reducedMotion(); card?.scrollIntoView({ behavior: still ? 'instant' : 'smooth', block: 'center' }); if (!still) card?.animate([{ boxShadow: '0 0 0 4px var(--accent-ring)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: motionMs('--slow') * 3, easing: 'ease-out' }); });
   };
+  // Sidebar destination rows jump to that destination's card on the Import desk.
+  const openDestination = (path: string) => {
+    if (page !== 'desk') navigate('desk');
+    void interfaceSettled().then(() => { document.querySelector<HTMLElement>(`section.destination-slot[data-destination-path="${CSS.escape(path)}"]`)?.scrollIntoView({ behavior: reducedMotion() ? 'instant' : 'smooth', block: 'center' }); });
+  };
   const navigate = (next: Page) => { if (next === page) return; animateInterfaceChange(() => { setPage(next); window.scrollTo({ top: 0, behavior: 'instant' }); }, pageOrder.indexOf(next) > pageOrder.indexOf(page) ? 'forward' : 'back'); };
   const [errorsOpen, setErrorsOpen] = useState(false);
   const [errorsTarget, setErrorsTarget] = useState<ErrorTarget>();
@@ -390,7 +395,7 @@ export default function RootApp() {
           <button key={item.id} type="button" className={`nav-item ${page === item.id ? 'selected' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon icon={item.icon} /><span>{item.label}</span>{page === item.id && <span className="nav-indicator" aria-hidden="true" />}</button>)}
       </nav>
       <SidebarSources state={state} onOpen={openSource} errors={errors} onErrors={openErrorsFor} act={act} />
-      <SidebarDestinations state={state} errors={errors} onErrors={openErrorsFor} act={act} />
+      <SidebarDestinations state={state} errors={errors} onErrors={openErrorsFor} act={act} onOpen={openDestination} />
     </aside>
     <div className="main-shell">
       <main id="main-content" className="main-content">
@@ -468,15 +473,80 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
   </section>;
 }
 
-export function SidebarDestinations({ state, errors, onErrors, act }: { state: AppState; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
+/** What a destination is doing now, from state the app already holds (jobs, the folder check, duplicates, leftover cleanup). */
+export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
+export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number }
+const destinationPriority: DestinationStatusKind[] = ['receiving', 'verifying', 'organizing', 'folder-check', 'cleaning'];
+function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
+export function destinationActivity(state: AppState, path: string): DestinationActivity {
+  const empty = { completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, fileRate: 0, sources: [] as string[] };
+  const status = state.destinationStatus?.find(item => item.path === path);
+  if (!status) return { kind: 'checking', ...empty };
+  if (!status.available) return { kind: 'offline', ...empty };
+  const required = state.preferences.copyMode === 'single' ? 1 : 2;
+  const chosen = state.preferences.destinations.slice(0, required).includes(path);
+  type Part = { kind: DestinationStatusKind; progress?: Progress; eta?: number; source?: string };
+  const parts: Part[] = [];
+  for (const job of state.jobs) {
+    if (!activePhases.includes(job.phase)) continue;
+    const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
+    if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta }); continue; }
+    if (!chosen || job.phase === 'discovering') continue;
+    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name });
+  }
+  const duplicates = state.duplicates;
+  if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
+  if (state.misplacedProgress?.[path]) parts.push({ kind: 'folder-check', progress: state.misplacedProgress[path], eta: state.misplacedProgress[path].eta });
+  if (state.residue?.progress) parts.push({ kind: 'cleaning', progress: state.residue.progress, eta: state.residue.progress.eta });
+  const kind = destinationPriority.find(item => parts.some(part => part.kind === item));
+  if (!kind) return { kind: 'idle', ...empty };
+  const same = parts.filter(part => part.kind === kind);
+  const sum = { ...empty, sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
+  const etas: (number | undefined)[] = [];
+  for (const { progress, eta } of same) {
+    etas.push(eta);
+    if (!progress) continue;
+    const basis = copyBasis(progress), work = progress.phase === 'verifying' && progress.work?.totalBytes ? progress.work : undefined;
+    sum.completed += basis.completed; sum.total += basis.total;
+    sum.bytes += work ? work.bytes : progress.bytes; sum.totalBytes += work ? work.totalBytes : progress.totalBytes;
+    sum.speed += progress.speed; sum.fileRate += progress.fileRate ?? 0;
+  }
+  const fraction = sum.totalBytes > 0 && sum.bytes > 0 ? sum.bytes / sum.totalBytes : sum.total > 0 ? sum.completed / sum.total : undefined;
+  return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)) };
+}
+/** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
+function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
+  const { t, formatNumber, formatBytes, language } = useTranslation();
+  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
+  const step = ({ receiving: 'copy', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
+  const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
+  const first = activity.sources[0], more = activity.sources.length - 1;
+  const from = first === undefined ? undefined : more > 0 ? t("from {name} (+{count} more)", { name: first, count: formatNumber(more) }) : t("from {name}", { name: first });
+  const count = activity.total > 0 ? activity.totalBytes > 0 ? t("{completed} of {total} files · {size} of {totalSize}", { completed: formatNumber(activity.completed), total: formatNumber(activity.total), size: formatBytes(activity.bytes), totalSize: formatBytes(activity.totalBytes) }) : t("{completed} of {total} files", { completed: formatNumber(activity.completed), total: formatNumber(activity.total) }) : undefined;
+  const speed = activity.speed > 0 ? formatSpeed(activity.speed, language) : activity.fileRate > 0 ? t("{count} files/s", { count: numberIn(activity.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
+  const left = activity.eta !== undefined ? t("{time} left", { time: formatRemaining(activity.eta, t) }) : undefined;
+  const rates = [speed, left].filter(Boolean).join(' · ');
+  return <div className="sidebar-dest-status" role="group" aria-label={t("Destination status")}>
+    <div className="sidebar-dest-line"><span data-testid="sidebar-destination-status" data-kind={activity.kind} {...(step ? { 'data-step': step } : {})} className="sidebar-dest-label">{labels[activity.kind]}</span>{from && <small className="sidebar-dest-from" title={activity.sources.join(', ')}>{from}</small>}{busy && percent !== undefined && <small className="sidebar-dest-percent">{formatNumber(percent)}%</small>}</div>
+    {busy && <div className="sidebar-dest-progress" data-step={step}>
+      <span className="sidebar-dest-bar" role="meter" aria-label={t("Destination progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent ?? 0}%` }} /></span>
+      {count && <small className="sidebar-dest-detail" title={count}>{count}</small>}
+      {rates && <small className="sidebar-dest-detail" title={rates}>{rates}</small>}
+    </div>}
+  </div>;
+}
+
+export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { state: AppState; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch; onOpen?: (path: string) => void }) {
   const { t } = useTranslation();
   const count = state.preferences.copyMode === 'single' ? 1 : 2;
   const destinations = state.preferences.destinations.slice(0, count);
   return <section className="sidebar-section" aria-labelledby="sidebar-destinations"><h2 id="sidebar-destinations">{t("Destinations")}</h2>
     {destinations.length ? <ul>{destinations.map(path => {
       const status = state.destinationStatus?.find(item => item.path === path);
-      const online = status?.available !== false;
-      return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-item sidebar-static"><Icon icon={HardDrive} size={16} /><span>{filename(path) || path}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} />{act && online && <RevealButton path={path} act={act} name={filename(path) || path} />}<SidebarErrors errors={errors} target={{ destination: path, name: filename(path) || path }} onErrors={onErrors} /></div>
+      const online = status?.available !== false, name = filename(path) || path;
+      const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
+      return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
+        <SidebarDestinationStatus activity={destinationActivity(state, path)} />
         <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
   </section>;
@@ -1622,7 +1692,7 @@ function DestinationBay({ state, act, onOrganization, onSettings, configure = fa
     const path = preferences.destinations[index];
     const status = state.destinationStatus?.find(item => item.path === path);
     const busy = state.jobs.some(job => activePhases.includes(job.phase)) || !!state.review || !!state.busyReview;
-    return <section className="destination-slot" key={index}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? filename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} /><DriveActivityMeter activity={state.driveActivity?.[path]} /><div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && (preferences.autoOrganizeBackup ?? 'ask') !== 'off' && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span><Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button></div>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
+    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? filename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} /><DriveActivityMeter activity={state.driveActivity?.[path]} /><div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && (preferences.autoOrganizeBackup ?? 'ask') !== 'off' && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span><Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button></div>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
   })}</div>{(onSettings || onOrganization) && <div className="bay-actions">{onSettings && <Button icon={Settings2} onClick={onSettings}>{t("Settings")}</Button>}{onOrganization && <Button icon={FolderCog} onClick={onOrganization}>{t("Folder organization")}</Button>}</div>}</aside>;
 }
 
