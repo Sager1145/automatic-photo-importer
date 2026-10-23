@@ -10,11 +10,11 @@ import {
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
   ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
   Activity, EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
-  Circle, LayoutGrid, List, ListOrdered, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
+  Circle, LayoutGrid, List, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
@@ -238,7 +238,6 @@ export function totalDriveActivity(state: AppState, keys: string[]): { utilizati
 }
 
 function ProgressBar({ value, label, indeterminate = false }: { value: number; label: string; indeterminate?: boolean }) {
-  const { t, language } = useTranslation();
   return <div className={`progress-track ${indeterminate ? 'progress-discovering' : ''}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} {...(!indeterminate ? { 'aria-valuenow': Math.round(Math.max(0, Math.min(1, value)) * 100) } : {})}><span style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, value))})` }} /></div>;
 }
 
@@ -745,8 +744,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
   // Drives in use: those of running jobs and the destinations they write to; with nothing running, every connected drive.
   const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, requiredDestinations)] : Object.keys(state.driveActivity ?? {}));
-  const organizationJobs = jobs.filter(job => job.organization), runningOrganization = organizationJobs.find(job => activePhases.includes(job.phase));
-  const organizing = active.length > 0 && active.every(job => job.organization), planningJob = active.find(job => !job.organization && job.progress?.phase === 'planning');
+  const organizationJobs = jobs.filter(job => job.organization);
+  const organizing = active.length > 0 && active.every(job => job.organization);
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
   const verify = state.preferences.verifyCopies !== false;
   const overall = overviewFraction(latestJobs, verify);
@@ -1042,7 +1041,7 @@ function AppearanceControls({ preferences, act }: { preferences: Preferences; ac
 }
 
 export function ImportDesk({ state, act, inspect, onOrganization, onSettings, needsChoice = [] }: { state: AppState; act: Dispatch; inspect: (path: string) => void; onOrganization: () => void; onSettings: () => void; needsChoice?: string[] }) {
-  const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const { t } = useTranslation();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const jobs = state.jobs;
   const active = jobs.filter(job => activePhases.includes(job.phase));
@@ -1051,10 +1050,6 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const startOrder = state.queueOrder ?? queued.map(job => job.id);
   const selectedJob = jobs.find(job => job.id === selectedJobId && !job.organization) ?? jobs.find(job => job.inventory && !job.organization);
   const latestJobs = jobs.filter((job,index)=>!job.organization && jobs.findIndex(item=>item.source.id===job.source.id)===index);
-  const progressJobs = latestJobs;
-  const transferred = progressJobs.reduce((sum, job) => sum + (job.progress?.bytes ?? 0), 0);
-  const total = progressJobs.reduce((sum, job) => sum + (job.progress?.totalBytes ?? 0), 0);
-  const speed = active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0);
   const idleSources = state.sources.filter(source => !jobs.some(job => job.source.id === source.id));
   // Organizations read a drive or folder too: each one's latest run is a card, ahead of the drives.
   const organizationCards = jobs.filter((job, index) => job.organization && jobs.findIndex(item => item.organization && item.source.id === job.source.id) === index);
@@ -1068,8 +1063,6 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const position = (id: string) => { const index = state.sources.findIndex(source => source.id === id); return index < 0 ? Infinity : index; };
   const cards = [...latestJobs.map(job => ({ id: job.source.id, job, source: job.source })), ...idleSources.map(source => ({ id: source.id, job: undefined as Job | undefined, source }))].sort((a, b) => position(a.id) - position(b.id));
   const movable = (card: typeof cards[number], index: number) => index > 0 && sourceSelected(card.source) && (!card.job || card.job.phase === 'queued' || (card.job.phase === 'stopped' && !!card.job.paused));
-  const requiredDestinations = state.preferences.copyMode==='single'?1:2;
-  const readyDestinations=(state.destinationStatus??[]).filter(disk=>disk.available&&state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
   return <div className="desk-page">
     {state.preferences.showDashboard !== false && <ImportDashboard state={state} act={act} />}
     <div className="workbench-columns"><div className="source-workspace">
@@ -1307,7 +1300,6 @@ function Speed({ value }: { value: number }) {
   useEffect(() => { shown.current = unit; });
   return <>{formatSpeed(value, language, unit)}</>;
 }
-const hasSpeed = (progress: Progress) => progress.speed > 0 || (progress.fileRate ?? 0) > 0;
 /** How fast a step reads: bytes per second, or files per second while checking metadata. */
 function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
@@ -1502,7 +1494,7 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
@@ -1602,7 +1594,7 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
 }
 
 function SourceMediaSummary({ source, inventory, scanning }: { source: Source; inventory?: Inventory; scanning?: boolean; cameraInfo?: SourceCameraInfo }) {
-  const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const summary = useMemo(() => {
     const photos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};
     const videos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};

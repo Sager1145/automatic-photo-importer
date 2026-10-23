@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Inventory, InventoryFile, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
-import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
+import { checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
 /** Entries of a folder looked at (lstat) at once. */
 const LISTING_STATS=8;

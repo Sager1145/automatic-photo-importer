@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {makeParent,syncParents,within} from './core/paths';
+import {within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {destinationEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
@@ -123,7 +123,6 @@ async function updateFolderCapacity(source:Source){
 function publishDevices(){state.newDevices=[...selection.newDevices];state.reconnectedDevices=[...selection.reconnectedDevices];}
 const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.sourceInventories?.[source.id]??rememberedScans.get(source.id);
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
-const livePreferences=new Set(['language','appearance','sourceLayout','showDashboard','textScale','accent','parallel','automatic']);
 /** Reserved destination plans for one source. A review holds one until applied. */
 interface Prepared {/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;}
 let reviewed:Prepared|undefined;

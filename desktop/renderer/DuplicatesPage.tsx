@@ -209,7 +209,7 @@ export function duplicatesBusy(state: AppState): boolean {
 type Filter = 'all' | 'manual' | 'auto';
 
 export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch }) {
-  const { t, formatNumber, formatBytes, language } = useTranslation();
+  const { t, formatNumber, formatBytes } = useTranslation();
   const dup = state.duplicates ?? { scopes: [], status: 'idle' as const, revision: 0, groups: 0, files: 0 };
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [loadError, setLoadError] = useState('');

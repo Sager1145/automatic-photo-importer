@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-import type {Action,AppState,Metadata} from '../shared';
+import type {Action,Metadata} from '../shared';
 import {createStateReceiver,type StateUpdate} from '../state-channel';
 import {formatMessage,type Message} from '../messages';
 import {threadpoolExceeds} from './thread-pool';

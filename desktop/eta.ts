@@ -1,7 +1,7 @@
 /** Time-remaining estimates for every stage of a job and for the whole job. See docs/eta-estimates.md. */
 import type {AppState,Job,Progress,Source} from './shared';
 import {LISTING_KNEE,listingShare} from './listing-estimate';
-import {DisplayHold,remainingRange} from './eta-format';
+import {DisplayHold} from './eta-format';
 import {FractionHold,JobModel,defaultBook,sharedDriveTotal,type JobKind,type PriorBook,type StepTotal} from './eta-model';
 import {PriorTable,layeredBook,type DriveInfo,type PriorContext,type PriorStore} from './eta-priors';
 
@@ -96,8 +96,6 @@ const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`
 const estimated=(key:string)=>key==='planning:listing'||key==='planning:scanning';
 /** Stages that read or write data: they report bytes per second once bytes move, files per second until then. Every other stage counts files. */
 const dataKeys=new Set(['planning:reading','planning:comparing','copying:','copying:moving','verifying:']);
-/** Bytes a listing will find: the job's own estimate (an earlier listing of the scope), else the drive's used space; 0 when unknown. */
-const listingTotal=(progress:EtaInput,context:EtaContext)=>progress.totalBytes>progress.bytes?progress.totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0;
 /** The model's name for what a progress is doing; undefined for steps it does not model (listing, downloading, scanning). */
 function modelStep(progress:EtaInput,kind:JobKind):string|undefined{
  const {phase,step}=progress;
