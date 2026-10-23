@@ -905,7 +905,18 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     const prior=await findPartial('publication',publicationEntry,root,recovery,signal);
     if(prior&&!prior.absent) {
       const output=await openPartial(prior,root);claimedDirect.add(claim);
-      try { const stat=await output.stat({bigint:true}); return {entry,destination,output,owned:prior,initial:Number(stat.size),synthetic:syntheticIno(prior.stat),fields,claim,closed:false}; }
+      try {
+        const stat=await output.stat({bigint:true});
+        let owned=prior;
+        // Only the receipt written before the name existed holds this file: bind the file to its own receipt before a byte is
+        // written, or a second interruption would leave a partial that nothing owns.
+        if(prior.record.fileIdentity==='creating') {
+          if(stat.birthtimeNs<=0n) throw new Error(`No creation date to bind a copy by: ${destination}`);
+          owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
+          await clearPartialRecord(prior,root,recovery,'lazy');
+        }
+        return {entry,destination,output,owned,initial:Number(stat.size),synthetic:syntheticIno(owned===prior?prior.stat:stat),fields,claim,closed:false};
+      }
       catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
     }
     const creating=prior?.absent?prior:await recordCreation(destination,publicationEntry,transfer,recovery,fields);

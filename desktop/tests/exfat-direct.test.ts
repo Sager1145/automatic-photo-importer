@@ -115,6 +115,14 @@ for(const point of ['after-r1','after-open','mid-stream','after-times','after-m'
   });
 }
 
+test('three interruptions in a row (after the name is created, mid-stream, before the read-back) still end in one finished, dated copy',async t=>{
+  const env=await ready(t);if(!env) return;
+  await crash(env.card,env.root,'after-open');
+  await crash(env.card,env.root,'mid-stream');
+  await crash(env.card,env.root,'full-unverified');
+  await reimport(env.card,env.root);
+});
+
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{
   const env=await ready(t);if(!env) return;
   const reads=new Map<string,number>(),opened:string[]=[],proto=await (async()=>{const probe=await fs.open(env.root,'r');await probe.close();return Object.getPrototypeOf(probe) as {sync:()=>Promise<void>};})();
