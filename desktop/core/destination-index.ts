@@ -76,6 +76,11 @@ export class DestinationIndex implements Digests {
   /** Checks that decide together, inside one hold of the publication lock: a file read by the
    * first and unchanged since is not read again by the next. */
   section():Digests {const memo=new Map<string,{stat:string;sha256:string}>();return {digestOf:(file,signal)=>memoized(memo,file,()=>this.digestOf(file,signal),this.hints)};}
+  /** The recorded digest of a file whose whole stat still matches, without reading it. */
+  cached(file:string,stat:BigIntStats):string|undefined {
+    const known=this.files.get(this.key(file));
+    return known&&unchanged(known,stat)?known.sha256:undefined;
+  }
   /** Record a digest computed from bytes this app just wrote or verified. */
   remember(file:string,sha256:string,stat:BigIntStats):void {
     if(!stat.isFile() || !provable(stat)) return;

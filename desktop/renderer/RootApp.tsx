@@ -9,7 +9,7 @@ import {
   ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
   EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
   Circle, LayoutGrid, List, ListOrdered, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
-  Save, ScanLine, Settings2, ShieldCheck, Square, Sun, Timer, Trash2, Usb, X, ArrowUpToLine,
+  Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
@@ -20,12 +20,13 @@ import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { settingsLocked } from '../settings-lock';
 import { listingShare } from '../listing-estimate';
+import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
 
-type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
-const pageOrder: Page[] = ['desk', 'drives', 'organization', 'history', 'settings'];
+type Page = 'desk' | 'drives' | 'organization' | 'duplicates' | 'history' | 'settings';
+const pageOrder: Page[] = ['desk', 'drives', 'organization', 'duplicates', 'history', 'settings'];
 type Dispatch = (action: Action) => void;
 type Preview = { path: string; metadata?: Metadata; loading: boolean; error?: string };
-const activePhases = ['discovering', 'verifying', 'copying'];
+export const activePhases = ['discovering', 'verifying', 'copying'];
 
 // In the order the options were asked for; 'flat' is the default.
 const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
@@ -106,10 +107,10 @@ export function OperationProgress({ progress, label, testId, className }: { prog
   return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t)} file={progress.file} />;
 }
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
-function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
+export function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
   return <IconComponent size={size} strokeWidth={1.8} aria-hidden="true" className={className} />;
 }
-function Button({ children, icon, kind = 'secondary', className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: LucideIcon; kind?: 'primary' | 'secondary' | 'quiet' | 'danger' }) {
+export function Button({ children, icon, kind = 'secondary', className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: LucideIcon; kind?: 'primary' | 'secondary' | 'quiet' | 'danger' }) {
   return <button type="button" className={`button button-${kind} ${children === undefined || children === null || children === false ? 'button-icon-only' : ''} ${className}`} {...props}>{icon && <Icon icon={icon} />}{children}</button>;
 }
 function Switch({ checked, onChange, label, detail, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; detail?: string; disabled?: boolean }) {
@@ -201,7 +202,7 @@ export function interfaceChangeKind(previous: AppState, next: AppState): Interfa
 }
 // A sheet opened mid-transition would render beneath the page snapshots, so finish the transition first.
 // Errors are always on top: a sheet that opens over an error surface (the toast, All errors) is put back beneath it.
-function showSheet(dialog: HTMLDialogElement | null) {
+export function showSheet(dialog: HTMLDialogElement | null) {
   interfaceTransition?.skipTransition();
   dialog?.showModal();
   for (const error of document.querySelectorAll<HTMLElement>('[data-error-layer]')) {
@@ -211,7 +212,7 @@ function showSheet(dialog: HTMLDialogElement | null) {
   }
 }
 /** Plays the exit of something React is about to remove (a sheet, the toast), then removes it. onClose returns false when new content arrived meanwhile: the element then stays, fully shown. */
-function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose: () => void | false) {
+export function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose: () => void | false) {
   const closing = useRef(false);
   return useCallback(() => {
     if (closing.current) return;
@@ -309,11 +310,11 @@ export default function RootApp() {
     if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else for (const id of ids) if (!id.startsWith('local:')) act({ type: 'clearError', id, ...(severity ? { severity } : {}) });
   };
   return <I18nProvider language={language}><div className="app-shell">
-    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.filter(error => error.severity === 'error').length} warningCount={errors.filter(error => error.severity === 'warning').length} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
+    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.filter(error => error.severity === 'error').length} warningCount={errors.filter(error => error.severity === 'warning').length} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
-        {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
+        {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'duplicates', label: t("Duplicates"), icon: CopyCheck }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
           <button key={item.id} type="button" className={`nav-item ${page === item.id ? 'selected' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon icon={item.icon} /><span>{item.label}</span>{page === item.id && <span className="nav-indicator" aria-hidden="true" />}</button>)}
       </nav>
       <SidebarSources state={state} onOpen={openSource} errors={errors} onErrors={openErrorsFor} act={act} />
@@ -324,6 +325,7 @@ export default function RootApp() {
         {(state.review || state.busyReview) && <ReviewPanel state={state} act={act} inspect={inspect} />}
         {page === 'desk' && <ImportDesk state={state} act={act} needsChoice={dismissedDrives} inspect={inspect} onOrganization={() => navigate('organization')} onSettings={() => navigate('settings')} />}
         {page === 'organization' && <Organization state={state} act={act} busy={busy} selectedDestination={organizationDestination} onSelectDestination={setOrganizationDestination} />}
+        {page === 'duplicates' && <DuplicatesPage state={state} act={act} />}
         {page === 'drives' && <DrivesPage state={state} act={act} />}
         {page === 'settings' && <SettingsPage state={state} act={act} busy={busy || settingsLocked(state)} />}
         {page === 'history' && <HistoryPage state={state} onDesk={() => navigate('desk')} />}
@@ -508,6 +510,10 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
     const destinationIndex = organizationDestinationIndex(state.preferences, organizationDestination);
     const destination = state.preferences.destinations[destinationIndex];
     return <div className="titlebar-actions" aria-label={t("Organization controls")}><Button icon={Eye} data-testid="titlebar-review-organization" disabled={pageBusy(state) || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} data-testid="titlebar-organize" disabled={organizeBusy(state) || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button>{errorsButton}</div>;
+  }
+  if (page === 'duplicates') {
+    const duplicates = state.duplicates;
+    return <div className="titlebar-actions" aria-label={t("Remove duplicates controls")}><Button kind="primary" icon={ScanSearch} data-testid="titlebar-duplicates-scan" disabled={!duplicates?.root || duplicatesBusy(state)} onClick={() => act({ type: 'duplicatesScan' })}>{duplicates?.scannedAt ? t("Scan again") : t("Scan for duplicates")}</Button><Button icon={Square} data-testid="titlebar-duplicates-stop" disabled={duplicates?.status !== 'scanning'} onClick={() => act({ type: 'duplicatesStop' })}>{t("Stop")}</Button>{errorsButton}</div>;
   }
   if (page !== 'desk') return <div className="titlebar-actions">{errorsButton}</div>;
   const scanning = !!state.scanningSources?.length;
@@ -1037,6 +1043,9 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'removing') return t("{completed} of {total} extra files set aside", counts);
   if (progress.step === 'scanning') return t("{completed} files looked at", counts);
   if (progress.step === 'stashing') return t("Setting aside duplicates: {completed} of {total}", counts);
+  if (progress.step === 'fingerprinting') return t("Reading metadata: {completed} of {total} files", counts);
+  if (progress.step === 'candidates') return t("Confirming possible duplicates: {completed} of {total} files", counts);
+  if (progress.step === 'collisions') return t("Looking for identical files: {completed} of {total} files", counts);
   if (progress.step === 'tidying') return t("Finishing up: {completed} of {total}", counts);
   if (progress.step === 'releasing') return t("{completed} of {total} files released", counts);
   if (progress.step === 'restoring') return t("{completed} of {total} files put back", counts);
@@ -1444,7 +1453,7 @@ function UnknownRules({ extensions, act }: { extensions: Record<string, number>;
   return <div className="unknown-rules"><h3>{t("Other file rules")}</h3><div className="rule-fields"><label>{t("Extension")}<div className="select-wrap"><select value={extension} onChange={event => { setExtension(event.target.value); }}>{choices.map(ext => <option key={ext} value={ext}>{ext ? `.${ext}` : t("No extension")} ({extensions[ext]})</option>)}</select><Icon icon={ChevronDown} size={14} /></div></label><label>{t("Action")}<div className="select-wrap"><select value={action} onChange={event => { setAction(event.target.value as typeof action); }}><option value="ignore">{t("Ignore")}</option><option value="camera">{t("Copy to camera folders")}</option><option value="copy">{t("Copy to folder")}</option></select><Icon icon={ChevronDown} size={14} /></div></label></div>{action === 'copy' && <label className="field-label">{t("Folder beneath each destination")}<input value={folder} onChange={event => { setFolder(event.target.value); }} placeholder="Documents/Camera notes" />{!valid && <span className="field-error">{t("Use a relative folder without empty components, . or ..")}</span>}</label>}<div className="rule-actions"><label className="checkbox-label"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} />{t("Remember for this extension")}</label><Button icon={Check} disabled={action === 'copy' && !valid} onClick={() => { act({ type: 'unknownRule', extension, folder: action === 'camera' ? { action: 'camera' } : action === 'copy' ? folder : null, remember }); }}>{t("Apply rule")}</Button></div></div>;
 }
 
-function CardHeader({ icon, title, id, detail, children }: { icon: LucideIcon; title: string; id?: string; detail?: ReactNode; children?: ReactNode }) {
+export function CardHeader({ icon, title, id, detail, children }: { icon: LucideIcon; title: string; id?: string; detail?: ReactNode; children?: ReactNode }) {
   return <div className="card-header"><span className="card-icon"><Icon icon={icon} size={17} /></span><div className="card-title"><h3 id={id}>{title}</h3>{detail && <p>{detail}</p>}</div>{children && <div className="card-actions">{children}</div>}</div>;
 }
 function SettingsSection({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {

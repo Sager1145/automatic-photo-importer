@@ -1,5 +1,5 @@
 import {contextBridge,ipcRenderer} from 'electron';
-import type {Action,Metadata} from './shared';
+import type {Action,DuplicateGroup,Metadata,Thumbnail} from './shared';
 import type {StateUpdate} from './state-channel';
 
 // Keep the bridge transparent: reconstructing AppState here would copy every
@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('importer',{
   ipcRenderer.on('importer:updated',callback);
   return()=>ipcRenderer.removeListener('importer:updated',callback);
  },
- inspect:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:inspect',path)
+ inspect:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:inspect',path),
+ thumbnail:(path:string):Promise<Thumbnail>=>ipcRenderer.invoke('importer:thumbnail',path),
+ exif:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:exif',path),
+ duplicateGroups:():Promise<DuplicateGroup[]>=>ipcRenderer.invoke('importer:duplicates')
 });
