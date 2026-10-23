@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ErrorLog,gatherErrors,severityOf,codeOf,createErrorLogCache,clearErrors} from '../error-log';
 import {buildRows,rowCounts} from '../error-groups';
-import {createIssueSink,errorTotal,issuePaths,recordIssue,reportSummary,throttled} from '../job-issues';
+import {errorTotal,issuePaths,recordIssue,reportSummary,throttled} from '../job-issues';
 import {createStateChannel} from '../state-channel';
 import {message,text} from '../messages';
 import {createTranslator,languages} from '../renderer/i18n';
@@ -48,10 +48,10 @@ test('entries without a code fall back to one derived from the message key',()=>
 test('benchmark: 100,000 errors of 3 kinds fold in under 1 s, the payload stays under 100 KB and emits follow the throttle',()=>{
  const job=newJob({phase:'copying'});let asked=0,emitted=0,clock=0;
  const emit=throttled(()=>{emitted++;},100,()=>clock);
- const sink=createIssueSink(job,()=>{asked++;emit();});
+ const add=(issue:ExecutionIssue)=>{recordIssue(job,issue);asked++;emit();};
  const kinds:Pick<ExecutionIssue,'code'|'severity'>[]=[{code:'staging-left',severity:'warning'},{code:'copy-failed',severity:'error'},{code:'unreadable',severity:'warning'}];
  const started=performance.now();
- for(let index=0;index<100_000;index++){clock=index*0.01;const kind=kinds[index%3]!;sink.add({...kind,path:`/Volumes/A006/photobackup/2024/IMG_${index}.NEF`,detail:'expected 1:2:3 found 1:2:4'});}
+ for(let index=0;index<100_000;index++){clock=index*0.01;const kind=kinds[index%3]!;add({...kind,path:`/Volumes/A006/photobackup/2024/IMG_${index}.NEF`,detail:'expected 1:2:3 found 1:2:4'});}
  const elapsed=performance.now()-started;
  assert.ok(elapsed<1000,`took ${elapsed.toFixed(0)} ms`);
  assert.equal(asked,100_000);

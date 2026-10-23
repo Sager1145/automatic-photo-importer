@@ -20,11 +20,6 @@ export function queueOrder<T extends QueuedJob>(jobs:T[],sourceOrder:string[]):s
   const position=(job:T)=>job.organization?sourceOrder.length:rank.get(job.source.id)??sourceOrder.length;
   return queued.map((job,index)=>({job,index})).sort((a,b)=>position(a.job)-position(b.job)||a.index-b.index).map(({job})=>job.id);
 }
-/** The queued job to start next. */
-export function nextQueued<T extends QueuedJob>(jobs:T[],sourceOrder:string[]):T|undefined {
-  const [first]=queueOrder(jobs,sourceOrder);
-  return jobs.find(job=>job.id===first);
-}
 /** The first queued job in start order that `canStart` accepts, so a job held back (its drive is
  * busy) lets the next one go. */
 export function nextRunnable<T extends QueuedJob>(jobs:T[],sourceOrder:string[],canStart:(job:T)=>boolean):T|undefined {

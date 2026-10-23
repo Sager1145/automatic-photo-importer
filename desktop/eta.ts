@@ -107,11 +107,10 @@ function modelStep(progress:EtaInput,kind:JobKind):string|undefined{
 /** Steps that count data (bytes) even when the model has no byte total for them: the totals a step reports are used as given. */
 const unknownBytes=new Set(['comparing','moving']);
 
-interface Known {files?:number;bytes?:number;copyFiles?:number;copyBytes?:number;entries?:number;}
 /** The legacy estimator of one stage: used for a listing and for steps the model does not cover. */
-interface Legacy {key:string;estimator:EtaEstimator;smoother:EtaSmoother;}
+interface Legacy {key:string;estimator:EtaEstimator;}
 interface JobState {
- plan:EtaPlan;model:JobModel;book:PriorBook;context?:PriorContext;known:Known;fixed:Set<string>;
+ plan:EtaPlan;model:JobModel;book:PriorBook;context?:PriorContext;fixed:Set<string>;
  first?:number;last?:number;key?:string;legacy?:Legacy;
  stepSmoother:EtaSmoother;jobSmoother:EtaSmoother;hold:DisplayHold;fractions:FractionHold;
  shared:Map<string,{shared:number;total:number}>;view:JobView;current?:string;
@@ -174,7 +173,7 @@ export class EtaTracker {
   const plan=this.plans.get(id)??{kind:context.kind};
   const prior=this.contextOf(plan),book=this.bookOf(plan,prior);
   const model=new JobModel({kind:plan.kind,book,totals:plan.totals,verify:plan.verify??context.verify,publish:plan.publish,estimated:plan.estimated});
-  const state:JobState={plan,model,book,context:prior,known:{},fixed:new Set(Object.keys(plan.totals??{}).map(step=>model.resolve(step))),stepSmoother:new EtaSmoother(),jobSmoother:new EtaSmoother(),hold:new DisplayHold(),fractions:new FractionHold(),shared:new Map(),view:{}};
+  const state:JobState={plan,model,book,context:prior,fixed:new Set(Object.keys(plan.totals??{}).map(step=>model.resolve(step))),stepSmoother:new EtaSmoother(),jobSmoother:new EtaSmoother(),hold:new DisplayHold(),fractions:new FractionHold(),shared:new Map(),view:{}};
   this.jobs.set(id,state);
   return state;
  }
@@ -249,7 +248,7 @@ export class EtaTracker {
  /** A step the model does not cover (a listing, a scan, a review's steps): its own estimator, for the step only. */
  private legacy(state:JobState,key:string,progress:EtaInput,context:EtaContext,now:number):JobEta{
   if(state.key!==key){if(state.key!==undefined&&state.current!==undefined){this.record(state,now);state.current=undefined;}state.key=key;}
-  if(!state.legacy||state.legacy.key!==key)state.legacy={key,estimator:new EtaEstimator(dataStages.has(key)?{perFileBytes:MiB}:estimated(key)?{perFileBytes:0}:{}),smoother:new EtaSmoother()};
+  if(!state.legacy||state.legacy.key!==key)state.legacy={key,estimator:new EtaEstimator(dataStages.has(key)?{perFileBytes:MiB}:estimated(key)?{perFileBytes:0}:{})};
   state.view={fraction:state.fractions.next(0),cost:{done:0,total:0}};
   const measured=state.legacy.estimator.update(this.sample(key,progress,context),now);
   // A listing that claims more than a day left is guessing.
