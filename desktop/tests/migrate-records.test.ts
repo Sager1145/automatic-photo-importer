@@ -202,3 +202,17 @@ test('a library organized with the earlier version: journal, pointers, receipts 
  assert.deepEqual(again,{converted:0,pending:0,problems:[]});
  assert.deepEqual((await core.resumeOrganization(f.videos,f.id)).errors,[]);
 });
+
+test('R: a resumed conversion whose earlier v5 receipt names the same file as the old staged copy (two names) stops for First Aid and renames nothing',async t=>{
+ const f=await card(t);
+ const partial=oldStage(f.entry);await fs.writeFile(partial,f.bytes.subarray(0,1500));
+ const receipt=await legacyReceipt(await f.record('stage',partial));
+ await assert.rejects(migrateDrive([f.destination],{crash:at=>{if(at==='R1')throw new SimulatedCrash(at);}}),SimulatedCrash);
+ const [earlier]=[...(await openReceiptsFor(f.destination)).values()];
+ // The staging name the earlier receipt chose and the old staged copy are one file (an APFS hard link).
+ await fs.link(partial,earlier!.file);
+ const result=await migrateDrive([f.destination]);
+ assert.ok(result.problems.some(problem=>/First Aid/.test(problem)),result.problems.join('; '));
+ assert.ok(await exists(partial));assert.ok(await exists(earlier!.file));assert.ok(await exists(receipt));
+ assert.equal((await fs.readdir(await stagingFor(f.destination))).length,1,'no fresh name was tried');
+});

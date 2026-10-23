@@ -2,10 +2,10 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
-import {maybeLstat,renameChecked,renamedIdentity,storeFor} from '../app-store';
+import {FirstAidError,maybeLstat,renameChecked,renamedIdentity,storeFor} from '../app-store';
 import {closeReceipts,isLegacyReceiptName,leftoverReceipt,openReceiptFor,openReceipts,stagingFolder} from '../import-recovery';
 import {isRecoveryName} from '../recovery';
-import {code,contained,digest,identity,sameStat,syncDirectory} from '../paths';
+import {code,contained,digest,identity,sameStat,syncDirectory,unreliableIno} from '../paths';
 import {hit,message,passThrough,type MigrationContext} from './common';
 
 const legacyStage=/^(?:\.import|photo-importer)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.partial$/;
@@ -27,11 +27,17 @@ const same=(a:{kind:string;source:string;destination:string;sha256:string},b:typ
 async function convertStage(receipt:string,found:Legacy,walkRoot:string,context:MigrationContext):Promise<void>{
  const record=found.record,file=found.file!;
  const {store,folder:staging}=await stagingFolder(record.root,path.dirname(file));
- // A v5 receipt an earlier run wrote for this copy whose staging name never got the file: closed.
- const stale=[...await openReceipts(store)].filter(([,open])=>same(open,record)&&path.dirname(open.file)===staging).map(([rid,open])=>({rid,file:open.file}));
- const absent:string[]=[];for(const item of stale)if(!await maybeLstat(item.file))absent.push(item.rid);
- await closeReceipts(store,absent);
+ // A v5 receipt an earlier run wrote for this copy: one whose staging name never got the file is closed; one whose
+ // staging name is this very copy too (two names for one file) stops for First Aid, renaming and unlinking nothing.
  const before=await fs.lstat(file,{bigint:true}),stagingIdentity=await identity(staging);
+ const stale=[...await openReceipts(store)].filter(([,open])=>same(open,record)&&path.dirname(open.file)===staging).map(([rid,open])=>({rid,file:open.file}));
+ const absent:string[]=[];
+ for(const item of stale){
+  const there=await maybeLstat(item.file);
+  if(!there){absent.push(item.rid);continue;}
+  if(there.dev===before.dev&&(unreliableIno(there)||unreliableIno(before)?there.birthtimeNs===before.birthtimeNs:there.ino===before.ino))throw new FirstAidError(`First Aid needed: ${file} and ${item.file} name the same staged copy`);
+ }
+ await closeReceipts(store,absent);
  for(let attempt=0;attempt<2;attempt++){
   const target=path.join(staging,`${randomUUID()}.partial`);
   const rid=await openReceiptFor(store,asRecord(record,{file:target,parentIdentity:stagingIdentity}));
