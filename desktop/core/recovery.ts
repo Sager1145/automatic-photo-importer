@@ -577,21 +577,21 @@ async function removeSiblingPointers(m:Manifest):Promise<void>{
 /** For residue cleanup: a pointer temp file left by a crash, a pointer that belongs to another
  * folder, or one whose journal is gone, finished, undone or superseded. A damaged pointer, or one
  * whose journal cannot be read, is kept. */
-export async function pointerLeftover(folder:string,name:string):Promise<boolean>{
+export async function pointerLeftover(folder:string,name:string,onRead?:(read:number,total:number)=>void):Promise<boolean>{
  if(pointerTemporary.test(name))return true;
  const id=name.match(pointerName)?.[1];if(id===undefined)return false;
  try{
   const root=await siblingPointer(folder,name);if(root===undefined)return true;
   if(!await maybeStat(path.join(root,storage,id)))return true;
-  const state=await readEvents(await readManifest(root,id),undefined,undefined,false);
+  const state=await readEvents(await readManifest(root,id),undefined,onRead,false);
   return !!state.superseded||!unfinished(state);
  }catch{return false;}
 }
 /** For residue cleanup: whether journal `id` in `root`'s recovery folder is in a terminal state
  * (complete and finalized, undone or superseded). A journal that cannot be read, or is still
  * pending, is not. */
-export async function journalTerminal(root:string,id:string):Promise<boolean>{
- try{return finished(await readEvents(await readManifest(root,id),undefined,undefined,false));}catch{return false;}
+export async function journalTerminal(root:string,id:string,onRead?:(read:number,total:number)=>void):Promise<boolean>{
+ try{return finished(await readEvents(await readManifest(root,id),undefined,onRead,false));}catch{return false;}
 }
 /** Signals a pointer file that cannot be read or trusted; the scan then looks for its journal. */
 class DamagedPointer extends Error{constructor(readonly file:string,readonly id:string,reason:string){super(`Damaged sibling journal pointer ${file} (${reason})`);}}
@@ -1361,7 +1361,7 @@ async function tally(folder:string,signal?:AbortSignal,onFiles?:(files:number,es
  return total;
 }
 /** Remove a folder and everything in it, counting the files as they go; a stop leaves what is left of it. */
-async function removeTree(folder:string,signal?:AbortSignal,onFile?:(removed:number)=>void,counter={removed:0}):Promise<void>{
+export async function removeTree(folder:string,signal?:AbortSignal,onFile?:(removed:number)=>void,counter={removed:0}):Promise<void>{
  const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
  await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),entries.length)},async()=>{while(next<entries.length){
   checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);

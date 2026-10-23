@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
 import { INDEX_PREFIX } from './destination-index';
 import { leftoverReceipt } from './import-recovery';
-import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover } from './recovery';
+import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover, removeTree } from './recovery';
 import { checkAbort, code, contained, sameStat } from './paths';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
@@ -30,13 +30,13 @@ async function regular(file:string):Promise<BigIntStats|undefined> {
   return stat?.isFile()?stat:undefined;
 }
 /** Bytes of a folder this app made in the temporary folder; links are counted, not followed. */
-async function folderBytes(folder:string,signal?:AbortSignal):Promise<number> {
+async function folderBytes(folder:string,signal?:AbortSignal,onEntry?:(name:string)=>void):Promise<number> {
   let bytes=0;
   for(const entry of await list(folder)) {
     checkAbort(signal);
     const file=path.join(folder,entry.name);
-    if(entry.isDirectory()) bytes+=await folderBytes(file,signal);
-    else bytes+=Number((await fs.lstat(file,{bigint:true}).catch(()=>undefined))?.size??0n);
+    if(entry.isDirectory()) bytes+=await folderBytes(file,signal,onEntry);
+    else {bytes+=Number((await fs.lstat(file,{bigint:true}).catch(()=>undefined))?.size??0n);onEntry?.(entry.name);}
   }
   return bytes;
 }
@@ -75,23 +75,25 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
 /** In each organization journal: staged and preserved incomplete copies (never read again; the
  * original stays at its path or among the retained originals), and folders emptied when retained
  * originals were released. Journals and retained originals are never listed. */
-async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
+async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal,scan?:{state:ResidueScan;emit():void}):Promise<void> {
+  // Each journal read (a pointer's, a finished journal's) counts the records it reads, so the look keeps moving.
+  const reading=(label:string)=>(read:number,total:number)=>{if(!scan)return;scan.state.looked++;scan.state.file=`${label} · ${read}/${total}`;scan.emit();};
   const folder=async(item:string)=>{const stat=await fs.lstat(item,{bigint:true}).catch(()=>undefined);if(stat)items.push({path:item,kind:'folder',bytes:0,root,stat});};
   // Pointers to journals in other backup folders that are finished, undone or gone, and their crash leftovers.
-  for(const entry of await list(storage)) {
-    if(!entry.isFile()||!entry.name.startsWith('journal-')) continue;
+  const pointers=(await list(storage)).filter(entry=>entry.isFile()&&entry.name.startsWith('journal-'));
+  for(const [position,entry] of pointers.entries()) {
     checkAbort(signal);
-    const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name)?await regular(file):undefined;
+    const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name,reading(`pointer ${position+1} of ${pointers.length}`))?await regular(file):undefined;
     if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
   }
   // A journal folder set aside by a deletion that stopped before it was gone.
   for(const entry of await list(storage)) {
     if(!entry.isDirectory()||!deletingPattern.test(entry.name)) continue;
     const aside=path.join(storage,entry.name),stat=await fs.lstat(aside,{bigint:true}).catch(()=>undefined);
-    if(stat) items.push({path:aside,kind:'organization',bytes:await folderBytes(aside,signal),root,stat});
+    if(stat) items.push({path:aside,kind:'organization',bytes:await folderBytes(aside,signal,name=>{if(scan){scan.state.looked++;scan.state.file=name;scan.emit();}}),root,stat});
   }
-  for(const job of await list(storage)) {
-    if(!job.isDirectory()||!uuid.test(job.name)) continue;
+  const journals=(await list(storage)).filter(job=>job.isDirectory()&&uuid.test(job.name));
+  for(const [position,job] of journals.entries()) {
     const jobPath=path.join(storage,job.name);
     for(const entry of await list(jobPath)) {
       checkAbort(signal);
@@ -99,7 +101,7 @@ async function journalLeftovers(storage:string,root:string,items:ResidueItem[],s
       if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
     }
     // Empty slots of a pending journal are where its retained originals will go: only a finished journal's are leftovers.
-    if(!await journalTerminal(path.dirname(storage),job.name)) continue;
+    if(!await journalTerminal(path.dirname(storage),job.name,reading(`journal ${position+1} of ${journals.length}`))) continue;
     const originals=path.join(jobPath,'originals');let emptied=true,any=false;
     for(const index of await list(originals)) {
       any=true;
@@ -127,7 +129,7 @@ async function walk(folder:string,root:string,items:ResidueItem[],signal?:AbortS
   for(const entry of entries) {
     if(!entry.isDirectory()) continue;
     const child=path.join(folder,entry.name);
-    if(isRecoveryName(entry.name)) await journalLeftovers(child,root,items,signal);
+    if(isRecoveryName(entry.name)) await journalLeftovers(child,root,items,signal,scan);
     // Other hidden folders (.Trashes, .Spotlight-V100, .mirror-removed…) are not this app's to clean.
     else if(!entry.name.startsWith('.')) await walk(child,root,items,signal,scan);
     if(scan&&top){scan.state.done++;scan.state.file=path.relative(root,child);scan.emit();}
@@ -191,7 +193,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
       if(item.kind==='folder'||item.kind==='temporary'||item.stat.isDirectory()) {
         if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
         // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
-        if(item.kind==='folder') await fs.rmdir(item.path); else await fs.rm(item.path,{recursive:true});
+        if(item.kind==='folder') await fs.rmdir(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
       } else {
         if(!now.isFile()||!sameStat(now,item.stat)) continue;
         await fs.unlink(item.path);
