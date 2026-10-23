@@ -882,7 +882,7 @@ const claimDirect=(key:string)=>{let release!:()=>void;const done=new Promise<vo
 const unclaimDirect=(key:string)=>{const claim=claimedDirect.get(key);claimedDirect.delete(key);claim?.release();};
 const NOT_DIRECT=Symbol('not-direct');
 const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=2n**63n;
-interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;}
+interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;/** This run created the name with O_EXCL: only then may it ever remove the file. */created:boolean;}
 async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,signal:AbortSignal|undefined,hooks:{bytes:(count:number)=>void;done:(entry:PlanEntry)=>void}):Promise<'done'|'staged'> {
   const {transfer,recovery,result}=run,index=run.index!,root=transfer.root,sums=new Map<string,string>(),members:DirectMember[]=[];
   const resolve:Resolve=async entry=>{
@@ -932,7 +932,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
           owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
           await clearPartialRecord(prior,root,recovery,'lazy');
         }
-        return {entry,destination,output,owned,initial:Number(stat.size),synthetic:syntheticIno(owned===prior?prior.stat:stat),fields,claim,closed:false};
+        return {entry,destination,output,owned,initial:Number(stat.size),synthetic:syntheticIno(owned===prior?prior.stat:stat),fields,claim,closed:false,created:false};
       }
       catch(error) { unclaimDirect(claim);await output.close().catch(()=>{});throw error; }
     }
@@ -952,7 +952,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       }
       const owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
       await clearPartialRecord(creating,root,recovery,'lazy');
-      return {entry,destination,output,owned,initial:0,synthetic:syntheticIno(stat),fields,claim,closed:false};
+      return {entry,destination,output,owned,initial:0,synthetic:syntheticIno(stat),fields,claim,closed:false,created:true};
     } catch(error) { unclaimDirect(claim);await output.close().catch(()=>{});throw error; }
   };
   const exact=await familyPaths(family);
@@ -1011,9 +1011,9 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     if(options.verify!==false) {
       const check=await digest(destination,signal);
       if(check!==streamed) {
-        // This process created the file and still holds it: only that identity is ever removed.
+        // Only a file this run created with O_EXCL and still holds is ever removed; a resumed one may hold bytes that are not ours.
         const held=await output.stat({bigint:true}),named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-        if(named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);await release({...entry,digest:streamed},destination,member.owned);}
+        if(member.created&&named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);await release({...entry,digest:streamed},destination,member.owned);}
         throw new Error(`Destination verification failed: ${destination}`);
       }
     }

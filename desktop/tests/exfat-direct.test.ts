@@ -163,6 +163,48 @@ test('identical files with one destination name, copied in the same run, finish 
   await assertNothingOwned(env.root);
 });
 
+/** While `t` lives, the first byte of the first block written to each named file (under `root`) is flipped on its way to the disk, as a failing drive would. */
+async function corruptWrites(t:test.TestContext,root:string,names:string[]) {
+  const probe=await fs.open(root,'r');await probe.close();
+  const proto=Object.getPrototypeOf(probe) as {write:(...args:unknown[])=>Promise<unknown>},write=proto.write,open=fsPatchable.open.bind(fsPatchable);
+  const paths=new WeakMap<object,string>(),done=new Set<string>();
+  t.mock.method(fsPatchable,'open',async(...args:Parameters<typeof fsPatchable.open>)=>{const handle=await open(...args);paths.set(handle,String(args[0]));return handle;});
+  syncBuiltinESMExports();
+  proto.write=function(this:object,...args:unknown[]){
+    const file=paths.get(this);
+    if(file&&file.startsWith(root+path.sep)&&names.includes(path.basename(file))&&!done.has(file)){done.add(file);const buffer=args[0] as Buffer;buffer[args[1] as number]^=1;}
+    return write.apply(this,args);
+  };
+  t.after(()=>{proto.write=write;t.mock.restoreAll();syncBuiltinESMExports();});
+  return ()=>{proto.write=write;t.mock.restoreAll();syncBuiltinESMExports();};
+}
+
+test('a read-back mismatch removes a file this run created, with its receipts, and reports the error',async t=>{
+  const env=await ready(t);if(!env) return;
+  const restore=await corruptWrites(t,env.root,['DSC_0003.NEF']);
+  const result=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!);
+  restore();
+  assert.ok(result.errors.some(error=>error.startsWith('DSC_0003.NEF')&&/verification failed/.test(error)),result.errors.join(' | '));
+  assert.ok(!(await media(env.root)).some(file=>path.basename(file)==='DSC_0003.NEF'),'the corrupt file was removed');
+  for(const file of await leftovers(env.root)) if(file.endsWith('.json')) assert.ok(!(await fs.readFile(file,'utf8')).includes('DSC_0003.NEF'),'its receipts were released');
+  await reimport(env.card,env.root);
+});
+
+test('a read-back mismatch in a file resumed from an earlier run keeps the file and its receipt',async t=>{
+  const env=await ready(t);if(!env) return;
+  await crash(env.card,env.root,'mid-stream');
+  let partial:string|undefined;
+  for(const file of await media(env.root)) {const size=(await fs.stat(file)).size;if(size>0&&size<(await fs.stat(path.join(env.card,path.basename(file)))).size){partial=file;break;}}
+  assert.ok(partial,'the killed run left a partial file');
+  const restore=await corruptWrites(t,env.root,[path.basename(partial!)]);
+  const result=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!);
+  restore();
+  assert.ok(result.errors.some(error=>error.startsWith(path.basename(partial!))&&/verification failed/.test(error)),result.errors.join(' | '));
+  assert.ok(await fs.lstat(partial!).then(()=>true,()=>false),'the file this run did not create stays');
+  const receipts=await Promise.all((await leftovers(env.root)).filter(file=>file.endsWith('.json')).map(file=>fs.readFile(file,'utf8').catch(()=>'')));
+  assert.ok(receipts.some(text=>text.includes(path.basename(partial!))),'its receipt stays');
+});
+
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{
   const env=await ready(t);if(!env) return;
   const reads=new Map<string,number>(),opened:string[]=[],proto=await (async()=>{const probe=await fs.open(env.root,'r');await probe.close();return Object.getPrototypeOf(probe) as {sync:()=>Promise<void>};})();
