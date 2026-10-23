@@ -145,3 +145,20 @@ test('the loop stops entirely while hidden and idle, and resumes on wake', async
   loop.stop(); loop.wake(); await flush();
   assert.equal(samples, 3, 'stopped loops stay stopped');
 });
+
+test('the costly media listing backs off exponentially, up to 5 minutes, while a wanted disk never maps', async () => {
+  const media: number[] = [];
+  let clock = 0;
+  const sampler = createDriveSampler({ now: () => clock, mediaRetryMs: 10000, run: async withMedia => { if (withMedia) media.push(clock); return withMedia ? a : a; } });
+  sampler.setTargets({ ghost: ['disk99'] });
+  for (; clock <= 1_500_000; clock += 5000) await sampler.sample();
+  const gaps = media.slice(1).map((at, index) => at - media[index]!);
+  assert.deepEqual(gaps.slice(0, 4), [20000, 40000, 80000, 160000]);
+  assert.ok(gaps.slice(4).every(gap => gap === 300000), 'capped at 5 minutes');
+  // A newly wanted disk is looked for without waiting out the backoff.
+  const known = [...parseDiskMap(a).values()].flat()[0]!;
+  const before = media.length; clock += 1000;
+  sampler.setTargets({ ghost: ['disk99'], real: [known] });
+  await sampler.sample();
+  assert.equal(media.length, before + 1);
+});

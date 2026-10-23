@@ -8,6 +8,7 @@ const exec = promisify(execFile);
 /** Cumulative IOBlockStorageDriver "Statistics" of one block-storage driver (one physical disk). */
 export interface Counters {readBytes:number;writeBytes:number;readOps:number;writeOps:number;readNs:number;writeNs:number;}
 export const HISTORY_LENGTH = 60;
+const MEDIA_RETRY_CAP = 300000;
 /** disk6s2 -> disk6; undefined when the name is not a BSD disk name. */
 export function wholeDisk(name:string|undefined):string|undefined {return name?.match(/^(disk\d+)(?:s\d+)*$/)?.[1];}
 /** A volume's physical identity is one whole disk, or several joined with "+" (APFS container over a Fusion pair). */
@@ -103,19 +104,23 @@ export interface SamplerOptions {
 }
 export function createDriveSampler(options:SamplerOptions):DriveSampler {
   const now=options.now??(()=>performance.now()),length=options.historyLength??HISTORY_LENGTH,retry=options.mediaRetryMs??10000;
-  let targets:Record<string,string[]>={},diskMap=new Map<number,string[]>(),lastMedia=-Infinity;
+  let targets:Record<string,string[]>={},diskMap=new Map<number,string[]>(),lastMedia=-Infinity,misses=0,wantedKey='';
   const previous=new Map<string,{at:number;counters:Counters}>(),history=new Map<string,number[]>(),latest=new Map<string,Rates>();
   return {
     setTargets(next){targets=next;},
     async sample(){
       const wanted=new Set(Object.values(targets).flat());
       if(!wanted.size)return {};
+      const key=[...wanted].sort().join('|'),changed=key!==wantedKey;
+      if(changed){wantedKey=key;misses=0;}
       let at=now(),stats=parseStatistics(await options.run(false));
       const mapped=new Set([...diskMap.values()].flat());
       const stale=[...stats.keys()].some(id=>!diskMap.has(id))||[...diskMap.keys()].some(id=>!stats.has(id));
-      if((stale||[...wanted].some(disk=>!mapped.has(disk)))&&at-lastMedia>=retry){
+      if((stale||[...wanted].some(disk=>!mapped.has(disk)))&&(changed||at-lastMedia>=Math.min(MEDIA_RETRY_CAP,retry*2**misses))){
         const xml=await options.run(true);at=now();lastMedia=at;
         diskMap=parseDiskMap(xml);stats=parseStatistics(xml);
+        // A wanted disk that still does not map (not a block-storage disk) must not cost a full listing every few seconds.
+        misses=[...wanted].every(disk=>[...diskMap.values()].some(names=>names.includes(disk)))?0:Math.min(misses+1,20);
       }
       // A disk with several drivers (rare) adds their counters.
       const byDisk=new Map<string,Counters>();
