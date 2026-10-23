@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {bothNames,FirstAidError,maybeLstat,renameChecked,storeFolder,writeNewFile,type Store} from '../app-store';
 import {journalConversion,JOURNAL,ORGANIZATIONS,RECOVERY_FOLDER,type ConversionTarget,type LegacyJournal} from '../recovery';
 import {code,contained,syncDirectory} from '../paths';
-import {bookkeepingOnly,deleted,hit,message,passThrough,pool,type MigrationContext} from './common';
+import {bookkeepingOnly,deleted,deletedDetail,hit,message,passThrough,pool,type MigrationContext} from './common';
 
 const temporaryName=/^journal-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
 /** Names the earlier version wrote in a journal folder; only these are removed from it. */
@@ -35,7 +35,7 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
   try{
    // Where an earlier run committed it, even if the store its library writes to has changed since.
    const holders=await journalConversion.holders(root,id),committed=holders[0]!;
-   if(holders.length===1&&(await journalConversion.convertedFromOf(committed))?.path===folder&&(await journalConversion.replay(committed,committed.journal,root,id)).state.migrationComplete){
+   if(holders.length===1&&(await journalConversion.convertedFromOf(committed))?.path===folder&&(await journalConversion.replay(committed,committed.journal,root,id,undefined,context.signal)).state.migrationComplete){
     const kept=await removeLegacyJournal(folder,root,context);await hit(context,'N8');journalConversion.forget(id);return kept;
    }
   }catch(error){if(passThrough(error))throw error;/* Read in full below, which reports what is wrong. */}
@@ -153,12 +153,19 @@ async function removeLegacyJournal(folder:string,root:string,context:MigrationCo
  const names=(await fs.readdir(folder)).filter(name=>legacyJournalFile.test(name));
  let done=0;const total=names.length,report=(file:string)=>context.onProgress?.({step:'removing',completed:done,total,file});
  report('');
- await pool(names,8,async name=>{
-  context.signal?.throwIfAborted?.();
-  await fs.unlink(path.join(folder,name)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
-  done++;if(done%64===0||done===total)report(name);
- });
- if(total)deleted(folder,'earlier version\'s journal records converted','migration-complete recorded in the converted journal; names this version wrote',{files:total});
+ // Each file is logged as it goes (detailed), and the count actually removed (normal) even when a job, Pause or quit stops it part-way.
+ const reason='earlier version\'s journal records converted',proof='migration-complete recorded in the converted journal; names this version wrote';
+ let removed=0;
+ try{
+  await pool(names,8,async name=>{
+   context.signal?.throwIfAborted?.();
+   const file=path.join(folder,name);
+   if(await fs.unlink(file).then(()=>true,error=>{if(code(error)!=='ENOENT')throw error;return false;})){removed++;deletedDetail(file,reason);}
+   done++;if(done%64===0||done===total)report(name);
+  });
+ }finally{
+  if(removed)deleted(folder,reason,proof,{files:removed,of:total});
+ }
  await hit(context,'N8:partial');
  // Emptied kept-original folders, deepest first (each holds at most Finder's bookkeeping).
  const unexpected:string[]=[];

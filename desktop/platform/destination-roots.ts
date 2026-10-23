@@ -4,12 +4,14 @@ import type {DestinationStatus,Preferences,Source} from '../shared';
 import {makeParent,syncParents,within} from '../core/paths';
 import {mountedVolumes,validateDestination,type MountedVolume} from './volumes';
 import {message,MessageError,type Message} from '../messages';
+import {isRecordFolderName} from '../core/legacy-names';
 
 /** The backup folders on each destination: the photo one, and in the video-root layout the video one. */
 export function backupFolders(prefs:Pick<Preferences,'basePath'|'mediaLayout'|'videoBasePath'>):string[] {
  return prefs.mediaLayout==='video-root'?[prefs.basePath,prefs.videoBasePath]:[prefs.basePath];
 }
-const unsafeFolder=(folder:string)=>{const parts=folder.split('/');return path.isAbsolute(folder)||parts.some(p=>!p||p==='.'||p==='..'||/[\\\0:]/.test(p));};
+/** A backup folder may not be, or lie in, one of the app's record folders (Photo Importer Data, Photo Importer Recovery): those are skipped by every listing. */
+const unsafeFolder=(folder:string)=>{const parts=folder.split('/');return path.isAbsolute(folder)||parts.some(p=>!p||p==='.'||p==='..'||/[\\\0:]/.test(p)||isRecordFolderName(p));};
 
 /** Validate the destinations a copy policy needs and create their backup folders. `sources`
  * are every connected source (none may hold a destination); `importing`, when given, is the one

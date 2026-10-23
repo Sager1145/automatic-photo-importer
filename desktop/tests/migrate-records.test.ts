@@ -185,6 +185,19 @@ test('R: a direct copy\'s receipts keep their direct fields: one that binds tole
  assert.ok([...(await openReceiptsFor(f.destination)).values()].some(record=>record.file===f.entry.destination),'the tolerant one stays open');
 });
 
+test('R: the receipt walk never enters the folder unknown files are filed in (the default name, or the one configured)',async t=>{
+ for(const folder of [undefined,'No date'] as const){
+  const f=await card(t);
+  const unknown=path.join(f.transfer.root,folder??'Unknown files');await fs.mkdir(unknown,{recursive:true});
+  const kept=path.join(unknown,'DSC_0001.NEF');await fs.writeFile(kept,f.bytes.subarray(0,10));
+  const inside=await legacyReceipt(await f.record('publication',kept,{destination:kept}));
+  const outside=await legacyReceipt(await f.record('publication',path.join(path.dirname(f.entry.destination),'GONE.NEF'),{destination:path.join(path.dirname(f.entry.destination),'GONE.NEF')}));
+  assert.deepEqual((await migrateDrive([f.destination],folder?{ignoreFolders:[folder]}:{})).problems,[]);
+  assert.ok(await exists(inside),'the receipt inside it is left as it is');
+  assert.equal(await exists(outside),false,'one elsewhere is handled');
+ }
+});
+
 // ---- C: caches ----
 test('C: the earlier version\'s index, duplicate store and drive markers are moved into the store, sealed; the old files go',async t=>{
  for(const point of [undefined,'C:written'] as const){

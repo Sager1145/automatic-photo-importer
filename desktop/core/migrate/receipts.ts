@@ -97,7 +97,9 @@ async function convertReceipt(receipt:string,walkRoot:string,context:MigrationCo
 /** R: every earlier-version receipt in the folders under `root` (record folders and hidden folders aside), counted
  * by top-level folder. Returns how many receipt files were looked at. */
 export async function convertReceipts(root:string,context:MigrationContext):Promise<number>{
- const top=(await fs.readdir(root,{withFileTypes:true}).catch(()=>[])).filter(entry=>entry.isDirectory()&&!entry.name.startsWith('.')&&!isRecoveryName(entry.name));
+ // Hidden folders, record folders and the folder unknown files are filed in are never entered.
+ const ignored=new Set((context.ignoreFolders??[]).map(name=>name.toLowerCase())),enter=(entry:{name:string;isDirectory():boolean})=>entry.isDirectory()&&!entry.name.startsWith('.')&&!isRecoveryName(entry.name)&&!ignored.has(entry.name.toLowerCase());
+ const top=(await fs.readdir(root,{withFileTypes:true}).catch(()=>[])).filter(enter);
  const sets=new OpenSets();
  let done=0,seen=0;const total=top.length+1,report=(file:string)=>context.onProgress?.({step:'receipts',completed:done,total,file});
  const walk=async(folder:string):Promise<void>=>{
@@ -109,7 +111,7 @@ export async function convertReceipts(root:string,context:MigrationContext):Prom
    try{await convertReceipt(path.join(folder,entry.name),root,context,sets);}
    catch(error){if(passThrough(error))throw error;context.problems.push(`An earlier version's receipt was kept: ${path.join(folder,entry.name)} (${message(error)})`);}
   }
-  for(const entry of entries)if(entry.isDirectory()&&!entry.name.startsWith('.')&&!isRecoveryName(entry.name))await walk(path.join(folder,entry.name));
+  for(const entry of entries)if(enter(entry))await walk(path.join(folder,entry.name));
  };
  report(path.basename(root));
  // The root's own files first, then each top-level folder in full.

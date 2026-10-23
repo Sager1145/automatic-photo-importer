@@ -14,8 +14,8 @@ async function seed(ctx:Context,folder=path.join(ctx.root,'destination')){
  await fs.copyFile(path.join(ctx.root,'source-1','photo.png'),path.join(folder,`unorganized-${seeded}.png`));
  await fs.copyFile(path.join(ctx.root,'source-1','clip.mp4'),path.join(folder,`unorganized-${seeded}.mp4`));
 }
-/** Every check leaves the backup folder where imports expect it. */
-async function withBasePath(h:Harness,basePath:string,run:()=>Promise<void>){try{await h.prefs({basePath});await run();}finally{await h.prefs({basePath:'photobackup'});}}
+/** Every check leaves the backup folder (and the unknown-files choice) where imports expect them. The seeded files carry no metadata, so these checks file them by file date; by default they would be left in place. */
+async function withBasePath(h:Harness,basePath:string,run:()=>Promise<void>){try{await h.prefs({basePath,noMetadataHandling:'fileDate'});await run();}finally{await h.prefs({basePath:'photobackup',noMetadataHandling:'keep'});}}
 const idle=(h:Harness,label:string)=>h.waitFor(label,async()=>!(await h.state()).jobs.some(job=>running.includes(job.phase)),{timeoutMs:60000});
 
 export const organizationChecks=(ctx:Context):Check[]=>[

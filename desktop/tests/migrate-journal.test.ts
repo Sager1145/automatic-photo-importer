@@ -210,3 +210,54 @@ test('a library renamed only by case converts; its journal keeps the name it rec
  await fs.rename(renamed,f.root);
  await converted(f);
 });
+
+/** What main's interim compaction (4af7b14) left: the event files' records missing from event-log.jsonl appended to it
+ * in folder order, then (fully) the event files removed, or (partly, stopped before removing) all still there. */
+async function compact(folder:string,removeFiles:boolean){
+ const names=(await fs.readdir(folder)).filter(name=>/^event-[a-f0-9-]+\.json$/.test(name));
+ const log=path.join(folder,'event-log.jsonl'),existing=new Set((await fs.readFile(log,'utf8').catch(()=>'')).split('\n').map(line=>line.trim()).filter(Boolean));
+ const missing=[...new Set(await Promise.all(names.map(async name=>(await fs.readFile(path.join(folder,name),'utf8')).trim())))].filter(text=>!existing.has(text));
+ if(missing.length)await fs.appendFile(log,missing.join('\n')+'\n');
+ if(removeFiles)for(const name of names)await fs.unlink(path.join(folder,name));
+ return names.length;
+}
+for(const removeFiles of [true,false])test(`a journal main's interim compaction ${removeFiles?'fully compacted (event-log.jsonl only)':'partly compacted (the same records in the log and in event files)'} reads the same, each record once, and converts`,async t=>{
+ const {journalConversion}=await import('../core/recovery');
+ for(const format of ['files','both'] as const){
+  const f=await legacyLibrary(t,format);
+  const before=await journalConversion.read(f.root,f.id);
+  assert.ok(await compact(f.legacy,removeFiles)>0);
+  journalConversion.forget(f.id);
+  const after=await journalConversion.read(f.root,f.id);
+  assert.equal(after.records.length,before.records.length,`${format}: each record applied once`);
+  assert.ok(journalConversion.same(after.state,before.state),`${format}: the same state`);
+  assert.deepEqual((await migrateDrive([f.root])).problems,[]);
+  await converted(f);
+ }
+});
+
+test('N8 stopped part-way (a job, Pause or quit) logs every file it removed and the count actually removed',async t=>{
+ const {configureLogger,resetLogger}=await import('../logger');
+ const {signV1}=await import('./fixtures/legacy-records');
+ const {randomUUID}=await import('node:crypto');
+ const f=await legacyLibrary(t,'files');
+ for(let index=0;index<300;index++)await fs.writeFile(path.join(f.legacy,`event-${randomUUID()}.json`),JSON.stringify(signV1({id:f.id,root:f.root,event:'checked',index:0,at:new Date(Date.UTC(2026,9,21,0,0,0,index)).toISOString()})));
+ const before=(await fs.readdir(f.legacy)).filter(name=>name.startsWith('event-')).length;
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'n8-logs-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const logger=configureLogger({dir,level:'detailed'});t.after(resetLogger);
+ const controller=new AbortController();
+ await assert.rejects(migrateDrive([f.root],{signal:controller.signal,onProgress:progress=>{if(progress.step==='removing'&&progress.completed>=64)controller.abort();}}),{name:'AbortError'});
+ await logger.flush();
+ const lines=(await Promise.all((await fs.readdir(dir)).map(name=>fs.readFile(path.join(dir,name),'utf8')))).join('').split('\n').filter(Boolean).map(line=>JSON.parse(line) as {level?:string;area?:string;event?:string;fields?:Record<string,unknown>;[key:string]:unknown});
+ const field=(line:typeof lines[number],key:string)=>line.fields?.[key]??line[key];
+ const gone=before-(await fs.readdir(f.legacy)).filter(name=>name.startsWith('event-')).length;
+ assert.ok(gone>0&&gone<before,`stopped part-way (${gone} of ${before})`);
+ const perFile=lines.filter(line=>line.area==='migrate'&&line.event==='file-deleted'&&String(field(line,'path')).startsWith(path.join(f.legacy,'event-')));
+ assert.equal(perFile.length,gone,'each removed file is logged');
+ const summary=lines.find(line=>line.area==='migrate'&&line.event==='file-deleted'&&field(line,'path')===f.legacy);
+ assert.equal(field(summary!,'files'),gone,'the count actually removed');
+ // The next run finishes.
+ resetLogger();
+ assert.deepEqual((await migrateDrive([f.root])).problems,[]);
+ await converted(f);
+});

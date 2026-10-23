@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import {UNKNOWN_FILES_FOLDER} from '../../shared';
 import {maybeLstat,openV5,sealV5,storesFor,writeNewFile} from '../app-store';
 import {indexLocations,indexTarget} from '../destination-index';
 import {journalConversion,RECOVERY_FOLDER} from '../recovery';
@@ -38,7 +39,7 @@ export interface ConversionResult {/** Journals converted (or finished) this run
  * folders): journals with their kept originals, then pointers (in those folders and in every folder a converted
  * journal leaves pointers in), import receipts and staged copies, caches, and finally the old record folders. */
 export async function migrateDrive(roots:string[],options:Omit<MigrationContext,'problems'>&{/** The folders whose receipts are walked (default: `roots`). */walk?:string[]}={}):Promise<ConversionResult>{
- const context:MigrationContext={...options,problems:[]};
+ const context:MigrationContext={ignoreFolders:[UNKNOWN_FILES_FOLDER],...options,problems:[]};
  const report=(step:'looking'|'cleanup'|'caches',completed:number,total:number,file:string)=>context.onProgress?.({step,completed,total,file});
  const unique:string[]=[];
  for(const root of roots){const real=await fs.realpath(root).catch(()=>undefined);if(real&&!unique.includes(real))unique.push(real);}

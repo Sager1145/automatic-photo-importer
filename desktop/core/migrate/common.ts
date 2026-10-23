@@ -1,10 +1,12 @@
 import * as fs from 'node:fs/promises';
 import {isAbort} from '../paths';
 import {APPLEDOUBLE_MAX_BYTES,inspectAppleDouble} from '../appledouble';
-import {logDeletion} from '../../logger';
+import {log,logDeletion} from '../../logger';
 
 /** Log a file or folder the converter deletes, with why and what proved it safe. */
 export const deleted=(file:string,reason:string,proof:string,fields?:Record<string,string|number|boolean>)=>logDeletion('migrate',file,reason,proof,fields);
+/** One of many files a step deletes, logged at the detailed level (the step logs their count at the normal level with `deleted`). */
+export const deletedDetail=(file:string,reason:string)=>log('detailed','migrate','file-deleted',{path:file,reason});
 
 /** The converter's steps, as the interface shows them. */
 export type MigrationStep='looking'|'converting'|'originals'|'removing'|'receipts'|'caches'|'cleanup';
@@ -12,7 +14,7 @@ export interface MigrationProgress {step:MigrationStep;completed:number;total:nu
 /** Called right after each step's change is durable, with the step's name (N1…N9, P1, R1…R3, C, F): tests stop the
  * converter there to check that the next run finishes from what is on disk. */
 export type CrashPoint=(point:string)=>void|Promise<void>;
-export interface MigrationContext {signal?:AbortSignal;onProgress?:(progress:MigrationProgress)=>void;crash?:CrashPoint;problems:string[];}
+export interface MigrationContext {signal?:AbortSignal;onProgress?:(progress:MigrationProgress)=>void;crash?:CrashPoint;problems:string[];/** Folders the receipt walk never enters, by name (the no-metadata "Unknown files" folder). */ignoreFolders?:string[];}
 /** What a test's crash point throws: never caught by the converter's own error handling. */
 export class SimulatedCrash extends Error {constructor(readonly point:string){super(`Simulated crash at ${point}`);this.name='SimulatedCrash';}}
 /** Errors a step must not swallow: a stop, or a simulated crash. */
