@@ -177,15 +177,18 @@ export function activityTargets(volumes:Pick<MountedVolume,'path'|'physicalId'>[
 
 export interface ActivityLoopOptions {
   sampler:DriveSampler;
-  /** Faster sampling while the window is visible or work is running. */
-  fast():boolean;
+  /** True while the window is visible or a job, scan or review runs; the loop stops entirely otherwise. */
+  wanted():boolean;
   publish(activity:Record<string,DriveActivity>):void;
-  intervals?:{fast:number;slow:number};
+  intervals?:{fast:number};
+  timers?:{set(fn:()=>void,ms:number):ReturnType<typeof setTimeout>;clear(handle:ReturnType<typeof setTimeout>):void};
 }
-/** Samples every second (every 5 s when nobody is looking) and publishes only when a shown value changed. */
-export function startActivityLoop(options:ActivityLoopOptions):{stop():void;tick():Promise<void>} {
-  const intervals=options.intervals??{fast:1000,slow:5000};
-  let stopped=false,timer:ReturnType<typeof setTimeout>|undefined,last='';
+/** Samples every second while wanted and publishes only when a shown value changed. When nothing is
+ * wanted (window hidden or minimized, no work) no timer is left running; wake() restarts it. */
+export function startActivityLoop(options:ActivityLoopOptions):{stop():void;tick():Promise<void>;wake():void} {
+  const interval=options.intervals?.fast??1000;
+  const timers=options.timers??{set:(fn,ms)=>{const handle=setTimeout(fn,ms);handle.unref?.();return handle;},clear:handle=>clearTimeout(handle)};
+  let stopped=false,timer:ReturnType<typeof setTimeout>|undefined,running=false,last='';
   async function tick(){
     try{
       const activity=await options.sampler.sample();
@@ -194,9 +197,13 @@ export function startActivityLoop(options:ActivityLoopOptions):{stop():void;tick
     }catch{/* The meter is optional: a failed reading just leaves the last values. */}
   }
   function loop(){
-    if(stopped)return;
-    void tick().finally(()=>{if(!stopped){timer=setTimeout(loop,options.fast()?intervals.fast:intervals.slow);timer.unref?.();}});
+    timer=undefined;
+    if(stopped||running)return;
+    if(!options.wanted())return;
+    running=true;
+    void tick().finally(()=>{running=false;if(!stopped&&options.wanted())timer=timers.set(loop,interval);});
   }
+  function wake(){if(stopped||running||timer!==undefined)return;loop();}
   loop();
-  return {stop(){stopped=true;if(timer)clearTimeout(timer);},tick};
+  return {stop(){stopped=true;if(timer!==undefined)timers.clear(timer);timer=undefined;},tick,wake};
 }

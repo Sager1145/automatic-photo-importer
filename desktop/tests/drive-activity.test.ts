@@ -80,7 +80,7 @@ test('targets map sources and destinations to whole disks through their volume',
 test('the loop publishes only when a shown value changed', async () => {
   const values: Record<string, DriveActivity>[] = [{ x: { utilization: 1, readBps: 0, writeBps: 0, iops: 0, history: [1] } }, { x: { utilization: 1, readBps: 0, writeBps: 0, iops: 0, history: [1] } }, { x: { utilization: 2, readBps: 0, writeBps: 0, iops: 0, history: [1, 2] } }];
   let n = 0; const published: unknown[] = [];
-  const loop = startActivityLoop({ sampler: { setTargets() {}, sample: async () => values[Math.min(n++, 2)]! }, fast: () => true, publish: value => published.push(value), intervals: { fast: 1e9, slow: 1e9 } });
+  const loop = startActivityLoop({ sampler: { setTargets() {}, sample: async () => values[Math.min(n++, 2)]! }, wanted: () => true, publish: value => published.push(value), intervals: { fast: 1e9 } });
   await loop.tick(); await loop.tick(); await loop.tick(); loop.stop();
   assert.ok(published.length >= 2 && published.length <= 3);
 });
@@ -115,4 +115,33 @@ test('the dashboard total counts drives sharing one disk once and takes the busi
   const state = { driveActivity: { a: sample, b: { ...sample }, c: other } } as unknown as AppState;
   assert.deepEqual(totalDriveActivity(state, ['a', 'b', 'c']), { utilization: 80, readBps: sample.readBps + 1000, writeBps: sample.writeBps + other.writeBps, count: 2 });
   assert.equal(totalDriveActivity(state, ['zzz']), undefined);
+});
+
+test('the loop stops entirely while hidden and idle, and resumes on wake', async () => {
+  let wanted = false, samples = 0;
+  const scheduled: { fn: () => void; ms: number; cleared: boolean }[] = [];
+  const timers = {
+    set: (fn: () => void, ms: number) => { const entry = { fn: () => { entry.cleared = true; fn(); }, ms, cleared: false }; scheduled.push(entry); return entry as unknown as ReturnType<typeof setTimeout>; },
+    clear: (handle: unknown) => { (handle as { cleared: boolean }).cleared = true; },
+  };
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const loop = startActivityLoop({ sampler: { setTargets() {}, sample: async () => { samples++; return {}; } }, wanted: () => wanted, publish() {}, timers });
+  await flush();
+  assert.equal(samples, 0, 'no sampling at all while hidden and idle');
+  assert.equal(scheduled.filter(entry => !entry.cleared).length, 0, 'no timer is left pending');
+  wanted = true; loop.wake(); loop.wake();
+  await flush();
+  assert.equal(samples, 1, 'wake resumes sampling once');
+  const next = scheduled.filter(entry => !entry.cleared);
+  assert.equal(next.length, 1); assert.equal(next[0]!.ms, 1000);
+  next[0]!.fn(); await flush();
+  assert.equal(samples, 2);
+  wanted = false;
+  scheduled.filter(entry => !entry.cleared)[0]!.fn(); await flush();
+  assert.equal(samples, 2, 'hidden again: the tick that finds nothing wanted does not sample or reschedule');
+  assert.equal(scheduled.filter(entry => !entry.cleared).length, 0);
+  wanted = true; loop.wake(); await flush();
+  assert.equal(samples, 3);
+  loop.stop(); loop.wake(); await flush();
+  assert.equal(samples, 3, 'stopped loops stay stopped');
 });
