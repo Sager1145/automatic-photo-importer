@@ -1,4 +1,4 @@
-import type {AppState} from './shared';
+import type {AppState,Job,JobIssueGroup} from './shared';
 import {message as makeMessage,text,type Message} from './messages';
 
 export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
@@ -32,24 +32,41 @@ export function driveName(location:string,fallback:string):string{return /^\/Vol
 // FNV-1a: short ids that main and renderer compute alike.
 function hash(value:string):string{let result=0x811c9dc5;for(let index=0;index<value.length;index++){result^=value.charCodeAt(index);result=Math.imul(result,0x01000193);}return (result>>>0).toString(36)+value.length.toString(36);}
 
+/** A job error's or issue group's id, kept with the entry: computed when it is recorded (see job-issues), so gathering only reads it.
+ * The renderer gets its own copies over the wire and computes the same id once per copy. Messages and groups are never edited into another problem. */
+const ids=new WeakMap<Message|JobIssueGroup,string>();
+export function entryId(job:Pick<Job,'id'|'source'>,entry:Message|JobIssueGroup):string{
+ let id=ids.get(entry);
+ if(id===undefined){id='key' in entry?hash(`job:${job.id}|${job.source.name}|${JSON.stringify(entry)}`):hash(`group|${job.id}|${entry.code}|${entry.severity}`);ids.set(entry,id);}
+ return id;
+}
+/** True when the user skipped this code for the job. */
+export function isAcknowledged(job:Pick<Job,'acknowledged'>,code:string):boolean{return !!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));}
+
+/** Change counts of the lists that grow in place: a job's errors, its groups (a new group or a count) and a group's paths.
+ * Writers (job-issues) mark each change; a list replaced whole is a new object and starts at 0. */
+const versions=new WeakMap<object,number>();
+export function markChanged(list:object){versions.set(list,(versions.get(list)??0)+1);}
+export function versionOf(list:object):number{return versions.get(list)??0;}
+
 /** Every problem the state carries. A job's errors belong to that job, so the same failure in a later import is a new error. */
 export function gatherErrors(state:AppState):LoggedError[]{
- const result:LoggedError[]=[],ids=new Set<string>();
- const add=(scope:string,source:string,location:string,message:Message|undefined,kind:ErrorKind,sourceId?:string,jobId?:string)=>{
-  if(!message)return;const id=hash(`${scope}|${source}|${JSON.stringify(message)}`);if(ids.has(id))return;ids.add(id);
+ const result:LoggedError[]=[],seen=new Set<string>();
+ const added=(id:string,source:string,location:string,message:Message,kind:ErrorKind,sourceId?:string,jobId?:string)=>{
+  if(seen.has(id))return;seen.add(id);
   result.push({id,code:codeOf(message),source,drive:location?driveName(location,source):'',message,kind,severity:severityOf(message,kind),...(sourceId?{sourceId}:{}),...(jobId?{jobId}:{})});
  };
+ const add=(scope:string,source:string,location:string,message:Message|undefined,kind:ErrorKind,sourceId?:string)=>{if(message)added(hash(`${scope}|${source}|${JSON.stringify(message)}`),source,location,message,kind,sourceId);};
  const raw=(value?:string)=>value?text(value):undefined;
  const issue=(item:{path:string;message:string}):Message=>({key:'text',params:{text:`${item.path}: ${item.message}`,code:'unreadable',path:item.path}});
  add('app','','',state.error,'app');
  for(const job of state.jobs){
   const kind:ErrorKind=job.organization?'organization':'source',id=job.organization?undefined:job.source.id,{name,path}=job.source;
-  const skipped=(code:string)=>!!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));
-  for(const error of job.errors)if(!skipped(codeOf(error)))add('job:'+job.id,name,path,error,kind,id,job.id);
+  for(const error of job.errors)if(!isAcknowledged(job,codeOf(error)))added(entryId(job,error),name,path,error,kind,id,job.id);
   for(const item of job.inventory?.issues??[])add('issue:'+job.source.id,name,path,issue(item),'metadata',id);
   for(const group of job.groups??[]){
-   if(skipped(group.code))continue;
-   const groupId=hash(`group|${job.id}|${group.code}|${group.severity}`);if(ids.has(groupId))continue;ids.add(groupId);
+   if(isAcknowledged(job,group.code))continue;
+   const groupId=entryId(job,group);if(seen.has(groupId))continue;seen.add(groupId);
    result.push({id:groupId,code:group.code,source:name,drive:driveName(path,name),message:makeMessage('issue.group',{code:group.code,count:group.count}),kind,severity:group.severity,count:group.count,items:group.items,...(id?{sourceId:id}:{}),jobId:job.id});
   }
   if(job.phase==='error'&&!job.errors.length&&!job.acknowledged&&!(job.groups??[]).some(group=>group.severity==='error'))add('job:'+job.id,name,path,job.detail,kind,id);
@@ -97,25 +114,22 @@ export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:str
  if(errors.some(error=>error.kind==='app'))state.error=undefined;
 }
 
-/** A cheap fingerprint of everything gatherErrors reads: counts and short strings, never the paths. Equal fingerprints mean equal errors. */
-export function errorSignature(state:AppState):string{
- const parts:(string|number)[]=[state.error?JSON.stringify(state.error):''];
+/** What the log is built from: the change count of each list that grows in place, and the identity of every value that is only ever replaced whole. */
+function errorInputs(state:AppState,log:ErrorLog):unknown[]{
+ const inputs:unknown[]=[log.revision,state.error,state.sources,state.organizationRecovery,state.destinationStatus];
  for(const job of state.jobs){
-  let grouped=0;for(const group of job.groups??[])grouped+=group.count;
-  parts.push(job.id,job.errors.length,grouped,job.acknowledged?job.acknowledged.at:'',job.inventory?.issues?.length??0,job.phase==='error'&&!job.errors.length?JSON.stringify(job.detail??''):'');
+  inputs.push(job,job.errors,versionOf(job.errors),job.groups,job.groups&&versionOf(job.groups),job.acknowledged,job.inventory,job.phase==='error'&&job.detail);
  }
- for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))parts.push(id,info.issues?.length??0,info.error??'');
- for(const recovery of state.organizationRecovery??[])parts.push(recovery.id,recovery.error??'');
- for(const destination of state.destinationStatus??[])parts.push(destination.path,destination.detail??'');
- for(const source of state.sources)parts.push(source.id,state.sourceInventories?.[source.id]?.issues?.length??0);
- return parts.join('\u0001');
+ for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))inputs.push(id,info.issues,info.error);
+ for(const source of state.sources)inputs.push(state.sourceInventories?.[source.id]);
+ return inputs;
 }
 /** Rebuilds the error log only when the errors (or a clear) changed since the last emit. */
 export function createErrorLogCache(log:ErrorLog){
- let signature:string|undefined,value:ErrorLogState|undefined;
+ let inputs:unknown[]=[],value:ErrorLogState|undefined;
  return {builds:0,refresh(this:{builds:number},state:AppState,now=new Date()):ErrorLogState{
-  const next=errorSignature(state)+'\u0002'+log.revision;
-  if(value&&next===signature)return value;
-  signature=next;this.builds++;value=log.update(gatherErrors(state),now);return value;
+  const next=errorInputs(state,log);
+  if(value&&next.length===inputs.length&&next.every((item,index)=>item===inputs[index]))return value;
+  inputs=next;this.builds++;value=log.update(gatherErrors(state),now);return value;
  }};
 }

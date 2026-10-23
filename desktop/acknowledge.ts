@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {codeOf,severityOf,type Severity} from './error-log';
+import {codeOf,isAcknowledged,severityOf,type Severity} from './error-log';
 import type {Acknowledged,Job} from './shared';
 
 /** The problems a job still holds, by code: its error entries and its groups. Counting only; no path is read. */
@@ -11,8 +11,6 @@ export function jobProblems(job:Pick<Job,'errors'|'groups'>):{code:string;severi
  for(const group of job.groups??[])add(group.code,group.severity,group.count);
  return [...found.values()];
 }
-/** True when the user skipped this code for the job. */
-export function isAcknowledged(job:Pick<Job,'acknowledged'>,code:string):boolean{return !!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));}
 /** Marks problems as skipped. Nothing is changed or deleted: only the status. With no codes everything is skipped and the job ends as complete.
  * Throws a plain Error for a job that is still running or codes the job does not have. */
 export function acknowledgeJob(job:Job,codes?:string[],now=new Date()):Acknowledged{

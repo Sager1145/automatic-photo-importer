@@ -125,3 +125,38 @@ test('sidebar sources and destinations with errors show a live count that opens 
  const sources=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
  assert.ok(!sources.includes('sidebar-errors'),'the badge goes once its errors are cleared');
 });
+
+test('the error log follows real changes, not counts: an equal-length A→B replacement and B→A back',async()=>{
+ const {createErrorLogCache}=await import('../error-log');
+ const log=new ErrorLog(),cache=createErrorLogCache(log),value=state({jobs:[job({errors:[text('A')]})]});
+ const t1=new Date('2026-10-23T09:00:00Z'),t2=new Date('2026-10-23T09:05:00Z'),t3=new Date('2026-10-23T09:10:00Z');
+ const [a]=gatherErrors(value);cache.refresh(value,t1);clearErrors(log,value,{ids:[a!.id]});
+ assert.deepEqual(cache.refresh(value,t1).cleared,[a!.id]);
+ value.jobs[0]!.errors=[text('B')];
+ const replaced=cache.refresh(value,t2),[b]=gatherErrors(value);
+ assert.deepEqual(replaced.cleared,[],'A is gone, so its clear is forgotten');assert.deepEqual(replaced.at,{[b!.id]:t2.toISOString()},'B shows with its own time');
+ value.jobs[0]!.errors=[text('A')];
+ const back=cache.refresh(value,t3);
+ assert.deepEqual(back.cleared,[],'A is not hidden by its old clear');assert.deepEqual(back.at,{[a!.id]:t3.toISOString()},'A is new again');
+});
+
+test('appending, a group count, acknowledging and a phase error each rebuild the cached log once',async()=>{
+ const {createErrorLogCache}=await import('../error-log');const {addErrors,recordIssue}=await import('../job-issues');const {acknowledgeJob}=await import('../acknowledge');
+ const log=new ErrorLog(),cache=createErrorLogCache(log),failing=job({phase:'copying'}),value=state({jobs:[failing]});
+ cache.refresh(value);assert.equal(cache.builds,1);
+ addErrors(failing,text('A'));cache.refresh(value);cache.refresh(value);assert.equal(cache.builds,2,'an appended error');
+ recordIssue(failing,{code:'copy-failed',severity:'error',path:'/a'});cache.refresh(value);assert.equal(cache.builds,3,'a new group');
+ recordIssue(failing,{code:'copy-failed',severity:'error',path:'/b'});const counted=cache.refresh(value);assert.equal(cache.builds,4,'only a count changed');
+ assert.equal(gatherErrors(value).find(error=>error.code==='copy-failed')!.count,2);assert.ok(counted);
+ failing.phase='error';acknowledgeJob(failing,['copy-failed']);cache.refresh(value);assert.equal(cache.builds,5,'acknowledging');
+ const quiet=state({jobs:[job({errors:[]})]});cache.refresh(quiet);const builds=cache.builds;
+ quiet.jobs[0]!.detail=text('Failed');cache.refresh(quiet);assert.equal(cache.builds,builds+1,'a failed job without entries shows its detail');
+ quiet.jobs[0]!.progress={completed:1,total:2,bytes:1,totalBytes:2,speed:1,file:'a'};cache.refresh(quiet);assert.equal(cache.builds,builds+1,'progress alone never rebuilds');
+});
+
+test('an error has the same id in main and, after the wire, in the renderer',async()=>{
+ const {addErrors,recordIssue}=await import('../job-issues');
+ const recorded=job({});addErrors(recorded,text('EIO'),text('ENOSPC'));recordIssue(recorded,{code:'copy-failed',severity:'error',path:'/a'});
+ const value=state({jobs:[recorded]});
+ assert.deepEqual(gatherErrors(structuredClone(value)).map(error=>error.id),gatherErrors(value).map(error=>error.id));
+});

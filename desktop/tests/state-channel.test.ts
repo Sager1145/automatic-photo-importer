@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createStateChannel,createStateReceiver,type StateUpdate} from '../state-channel';
-import type {AppState,Inventory,Review} from '../shared';
+import type {AppState,Inventory,Job,Review} from '../shared';
 import {text} from '../messages';
 
 function inventory(name='photo.nef'):Inventory{return {files:[{path:'/card/'+name,relative:name,size:8,kind:'RAW',included:true}],media:1,companions:0,unknown:0,bytes:8,unknownExtensions:{},elapsedMs:1};}
@@ -52,7 +52,7 @@ test('receiver retains updates arriving while an initial snapshot response is in
  const latest=receiver.apply(initial)!;assert.equal(latest.sourceInventories!.card.media,1);
 });
 
-test('job errors, problem files, the error log and history cross once until they change',()=>{
+test('job errors, problem files, the error log and history cross once until they change',async()=>{
  const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
  value.jobs=[{id:'job',source:value.sources[0],phase:'copying',detail:text('Copying'),errors:[text('first')],backup:false,problemFiles:[{path:'/card/empty.jpg',relative:'empty.jpg',reason:'empty',group:'empty',collected:false}]}];
  value.history=[{id:'h',date:'2026-10-23',title:text('Import'),detail:text('Done')}];value.errorLog={at:{a:'2026-10-23'},cleared:[]};
@@ -62,8 +62,8 @@ test('job errors, problem files, the error log and history cross once until they
  const quiet=updates.at(-1)!;assert.deepEqual(quiet.details,{});receiver.apply(quiet);
  const second=receiver.snapshot()!;
  assert.equal(second.jobs[0].errors,errors);assert.equal(second.jobs[0].problemFiles,problems);assert.equal(second.errorLog,log);assert.equal(second.history,history);
- // Errors are appended in place: a longer list crosses again, whole.
- value.jobs[0].errors.push(text('second'));channel.publish(value);
+ // Errors are appended in place through addErrors: the list crosses again, whole.
+ const {addErrors}=await import('../job-issues');addErrors(value.jobs[0],text('second'));channel.publish(value);
  const grown=updates.at(-1)!;assert.equal(Object.keys(grown.details).length,1);receiver.apply(grown);
  assert.deepEqual(receiver.snapshot()!.jobs[0].errors.map(item=>item.params!.text),['first','second']);assert.equal(receiver.snapshot()!.history,history);
  value.history=[{id:'i',date:'2026-10-24',title:text('Import'),detail:text('Again')},...value.history];value.errorLog={at:{},cleared:['a']};channel.publish(value);
@@ -88,4 +88,43 @@ test('an inventory crosses without its folder listing, and an unchanged earlier-
  assert.deepEqual(receiver.snapshot()!.duplicates!.earlier,['b/3.jpg']);
  value.duplicates={...value.duplicates,earlier:undefined};channel.publish(value);receiver.apply(updates.at(-1)!);
  assert.equal(receiver.snapshot()!.duplicates!.earlier,undefined);
+});
+
+test('a group count change crosses as a number; its paths cross only when they change',async()=>{
+ const {recordIssue}=await import('../job-issues');const {MAX_GROUP_ITEMS}=await import('../shared');
+ const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
+ const job:Job={id:'job',source:value.sources[0],phase:'copying',detail:text('Copying'),errors:[],backup:false};value.jobs=[job];
+ for(let index=0;index<MAX_GROUP_ITEMS;index++)recordIssue(job,{code:'copy-failed',severity:'error',path:`/card/${index}.nef`});
+ channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
+ const items=receiver.snapshot()!.jobs[0].groups![0]!.items;assert.equal(items.length,MAX_GROUP_ITEMS);
+ recordIssue(job,{code:'copy-failed',severity:'error',path:'/card/more.nef'});channel.publish(value);
+ const counted=updates.at(-1)!;assert.deepEqual(counted.details,{},'the capped paths are not resent');receiver.apply(counted);
+ assert.equal(receiver.snapshot()!.jobs[0].groups![0]!.count,MAX_GROUP_ITEMS+1);assert.equal(receiver.snapshot()!.jobs[0].groups![0]!.items,items);
+ job.progress={completed:1,total:2,bytes:1,totalBytes:2,speed:1,file:'a'};channel.publish(value);assert.deepEqual(updates.at(-1)!.details,{});
+ recordIssue(job,{code:'staging-left',severity:'warning',path:'/card/.partial'});channel.publish(value);
+ const added=updates.at(-1)!;assert.equal(Object.keys(added.details).length,1,'only the new group\'s paths');receiver.apply(added);
+ assert.deepEqual(receiver.snapshot()!.jobs[0].groups!.map(group=>[group.code,group.count]),[['copy-failed',MAX_GROUP_ITEMS+1],['staging-left',1]]);
+});
+
+test('an equal-length replacement of job errors crosses again',async()=>{
+ const {addErrors}=await import('../job-issues');
+ const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
+ const job={id:'job',source:value.sources[0],phase:'error' as const,detail:text('Failed'),errors:[text('A')],backup:false};value.jobs=[job];
+ channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
+ job.errors=[text('B')];channel.publish(value);receiver.apply(updates.at(-1)!);
+ assert.deepEqual(receiver.snapshot()!.jobs[0].errors.map(item=>item.params!.text),['B']);
+ addErrors(job,text('C'));channel.publish(value);receiver.apply(updates.at(-1)!);
+ assert.deepEqual(receiver.snapshot()!.jobs[0].errors.map(item=>item.params!.text),['B','C']);
+});
+
+test('an update with a missing reference fails without emptying the received state',()=>{
+ const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
+ value.sourceInventories={card:inventory()};channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
+ const before=receiver.snapshot()!;
+ const broken=wire(channel.snapshot(value));broken.revision+=100;broken.historyRef='missing';
+ assert.throws(()=>receiver.apply(broken),/unavailable detail/);
+ assert.equal(receiver.snapshot(),before);
+ value.jobs=[{id:'job',source:value.sources[0],phase:'copying',detail:text('Copying'),errors:[],backup:false}];channel.publish(value);
+ const next=updates.at(-1)!;next.revision=broken.revision-1;receiver.apply(next);
+ assert.equal(receiver.snapshot()!.sourceInventories!.card,before.sourceInventories!.card,'details from before the failed reset are kept');
 });
