@@ -8,6 +8,8 @@ import { logDeletion } from '../logger';
 /** Files the operating system creates that are not user content. The app's own recovery
  * files (.import-*, photo-importer-*, .photo-importer-*) are deliberately absent: they are never removed here. */
 const serviceNames=new Set(['.ds_store','thumbs.db','desktop.ini','icon\r']);
+/** An OS bookkeeping file name other than a `._` sidecar (those need their contents judged). */
+export const isServiceName=(name:string)=>serviceNames.has(name.toLowerCase());
 const serviceFile=(name:string)=>name.startsWith('._')||serviceNames.has(name.toLowerCase());
 
 /** Remove folders under the chosen source folders that hold nothing but service files once

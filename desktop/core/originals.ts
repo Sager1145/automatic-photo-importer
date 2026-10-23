@@ -1,6 +1,10 @@
 import * as fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
-import { beneath, checkAbort, code, contained, digest, statKey } from './paths';
+import path from 'node:path';
+import { beneath, checkAbort, code, contained, digest, sameStat, statKey, syncDirectory } from './paths';
+import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
+import { isServiceName } from './redundant-folders';
 import { mapPool } from './devices';
 import { log, logDeletion } from '../logger';
 
@@ -12,7 +16,7 @@ const VERIFY_CONCURRENCY=4;
 export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];identity?:string;}
 export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
-export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];}
+export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];/** Source folders removed because this run left them empty. */folders:number;}
 
 async function regular(file:string) {
   const stat=await fs.lstat(file,{bigint:true});
@@ -59,9 +63,9 @@ type Outcome={deleted:true}|{kept:KeptReason;error?:string};
  * Files are checked through a small pool: the source is hashed (unless it is unchanged since the import read it), then every backup copy at once, so the reads
  * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
  * the report is assembled in input order afterwards. */
-export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** The source volume keeps real change times (APFS or HFS+, by its file system type): only then may a source
+export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** Folders chosen separately as sources: roots like `sourceRoot`, never removed. */protect?:string[];/** Empty-folder pass: folders looked at so far of all that may have become empty. */onFolders?:(done:number,total:number,folder:string)=>void;/** The source volume keeps real change times (APFS or HFS+, by its file system type): only then may a source
  * whose identity is unchanged since the import read it go unread. */changeTimes?:boolean;/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import; planned before the first read. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
-  const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
+  const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[],folders:0};
   let completed=0,bytesDone=0;
   // Still the very file the import hashed (its identity is only kept for a source the import read itself), on a
   // volume that keeps real change times: it is not read again. Every backup copy always is.
@@ -117,5 +121,65 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
   });
   options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
+  result.folders=await removeEmptiedFolders(sourceRoot,result.deleted.map(item=>item.source),options);
   return result;
+}
+
+/** Why a folder entry is OS bookkeeping, or undefined when it is anything else (so the folder stays). */
+async function bookkeeping(file:string,name:string,root:string):Promise<string|undefined> {
+  if(isServiceName(name)) return 'operating-system service file';
+  if(!name.startsWith('._')||name.length<3) return undefined;
+  const before=await fs.lstat(file,{bigint:true});
+  if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)) return undefined;
+  await contained(file,root);
+  const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try {
+    const opened=await handle.stat({bigint:true});
+    if(!opened.isFile()||!sameStat(before,opened)) return undefined;
+    if(!inspectAppleDouble(await handle.readFile()).safe) return undefined;
+  } finally { await handle.close(); }
+  return 'AppleDouble sidecar holding only bookkeeping (no resource fork, tags, label or comment)';
+}
+/** After the verified deletions: removes the folders those files were in, and their ancestors below
+ * `root`, that now hold nothing but OS bookkeeping. Bottom-up, same device, links never followed;
+ * bookkeeping files go first, then a non-recursive rmdir that fails (and keeps the folder) if anything
+ * else appeared. `root`, separately chosen sources and everything outside `root` are never touched. */
+async function removeEmptiedFolders(root:string,deleted:string[],options:{signal?:AbortSignal;protect?:string[];onFolders?:(done:number,total:number,folder:string)=>void}):Promise<number> {
+  const candidates=new Set<string>();
+  for(const file of deleted) for(let folder=path.dirname(file);beneath(folder,root);folder=path.dirname(folder)) candidates.add(folder);
+  const folders=[...candidates].sort((a,b)=>b.length-a.length),protect=(options.protect??[]).map(item=>path.resolve(item));
+  if(!folders.length) return 0;
+  checkAbort(options.signal);
+  let device:bigint;
+  try { device=(await fs.lstat(root,{bigint:true})).dev; } catch { return 0; }
+  let removed=0,done=0;
+  options.onFolders?.(0,folders.length,'');
+  for(const folder of folders) {
+    checkAbort(options.signal);
+    options.onFolders?.(++done,folders.length,folder);
+    if(protect.some(item=>item===folder)) continue;
+    try {
+      await contained(path.join(folder,'.x'),root);
+      const stat=await fs.lstat(folder,{bigint:true});
+      if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==device) continue;
+      const found:[string,string][]=[];
+      let empty=true;
+      for(const entry of await fs.readdir(folder,{withFileTypes:true})) {
+        const file=path.join(folder,entry.name),why=entry.isFile()?await bookkeeping(file,entry.name,root).catch(()=>undefined):undefined;
+        if(why) found.push([file,why]); else {empty=false;break;}
+      }
+      if(!empty) continue;
+      for(const [file,why] of found) {
+        await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+        logDeletion('originals',file,`${why} in a folder emptied by Delete originals`,'the folder held nothing else; the file is bookkeeping, not user content',{folder});
+      }
+      // Anything that appeared since the listing keeps the folder; rmdir refuses a folder that is not empty.
+      if((await fs.readdir(folder)).length) continue;
+      try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST','ENOENT'].includes(code(error)??'')) continue; throw error; }
+      logDeletion('originals',folder,'folder left with no files after Delete originals','rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
+      await syncDirectory(path.dirname(folder));
+      removed++;
+    } catch(error) { if(options.signal?.aborted) throw error; log('normal','originals','folder-kept',{path:folder,code:code(error)??'error',error}); }
+  }
+  return removed;
 }

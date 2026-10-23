@@ -918,7 +918,8 @@ No verified originals to delete.|没有可删除的已验证原文件。|沒有�
 This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.|这将从 {name} 永久删除 {count} 个文件（{size}）。删除前会逐个与备份中的副本核对。此操作无法撤销。|這將從 {name} 永久刪除 {count} 個檔案（{size}）。刪除前會逐一與備份中的副本核對。此操作無法復原。|{name} から {count} 件（{size}）のファイルを完全に削除します。削除前に、それぞれバックアップ内のコピーと照合します。この操作は取り消せません。
 Counting verified originals…|正在统计已验证的原文件…|正在統計已驗證的原始檔案…|検証済みの元のファイルを数えています…
 {count} files will stay where they are.|有 {count} 个文件会保留在原处。|有 {count} 個檔案會保留在原處。|{count} 件のファイルはそのまま残ります。
-{count} originals deleted ({size}); {kept} left in place|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残しました
+{count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处；已移除 {folders} 个空文件夹|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處；已移除 {folders} 個空資料夾|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残し、空のフォルダ {folders} 件を削除しました
+Removing empty folders: {completed} of {total}|正在移除空文件夹：{completed}/{total}|正在移除空資料夾：{completed}/{total}|空のフォルダを削除中：{total} 件中 {completed} 件
 Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
 Level 1: you decide|级别 1：由你决定|層級 1：由你決定|レベル1：すべて自分で決める
 You decide every group. Nothing is removed until you choose which file to keep.|每一组都由你决定。在你选择要保留的文件之前，不会删除任何内容。|每一組都由你決定。在你選擇要保留的檔案之前，不會移除任何內容。|すべてのグループを自分で決めます。残すファイルを選ぶまで何も削除されません。
