@@ -591,13 +591,15 @@ export async function storePointerLeftover(store:Store,file:string):Promise<bool
   if(await fs.realpath(root).then(real=>real!==root,()=>true))return false;
   let m:Manifest;try{m=await readManifest(root,id);}catch(error){if(code(error)==='ENOENT')return true;return false;}
   const state=await readEvents(m,undefined,undefined,false);
+  // A half-converted journal is an old record: its pointers stay.
+  if(state.halfConverted)return false;
   return !!state.superseded||!unfinished(state);
  }catch{return false;}
 }
 /** For the store cleanup: whether journal `id` of `root` is in a terminal state (complete and finalized, undone or
  * superseded). A journal that cannot be read, or is still pending, is not. */
 export async function journalTerminal(root:string,id:string,onRead?:(read:number,total:number)=>void):Promise<boolean>{
- try{return finished(await readEvents(await readManifest(root,id),undefined,onRead,false));}catch{return false;}
+ try{const state=await readEvents(await readManifest(root,id),undefined,onRead,false);return !state.halfConverted&&finished(state);}catch{return false;}
 }
 /** Signals a pointer file that cannot be read or trusted; the scan then looks for its journal. */
 class DamagedPointer extends Error{constructor(readonly file:string,readonly id:string,reason:string){super(`Damaged sibling journal pointer ${file} (${reason})`);}}

@@ -37,7 +37,7 @@ import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {orphanedJournals} from './core/recovery';
 import {registerDestinations} from './core/app-store';
-import {acknowledgeOldRecords,findOldRecords,onOldRecordsFound} from './core/old-records';
+import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-records';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
@@ -516,11 +516,8 @@ function checkResidue(all:boolean):Promise<void>{
 async function stopResidueCheck(){residueControl?.abort();await residueTask;}
 // Records v5: what an earlier version wrote on a connected destination is never read beyond telling whether this
 // Mac wrote it, never changed and never deleted. A notice names the drive; Acknowledge stops it for those items.
-/** Drives (path and volume) looked at while connected: looked at again once reconnected, after a restart or an acknowledgement. */
-const oldRecordsChecked=new Set<string>();
-let oldRecordsTask:Promise<void>|undefined;
 /** Per connected, unchanged destination: the folders to look at (the destination, its backup folders, folders organized there). */
-async function oldRecordsDrives():Promise<{drive:string;key:string;roots:string[]}[]>{
+async function configuredOldRecordsDrives():Promise<DriveRoots[]>{
  const prefs=state.preferences,drives=new Map<string,{key:string;roots:string[]}>();
  const add=(drive:string,root:string,volumeId:string)=>{const entry=drives.get(drive)??{key:`${drive}\0${volumeId}`,roots:[]};if(!entry.roots.includes(root))entry.roots.push(root);drives.set(drive,entry);};
  prefs.destinations.forEach((destination,index)=>{
@@ -534,38 +531,29 @@ async function oldRecordsDrives():Promise<{drive:string;key:string;roots:string[
  }
  return [...drives].map(([drive,entry])=>({drive,...entry}));
 }
+// The notice keeps the folders a refusal or an inventory named (an unconfigured sibling beside a library) with the configured ones.
+const oldRecords=new OldRecordsNotice(configuredOldRecordsDrives);
+let oldRecordsTask:Promise<void>|undefined;
 /** Cheap: two folder checks per root, then one small file per old journal. Nothing is organized, converted or deleted. */
 function scheduleOldRecordsCheck(force=false){
  if(qa||hardwareTest||quitting||oldRecordsTask)return;
  const task:Promise<void>=(async()=>{
-  const drives=await oldRecordsDrives(),connected=new Set(drives.map(item=>item.key));
-  for(const key of [...oldRecordsChecked])if(!connected.has(key))oldRecordsChecked.delete(key);
-  if(state.oldRecords)state.oldRecords=state.oldRecords.filter(drive=>drives.some(item=>item.drive===drive));
-  let changed=false;
-  for(const {drive,key,roots} of drives){
-   if(!force&&oldRecordsChecked.has(key))continue;
-   oldRecordsChecked.add(key);
-   const found=(await Promise.all(roots.map(root=>findOldRecords(root).catch(()=>[])))).flat();
-   const known=!!state.oldRecords?.includes(drive);
-   if(found.length&&!known){(state.oldRecords??=[]).push(drive);changed=true;log('normal','records','old-records-found',{drive,items:found.length});}
-   else if(!found.length&&known){state.oldRecords=state.oldRecords!.filter(item=>item!==drive);changed=true;}
-  }
-  if(state.oldRecords&&!state.oldRecords.length)delete state.oldRecords;
-  if(changed)emit();
+  const changed=await oldRecords.scan(force);
+  if(!changed)return;
+  if(oldRecords.drives.length)state.oldRecords=[...oldRecords.drives];else delete state.oldRecords;
+  log('normal','records','old-records-found',{drives:oldRecords.drives.length});emit();
  })().catch(error=>{log('normal','records','old-records-check-failed',{error:toMessage(error)});}).finally(()=>{if(oldRecordsTask===task)oldRecordsTask=undefined;});
  oldRecordsTask=task;
 }
-/** A receipt met while listing, or a library refused for old records, after the drive was already checked: look again (once a second at most). */
+/** A receipt met while listing, or a folder refused for old records: its drive is looked at too (once a second at most). */
 let oldRecordsAgain:NodeJS.Timeout|undefined;
-onOldRecordsFound(()=>{if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
-/** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the drive's reviewed list. */
+onOldRecordsFound(folder=>{oldRecords.note(folder);if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
+/** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the reviewed list. */
 async function acknowledgeDrive(drive:string){
- const found=(await oldRecordsDrives()).find(item=>item.drive===drive);if(!found)return;
- let count=0;
- for(const root of found.roots)count+=await acknowledgeOldRecords(root);
+ const count=await oldRecords.acknowledge(drive);
  log('normal','records','old-records-acknowledged',{drive,items:count});
- if(oldRecordsTask)await oldRecordsTask;
- scheduleOldRecordsCheck(true);
+ if(oldRecords.drives.length)state.oldRecords=[...oldRecords.drives];else delete state.oldRecords;
+ emit();
 }
 // Jobs still settling; quitting waits for them so a stopped job removes its staging files.
 const settling=new Set<Promise<unknown>>();

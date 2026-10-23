@@ -6,11 +6,11 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
 import * as core from '../core/index';
-import {acknowledgeOldRecords,findOldRecords,onOldRecordsFound,refuseOldRecords} from '../core/old-records';
-import {beginDuplicateRemoval,deleteOrganizationRecovery,finalizeOrganization,resumeOrganization,undoOrganization} from '../core/recovery';
+import {acknowledgeOldRecords,findOldRecords,OldRecordsNotice,onOldRecordsFound,refuseOldRecords} from '../core/old-records';
+import {beginDuplicateRemoval,storePointerLeftover,deleteOrganizationRecovery,finalizeOrganization,resumeOrganization,undoOrganization} from '../core/recovery';
 import {findResidue} from '../core/residue';
 import {openV5,sealV5,storeFor} from '../core/app-store';
-import {appendJournalLine,journalFileFor,resealJournalLine,sealedEvent} from './fixtures/records';
+import {appendJournalLine,journalFileFor,journalFolderFor,pointerFor,resealJournalLine,sealedEvent,sealedRecord} from './fixtures/records';
 import {identity} from '../core/paths';
 import {OLD_HIDDEN_FOLDER,OLD_FOLDER,oldJournal,oldPointer,oldReceipt} from './fixtures/old-records';
 
@@ -213,18 +213,46 @@ test('a journal converted only in part is an old record: in the notice, refused 
  assert.deepEqual((await resumeOrganization(root,id)).errors,[]);
  assert.equal((await undoOrganization(root,id)).restored>=0,true);
 });
-test('deleting a journal\'s records looks at the neighbouring folders too: an old record there stops it until acknowledged',async t=>{
+test('a refusal on an unconfigured sibling folder makes the notice appear for its drive, and acknowledging through the app\'s own path unblocks the delete',async t=>{
  const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-neighbours-')));
  t.after(()=>fs.rm(parent,{recursive:true,force:true}));
- const root=path.join(parent,'library'),neighbour=path.join(parent,'other');
+ const root=path.join(parent,'library'),neighbour=path.join(parent,'OldLibrary');
  await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(neighbour);
  await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
  await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  await undoOrganization(root,id);
- await oldJournal(neighbour);
- await assert.rejects(deleteOrganizationRecovery(root,id),(error:any)=>error.key==='error.oldRecords');
- assert.ok(!(await findResidue([root])).items.some(item=>item.kind==='journal'),'the automatic cleanup keeps it');
- await acknowledgeOldRecords(neighbour);
- await deleteOrganizationRecovery(root,id);
+ // The app knows only the library's drive (the destination); the sibling is not configured anywhere.
+ const notice=new OldRecordsNotice(async()=>[{drive:root,key:'library',roots:[root]}]);
+ onOldRecordsFound(folder=>notice.note(folder));
+ try{
+  await notice.scan(true);
+  assert.deepEqual(notice.drives,[],'nothing is known yet: the sibling is not configured');
+  await oldJournal(neighbour);
+  await assert.rejects(deleteOrganizationRecovery(root,id),(error:any)=>error.key==='error.oldRecords');
+  assert.ok(!(await findResidue([root])).items.some(item=>item.kind==='journal'),'the automatic cleanup keeps it');
+  assert.equal(await notice.scan(true),true,'the refusal named the folder, so the next look finds it');
+  assert.deepEqual(notice.drives,[root],'the notice names the library\'s drive');
+  assert.equal(await notice.acknowledge(root),1);
+  assert.deepEqual(notice.drives,[]);
+  await deleteOrganizationRecovery(root,id);
+ }finally{onOldRecordsFound(undefined);}
+});
+test('the automatic cleanup keeps the empty slots and the pointers of a half-converted journal',async t=>{
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-pointers-')));
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
+ const root=path.join(parent,'library'),sibling=path.join(parent,'sibling');
+ await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(sibling);
+ await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'rename'});
+ const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
+ const slot=path.join(await journalFolderFor(root,id),'originals','0','5b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f');await fs.mkdir(slot,{recursive:true});
+ const pointer=await pointerFor(sibling,id);await fs.mkdir(path.dirname(pointer),{recursive:true});
+ await fs.writeFile(pointer,sealedRecord('pointer',{library:sibling,root,id}));
+ const store=await storeFor(sibling);
+ assert.equal(await storePointerLeftover(store,pointer),true,'a finished journal\'s pointer is a leftover');
+ assert.ok((await findResidue([root])).items.some(item=>item.path===slot),'and so is its empty slot');
+ await resealJournalLine(root,id,0,value=>({...value,convertedFrom:{path:path.join(root,OLD_FOLDER,id),records:3,sha256:'0'.repeat(64)}}));
+ assert.equal(await storePointerLeftover(store,pointer),false,'a half-converted journal keeps its pointer');
+ assert.ok(!(await findResidue([root])).items.some(item=>item.path===slot),'and its empty slots');
 });

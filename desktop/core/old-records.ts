@@ -22,14 +22,14 @@ const identityOf=(file:string,stat:BigIntStats):OldRecord=>({path:file,dev:Strin
  * changes whenever the drive is mounted again (the inode, size and date of the same file do not). */
 const keyOf=(item:OldRecord)=>JSON.stringify([item.path,item.ino,item.size,item.mtimeNs]);
 
-/** Told when something new that may be an old record turns up (an inventory met a receipt) or a library was refused
- * for one: the app looks at the drive again, so the notice and its Acknowledge button appear. */
-let listener:(()=>void)|undefined;
-export function onOldRecordsFound(next:(()=>void)|undefined):void{listener=next;}
+/** Told, with the folder, when something new that may be an old record turns up (an inventory met a receipt) or a folder
+ * was refused for one: the app looks at that folder's drive too, so the notice and its Acknowledge button appear. */
+let listener:((folder:string)=>void)|undefined;
+export function onOldRecordsFound(next:((folder:string)=>void)|undefined):void{listener=next;}
 
 /** Old files an inventory met (a receipt beside a media file), by path; looked at again when asked about the library. */
 const hits=new Set<string>();
-export function noteOldReceipt(file:string):void{if(hits.size<MAX_HITS&&!hits.has(file)){hits.add(file);listener?.();}}
+export function noteOldReceipt(file:string):void{if(hits.size<MAX_HITS&&!hits.has(file)){hits.add(file);listener?.(path.dirname(file));}}
 
 /** The earlier version's seal: an HMAC-SHA256 over the plain JSON text, with the host key. */
 function sealedByThisMac(value:unknown):boolean{
@@ -143,5 +143,60 @@ export function driveName(root:string):string{
 /** Organizing, Remove duplicates and anything that deletes records stop while any of these folders holds old
  * records the user has not acknowledged. */
 export async function refuseOldRecords(...roots:string[]):Promise<void>{
- for(const root of roots)if((await findOldRecords(root)).length){listener?.();throw new MessageError('error.oldRecords',{drive:driveName(root)});}
+ for(const root of roots)if((await findOldRecords(root)).length){listener?.(root);throw new MessageError('error.oldRecords',{drive:driveName(root)});}
+}
+
+/** A drive as the app knows it (a configured destination) with the folders it looks at there. */
+export interface DriveRoots {drive:string;key:string;roots:string[];}
+/** The notice: which drives hold old records this Mac wrote and the user has not acknowledged. The folders to look at
+ * are the configured ones plus every folder a refusal or an inventory named (an unconfigured sibling beside a library
+ * is checked when a journal is deleted, so its records must be acknowledgeable too), each put with the configured
+ * drive on its device, or else with its own volume. */
+export class OldRecordsNotice {
+ /** Folders named by a refusal or an inventory, beyond the configured ones. */
+ readonly extra=new Set<string>();
+ /** Drives holding unacknowledged old records, as of the last scan. */
+ drives:string[]=[];
+ private checked=new Set<string>();
+ constructor(private readonly configured:()=>Promise<DriveRoots[]>){}
+ note(folder:string):void{if(this.extra.has(folder))return;this.extra.add(folder);this.checked.clear();}
+ /** The drives with the folders to look at: the configured ones, and each extra folder beside them or on a volume of its own. */
+ async groups():Promise<DriveRoots[]>{
+  const groups=(await this.configured()).map(item=>({...item,roots:[...item.roots]}));
+  const devices=new Map<string,string>();
+  for(const group of groups){const stat=await maybeLstat(group.drive).catch(()=>undefined);if(stat)devices.set(group.drive,String(stat.dev));}
+  for(const folder of this.extra){
+   const stat=await maybeLstat(folder).catch(()=>undefined);
+   if(!stat?.isDirectory())continue;
+   const dev=String(stat.dev),home=groups.find(group=>devices.get(group.drive)===dev);
+   if(home){if(!home.roots.includes(folder))home.roots.push(folder);continue;}
+   const parts=path.resolve(folder).split(path.sep),volume=parts[1]==='Volumes'&&parts[2]?path.sep+path.join('Volumes',parts[2]):folder;
+   const alone=groups.find(group=>group.drive===volume);
+   if(alone){if(!alone.roots.includes(folder))alone.roots.push(folder);}
+   else groups.push({drive:volume,key:`${volume}\0${dev}`,roots:[folder]});
+  }
+  return groups;
+ }
+ /** Looks again at the drives not yet looked at (all of them with `force`). Returns whether the list of drives changed. */
+ async scan(force=false):Promise<boolean>{
+  const groups=await this.groups(),connected=new Set(groups.map(group=>group.key));
+  for(const key of [...this.checked])if(!connected.has(key))this.checked.delete(key);
+  const before=this.drives.join('\0'),holding=new Set(this.drives.filter(drive=>groups.some(group=>group.drive===drive)));
+  for(const group of groups){
+   if(!force&&this.checked.has(group.key))continue;
+   this.checked.add(group.key);
+   const found=(await Promise.all(group.roots.map(root=>findOldRecords(root).catch(()=>[])))).flat();
+   if(found.length)holding.add(group.drive);else holding.delete(group.drive);
+  }
+  this.drives=groups.map(group=>group.drive).filter((drive,position,all)=>holding.has(drive)&&all.indexOf(drive)===position);
+  return this.drives.join('\0')!==before;
+ }
+ /** The user acknowledged the notice of `drive`: every item in its folders, exactly as it is now. Returns how many. */
+ async acknowledge(drive:string):Promise<number>{
+  const group=(await this.groups()).find(item=>item.drive===drive);if(!group)return 0;
+  let count=0;
+  for(const root of group.roots)count+=await acknowledgeOldRecords(root);
+  await this.scan(true);
+  return count;
+ }
 }

@@ -572,6 +572,8 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
         <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} />
         <SidebarOldRecords state={state} path={path} act={act} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
+    {/* A drive that holds old records beside a library but is not a destination. */}
+    {(state.oldRecords ?? []).filter(drive => !destinations.includes(drive)).map(drive => <SidebarOldRecords key={drive} state={state} path={drive} act={act} />)}
   </section>;
 }
 
