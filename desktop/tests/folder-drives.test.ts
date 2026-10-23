@@ -8,6 +8,7 @@ import {promisify} from 'node:util';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {resolveFolderSources} from '../folder-sources';
+import {mountedVolumes,volumeOf} from '../platform/volumes';
 import {driveContext} from '../drive-groups';
 import {DeviceStreams,deviceHasRoom} from '../core/devices';
 import {nextRunnable} from '../queue-order';
@@ -36,30 +37,32 @@ async function volumes(t:test.TestContext,names:string[]):Promise<string[]> {
 const folder=async(root:string,relative:string)=>{const target=path.join(root,relative);await fs.mkdir(target,{recursive:true});return target;};
 const hdd=async()=>'hdd' as const;
 
-test('folders chosen together are grouped by the drive they are on, and flagged when on the destination drive',{skip:!hasHdiutil&&'needs hdiutil on macOS',timeout:600000},async t=>{
+test('folders chosen together are grouped by the drive they are on, and flagged when on a connected destination\'s drive',{skip:!hasHdiutil&&'needs hdiutil on macOS',timeout:600000},async t=>{
  const [one,two,dest]=await volumes(t,['DRVONE','DRVTWO','DRVDEST']);
  const a1=await folder(one!,'Trip A'),a2=await folder(one!,'Trip B'),b1=await folder(two!,'Wedding'),d1=await folder(dest!,'Loose photos');
  const backup=await folder(dest!,'Backups');
- const {sources,rejected}=await resolveFolderSources([a1,a2,b1,d1],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false,kindOf:hdd});
+ const {sources,rejected}=await resolveFolderSources([a1,a2,b1,d1],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false});
  assert.deepEqual(rejected,[]);
  const by=new Map(sources.map(source=>[source.path,source]));
  const [sa1,sa2,sb1,sd1]=[a1,a2,b1,d1].map(file=>by.get(file)!);
  // Grouping metadata: volume id, name and mount path, and the physical device.
  assert.equal(sa1.drive!.volumeId,sa2.drive!.volumeId);
- assert.equal(sa1.drive!.device,sa2.drive!.device);
+ assert.equal(sa1.drive!.physicalId,sa2.drive!.physicalId);
  assert.equal(sa1.drive!.mount,one);assert.equal(sa1.drive!.name,path.basename(one!));
  assert.equal(sb1.drive!.mount,two);
  assert.notEqual(sa1.drive!.volumeId,sb1.drive!.volumeId);assert.notEqual(sa1.drive!.volumeId,sd1.drive!.volumeId);
  assert.ok(!sa1.drive!.volumeId.startsWith('filesystem:'),'the volume is identified by its volume id');
- assert.equal(sa1.drive!.kind,'hdd');
- // Only the folder on the destination's own drive is flagged.
- assert.deepEqual([sa1,sa2,sb1,sd1].map(source=>source.drive!.sameAsDestination),[false,false,false,true]);
+ // The kind comes from the same mount snapshot that names the volume.
+ assert.equal(sa1.drive!.kind,volumeOf(await mountedVolumes(),one!)?.kind??'unknown');
  // Folders on one drive read its capacity once; each drive keeps its own.
  assert.equal(sa1.total,sa2.total);assert.equal(sa1.free,sa2.free);
  const first=driveContext(sa1,sources),second=driveContext(sa2,sources),other=driveContext(sb1,sources);
  assert.deepEqual([first!.shared,first!.showsCapacity,second!.shared,second!.showsCapacity,second!.leader.id],[1,true,1,false,sa1.id]);
+ // Moving a folder to the top does not move the capacity to it.
+ assert.deepEqual([driveContext(sa2,[sa2,sa1])!.showsCapacity,driveContext(sa1,[sa2,sa1])!.showsCapacity],[false,true]);
  assert.deepEqual([other!.shared,other!.showsCapacity],[0,true]);
- // Live destination state decides the notice once destinations are known.
+ // Only a connected destination on the same volume flags it; before destinations are known nothing is flagged.
+ assert.equal(driveContext(sd1,sources)!.onDestination,false);
  assert.equal(driveContext(sd1,sources,[{volumeId:sd1.drive!.volumeId,available:true}])!.onDestination,true);
  assert.equal(driveContext(sd1,sources,[{volumeId:sa1.drive!.volumeId,available:true}])!.onDestination,false);
 });
@@ -67,12 +70,12 @@ test('folders chosen together are grouped by the drive they are on, and flagged 
 test('a folder inside the backup on the destination drive is still rejected, not treated as the destination',{skip:!hasHdiutil&&'needs hdiutil on macOS',timeout:600000},async t=>{
  const [dest]=await volumes(t,['DRVBACKUP']);
  const backup=await folder(dest!,'Backups'),inside=await folder(dest!,'Backups/photobackup/2024'),beside=await folder(dest!,'Camera dump');
- const {sources,rejected}=await resolveFolderSources([inside,beside],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false,kindOf:hdd});
+ const {sources,rejected}=await resolveFolderSources([inside,beside],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false});
  assert.deepEqual(rejected.map(item=>item.key),['error.alreadyInBackup']);
- assert.deepEqual(sources.map(source=>[source.path,source.drive!.sameAsDestination]),[[beside,true]]);
+ assert.deepEqual(sources.map(source=>source.path),[beside]);
 });
 
-const folderSource=(name:string,volumeId:string,device:string,kind:'hdd'|'ssd'='hdd'):Source=>({id:`folder:/${name}`,name,path:`/${name}`,transport:'folder',drive:{volumeId,name:volumeId,mount:`/${volumeId}`,device,kind,sameAsDestination:false}});
+const folderSource=(name:string,volumeId:string,physicalId:string|undefined,kind:'hdd'|'ssd'='hdd'):Source=>({id:`folder:/${name}`,name,path:`/${name}`,transport:'folder',drive:{volumeId,name:volumeId,mount:`/${volumeId}`,...(physicalId?{physicalId}:{}),kind}});
 
 test('two jobs on one physical device share its limit; jobs on other devices run in parallel',()=>{
  const a=folderSource('a','vol1','disk1'),b=folderSource('b','vol2','disk1'),c=folderSource('c','vol3','disk2');
@@ -81,6 +84,9 @@ test('two jobs on one physical device share its limit; jobs on other devices run
  assert.equal(deviceHasRoom(c.drive,[a.drive]),true);
  assert.equal(deviceHasRoom(b.drive,[]),true);
  assert.equal(deviceHasRoom(undefined,[a.drive,a.drive]),true,'cards and cameras are never held back');
+ // Without a physical disk the snapshot cannot say two volumes share one, so neither is held back.
+ const loose=folderSource('e','vol5',undefined);
+ assert.equal(deviceHasRoom(loose.drive,[loose.drive,folderSource('f','vol6',undefined).drive]),true);
  const fast=folderSource('d','vol4','disk3','ssd');
  assert.deepEqual([1,2,3,4].map(count=>deviceHasRoom(fast.drive,Array(count).fill(fast.drive))),[true,true,true,false]);
  // The queue skips a held-back job rather than stalling behind it.

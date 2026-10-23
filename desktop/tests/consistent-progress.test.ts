@@ -197,7 +197,9 @@ test('the step tracker uses one style: done, the current step with its percent, 
 });
 test('a library on a mounted drive shows that drive\'s capacity',()=>{
  const drive={id:'a006',name:'A006',path:'/Volumes/A006',transport:'storage' as const,selected:true,total:2e12,free:342.7e9};
- const html=desk(stateWith({sources:[drive],jobs:[renameJob({renames:true})]}));
+ // The main process reads the library's own volume into its source; the card does not look for a drive holding its path.
+ const job=renameJob({renames:true});job.source={...job.source,total:2e12,free:342.7e9};
+ const html=desk(stateWith({sources:[drive],jobs:[job]}));
  assert.ok(!html.includes('Capacity unavailable'),'no unavailable note');
  assert.ok(html.includes('342.7 GB free of 2.00 TB'));
  assert.ok(html.includes('A006'));

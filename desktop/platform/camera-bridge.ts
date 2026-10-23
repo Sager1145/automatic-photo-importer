@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Source } from '../shared';
 
-interface Camera {id:string;name:string;cameraID:string;}
+interface Camera {name:string;cameraID:string;}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
@@ -74,7 +74,7 @@ export async function cameraSources():Promise<Source[]> {
   if(!await nativeCameraHelperPath())return [];
   const result=await request({command:'list'},10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera',camera:true}));
+  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera'}));
   return cached;
 }
 export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {

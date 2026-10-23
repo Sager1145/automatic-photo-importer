@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DeviceSelection,deviceId,recordDeviceHistory} from '../device-selection';
+import {normalizePreferences} from '../preferences';
 import type {Preferences,Source} from '../shared';
 
 type Remembered=NonNullable<Preferences['rememberedDevices']>;
@@ -11,8 +12,39 @@ const folder:Source={id:'folder:/Users/me/Photos',name:'Photos',path:'/Users/me/
 
 test('stable device ids come from volume UUIDs and camera ids, never from mount paths or folders',()=>{
  assert.equal(deviceId(card),'6A1F-UUID-CARD');assert.equal(deviceId(camera),'camera:0x1234');
- assert.equal(deviceId({...card,id:'/Volumes/Untitled'}),undefined);
+ assert.equal(deviceId({...card,id:'/Volumes/Untitled',path:'/Volumes/Untitled'}),undefined);
  assert.equal(deviceId(folder),undefined);
+ assert.equal(deviceId({...card,id:'E:\\',path:'E:\\'}),undefined,'a volume without a UUID keeps its path as its id');
+});
+
+test('a drive without a volume UUID is never remembered, ignored or recorded',()=>{
+ const remembered:Remembered={},ignored:NonNullable<Preferences['ignoredDevices']>={},history:NonNullable<Preferences['deviceHistory']>={};
+ const untitled:Source={id:'E:\\',name:'Untitled',path:'E:\\',transport:'storage'},selection=new DeviceSelection();
+ selection.apply([untitled],remembered,ignored,history);
+ selection.select(untitled,true,remembered,'2026-10-23T10:00:00.000Z',ignored);
+ selection.select(untitled,false,remembered,'2026-10-23T10:01:00.000Z',ignored);
+ recordDeviceHistory(history,untitled,'import','2026-10-23T10:02:00.000Z');
+ assert.deepEqual([remembered,ignored,history],[{},{},{}]);
+});
+
+test('device keys saved from a mount path or a diskN identifier are dropped when settings are read',()=>{
+ const entry={name:'Card',lastSelected:'2026-10-01T00:00:00.000Z'},seen={name:'Card',ignoredAt:'2026-10-01T00:00:00.000Z'};
+ const preferences=normalizePreferences({
+  rememberedDevices:{'/Volumes/Untitled':entry,'disk4s1':entry,'E:\\':entry,'6A1F-UUID-CARD':entry,'camera:0x1234':entry},
+  ignoredDevices:{'/dev/sdb1':seen,'9C3D-UUID-SSD':seen},
+  deviceHistory:{'disk5s2':{name:'Old'},'9C3D-UUID-SSD':{name:'PMHOME'}}});
+ assert.deepEqual(Object.keys(preferences.rememberedDevices!),['6A1F-UUID-CARD','camera:0x1234']);
+ assert.deepEqual(Object.keys(preferences.ignoredDevices!),['9C3D-UUID-SSD']);
+ assert.deepEqual(Object.keys(preferences.deviceHistory!),['9C3D-UUID-SSD']);
+});
+
+test('a chosen folder that the system then detects as a volume stays selected under the volume id',()=>{
+ const remembered:Remembered={},selection=new DeviceSelection();
+ const mounted:Source={id:'folder:/Volumes/PMHOME',name:'PMHOME',path:'/Volumes/PMHOME',transport:'folder'};
+ assert.equal(selection.apply([mounted],remembered)[0]!.selected,true);
+ selection.replace(mounted.id,ssd.id);
+ assert.deepEqual(selection.apply([ssd],remembered).map(source=>source.selected),[true]);
+ assert.deepEqual(selection.newDevices,[],'it is not announced as a new drive');
 });
 
 test('new drives start deselected and are announced once; remembered drives start selected',()=>{
