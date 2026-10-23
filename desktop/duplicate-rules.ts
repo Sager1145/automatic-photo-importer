@@ -102,14 +102,17 @@ export function buildGroups(files: DuplicateFile[]): DuplicateGroup[] {
   return groups.sort((a, b) => a.files[0]!.path.localeCompare(b.files[0]!.path));
 }
 
-/** Whether a level resolves a group of this strength without asking. */
+/** Whether a level resolves a group of this strength without asking. Only identical bytes are removed without the
+ * user: level 3 and level 2 both resolve SHA groups alone; an EXIF group always waits for a decision. */
 export function automatic(strength: DuplicateStrength, level: DuplicateLevel): boolean {
-  return level === 3 ? strength === 'sha' || strength === 'exif' : level === 2 ? strength === 'sha' : false;
+  return level >= 2 && strength === 'sha';
 }
 export interface ResolvedGroup {
   group: DuplicateGroup; auto: boolean; suggested: string;
   /** The file kept: the user's choice, or the suggestion for an automatic group; 'all' keeps everything; undefined awaits a decision. */
   keep?: string | 'all'; remove: DuplicateFile[]; needsDecision: boolean;
+  /** The keeper is the user's choice; otherwise the level chose it, and the removal proves every copy by content. */
+  decided: boolean;
 }
 /** Split groups by level into automatic and manual ones. `decisions` are the user's choices by group id
  * (a path of the group, or 'all'); they win over the level. */
@@ -118,7 +121,7 @@ export function resolveGroups(groups: DuplicateGroup[], level: DuplicateLevel, d
     const suggested = chooseKeeper(group.files, editedFolder).path, auto = automatic(group.strength, level);
     const chosen = decisions[group.id], valid = chosen === 'all' || group.files.some(file => file.path === chosen);
     const keep = valid ? chosen : auto ? suggested : undefined;
-    return { group, auto, suggested, keep, remove: keep === undefined || keep === 'all' ? [] : group.files.filter(file => file.path !== keep), needsDecision: keep === undefined };
+    return { group, auto, suggested, keep, remove: keep === undefined || keep === 'all' ? [] : group.files.filter(file => file.path !== keep), needsDecision: keep === undefined, decided: valid };
   });
 }
 export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; /** Files to remove that an earlier organization placed: removing them supersedes it and ends its Undo. Present when `earlier` is given. */ earlier?: number; }

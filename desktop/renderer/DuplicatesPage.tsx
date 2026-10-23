@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock3, CopyCheck, ImageOff, Info, LoaderCircle, RotateCcw, ScanSearch, Square, Trash2, FolderOpen } from 'lucide-react';
-import type { Action, AppState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
+import type { Action, AppState, DuplicatesState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
 import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
+import { message } from '../messages';
 import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, type DeleteRecoveryStep } from './RootApp';
 
 type Dispatch = (action: Action) => void;
@@ -14,7 +15,7 @@ export const GROUPS_PER_PAGE = 8;
 export const duplicateLevels = (t: Translator): { level: DuplicateLevel; label: string; detail: string }[] => [
   { level: 1, label: t("Level 1: you decide"), detail: t("You decide every group. Nothing is removed until you choose which file to keep.") },
   { level: 2, label: t("Level 2: identical files"), detail: t("Files that are exactly the same (same SHA-256) are removed automatically, keeping the copy in your organized folders. You decide all other groups.") },
-  { level: 3, label: t("Level 3: automatic"), detail: t("Exactly identical files, and files with identical EXIF and size, are removed automatically. You decide only the groups with the same EXIF but a different size, or the same name and time.") },
+  { level: 3, label: t("Level 3: automatic"), detail: t("Exactly identical files (same SHA-256) are removed automatically. Files with the same EXIF are removed only after you confirm them, even when their size matches.") },
 ];
 
 export function LevelSelector({ level, onChange, disabled = false }: { level: DuplicateLevel; onChange: (level: DuplicateLevel) => void; disabled?: boolean }) {
@@ -269,6 +270,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
     </section>
     {running && <section className="organization-action organization-running" aria-labelledby="duplicates-running-heading" data-testid="duplicates-running"><CardHeader icon={LoaderCircle} id="duplicates-running-heading" title={t("Removing duplicates")} detail={dup.name} /><OrganizationProgress job={running} act={act} /></section>}
     {dup.result && !running && <p className="notice" role="status" data-testid="duplicates-result"><Icon icon={CheckCircle2} />{t("{count} duplicates set aside ({size}).", { count: formatNumber(dup.result.removed), size: formatBytes(dup.result.bytes) })}{dup.result.errors > 0 && ` ${t("{count} errors", { count: formatNumber(dup.result.errors) })}`}</p>}
+    {dup.unread && dup.status === 'ready' && <ScanUnread unread={dup.unread} />}
     {loadError && <p className="field-error" role="alert">{loadError}</p>}
     {state.error?.key === 'error.duplicatesLibraries' && <p className="field-error" role="alert" data-testid="duplicates-libraries-error">{t(state.error)}</p>}
     {dup.root && dup.status === 'ready' && <>
@@ -301,4 +303,13 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
     {dup.root && <RemovedDuplicates jobs={removed} act={act} busy={busy} />}
     {confirm !== 'closed' && <DuplicatesConfirm key={confirm} step={confirm} summary={summary} name={dup.name ?? ''} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
+}
+
+/** The scan's results are usable, but some files could not be read: how many, and the first few with the reason. */
+export function ScanUnread({ unread }: { unread: NonNullable<DuplicatesState['unread']> }) {
+  const { t } = useTranslation();
+  return <div className="notice" role="status" data-testid="duplicates-unread"><Icon icon={Info} /><div>
+    <p>{t(message('duplicates.unread', { count: unread.count }))}</p>
+    <ul>{unread.sample.map(item => <li key={item.path}><code>{item.path}</code> {t(item.error)}</li>)}</ul>
+  </div></div>;
 }

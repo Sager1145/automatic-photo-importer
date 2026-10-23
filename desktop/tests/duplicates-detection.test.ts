@@ -5,7 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { plan } from '../core/index';
 import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
-import { destinationIndex, dropDestinationIndexes, indexTarget } from '../core/destination-index';
+import { destinationIndex, dropDestinationIndexes, indexTarget, provablySame, statRecord } from '../core/destination-index';
+import type { BigIntStats } from 'node:fs';
 import { identity } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
 import { buildGroups, candidates, classify, comparable, exifKey } from '../duplicate-rules';
@@ -24,7 +25,10 @@ async function library(t: test.TestContext) {
   dropDuplicateStores(); dropDestinationIndexes();
   return base;
 }
-const write = async (root: string, relative: string, content: string | Buffer) => { const target = path.join(root, relative); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); return target; };
+/** A library file as an import leaves it: its modified time is the capture's, earlier than its ctime. A file just
+ * written has ctime equal to mtime, which (as on exFAT) proves nothing, so no record would be reused for it. */
+const captured = new Date('2024-05-06T07:08:09Z');
+const write = async (root: string, relative: string, content: string | Buffer) => { const target = path.join(root, relative); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); await fs.utimes(target, captured, captured); return target; };
 /** Metadata by file name; files not listed have no EXIF. */
 const reader = (table: Record<string, DuplicateExif>, counter = { reads: 0 }) => async (target: string): Promise<Metadata> => {
   counter.reads++;
@@ -112,7 +116,7 @@ test('stage 2 finds a renamed SHA duplicate that stage 1 could not match, and re
   assert.equal(result.groups[0]!.strength, 'sha');
   assert.deepEqual(result.groups[0]!.files.map(item => item.path).sort(), ['2024/202405/Nikon Z f/DSC_0001.NEF', 'Imported/holiday.nef']);
   const saved = await storedRecord(root);
-  assert.equal(saved.v, 5); assert.equal(saved.kind, 'duplicates'); assert.match(saved.seal, /^[a-f0-9]{64}$/); assert.equal(saved.complete, true); assert.equal(saved.groups.length, 1);
+  assert.equal(saved.v, 5); assert.equal(saved.kind, 'duplicates'); assert.match(saved.seal, /^[a-f0-9]{64}$/);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}.json`), true);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}-11111111-1111-4111-8111-111111111111.tmp`), true);
   assert.equal((await inventory(root, { backup: true })).files.some(item => item.path.includes(DUPLICATES_PREFIX)), false);
@@ -180,11 +184,12 @@ test('recordPlanDuplicates keeps what planning found per library and never delet
   const destinationOf = (from: string) => entries.find(entry => entry.source === from)?.destination;
   await recordPlanDuplicates(root, planned.duplicates!, destinationOf);
   const store = await duplicateStore(await fs.realpath(root), await identity(root));
-  assert.equal(store.groups.length, 1); assert.equal(store.complete, false);
+  assert.deepEqual([...store.files.keys()].sort(), ['2024/202405/Nikon Z f/A.JPG', '2024/202405/Nikon Z f/B.JPG']);
+  assert.ok([...store.files.values()].every(record => record.exif && !('sha256' in record)), 'EXIF is recorded; digests belong to the destination index');
   assert.equal((await fs.readdir(path.join(root, '2024/202405/Nikon Z f'))).length, 2, 'nothing was removed');
   // A second library gets nothing from the first.
   await recordPlanDuplicates(other, planned.duplicates!, () => undefined);
-  assert.equal((await duplicateStore(await fs.realpath(other), await identity(other))).groups.length, 0);
+  assert.equal((await duplicateStore(await fs.realpath(other), await identity(other))).files.size, 0);
 });
 
 test('stage 1 runs for imports only, and reuses a hash remembered for the source file', async t => {
@@ -254,12 +259,12 @@ test('a duplicate store that fails authentication is ignored and its files are r
   const saved = JSON.parse(await fs.readFile(storeFile, 'utf8'));
   assert.equal(saved.v, 5);
   assert.equal(counter.reads, 2);
-  await fs.writeFile(storeFile, JSON.stringify({ ...saved, complete: !saved.complete }));
+  await fs.writeFile(storeFile, JSON.stringify({ ...saved, files: {} }));
   dropDuplicateStores(); dropDestinationIndexes();
   const again = await scanDuplicates(root, await deps());
   assert.equal(counter.reads, 4, 'records that fail authentication are re-read, not trusted');
   assert.equal(again.groups.length, 1);
-  assert.equal((await storedRecord(root)).v, 5); assert.equal((await storedRecord(root)).complete, saved.complete);
+  assert.equal((await storedRecord(root)).v, 5); assert.equal(Object.keys((await storedRecord(root)).files).length, 2);
 });
 
 test('duplicate MOVs of two copies of one Live Photo are found at import time', async t => {
@@ -285,4 +290,67 @@ test('buildGroups scales linearly: 100k files in one class group in under 2 s wi
   assert.ok(groups.every(group => group.files.length === 2));
   assert.deepEqual(groups[0]!.files.map(f => f.sha256), ['sha0', 'sha0']);
   assert.ok(elapsed < 2000, `buildGroups took ${Math.round(elapsed)} ms`);
+});
+
+/** A stat as FAT/exFAT reports it (ctime equal to mtime) or as APFS does. */
+const fakeStat = (patch: Partial<Record<'dev' | 'ino' | 'size' | 'mtimeNs' | 'ctimeNs' | 'birthtimeNs', bigint>> = {}) => ({ dev: 1n, ino: 42n, size: 10n, mtimeNs: 1_000n, ctimeNs: 2_000n, birthtimeNs: 500n, ...patch, isFile: () => true }) as unknown as BigIntStats;
+test('one provable-stat rule: an exFAT-shaped stat (ctime equal to mtime) never reuses a record, in the index or the duplicate store', async t => {
+  const apfs = fakeStat(), exfat = fakeStat({ ctimeNs: 1_000n });
+  assert.equal(provablySame(statRecord(apfs), apfs), true);
+  assert.equal(provablySame(statRecord(apfs), fakeStat({ ctimeNs: 3_000n })), false, 'a changed ctime is another file');
+  assert.equal(provablySame(statRecord(exfat), exfat), false, 'an unchanged exFAT stat proves nothing');
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'one');
+  const store = await duplicateStore(root, await identity(root));
+  store.files.set('a/one.JPG', { stat: statRecord(exfat), kind: 'JPEG', edited: false, exif: exif() });
+  assert.equal(store.known('a/one.JPG', exfat), undefined, 'the metadata record is read again');
+  store.files.set('a/one.JPG', { stat: statRecord(apfs), kind: 'JPEG', edited: false, exif: exif() });
+  assert.ok(store.known('a/one.JPG', apfs));
+});
+test('the duplicate store keeps no content digest: SHA-256 values come only from the destination index', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'identical one'); await write(root, 'b/one.JPG', 'identical one');
+  const result = await scan(root);
+  assert.equal(result.groups.length, 1);
+  const saved = await storedRecord(root);
+  assert.ok(Object.values(saved.files as Record<string, object>).every(record => !('sha256' in record)), JSON.stringify(saved.files));
+  assert.equal('groups' in saved, false); assert.equal('complete' in saved, false); assert.equal('updated' in saved, false);
+});
+test('a file whose hash fails is left out of this scan\'s groups, reported, and not hashed again in the same scan', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  // The same name and EXIF: a candidate pair that EXIF alone would join.
+  await write(root, 'a/X.JPG', 'xxxxxxxxxx'); await write(root, 'b/X.JPG', 'xxxxxxxxxx'); await write(root, 'c/lonely.JPG', 'other');
+  const index = await destinationIndex(root, await identity(root)), asked: string[] = [];
+  const failing = { cached: index.cached.bind(index), flush: index.flush.bind(index), digestOf: async (file: string, signal?: AbortSignal) => { asked.push(path.relative(root, file)); if (file.endsWith(path.join('b', 'X.JPG'))) throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }); return index.digestOf(file, signal); } };
+  const result = await scanDuplicates(root, { metadata: reader({ 'X.JPG': exif() }), index: failing });
+  assert.deepEqual(result.groups, [], 'no fallback to the EXIF join');
+  assert.deepEqual(result.failures.map(item => [item.path, item.step]), [['b/X.JPG', 'hash']]);
+  assert.match(JSON.stringify(result.failures[0]!.error), /EIO/);
+  assert.equal(asked.filter(item => item === path.join('b', 'X.JPG')).length, 1, 'one attempt per scan');
+  assert.equal(result.files, 3);
+});
+test('a failed metadata read is reported, and the file is still grouped by its content', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'identical'); await write(root, 'b/two.JPG', 'identical');
+  const result = await scanDuplicates(root, { metadata: async target => { if (target.endsWith('one.JPG')) throw new Error('exiftool crashed'); return { fields: {} }; }, index: await destinationIndex(root, await identity(root)) });
+  assert.deepEqual(result.failures.map(item => [item.path, item.step]), [['a/one.JPG', 'metadata']]);
+  assert.equal(result.groups.length, 1); assert.equal(result.groups[0]!.strength, 'sha');
+});
+test('a file that fails both its metadata and its hash is one unread file, reported by the hash step', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/X.JPG', 'xxxxxxxxxx'); await write(root, 'b/X.JPG', 'xxxxxxxxxx');
+  const index = await destinationIndex(root, await identity(root));
+  const broken = (file: string) => file.endsWith(path.join('b', 'X.JPG'));
+  const failing = { cached: index.cached.bind(index), flush: index.flush.bind(index), digestOf: async (file: string, signal?: AbortSignal) => { if (broken(file)) throw new Error('EACCES'); return index.digestOf(file, signal); } };
+  const result = await scanDuplicates(root, { metadata: async target => { if (broken(target)) throw new Error('EACCES'); return { fields: {} }; }, index: failing });
+  assert.deepEqual(result.failures.map(item => [item.path, item.step]), [['b/X.JPG', 'hash']]);
+});
+test('a freshly written file (ctime equal to mtime, as on exFAT) has its metadata read again by every scan', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await fs.mkdir(path.join(root, 'a'), { recursive: true }); await fs.writeFile(path.join(root, 'a/fresh.JPG'), 'fresh');
+  const stat = await fs.lstat(path.join(root, 'a/fresh.JPG'), { bigint: true });
+  if (stat.ctimeNs !== stat.mtimeNs) { t.skip('this filesystem gives a new file a ctime other than its mtime'); return; }
+  const counter = { reads: 0 };
+  for (let run = 0; run < 2; run++) await scanDuplicates(root, { metadata: reader({}, counter), index: await destinationIndex(root, await identity(root)) });
+  assert.equal(counter.reads, 2);
 });

@@ -36,7 +36,8 @@ export function companionTarget(primary: string, from: string, keeper: string): 
 }
 
 /** Set aside every duplicate the resolved groups remove, into the library's recovery store, with undo. The
- * hashes are read again here: a file that changed since the scan stays where it is. Companions follow their
+ * hashes are read again here: a file that changed since the scan stays where it is, and a copy removed without the
+ * user's decision must still have the kept copy's bytes. Companions follow their
  * primary. Never deletes anything. */
 export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup[], companions: Map<string, string[]>, options: { signal?: AbortSignal; onProgress?: (progress: Progress) => void; /** The library's checksum index: a file whose whole stat it still records is not read ahead. */ index?: Pick<DestinationIndex, 'cached'> } = {}): Promise<RemovalResult> {
   const root = await directory(rootPath), rootIdentity = await identity(root), signal = options.signal;
@@ -87,8 +88,9 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       if (found.ino !== 0n && found.dev === kept.dev && found.ino === kept.ino) { report.push({ ...entry, result: 'left', reason: 'it is the same file as the copy to keep (a link)' }); continue; }
       if (never.has(source)) { report.push({ ...entry, result: 'left', reason: 'it is the copy kept in another group' }); continue; }
       const sha = await digestOf(source, found);
-      // Identical groups are proven again by content now; a lookalike group is the user's decision, made on the previews.
-      if (item.group.strength === 'sha' && sha !== keeperSha) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it no longer matches the copy to keep' }); continue; }
+      // Identical groups, and any group removed without the user's decision, are proven again by content now; a
+      // lookalike group the user decided on the previews keeps only the stat check above.
+      if ((item.group.strength === 'sha' || !item.decided) && sha !== keeperSha) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it no longer matches the copy to keep' }); continue; }
       if (taken.has(source) || taken.has(keepPath)) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it is also part of another group' }); continue; }
       taken.add(source);
       entries.push({ source, destination: keepPath, digest: sha, size: file.size, stat: found, move: true, kept: { digest: keeperSha, size: Number(kept.size) } });
