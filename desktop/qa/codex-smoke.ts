@@ -35,6 +35,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const previousTheme=nativeTheme.themeSource;
  let failure:unknown;
  try{
+  // The start-up splash covers the app; every check (and screenshot) starts once it has been removed.
+  await wait(()=>js<boolean>("document.documentElement.dataset.boot==='done'"),'boot splash removed');
   await check('Fresh launch follows System, Automatic is off, and only fixture sources are present',async()=>{const s=await state();assert.equal(s.preferences.appearance,'system');assert.equal(s.preferences.automatic,false);assert.equal(s.sources.length,6);assert.ok(s.sources.every(s=>s.id.startsWith('fixture:')&&s.path.startsWith(root+path.sep)));});
   await check('macOS uses native window controls instead of HTML replicas',async()=>{if(process.platform==='darwin'){assert.deepEqual(window.getWindowButtonPosition(),{x:18,y:15});assert.equal(window.isFullScreenable(),true);assert.equal(await js<boolean>("document.querySelector('.window-controls')!==null"),false);}});
   await check('System appearance responds live to OS light and dark changes',async()=>{nativeTheme.themeSource='dark';await theme('dark');nativeTheme.themeSource='light';await theme('light');await shot('system');});

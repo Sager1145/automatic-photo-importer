@@ -19,6 +19,8 @@ import { buildTemplate, parseTemplate, type FolderPath } from '../folder-templat
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { settingsLocked } from '../settings-lock';
+import { BrandLogo } from './BrandLogo';
+import { markAppReady } from './Boot';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
 const pageOrder: Page[] = ['desk', 'drives', 'organization', 'history', 'settings'];
@@ -294,6 +296,9 @@ export default function RootApp() {
   // Hooks stay above the early return below, so every render calls the same hooks.
   const sidebarRef = useRef<HTMLElement>(null);
   useSidebarFit(sidebarRef);
+  // The start-up splash finishes once the first state has been rendered (a layout effect, so the sidebar logo can be measured).
+  const hasState = !!state;
+  useLayoutEffect(() => { if (hasState) markAppReady(); }, [hasState]);
   if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
@@ -308,7 +313,7 @@ export default function RootApp() {
   return <I18nProvider language={language}><div className="app-shell">
     <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.filter(error => error.severity === 'error').length} warningCount={errors.filter(error => error.severity === 'warning').length} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
-      <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
+      <div className="brand"><BrandLogo className="brand-logo" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
         {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
           <button key={item.id} type="button" className={`nav-item ${page === item.id ? 'selected' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon icon={item.icon} /><span>{item.label}</span>{page === item.id && <span className="nav-indicator" aria-hidden="true" />}</button>)}
