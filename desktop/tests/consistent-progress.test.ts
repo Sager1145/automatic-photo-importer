@@ -28,6 +28,7 @@ const operations:Operation[]=[
  {name:'import checking',step:'checking',phase:'planning',unit:'files',count:/files checked/,file:true,at:s=>({...base,phase:'planning',step:'checking',...files(s)})},
  {name:'import reading',step:'reading',phase:'planning',unit:'bytes',count:/files read/,file:true,at:s=>({...base,phase:'planning',step:'reading',bytes:s*100e6,completed:s*5})},
  {name:'import comparing',step:'comparing',phase:'planning',unit:'bytes',count:/Checking the destination/,file:true,at:s=>({...base,phase:'planning',step:'comparing',bytes:s*100e6,completed:s*5})},
+ {name:'import locating',step:'locating',phase:'planning',unit:'files',count:/Looking for files already in the backup/,file:true,at:s=>({...base,phase:'planning',step:'locating',...files(s)})},
  {name:'import existing',step:'existing',phase:'planning',unit:'files',count:/already on the destination/,file:true,at:s=>({...base,phase:'planning',step:'existing',...files(s)})},
  {name:'earlier organization',step:'earlier',phase:'verifying',unit:'files',count:/earlier organization/,file:true,at:s=>({...base,phase:'verifying',step:'earlier',...files(s)})},
  {name:'organization history',step:'history',phase:'verifying',unit:'files',count:/organization history/,file:true,at:s=>({...base,phase:'verifying',step:'history',...files(s)})},

@@ -165,6 +165,7 @@ The backup folder isn't scanned as a source|备份文件夹不会作为来源被
 {completed} files looked at|已查看 {completed} 个文件|已查看 {completed} 個檔案|{completed} 件のファイルを確認済み
 Setting aside duplicates: {completed} of {total}|正在搁置重复文件：{completed}/{total}|正在擱置重複檔案：{completed}/{total}|重複ファイルを退避中：{total} 件中 {completed} 件
 Reading metadata: {completed} of {total} files|正在读取元数据：{completed}/{total} 个文件|正在讀取中繼資料：{completed}/{total} 個檔案|メタデータを読み込み中：{total} 件中 {completed} 件
+Looking for files already in the backup: {completed} of {total}|正在查找备份中已有的文件：{completed}/{total}|正在尋找備份中已有的檔案：{completed}/{total}|バックアップにすでにあるファイルを検索中：{completed}/{total}
 Confirming possible duplicates: {completed} of {total} files|正在确认可能的重复文件：{completed}/{total} 个文件|正在確認可能的重複檔案：{completed}/{total} 個檔案|重複の可能性があるファイルを確認中：{total} 件中 {completed} 件
 Looking for identical files: {completed} of {total} files|正在查找相同的文件：{completed}/{total} 个文件|正在尋找相同的檔案：{completed}/{total} 個檔案|同一のファイルを検索中：{total} 件中 {completed} 件
 Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在收尾：{completed}/{total}|仕上げ中：{total} 件中 {completed} 件

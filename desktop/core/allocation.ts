@@ -5,6 +5,8 @@ import {MessageError} from '../messages';
 export function destinationParts(plan:TransferPlan):TransferPlan[]{return plan.videos?[plan,plan.videos]:[plan];}
 /** Every entry written to one destination disk. */
 export function destinationEntries(plan:TransferPlan):PlanEntry[]{return destinationParts(plan).flatMap(part=>part.entries);}
+/** Files an import placed where the rules wanted them: entries found elsewhere under older rules (`routed`) are not. */
+export function placedEntries(plan:TransferPlan):PlanEntry[]{return destinationEntries(plan).filter(entry=>entry.routed===undefined);}
 
 /** Staging holds all pending bytes; linkless publication temporarily needs one
  * additional related family before that family's staging can be released. No

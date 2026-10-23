@@ -90,7 +90,7 @@ export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>
   switch (progress.step) {
     case 'listing': case 'scanning': return 'scan';
     case 'checking': case 'reading': case 'history': case 'earlier': return 'read';
-    case 'comparing': case 'existing': case 'confirming': return 'compare';
+    case 'comparing': case 'locating': case 'existing': case 'confirming': return 'compare';
     case 'moving': return 'move';
     case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': return 'tidy';
     case 'deleting': return 'delete';
@@ -1221,6 +1221,7 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
+  if (progress.step === 'locating') return t("Looking for files already in the backup: {completed} of {total}", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   // Verifying also shows how many bytes of the copied files are published.
@@ -1327,7 +1328,7 @@ export function importFraction(job: Job, verify = true): number | undefined {
   if (!progress) return undefined;
   if (job.fraction !== undefined) return job.fraction;
   const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
-  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
+  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' || progress.step === 'locating' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
   return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
 }
 /** What a running job is doing, for the dashboard's total. */
