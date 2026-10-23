@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import * as core from '../core/index';
-import {journalLines,resealJournalLine} from './fixtures/records';
+import {journalLines,organizeAs,resealJournalLine} from './fixtures/records';
 
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
@@ -28,7 +28,7 @@ test(`a ${strategy} organization journal${manifestToo?'':' whose events came fro
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'recovery-remount-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const original=path.join(root,'incoming','deep','A.JPG');await fs.mkdir(path.dirname(original),{recursive:true});await fs.writeFile(original,'precious original');
  const p=(await core.plan(root,[root],options,metadata)).plans[0]!;
- assert.equal((await core.executeReorganization(p,undefined,undefined,{strategy})).errors.length,0);
+ assert.equal((await organizeAs(strategy,p)).errors.length,0);
  const [job]=await core.getOrganizationRecovery(root);
  const real=(await fs.lstat(root,{bigint:true})).dev;
  // Events only: the disk got its old device number back after a resume under another mount.

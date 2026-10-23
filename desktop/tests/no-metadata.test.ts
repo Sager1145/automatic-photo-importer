@@ -93,7 +93,7 @@ test('organization keep leaves unknown files where they are, and the misplaced c
   const found=await plan(f.library,[f.library],options,metadata);
   assert.deepEqual(sources(found),['IMG_2.JPG']);
   assert.equal(found.noMetadata?.count,2);
-  const result=await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(found.plans[0]!,undefined,undefined);
   assert.deepEqual(result.errors,[]);
   assert.equal(await fs.readFile(snap,'utf8'),'screenshot');assert.equal(await exists(legacy),true);
   assert.equal(await exists(path.join(f.library,'2022/202205/Cam/IMG_2.JPG')),true);
@@ -108,7 +108,7 @@ test('organization folder moves unknown files under the named folder, removes em
   const options={...base,reorganize:true,noMetadata:'folder' as const,noMetadataFolder:'Not dated'};
   const found=await plan(f.library,[f.library],options,metadata);
   assert.equal(found.noMetadata?.folder,'Not dated');
-  const result=await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(found.plans[0]!,undefined,undefined);
   assert.deepEqual(result.errors,[]);
   assert.equal(await fs.readFile(path.join(f.library,'Not dated/old/trip/SNAP_1.PNG'),'utf8'),'screenshot');
   assert.equal(await fs.readFile(path.join(f.library,'Not dated/2021/202103/NOCAM_3.JPG'),'utf8'),'no camera');

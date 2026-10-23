@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import * as core from '../core/index';
-import {journalFolderFor,journalFileFor,editJournalLine} from './fixtures/records';
+import {journalFolderFor,journalFileFor,editJournalLine,organizeByCopy} from './fixtures/records';
 
 async function singlePlan(source:string,root:string,...args:Parameters<typeof core.plan> extends [string,string[],...infer Rest]?Rest:never){return (await core.plan(source,[root],...args)).plans[0]!;}
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -24,7 +24,7 @@ async function retained(root:string,id:string,index=0):Promise<string> {
 }
 test('organization retains original bytes in durable recovery storage and excludes them from scans',async t=>{
  const {root,original}=await fixture(t);const p=await singlePlan(root,root,options,metadata);
- const r=await core.executeReorganization(p);assert.equal(r.moved,1);
+ const r=await organizeByCopy(p);assert.equal(r.moved,1);
  assert.equal(typeof core.getOrganizationRecovery,'function');
  const jobs=await core.getOrganizationRecovery(root);assert.equal(jobs.length,1);assert.equal(jobs[0]!.status,'complete');
  const saved=await retained(root,jobs[0]!.id);
@@ -34,15 +34,16 @@ test('organization retains original bytes in durable recovery storage and exclud
 });
 test('organization can move folders into a newly selected descendant base folder',async t=>{
  const {root,original}=await fixture(t);const destination=path.join(root,'newbase');await fs.mkdir(destination);
- const p=await singlePlan(root,destination,options,metadata);assert.equal((await core.executeReorganization(p)).moved,1);
+ const p=await singlePlan(root,destination,options,metadata);assert.equal((await organizeByCopy(p)).moved,1);
  assert.equal(await fs.readFile(p.entries[0]!.destination,'utf8'),'precious original');await assert.rejects(fs.stat(original));
 });
 
 async function crash(t:test.TestContext,when:'publish'|'stash'|'copy') {
  const f=await fixture(t);const script=path.join(f.root,'crash.mjs');
- const module=path.resolve('desktop/core/index.ts');
+ const module=path.resolve('desktop/core/index.ts'); const records=path.resolve('desktop/tests/fixtures/records.ts');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(module)};
+ import {plan,configureOrganizationRecovery} from ${JSON.stringify(module)};
+ import {organizeByCopy} from ${JSON.stringify(records)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const original=${JSON.stringify(f.original)},root=${JSON.stringify(f.root)};
  const originalRename=filesystem.rename,originalLink=filesystem.link;
@@ -50,7 +51,7 @@ async function crash(t:test.TestContext,when:'publish'|'stash'|'copy') {
  filesystem.link=async(...args)=>{if(${JSON.stringify(when)}==='copy')throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});const r=await originalLink(...args);if(!String(args[1]).includes('Photo Importer Data')&&${JSON.stringify(when)}==='publish')process.exit(91);return r;};
  const originalOpen=filesystem.open;filesystem.open=async(...args)=>{const h=await originalOpen(...args);if(${JSON.stringify(when)}==='copy'&&String(args[0]).endsWith('/2024/202402/Sony/JPEG/A.JPG')){const write=h.write.bind(h);h.write=async(...writeArgs)=>{await write(writeArgs[0],writeArgs[1],Math.min(4,writeArgs[2]),writeArgs[3]);process.exit(91);};}return h;};
  const {plans:[p]}=await plan(root,[root],${JSON.stringify(options)},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
- await executeReorganization(p);process.exit(0);`);
+ await organizeByCopy(p);process.exit(0);`);
  const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});
  assert.equal(child.status,91,child.stderr);await fs.unlink(script);
  const jobs=await core.getOrganizationRecovery(f.root);assert.equal(jobs.length,1);assert.equal(jobs[0]!.status,'pending');
@@ -86,7 +87,7 @@ test('cancellation after the first relocation retains every original and a later
  const p=await singlePlan(root,root,options,metadata),controller=new AbortController();
  const filesystem=(await import('node:fs/promises')).default,rename=filesystem.rename;
  t.mock.method(filesystem,'rename',async(from:string,to:string)=>{await rename(from,to);if(from===original)controller.abort();});
- await assert.rejects(core.executeReorganization(p,controller.signal),{name:'AbortError'});t.mock.restoreAll();
+ await assert.rejects(organizeByCopy(p,controller.signal),{name:'AbortError'});t.mock.restoreAll();
  const [job]=await core.getOrganizationRecovery(root);assert.ok(job);assert.equal(job.status,'pending');
  assert.equal(await fs.readFile(await retained(root,job.id),'utf8'),'precious original');
  assert.equal(await fs.readFile(second,'utf8'),'second precious original');
@@ -131,7 +132,7 @@ test('a forged valid journal cannot authorize moving another file',async t=>{
 });
 
 test('rechecking a completed operation restores a missing destination from retained originals',async t=>{
- const {root}=await fixture(t);const p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root}=await fixture(t);const p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root);await fs.unlink(p.entries[0]!.destination);
  assert.equal((await core.getOrganizationRecovery(root))[0]!.status,'pending');
  const result=await core.resumeOrganization(root,job!.id);assert.deepEqual(result.errors,[]);assert.equal(result.copied,1);assert.equal(result.moved,1);
@@ -152,7 +153,7 @@ test('a colliding exclusive stash slot preserves the competing bytes and origina
    await mkdir(...args);competitor=path.join(folder,'A.JPG');await fs.writeFile(competitor,'competing retained original');throw Object.assign(new Error('Slot already exists'),{code:'EEXIST'});
   }return mkdir(...args);
  });
- const result=await core.executeReorganization(p);assert.ok(result.errors.length);assert.equal(result.moved,0);assert.ok(competitor);
+ const result=await organizeByCopy(p);assert.ok(result.errors.length);assert.equal(result.moved,0);assert.ok(competitor);
  assert.equal(await fs.readFile(competitor,'utf8'),'competing retained original');assert.equal(await fs.readFile(original,'utf8'),'precious original');
 });
 test('a live review cannot be changed to authorize a broader source root',async t=>{
@@ -161,7 +162,7 @@ test('a live review cannot be changed to authorize a broader source root',async 
 });
 
 test('cached recovery listing reads no media bytes while an explicit recheck detects corruption',async t=>{
- const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id),destination=p.entries[0]!.destination;
  await fs.writeFile(destination,'different content'); // Same length as the reviewed original.
  const filesystem=(await import('node:fs/promises')).default,open=filesystem.open;
@@ -177,7 +178,7 @@ test('cached recovery listing reads no media bytes while an explicit recheck det
 test('explicit finalization removes only retained duplicates and preserves journal rechecks',async t=>{
  const {root,original}=await fixture(t),existing=path.join(root,'2024/202402/Sony/JPEG/B.JPG');
  await fs.mkdir(path.dirname(existing),{recursive:true});await fs.writeFile(existing,'already organized original');
- const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p)).errors,[]);
+ const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await organizeByCopy(p)).errors,[]);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id,p.entries.findIndex(entry=>entry.source===original));
  const result=await core.finalizeOrganization(root,job!.id);assert.equal(result.removed,1);assert.equal(result.bytes,Buffer.byteLength('precious original'));
  await assert.rejects(fs.stat(saved));assert.equal(await fs.readFile(existing,'utf8'),'already organized original');
@@ -187,7 +188,7 @@ test('explicit finalization removes only retained duplicates and preserves journ
 });
 
 for(const fault of ['missing','corrupt','symlink','source reappeared'] as const)test(`finalization preserves retained originals when ${fault}`,async t=>{
- const {root,original}=await fixture(t),p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root,original}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id),destination=p.entries[0]!.destination;
  if(fault==='missing')await fs.unlink(destination);
  else if(fault==='corrupt')await fs.writeFile(destination,'changed target');
@@ -202,7 +203,7 @@ test('finalization requires a fully completed journal',async t=>{
 });
 
 for(const when of ['intent','unlink'] as const)test(`finalization resumes a fresh process exit after ${when}`,async t=>{
- const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id),script=path.join(root,'finalize-crash.mjs');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
  import {configureOrganizationRecovery,finalizeOrganization} from ${JSON.stringify(path.resolve('desktop/core/index.ts'))};
@@ -217,7 +218,7 @@ for(const when of ['intent','unlink'] as const)test(`finalization resumes a fres
 });
 
 test('a released original is never recreated or silently accepted after its target disappears',async t=>{
- const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root);await core.finalizeOrganization(root,job!.id);await fs.unlink(p.entries[0]!.destination);
  assert.equal((await core.getOrganizationRecovery(root))[0]!.status,'pending');
  assert.ok((await core.resumeOrganization(root,job!.id)).errors.length);
@@ -226,7 +227,7 @@ test('a released original is never recreated or silently accepted after its targ
 
 test('finalization validates the whole journal before deleting the first retained original',async t=>{
  const {root}=await fixture(t);await fs.writeFile(path.join(root,'incoming/B.JPG'),'second precious original');
- const p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),first=await retained(root,job!.id,0),second=await retained(root,job!.id,1);
  await fs.writeFile(p.entries[1]!.destination,'invalid second target');await assert.rejects(core.finalizeOrganization(root,job!.id));
  assert.equal(await fs.readFile(first,'utf8'),'precious original');assert.equal(await fs.readFile(second,'utf8'),'second precious original');
@@ -236,7 +237,7 @@ test('finalization validates the whole journal before deleting the first retaine
 test('finalizing relocated duplicates releases the retained copy while preserving the existing target',async t=>{
  const {root,original}=await fixture(t),destination=path.join(root,'2024/202402/Sony/JPEG/A.JPG');
  await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,'precious original');
- const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p)).errors,[]);
+ const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await organizeByCopy(p)).errors,[]);
  const [job]=await core.getOrganizationRecovery(root);const result=await core.finalizeOrganization(root,job!.id);
  // The existing target is already in place, so the journal holds only the relocated duplicate.
  assert.equal(result.removed,1);assert.equal(result.finalized,1);await assert.rejects(fs.stat(original),{code:'ENOENT'});
@@ -247,7 +248,7 @@ test('finalizing relocated duplicates releases the retained copy while preservin
 
 
 test('fully finalized entries ignore obsolete source directories and preserve reused source paths',async t=>{
- const {root,original}=await fixture(t),p=await singlePlan(root,root,options,metadata);await core.executeReorganization(p);
+ const {root,original}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root);await core.finalizeOrganization(root,job!.id);
  await assert.rejects(fs.stat(path.dirname(original)),{code:'ENOENT'});
  assert.equal((await core.getOrganizationRecovery(root))[0]!.status,'complete');
@@ -280,7 +281,7 @@ test('a second entry interrupted during exclusive publication resumes using its 
   }
   return handle;
  });
- const result=await core.executeReorganization(p);assert.equal(result.errors.length,1);
+ const result=await organizeByCopy(p);assert.equal(result.errors.length,1);
  assert.equal(await fs.readFile(original,'utf8'),'precious original');assert.equal(await fs.readFile(second,'utf8'),'second precious original');assert.equal(await fs.readFile(target,'utf8'),'seco');
  t.mock.restoreAll();const [job]=await core.getOrganizationRecovery(root);assert.equal(job!.status,'pending');
  const resumed=await core.resumeOrganization(root,job!.id);assert.deepEqual(resumed.errors,[]);assert.equal(resumed.moved,2);
@@ -291,7 +292,7 @@ test('finalizing and undoing report n of x progress through their checking and t
  const {root}=await fixture(t),destination=path.join(root,'2024/202402/Sony/JPEG/A.JPG');
  await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,'precious original');
  const second=path.join(root,'incoming/B.JPG');await fs.writeFile(second,'another original');
- const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p,undefined,undefined)).errors,[]);
  const [job]=await core.getOrganizationRecovery(root);
  const seen:{step:string;completed:number;total:number}[]=[];
  // A report may repeat between slow calls inside one entry, so each is a heartbeat; counts are compared without the repeats.
@@ -305,7 +306,7 @@ test('finalizing and undoing report n of x progress through their checking and t
  const other=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-undo-progress-')));
  t.after(()=>fs.rm(other,{recursive:true,force:true}));
  for(const name of ['C.JPG','D.JPG']){await fs.mkdir(path.join(other,'incoming'),{recursive:true});await fs.writeFile(path.join(other,'incoming',name),name);}
- const q=await singlePlan(other,other,options,metadata);assert.deepEqual((await core.executeReorganization(q,undefined,undefined,{strategy:'rename'})).errors,[]);
+ const q=await singlePlan(other,other,options,metadata);assert.deepEqual((await core.executeReorganization(q,undefined,undefined)).errors,[]);
  const [moved]=await core.getOrganizationRecovery(other);const undoing:{step:string;completed:number;total:number}[]=[];
  assert.equal((await core.undoOrganization(other,moved!.id,undefined,progress=>distinct(undoing,{step:progress.step,completed:progress.completed,total:progress.total}))).restored,2);
  assert.deepEqual(undoing.filter(item=>item.step==='checking').map(item=>item.completed),[1,2]);

@@ -20,7 +20,7 @@ async function fixture(t:test.TestContext,parent?:string) {
 }
 const organize=async(library:string,collectProblems:boolean)=>{
   const found=await plan(library,[library],{...options,reorganize:true,collectProblems},metadata);
-  const result=await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(found.plans[0]!,undefined,undefined);
   assert.deepEqual(result.errors,[]);
   return {found,result};
 };

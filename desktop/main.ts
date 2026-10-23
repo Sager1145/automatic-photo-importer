@@ -12,7 +12,7 @@ import {organizesAfterImport} from './after-import';
 import {checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
-import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
@@ -530,12 +530,12 @@ function checkResidue(all:boolean):Promise<void>{
   // Looking is a share of the folders walked; removing counts the leftovers found. Both show in the settings row.
   const show=(progress:Progress)=>{if(state.residue)state.residue.progress=progress;progressEmit();};
   const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
-  // Cleaned when something can go: files beyond the copies kept, or receipts to close.
-  const work=found.files>(all?0:found.resumable.files)+found.recoverable.files||found.items.some(item=>item.kind==='receipt'&&!!item.rid);
+  // Cleaned when something can go: files beyond the copies kept (automatic cleanup keeps resumable and kept copies, every cleanup recoverable ones), or receipts to close.
+  const work=found.files>(all?0:found.resumable.files+found.kept.files)+found.recoverable.files||found.items.some(item=>item.kind==='receipt'&&!!item.rid);
   const {removed,left}=work?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
   residueItems=left.items;
-  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,recoverable:left.recoverable,...(left.unbound?.files?{unbound:left.unbound}:{}),checkedAt:now,...(cleaned?{cleaned}:{})};
+  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,...(left.kept.files?{kept:left.kept}:{}),recoverable:left.recoverable,...(left.unbound?.files?{unbound:left.unbound}:{}),checkedAt:now,...(cleaned?{cleaned}:{})};
   // Ended organizations the cleanup deleted leave the list.
   if(removed.files)void refreshOrganizations();
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue){delete state.residue.checking;delete state.residue.progress;}emit();void releaseIfIdle();});
@@ -750,8 +750,8 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.phase='copying';
   // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
   const verified:Record<string,ImportVerified>={},volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
-  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await rememberingVerified(verified,async()=>{if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,verified);},()=>executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
+  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=await rememberingVerified(verified,async()=>{if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,verified);},()=>executeDestinations(plans,{
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
@@ -769,12 +769,6 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
-  // Folders the organized files came from that now hold only service files (or nothing).
-  let foldersRemoved=0;
-  if(reorganize&&policy.removeEmptySourceFolders&&errors.length===0&&errorTotal(job)===0){
-   try{foldersRemoved=await removeOrganizedFolders(job.source.path,plans,sourceFolders);
-   }catch(error){job.errors.push(message('error.folderCleanup',{error:toMessage(error)}));}
-  }
   job.alreadyImported=!reorganize&&entries>0&&copied===0&&!removed&&errors.length===0&&errorTotal(job)===0;
   await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
@@ -1074,7 +1068,7 @@ async function action(input:Action):Promise<void>{
    const stamp=new Date().toISOString().replace(/[-:]/g,'').slice(0,15).replace('T','-');
    const result=await dialog.showSaveDialog(window!,{title:'Export logs',defaultPath:path.join(app.getPath('documents'),`importer-logs-${stamp}.zip`),filters:[{name:'Zip archive',extensions:['zip']}]});
    if(result.canceled||!result.filePath)break;
-   const done=await exportLogs(logger.directory,result.filePath);log('normal','app','logs-exported',{to:done.path,kind:done.kind,files:done.files,bytes:done.bytes});
+   const done=await exportLogs(logger.directory,result.filePath);log('normal','app','logs-exported',{to:done.path,files:done.files,bytes:done.bytes});
    shell.showItemInFolder(done.path);break;
   }
   case 'preferences':{

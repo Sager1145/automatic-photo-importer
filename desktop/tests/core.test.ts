@@ -6,6 +6,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { inventory, plan as planDestinations, execute, executeReorganization, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
+import {organizeByCopy} from './fixtures/records';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
@@ -281,7 +282,7 @@ test('reviewed library reorganization moves a wrong-folder original only after v
   const {source,put}=await fixture(t); const original=await put('incoming/A.JPG','original bytes');
   const p=await plan(source,source,{...options,reorganize:true},metadata);
   assert.equal(p.entries[0]?.destination,path.join(source,'2024/202402/Sony A7/JPEG/A.JPG'));
-  const result=await executeReorganization(p);
+  const {id:_id,foldersRemoved:_removed,...result}=await organizeByCopy(p);
   assert.deepEqual(result,{copied:1,skipped:0,errors:[],moved:1,retained:1,retainedBytes:14});
   await assert.rejects(fs.stat(original));
   assert.equal(await fs.readFile(p.entries[0]!.destination,'utf8'),'original bytes');
@@ -293,7 +294,7 @@ test('reorganization stashes identical wrong-folder duplicates and retains alrea
   const p=await plan(source,source,{...options,reorganize:true},metadata);
   // The already organized file is not planned at all; only the duplicate is journaled.
   assert.equal(p.entries.length,1);
-  const result=await executeReorganization(p);
+  const {id:_id,foldersRemoved:_removed,...result}=await organizeByCopy(p);
   assert.deepEqual(result,{copied:0,skipped:1,errors:[],moved:1,retained:1,retainedBytes:14});
   await assert.rejects(fs.stat(original),{code:'ENOENT'});
   assert.equal(await fs.readFile(organized,'utf8'),'original bytes');
@@ -303,7 +304,7 @@ test('stale reorganization source fails without removing its original',async t=>
   const {source,put}=await fixture(t); const original=await put('incoming/A.JPG','original bytes');
   const p=await plan(source,source,{...options,reorganize:true},metadata);
   await fs.writeFile(original,'modified bytes');
-  const result=await executeReorganization(p);
+  const result=await organizeByCopy(p);
   assert.equal(result.moved,0); assert.equal(result.retained,0,'nothing moved, so nothing is kept for undo'); assert.equal(result.errors.length,1);
   assert.equal(await fs.readFile(original,'utf8'),'modified bytes');
   await assert.rejects(fs.stat(p.entries[0]!.destination));
@@ -313,7 +314,7 @@ test('reorganization retains a source whose identity timestamps changed after re
   const {source,put}=await fixture(t); const original=await put('incoming/A.JPG','original bytes');
   const p=await plan(source,source,{...options,reorganize:true},metadata);
   await fs.utimes(original,new Date('2000-01-01T00:00:00Z'),new Date('2000-01-01T00:00:00Z'));
-  const result=await executeReorganization(p);
+  const result=await organizeByCopy(p);
   assert.equal(result.moved,0); assert.equal(result.retained,0,'nothing moved, so nothing is kept for undo'); assert.equal(result.errors.length,1);
   assert.equal(await fs.readFile(original,'utf8'),'original bytes');
 });
@@ -323,7 +324,7 @@ test('runtime reorganization collision copies to a new name and retains the unre
   const p=await plan(source,source,{...options,reorganize:true},metadata);
   await fs.mkdir(path.dirname(p.entries[0]!.destination),{recursive:true});
   await fs.writeFile(p.entries[0]!.destination,'other writer!!');
-  const result=await executeReorganization(p);
+  const {id:_id,foldersRemoved:_removed,...result}=await organizeByCopy(p);
   // Nothing was moved, so no original is kept for undo; it is still at its source path.
   assert.deepEqual(result,{copied:1,skipped:0,errors:[],moved:0,retained:0,retainedBytes:0});
   assert.equal(await fs.readFile(original,'utf8'),'original bytes');

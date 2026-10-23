@@ -120,7 +120,7 @@ test('organization moves an existing backup into the new layout, including betwe
  const misplaced=await findMisplaced(drive,photos,options,metadata);
  assert.deepEqual(misplaced.files.sort(),['photobackup/'+camera+'/RAW/DSC_0001.NEF','photobackup/'+camera+'/RAW/DSC_0001.xmp','photobackup/'+camera+'/Videos/C0004.MP4','photobackup/'+camera+'/Videos/C0004M01.XML','videobackup/'+camera+'/DSC_0009.JPG'].sort());
  const {plans:[transfer]}=await plan(drive,[photos],{...options,reorganize:true},metadata);
- for(const part of parts(transfer!))assert.deepEqual((await executeReorganization(part,undefined,undefined,{strategy:'rename'})).errors,[]);
+ for(const part of parts(transfer!))assert.deepEqual((await executeReorganization(part,undefined,undefined)).errors,[]);
  for(const file of [path.join(photos,camera,'DSC_0001.NEF'),path.join(photos,camera,'DSC_0001.xmp'),path.join(photos,camera,'DSC_0009.JPG'),path.join(videos,camera,'C0004.MP4'),path.join(videos,camera,'C0004M01.XML')])await fs.access(file);
  assert.equal((await findMisplaced(drive,photos,options,metadata)).count,0);
 });
@@ -132,7 +132,7 @@ test('organization moves files from the old media-type folders into format folde
  const options={...base,layout:'type-format' as const};
  assert.equal((await findMisplaced(photos,photos,options,metadata)).count,4);
  const {plans:[transfer]}=await plan(photos,[photos],{...options,reorganize:true},metadata);
- assert.deepEqual((await executeReorganization(transfer!,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await executeReorganization(transfer!,undefined,undefined)).errors,[]);
  for(const relative of ['Photos/NEF/DSC_0001.NEF','Photos/JPEG/DSC_0001.JPG','Photos/NEF/DSC_0001.xmp','Videos/MOV/C0004.MOV'])await fs.access(path.join(photos,camera,relative));
 });
 
@@ -153,11 +153,11 @@ test('a video-root organization supersedes an earlier journal kept in the photo 
  const clip=path.join(drive,'2025','C0016.MOV');await fs.mkdir(path.dirname(clip),{recursive:true});await fs.writeFile(clip,'bytes of a Sony clip');
  // First: the year folder organized into one backup folder, journaled in photobackup.
  const first=(await plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
- assert.deepEqual((await executeReorganization(first,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await executeReorganization(first,undefined,undefined)).errors,[]);
  // Then: photos and videos split; the clip moves on to videobackup under a journal kept there.
  const options={...base,layout:'video-root' as const,videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true};
  const {plans:[second]}=await plan(drive,[photos],options,metadata);
- for(const part of parts(second!))assert.deepEqual((await executeReorganization(part,undefined,undefined,{strategy:'rename'})).errors,[]);
+ for(const part of parts(second!))assert.deepEqual((await executeReorganization(part,undefined,undefined)).errors,[]);
  await fs.access(path.join(videos,camera,'C0016.MOV'));
  const earlier=await getOrganizationRecovery(photos),later=await getOrganizationRecovery(videos);
  assert.deepEqual(earlier.filter(job=>job.error),[],'the earlier journal is superseded, not reported as broken');

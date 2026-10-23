@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,resumeOrganization} from '../core/index';
+import {organizeByCopy} from './fixtures/records';
 configureOrganizationRecovery('edited-organization-fixture-key-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'edited-organization-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));const source=path.join(base,'library'),target=path.join(source,'photobackup');await fs.mkdir(target,{recursive:true});const put=async(relative:string,contents='original')=>{const file=path.join(source,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,contents);return file;};return{base,source,target,put};}
@@ -30,7 +31,7 @@ test('camera-card planning honors remembered folder rules for nonmedia and keeps
 test('organization merges exact duplicates, retains different content and removes only empty obsolete folders; resume still verifies',async t=>{
  const{source,target,put}=await fixture(t);const original=await put('2025/Wrong camera/A.ARW','same');const conflict=await put('2025/Wrong camera/B.ARW','different');await put('2025/Keep notes/readme.txt','keep');
  await put('photobackup/2025/202506/ILCE-7M5/A.ARW','same');await put('photobackup/2025/202506/ILCE-7M5/B.ARW','existing');
- const {plans}=await plan(source,[target],{...options,reorganize:true},metadata);const result=await executeReorganization(plans[0]);assert.deepEqual(result.errors,[]);
+ const {plans}=await plan(source,[target],{...options,reorganize:true},metadata);const result=await organizeByCopy(plans[0]);assert.deepEqual(result.errors,[]);
  await assert.rejects(fs.stat(original),{code:'ENOENT'});await assert.rejects(fs.stat(conflict),{code:'ENOENT'});await assert.rejects(fs.stat(path.dirname(original)),{code:'ENOENT'});
  assert.equal(await fs.readFile(path.join(source,'2025/Keep notes/readme.txt'),'utf8'),'keep');
  assert.equal(await fs.readFile(path.join(target,'2025/202506/ILCE-7M5/B.ARW'),'utf8'),'existing');

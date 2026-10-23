@@ -10,7 +10,7 @@ import {recordPartial,closeReceipts,openReceiptFor,activeSegment,SEGMENT_BYTES,t
 import {appendLines,sealedLine,storeFor} from '../core/app-store';
 import {findResidue,cleanResidue,type ResidueItem} from '../core/residue';
 import {stagePathFor,openReceiptsFor,segmentsFor} from './fixtures/receipts';
-import {journalFolderFor} from './fixtures/records';
+import {journalFolderFor,organizeAs,organizeByCopy} from './fixtures/records';
 import {oldReceipt} from './fixtures/old-records';
 import type {Metadata} from '../shared';
 
@@ -49,7 +49,7 @@ test('Stop while organization copies a file leaves no staged copy in the journal
   const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
   const organizations=path.join(root,'Photo Importer Data','Organizations');
   const staged=()=>readdirSync(organizations).flatMap(id=>{try{return readdirSync(path.join(organizations,id)).filter(name=>name.startsWith('stage-')).map(name=>path.join(organizations,id,name));}catch{return [];}});
-  await assert.rejects(executeReorganization(reviewed,stopWhen(()=>staged().some(file=>statSync(file).size>0)),undefined,{strategy:'copy'}),{name:'AbortError'});
+  await assert.rejects(organizeByCopy(reviewed,stopWhen(()=>staged().some(file=>statSync(file).size>0))),{name:'AbortError'});
   assert.deepEqual(staged(),[]);
   assert.equal((await fs.stat(original)).size,3*1024*1024);
 });
@@ -116,7 +116,8 @@ test('residue lists only the app\'s own leftovers in the records folder, with re
   assert.equal(kindOf(found,f.camera1),'temporary');assert.equal(kindOf(found,f.preview),'temporary');
   // A receipt to close names its file; the file itself is never residue.
   for(const kept of [f.second.destination,f.third.destination,f.inUse,f.oldPartial,...f.user])assert.ok(!found.items.some(item=>item.path===kept&&!item.rid),`not residue: ${kept}`);
-  assert.deepEqual(found.resumable,{files:2,bytes:1000+2500});
+  assert.deepEqual(found.resumable,{files:1,bytes:1000},'only a copy a re-import could continue');
+  assert.deepEqual(found.kept,{files:1,bytes:2500},'a copy not proven dead is counted apart');
   // Receipts to close are not files the user has.
   assert.equal(found.files,found.items.filter(item=>!(item.kind==='receipt'&&item.rid)).length);
 });
@@ -172,7 +173,7 @@ test('camera and preview folders are found and removed through the system tempor
   const found=await findResidue([],{temporary:os.tmpdir(),inUse:()=>[reading]});
   const own=found.items.filter(item=>item.path.endsWith(path.sep+path.basename(left)));
   assert.equal(own.length,1);assert.ok(!found.items.some(item=>item.path.endsWith(path.sep+path.basename(reading))),'a folder in use is not listed');
-  const {removed}=await cleanResidue({items:own,files:1,bytes:own[0]!.bytes,resumable:{files:0,bytes:0},recoverable:{files:0,bytes:0}});
+  const {removed}=await cleanResidue({items:own,files:1,bytes:own[0]!.bytes,resumable:{files:0,bytes:0},kept:{files:0,bytes:0},recoverable:{files:0,bytes:0}});
   assert.equal(removed.files,1);await assert.rejects(fs.lstat(left),{code:'ENOENT'});await fs.lstat(reading);
 });
 
@@ -290,8 +291,8 @@ test('empty original slots are leftovers only in a finished journal, not a pendi
     const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
     const organizations=path.join(root,'Photo Importer Data','Organizations');
     const stagedNow=()=>readdirSync(organizations).flatMap(id=>{try{return readdirSync(path.join(organizations,id)).filter(name=>name.startsWith('stage-'));}catch{return [];}});
-    if(finished) await executeReorganization(reviewed,undefined,undefined,{strategy:'rename'});
-    else await assert.rejects(executeReorganization(reviewed,stopWhen(()=>stagedNow().length>0),undefined,{strategy:'copy'}),{name:'AbortError'});
+    if(finished) await executeReorganization(reviewed,undefined,undefined);
+    else await assert.rejects(organizeByCopy(reviewed,stopWhen(()=>stagedNow().length>0)),{name:'AbortError'});
     const [job]=await getOrganizationRecovery(root);
     const slot=path.join(await journalFolderFor(root,job!.id),'originals','0',randomUUID());await fs.mkdir(slot,{recursive:true});
     const found=await findResidue([root]);
@@ -336,7 +337,7 @@ test('ended organizations holding no kept original are deleted automatically, th
     const original=path.join(root,'incoming',name);await fs.mkdir(path.dirname(original),{recursive:true});await fs.writeFile(original,Buffer.alloc(2000,name.length));
     const reviewed=(await plan(root,[root],{...options,reorganize:true,sourceFolders:['incoming']},metadata)).plans[0]!;
     const before=new Set((await getOrganizationRecovery(root,{includeEnded:true})).map(job=>job.id));
-    assert.deepEqual((await executeReorganization(reviewed,undefined,undefined,{strategy})).errors,[]);
+    assert.deepEqual((await organizeAs(strategy,reviewed)).errors,[]);
     return (await getOrganizationRecovery(root,{includeEnded:true})).find(job=>!before.has(job.id))!;
   };
   // A finished rename can still be undone: kept.

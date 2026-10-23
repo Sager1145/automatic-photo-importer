@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
 import * as core from '../core/index';
+import {organizeByCopy} from './fixtures/records';
 
 // Each file is read whole, so reads are counted in whole files: what each flow reads, by role.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -53,7 +54,7 @@ test('an organization copy reads its source once and its destination not at all 
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
  const destination=transfer!.entries[0]!.destination;
  const reads=countReads(t,file=>file===original?'source':file===destination?'destination':file.endsWith('.partial')?'stage':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined);
- const result=await core.executeReorganization(transfer!);
+ const result=await organizeByCopy(transfer!);
  reads.stop();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.deepEqual(reads.files(),{source:1,stage:1});
@@ -74,7 +75,7 @@ test('a destination changed after its check is read again and the original is ke
   return mkdir(...args);
  });syncBuiltinESMExports();
  const reads=countReads(t,file=>file===destination?'destination':undefined);
- const result=await core.executeReorganization(transfer!);
+ const result=await organizeByCopy(transfer!);
  reads.stop();
  assert.equal(changed,true);assert.equal(result.errors.length,1);assert.match(result.errors[0]!,/Destination changed/);
  assert.deepEqual(reads.files(),{destination:1});
@@ -85,7 +86,7 @@ async function organized(t:test.TestContext,name:string){
  const root=await folder(t,name),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
  await photo(original,data);
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
- assert.deepEqual((await core.executeReorganization(transfer!)).errors,[]);
+ assert.deepEqual((await organizeByCopy(transfer!)).errors,[]);
  const id=(await core.getOrganizationRecovery(root))[0]?.id;
  const role=(file:string)=>file===original?'source':file===transfer!.entries[0]!.destination?'destination':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined;
  return {root,id:id!,original,data,destination:transfer!.entries[0]!.destination,role};
@@ -264,7 +265,7 @@ test('on exFAT an organization reads the original and the copy again before sett
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
  const destination=transfer!.entries[0]!.destination;
  const reads=countReads(t,file=>file===original?'source':file===destination?'destination':file.endsWith('.partial')?'stage':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined);
- const result=await core.executeReorganization(transfer!);
+ const result=await organizeByCopy(transfer!);
  reads.stop();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.deepEqual(reads.files(),{source:3,stage:1,destination:3});
@@ -283,7 +284,7 @@ for(const [name,expected,link] of [
  const destination=transfer!.entries[0]!.destination,real=fs.link.bind(fs);
  t.mock.method(fs,'link',async(from:string,to:string)=>String(from).endsWith('.partial')?(link as (a:string,b:string,c:typeof real)=>Promise<void>)(String(from),String(to),real):real(from,to));syncBuiltinESMExports();
  const reads=countReads(t,file=>file===destination?'destination':undefined);
- const result=await core.executeReorganization(transfer!);
+ const result=await organizeByCopy(transfer!);
  reads.stop();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.deepEqual(reads.files(),{destination:expected});

@@ -9,7 +9,6 @@ import {normalizePreferences} from '../preferences';
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
-const rename={strategy:'rename' as const};
 
 // A library where a stray copy of an already organized file sits in an old folder,
 // next to a stray file that is not organized yet.
@@ -26,7 +25,7 @@ const prepare=async(root:string)=>(await core.plan(root,[root],options,metadata)
 
 test('organizing with duplicate release removes a confirmed duplicate from its original place',async t=>{
  const f=await fixture(t);
- const result=await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:true});
+ const result=await core.executeReorganization(await prepare(f.root),undefined,undefined,{releaseDuplicates:true});
  assert.deepEqual(result.errors,[]);
  assert.equal(result.released,1);assert.equal(result.releasedBytes,Buffer.byteLength('same bytes'));
  assert.equal(result.retained,0);assert.equal(result.retainedBytes,0);
@@ -39,7 +38,7 @@ test('organizing with duplicate release removes a confirmed duplicate from its o
 
 test('without duplicate release a confirmed duplicate is kept in recovery storage',async t=>{
  const f=await fixture(t);
- const result=await core.executeReorganization(await prepare(f.root),undefined,undefined,rename);
+ const result=await core.executeReorganization(await prepare(f.root),undefined,undefined);
  assert.deepEqual(result.errors,[]);
  assert.equal(result.released??0,0);assert.equal(result.retained,1);
  const [job]=await core.getOrganizationRecovery(f.root);
@@ -51,7 +50,7 @@ test('duplicates are not released when the organization reports an error',async 
  const reviewed=await prepare(f.root);
  // Another file changes after review, so the run stops with an error.
  await fs.writeFile(f.stray,'changed after review');
- const result=await core.executeReorganization(reviewed,undefined,undefined,{...rename,releaseDuplicates:true}).catch(error=>({errors:[String(error)],released:0}));
+ const result=await core.executeReorganization(reviewed,undefined,undefined,{releaseDuplicates:true}).catch(error=>({errors:[String(error)],released:0}));
  assert.notDeepEqual(result.errors,[]);
  assert.equal(result.released??0,0);
  const kept=await fs.readFile(f.duplicate,'utf8').catch(()=>undefined);
@@ -68,7 +67,7 @@ const hiddenFolders=async(root:string)=>{const found:string[]=[];const walk=asyn
 
 test('organization never creates hidden folders; its records folder is visible',async t=>{
  const f=await fixture(t);
- await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false});
+ await core.executeReorganization(await prepare(f.root),undefined,undefined,{releaseDuplicates:false});
  assert.deepEqual(await hiddenFolders(f.root),[]);
  assert.ok((await fs.stat(path.join(f.root,'Photo Importer Data'))).isDirectory());
  assert.equal((await core.findMisplaced(f.root,f.root,options,metadata)).count,0,'the records folder is never organized');
@@ -80,6 +79,6 @@ test('records an earlier version left in its hidden folder that this Mac did not
  const id='6b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f',old=path.join(f.root,'.photo-importer-recovery',id);
  await fs.mkdir(old,{recursive:true});await fs.writeFile(path.join(old,'manifest.json'),'{}');
  assert.deepEqual(await core.getOrganizationRecovery(f.root),[],'an old folder is not a journal list');
- await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false});
+ await core.executeReorganization(await prepare(f.root),undefined,undefined,{releaseDuplicates:false});
  assert.equal(await fs.readFile(path.join(old,'manifest.json'),'utf8'),'{}','the old records are left as they are');
 });

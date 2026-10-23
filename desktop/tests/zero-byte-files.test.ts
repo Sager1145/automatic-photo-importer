@@ -47,7 +47,7 @@ test('on exFAT an organization skips 0-byte files, reports them and still moves 
   assert.equal(inventory.empty,3);
   assert.deepEqual(inventory.skipped!.filter(item=>item.reason==='empty').map(item=>item.path).sort(),[...zero].sort());
   assert.deepEqual(plans[0]!.entries.map(entry=>path.basename(entry.source)).sort(),['A.CR3','B.JPG']);
-  const result=await executeReorganization(plans[0]!,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(plans[0]!,undefined,undefined);
   assert.deepEqual(result.errors,[]);assert.equal(result.moved,2);
   for(const file of zero) assert.equal((await fs.stat(file)).size,0);
   await assert.rejects(fs.stat(path.join(stray,'A.CR3')),{code:'ENOENT'});
@@ -97,7 +97,7 @@ test('an organization goes on without a file that changes between checking and r
   assert.ok(first instanceof MessageError&&first.key==='error.sourceChanged');
   assert.match(failures.find(item=>path.basename(item.path)==='B.CR3')!.error.message,/changed/i);
   assert.deepEqual(plans[0]!.entries.map(entry=>path.basename(entry.source)).sort(),['C.CR3','D.CR3']);
-  const result=await executeReorganization(plans[0]!,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(plans[0]!,undefined,undefined);
   assert.deepEqual(result.errors,[]);assert.equal(result.moved,2);
   await fs.stat(path.join(stray,'A.CR3'));await fs.stat(path.join(stray,'B.CR3'));
 });

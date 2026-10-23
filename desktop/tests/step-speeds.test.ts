@@ -119,7 +119,7 @@ test('real transfers report bytes while copying and rename steps report files, n
  assert.ok(events.some(event=>event.phase==='verifying'&&event.totalBytes>0&&event.bytes>0),'verifying events carry the bytes being re-read');
  const moves:Progress[]=[];
  const {plans:[organize]}=await core.plan(library,[library],{backup:false,template:'{year}/{camera}',layout:'format',unknownRules:{},reorganize:true},metadata);
- await core.executeReorganization(organize!,undefined,progress=>moves.push(progress),{strategy:'rename'});
+ await core.executeReorganization(organize!,undefined,progress=>moves.push(progress));
  const steps=moves.filter(event=>event.step==='confirming'||event.step==='moving');
  assert.ok(steps.some(event=>event.step==='confirming')&&steps.some(event=>event.step==='moving'));
  assert.ok(steps.every(event=>event.renames&&event.bytes===0&&event.speed===0),'rename steps count files; no bytes move');
