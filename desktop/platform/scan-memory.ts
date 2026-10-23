@@ -84,6 +84,12 @@ export async function rememberImported(store:string,volume:string,mount:string,v
   try { await fs.writeFile(temporary,JSON.stringify(cacheRecord('imported',{volume,files})),{mode:0o600}); await fs.rename(temporary,target); }
   catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
 }
+/** Run `work`, which fills `verified`, then `remember` what it verified: also when it stops or fails, so the next
+ * plan still recognises those files. Only a cache: a failed write is ignored, and `work`'s own outcome stands. */
+export async function rememberingVerified<T>(verified:Record<string,unknown>,remember:()=>Promise<void>,work:()=>Promise<T>):Promise<T> {
+  try { return await work(); }
+  finally { if(Object.keys(verified).length) await remember().catch(()=>{}); }
+}
 export async function loadImported(store:string,volume:string,mount:string):Promise<(file:string,identity:string)=>string|undefined> {
   const files=await readImported(store,volume),prefix=mount+path.sep;
   return (file,identity)=>{

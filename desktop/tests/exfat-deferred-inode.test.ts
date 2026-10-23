@@ -104,10 +104,11 @@ async function ready(t:test.TestContext) {
   return {d,card,root};
 }
 
+// The staged path (direct: false). A Stop during a direct copy keeps the partial files; exfat-direct.test.ts covers that.
 test('a Stop while copying to a large exFAT volume leaves no staging file or receipt',async t=>{
   const env=await ready(t);if(!env) return;
   const controller=new AbortController(),reviewed=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
-  await assert.rejects(execute(reviewed,controller.signal,progress=>{if(progress.phase==='copying'&&progress.bytes>20*1048576)controller.abort();}),{name:'AbortError'});
+  await assert.rejects(execute(reviewed,controller.signal,progress=>{if(progress.phase==='copying'&&progress.bytes>20*1048576)controller.abort();},{direct:false}),{name:'AbortError'});
   assert.deepEqual(await leftovers(env.root),[]);
 });
 
@@ -115,7 +116,7 @@ test('a Stop while publishing to a large exFAT volume is finished by the next im
   const env=await ready(t);if(!env) return;
   const controller=new AbortController(),reviewed=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
   const timer=setInterval(()=>{media(env.root).then(async files=>{for(const file of files)if((await fs.stat(file)).size>0){controller.abort();return;}}).catch(()=>{});},3);
-  try { await execute(reviewed,controller.signal); } catch(error) { assert.equal((error as Error).name,'AbortError'); } finally { clearInterval(timer); }
+  try { await execute(reviewed,controller.signal,undefined,{direct:false}); } catch(error) { assert.equal((error as Error).name,'AbortError'); } finally { clearInterval(timer); }
   await reimport(env.card,env.root);
 });
 

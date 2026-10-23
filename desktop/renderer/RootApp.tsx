@@ -4,7 +4,7 @@ import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
@@ -489,9 +489,9 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
 }
 
 /** What a destination is doing now, from state the app already holds (jobs, the folder check, duplicates, leftover cleanup). */
-export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
-export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
-const destinationPriority: DestinationStatusKind[] = ['receiving', 'verifying', 'organizing', 'folder-check', 'cleaning'];
+export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'checking-files' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
+export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** checking-files: the step the bar is drawn in. */layer?: StepKind; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
+const destinationPriority: DestinationStatusKind[] = ['receiving', 'checking-files', 'verifying', 'organizing', 'folder-check', 'cleaning'];
 function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
 export function destinationActivity(state: AppState, path: string): DestinationActivity {
   const empty = { completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, fileRate: 0, sources: [] as string[] };
@@ -507,7 +507,10 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
     if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
-    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name, paused: jobPaused(job) });
+    // Progress left over from an earlier run (planning figures on a job already copying) says nothing about what the job does now; without any, the job's phase decides.
+    const progress = job.progress && job.phase === 'copying' && job.progress.phase === 'planning' ? undefined : job.progress;
+    const stage = progress?.phase ?? (job.phase === 'verifying' ? 'planning' : job.phase === 'copying' ? 'copying' : undefined);
+    parts.push({ kind: tidy ? 'cleaning' : stage === 'planning' ? 'checking-files' : stage === 'verifying' ? 'verifying' : 'receiving', progress, eta: job.eta ?? progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
   if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
@@ -516,7 +519,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   const kind = destinationPriority.find(item => parts.some(part => part.kind === item));
   if (!kind) return { kind: 'idle', ...empty };
   const same = parts.filter(part => part.kind === kind);
-  const sum = { ...empty, sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
+  const layer = kind === 'checking-files' ? stepKind(same.find(part => part.progress)?.progress) : undefined;
+  const sum = { ...empty, ...(layer ? { layer } : {}), sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
   const etas: (number | undefined)[] = [];
   for (const { progress, eta } of same) {
     etas.push(eta);
@@ -532,8 +536,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
 function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
   const { t, formatNumber, formatBytes, language } = useTranslation();
-  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
-  const step = ({ receiving: 'copy', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
+  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), 'checking-files': t("Checking files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
+  const step = ({ receiving: 'copy', 'checking-files': activity.layer ?? 'read', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
   const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
   // Verifying sits over the finished copy layer, as in every other bar.
   const top = Math.min(1, Math.max(0, activity.fraction ?? 0)), layers: StageLayer[] = activity.kind === 'verifying' ? [{ kind: 'copy', fraction: 1 }, { kind: 'verify', fraction: top }] : step ? [{ kind: step as StepKind, fraction: top }] : [];
@@ -688,7 +692,8 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   }, [errors, hidden]);
   useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, fresh.some(error => error.severity === 'error') ? 7000 : 4000); return () => window.clearTimeout(timer); }, [fresh]);
   // The toast lives in the top layer, above the page, the sidebar, the titlebar and any sheet already open.
-  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) node.showPopover(); });
+  // A View Transition draws above the top layer and takes every hit test, so one still running is finished first.
+  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) { interfaceTransition?.skipTransition(); node.showPopover(); } });
   if (!fresh.length || hidden) return null;
   // Errors take the toast; warnings alone get a calmer one that dismisses itself sooner.
   const newErrors = fresh.filter(error => error.severity === 'error'), shown = newErrors.length ? newErrors : fresh, severity: Severity = newErrors.length ? 'error' : 'warning';
@@ -917,10 +922,12 @@ export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Disp
   const files = (count: number) => count === 1 ? t("1 leftover file") : t("{count} leftover files", { count: formatNumber(count) });
   const status = residue?.checking ? t("Looking for leftover files…") : !residue?.checkedAt ? t("Not checked yet.") : residue.files ? `${files(residue.files)} · ${formatBytes(residue.bytes)}` : t("No leftover files.");
   return <div data-testid="residue-cleanup">
-    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
+    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} title={busy ? t("Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.") : undefined} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
     {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
     {!!residue?.recoverable?.files && <p className="settings-row-note" data-testid="residue-recoverable">{t("{count} complete copies whose card file changed are kept: {folder}", { count: formatNumber(residue.recoverable.files), folder: residue.recoverable.folder ?? '' })}</p>}
+    {residue?.unbound?.paths.map(file => <p key={file} className="settings-row-note" data-testid="residue-unbound">{t("A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.", { path: file })} <Button disabled={busy || !!residue.checking} onClick={() => act({ type: 'removeReceipt', file })}>{t("Remove receipt")}</Button></p>)}
+    {!!residue?.unbound && residue.unbound.files > residue.unbound.paths.length && <p className="settings-row-note">{t("{count} more files have an old copy receipt. Clean up removes those receipts too; the files are kept.", { count: formatNumber(residue.unbound.files - residue.unbound.paths.length) })}</p>}
     {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
     <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
   </div>;
@@ -1322,14 +1329,36 @@ function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
   const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
   return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
 }
+/** Which stage of a plan's bar a step of the time-left model belongs to: for an import everything before copying is the first stage, then copying, then verifying and publishing. */
+function stageOfStep(plan: StagePlan, step: string): number {
+  const last = plan.kinds.length - 1;
+  const kind: StepKind | undefined = step === 'copying' ? 'copy' : /^(verifying|publish)/.test(step) ? 'verify' : stepKind({ step } as Pick<Progress, 'phase' | 'step' | 'renames'>);
+  if (plan.kinds !== organizationKinds) return kind === 'copy' ? Math.min(1, last) : kind === 'verify' ? last : 0;
+  const at = kind ? plan.kinds.indexOf(kind) : -1;
+  return at < 0 ? 0 : at;
+}
+/** The share of the whole job done once stage `stage` and those before it are counted (what the model's steps up to it have done), from the job's cumulative step shares. */
+function shareThrough(job: Job, plan: StagePlan, stage: number): number {
+  let share = 0;
+  for (const item of job.stageShares ?? []) if (stageOfStep(plan, item.step) <= stage) share = Math.max(share, item.share);
+  return share;
+}
+/** A running job's layers drawn by cost: layer i reaches as far as everything up to its stage has done of the whole job, so the bar's length is the percent shown
+ * (a finished stage stays as a full-colour segment and the next colour grows over it). Undefined when the job has no step shares yet. */
+function costLayers(job: Job, plan: StagePlan): StageLayer[] | undefined {
+  if (!job.stageShares?.length || plan.finished || job.fraction === undefined) return undefined;
+  const top = Math.min(1, Math.max(0, job.fraction));
+  return plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? Math.min(top, shareThrough(job, plan, index)) : top }));
+}
 const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
-/** A job's bar: one layer per stage up to the one it is on; the passed stages are full, the current one is as far as it is. */
+/** A job's bar: one layer per stage up to the one it is on, each as far as the job's cost done through that stage (the bar is as long as the percent). */
 export function jobStageLayers(job: Job, verify = true): StageLayer[] {
   const plan = stagePlan(job, verify);
-  return plan ? layersOfPlan(plan) : [];
+  return plan ? costLayers(job, plan) ?? layersOfPlan(plan) : [];
 }
 /** The total bar: the layers of the least advanced job, so the top color is the stage that still holds the whole back. Jobs already past that
- * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color. */
+ * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color.
+ * When every job reports its cost, each layer is the cost done through its stage over all jobs' cost, so the bar is as long as the percent. */
 export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const plans = jobs.flatMap(job => { const plan = stagePlan(job, verify); return plan ? [{ job, plan }] : []; });
   if (!plans.length) return [];
@@ -1337,6 +1366,11 @@ export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const open = plans.filter(item => !item.plan.finished);
   if (!open.length) return layersOfPlan(plans.reduce((best, item) => rank(item.plan) > rank(best.plan) ? item : best).plan);
   const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best), floor = rank(least.plan);
+  const comparable = plans.every(({ job, plan }) => job.cost && job.cost.total > 0 && (plan.finished || job.stageShares?.length) && (plan.kinds === organizationKinds) === (least.plan.kinds === organizationKinds) && plan.kinds.length === least.plan.kinds.length);
+  if (comparable) {
+    const weight = plans.reduce((sum, { job }) => sum + job.cost!.total, 0);
+    return least.plan.kinds.slice(0, least.plan.index + 1).map((kind, index) => ({ kind, fraction: Math.min(1, plans.reduce((sum, { job, plan }) => sum + job.cost!.total * (plan.finished ? 1 : shareThrough(job, plan, index)), 0) / weight) }));
+  }
   const weights = plans.map(({ job, plan }) => ({ fraction: rank(plan) > floor || plan.finished ? 1 : plan.fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }));
   const top = weights.reduce((sum, item) => sum + item.fraction * item.weight, 0) / weights.reduce((sum, item) => sum + item.weight, 0);
   return layersOfPlan(least.plan, top);
@@ -1564,7 +1598,7 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
     <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
-    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}<RevealButton path={job.source.path} act={act} /></p>
+    <p className="progress-job-place progress-job-place-action" title={organizationPlace(job, true)}><span>{organizationPlace(job, true)}</span><RevealButton path={job.source.path} act={act} /></p>
     <OrganizationProgress job={job} act={act} />
     <SkipFileNotice job={job} act={act} />
   </article>;
@@ -1615,8 +1649,8 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
   if (!job.verifiedOriginals && !done) return null;
   return <div className="source-choice" data-testid="delete-originals">
     <p><Icon icon={Info} size={14} />{t("Import: copy, source untouched")}</p>
-    {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept) })}</p>}
-    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
+    {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept), folders: formatNumber(done.folders ?? 0) })}</p>}
+    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{job.deletingOriginals.folders ? t("Removing empty folders: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.folders.completed), total: formatNumber(job.deletingOriginals.folders.total) }) : t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
     {!!job.verifiedOriginals && <div className="rule-actions"><Button kind="danger" icon={Trash2} data-testid="delete-originals-button" disabled={busy || !!job.deletingOriginals} title={t("Deletes only source files verified in the backup")} onClick={() => choose('open')}>{t("Delete originals already in the backup")}</Button></div>}
     {step !== 'closed' && <OriginalsConfirm key={step} step={step} name={job.source.name} size={measured} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
@@ -1692,8 +1726,9 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
@@ -1720,13 +1755,16 @@ function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queu
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
     {reviewing && !active && !queued && <OperationProgress progress={reviewProgress} label={t("Review progress")} testId="source-review-progress" className="progress-in-card" />}
-    <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+    <div className="source-step-row" data-testid="source-step-row">
+      <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+      <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
+    </div>
     {job?.space && !already && (job.phase === 'queued' || activePhases.includes(job.phase)) && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
-    <details className="source-disclosure">
-      <summary aria-label={t("Drive details")}><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
+    <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+      <summary aria-hidden="true"><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div></summary>
       <div className="source-expanded-details">
         <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}

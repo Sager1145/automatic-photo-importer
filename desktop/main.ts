@@ -22,7 +22,7 @@ import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
 import {deviceHasRoom} from './core/devices';
-import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
+import {loadScanMemory,saveScanMemory,loadImported,rememberImported,rememberingVerified} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {loadPlacement,placedMatches,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
@@ -30,7 +30,7 @@ import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,c
 import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
-import {findResidue,cleanResidue} from './core/residue';
+import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {orphanedJournals,recordsWeight} from './core/recovery';
 import {convertUserCaches} from './platform/user-caches';
 import {registerDestinations} from './core/app-store';
@@ -41,8 +41,9 @@ import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
-import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
+import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
 import {runCodexSmoke} from './qa/codex-smoke';
+import {createQaHooks,type QaHooks} from './qa/hooks';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
 import {ErrorLog,clearErrorIds,clearErrors,createErrorLogCache} from './error-log';
@@ -52,7 +53,7 @@ import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
 import {sourcePolicy,freshOrganizeOptions} from './run-policy';
-import {measureOriginals,deleteOriginals,type VerifiedOriginal} from './core/originals';
+import {measureOriginals,deleteOriginals,recordVerified,verifiedOriginals,type ImportVerified,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
 import {migrationGate} from './migration-gate';
@@ -61,6 +62,8 @@ import {PhaseLog,TopologyLog,ActivityLog,logProgress} from './job-log';
 import {exportLogs} from './log-export';
 
 const qa=process.argv.includes('--qa')||process.execPath.includes(' QA.app/');
+/** Synthetic state and the import gate for the automated QA; only an unpackaged --codex-test launch has them. */
+let qaHooks:QaHooks|undefined;
 const hardwareTest=process.argv.includes('--hardware-test-a006');
 const qaFixtureRoot=qa?(process.argv.find(arg=>arg.startsWith('--qa-fixture-root='))?.slice('--qa-fixture-root='.length)||path.join(os.tmpdir(),'photo-importer-electron-fixtures')):undefined;
 
@@ -185,7 +188,7 @@ function etaTotals(plans:TransferPlan[]){
  return {copying:{files:copy.length,bytes},verifying:{files:entries.length,bytes}};
 }
 // A stalled step sends no progress; republish so its time left can grow instead of freezing.
-setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase))){logProgress(state.jobs);emit();}},5000).unref();
+setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase))){emit();logProgress(state.jobs);}},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
 const emit=()=>{yieldListing();activityLoop?.wake();state.resources=resourceUse();state.logInfo=logInfo();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
@@ -482,6 +485,7 @@ function scheduleMisplacedCheck(force=false){
 // scratch files, and camera and preview folders in the system temporary folder. Looked for while
 // nothing runs (after imports and organizations finish and when a destination connects) and
 // removed at once; copies a re-import could continue wait for Clean up.
+let residueItems:ResidueItem[]=[];
 let residueControl:AbortController|undefined,residueTask:Promise<void>|undefined,residueScope='',residuePaths:string[]=[];
 /** The backup folders of connected destinations, and folders organized in place on connected drives. */
 async function residueRoots():Promise<string[]>{
@@ -514,7 +518,8 @@ function checkResidue(all:boolean):Promise<void>{
   const work=found.files>(all?0:found.resumable.files)+found.recoverable.files||found.items.some(item=>item.kind==='receipt'&&!!item.rid);
   const {removed,left}=work?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
-  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,recoverable:left.recoverable,checkedAt:now,...(cleaned?{cleaned}:{})};
+  residueItems=left.items;
+  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,recoverable:left.recoverable,...(left.unbound?.files?{unbound:left.unbound}:{}),checkedAt:now,...(cleaned?{cleaned}:{})};
   // Ended organizations the cleanup deleted leave the list.
   if(removed.files)void refreshOrganizations();
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue){delete state.residue.checking;delete state.residue.progress;}emit();void releaseIfIdle();});
@@ -683,9 +688,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(prepared.review.plans.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
   else{
-   job.phase='discovering';job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
+   job.phase='discovering';job.progress=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
    await stopResidueCheck();
-   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   if(qaHooks)await qaHooks.gate(job.id,signal);
+   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
    // Mirror moves only run from a review the user applied.
    const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
    if(moving)throw new MessageError('error.mirrorReview',{count:moving});
@@ -707,13 +713,14 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
   job.phase='copying';
-  const verified:Record<string,{sha256:string;identity:string}>={};
-  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
+  // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
+  const verified:Record<string,ImportVerified>={},volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
+  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await rememberingVerified(verified,async()=>{if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,verified);},()=>executeDestinations(plans,{
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
-  });job.errors.push(...errors.map(text));recordIssues(job,warnings);
+  }));job.errors.push(...errors.map(text));recordIssues(job,warnings);
   for(const error of errors)log('normal','job','error',{message:text(error)});for(const issue of warnings)log('normal','job',issue.severity==='error'?'error':'warning',{...issue});
   // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
   const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];
@@ -724,8 +731,6 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // Files actually verified where an older rule filed them (a family that failed is not counted).
   const olderRules=routed??0;
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,...(prepared.elsewhere?{olderRules:{files:olderRules,partialFamilies:prepared.elsewhere.partialFamilies,skippedSizeGroups:prepared.elsewhere.skipped.map(item=>({...item,reason:'skipped: too many same-size files'})),paths:olderRulesPaths(plans)}}:{}),skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
-  const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
-  if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
@@ -741,8 +746,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
-   const entries=plans.flatMap(item=>destinationEntries(item)),files:VerifiedOriginal[]=[];
-   for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
+   const files=verifiedOriginals(verified,plans.flatMap(item=>destinationEntries(item)));
    if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
@@ -869,7 +873,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=recordsDetail(progress)??message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,index:await destinationIndex(real,await identity(real)),onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):(recordsDetail(progress)??message('job.removingDuplicates'));progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
@@ -901,16 +905,18 @@ async function removeOriginals(jobId:string){
  emit();
  const control=new AbortController();
  try{
-  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}}));
+  // Only APFS and HFS+ keep change times that prove an unchanged source; on any other volume every source is read.
+  const changeTimes=['apfs','hfs'].includes(etaDrive(await mountedVolumes(),kept.root,'folder').fsType??'');
+  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,changeTimes,protect:state.sources.map(item=>item.path),onFolders:(completed,total)=>{job.deletingOriginals={...job.deletingOriginals!,folders:{completed,total}};progressEmit();},onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}}));
   const gone=new Set(result.deleted.map(item=>item.source));
   kept.files=kept.files.filter(file=>!gone.has(file.source));
   job.verifiedOriginals=kept.files.length||undefined;if(!kept.files.length)importedOriginals.delete(jobId);
-  job.originalsDeleted={files:result.deleted.length,bytes:result.bytes,kept:result.kept.length};
+  job.originalsDeleted={files:result.deleted.length,bytes:result.bytes,kept:result.kept.length,folders:result.folders};
   const directory=path.join(app.getPath('userData'),'operation-reports',job.id);
   await fs.mkdir(directory,{recursive:true});
   const file=await fs.open(path.join(directory,`originals-deleted-${Date.now()}.json`),'wx',0o600);
-  try{await file.writeFile(JSON.stringify({producer:'desktop-app',jobId:job.id,source:job.source.path,finished:new Date().toISOString(),deleted:result.deleted,kept:result.kept,errors:result.errors},null,2));await file.sync();}finally{await file.close();}
-  addHistory(text(job.source.name),message('job.originalsDeleted',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length}));
+  try{await file.writeFile(JSON.stringify({producer:'desktop-app',jobId:job.id,source:job.source.path,finished:new Date().toISOString(),deleted:result.deleted,kept:result.kept,foldersRemoved:result.folders,errors:result.errors},null,2));await file.sync();}finally{await file.close();}
+  addHistory(text(job.source.name),message('job.originalsDeleted',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length,folders:result.folders}));
   if(result.errors.length)state.error=message('error.originalsDelete',{count:result.errors.length,error:result.errors[0]!});
  }catch(error){state.error=toMessage(error);}
  finally{delete job.deletingOriginals;emit();}
@@ -937,6 +943,13 @@ async function action(input:Action):Promise<void>{
   case 'duplicatesStop':duplicateControl?.abort();break;
   case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;
   case 'refreshOrganization':await refreshOrganizations();break;
+  case 'removeReceipt':{
+   if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');
+   // Only a receipt the last check listed; removeUnboundReceipt checks it again, and never touches the file.
+   const item=residueItems.find(entry=>entry.kind==='unbound'&&entry.file===input.file);
+   if(item)await removeUnboundReceipt(item);
+   await checkResidue(false);break;
+  }
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id,'resume',undefined,undefined,input.full===true);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;
@@ -1116,7 +1129,11 @@ async function action(input:Action):Promise<void>{
 }
 async function boot(){
  // Soft memory governor: main plus the scan worker against the limit; above 90% new files wait, above 100% a warning shows.
- setChildMemory(()=>app.getAppMetrics().filter(item=>item.type==='Utility').reduce((sum,item)=>sum+item.memory.workingSetSize*1024,0));
+ // The main process counts by private memory (refreshed each reading, so a value is at most one tick old); the child is the scan worker.
+ let mainPrivate:{private?:number}|undefined;
+ const refreshMainMemory=()=>{try{void (process as unknown as {getProcessMemoryInfo?:()=>Promise<{private?:number}>}).getProcessMemoryInfo?.().then(info=>{mainPrivate=info;},()=>{});}catch{/* RSS stays the fallback */}};
+ setMainMemory(()=>{refreshMainMemory();return privateOrRss(mainPrivate,process.memoryUsage().rss);});
+ setChildMemory(()=>childProcessMemory(app.getAppMetrics()));
  governor.observe({
   onChange:(usage,limit)=>{log('detailed','resources','memory',{usageMB:Math.round(usage),limitMB:limit,busy:busy()});const moved=Math.round(usage/16)!==Math.round(lastUsageMB/16);lastUsageMB=usage;const cleared=overLimit&&usage<limit*0.9;if(cleared)overLimit=false;if(busy()&&(moved||cleared))emit();},
   onWarn:(usage,limit)=>{overLimit=true;log('normal','resources','memory-over-limit',{usageMB:Math.round(usage),limitMB:limit});console.warn(`Memory use ${usage} MB is above the ${limit} MB limit; new files wait until it drops.`);if(busy())emit();},
@@ -1141,7 +1158,7 @@ async function boot(){
  function trusted(event:Electron.IpcMainInvokeEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
  ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{await action(value);}catch(e){state.error=toMessage(e);emit();}});
- ipcMain.handle('importer:inspect',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:inspect',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file),{preview:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
@@ -1149,7 +1166,9 @@ async function boot(){
  await window.loadFile(renderer);await refresh();timer=setInterval(()=>void refresh(),5000);
  if(process.platform==='darwin'&&!hardwareTest){activityLoop=startActivityLoop({sampler:driveSampler,wanted:()=>!!window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized()||busy()||scanControls.size>0||!!state.review||!!state.busyReview,publish:activity=>{state.driveActivity=activity;activityLog.observe(activity,Date.now());emit();}});window.on('show',()=>activityLoop?.wake());window.on('restore',()=>activityLoop?.wake());window.on('focus',()=>activityLoop?.wake());}
  if(hardwareReportRoot){const reports=hardwareReportRoot,owner=window;runA006HardwareTest(()=>state,action,reports,async source=>{const result=await dialog.showOpenDialog(owner,{title:`Authorize read access: ${source.name}`,defaultPath:source.path,properties:['openDirectory']});if(result.canceled||!result.filePaths[0]||await fs.realpath(result.filePaths[0])!==await fs.realpath(source.path))throw new Error(`Select the exact source root: ${source.path}`);}).catch(error=>{state.error=text(`A006 hardware test failed: ${errorText(error)}. Reports: ${reports}`);emit();});}
- if(qa&&qaFixtureRoot&&process.argv.includes('--codex-test')){const passed=await runCodexSmoke(window,qaFixtureRoot,process.argv.includes('--codex-ui-only'),process.argv.includes('--codex-organization-only'));await closeMetadata();app.exit(passed?0:1);}
+ if(qa&&qaFixtureRoot&&process.argv.includes('--codex-test')){if(!app.isPackaged)qaHooks=createQaHooks(state,emit);const passed=await runCodexSmoke(window,qaFixtureRoot,{uiOnly:process.argv.includes('--codex-ui-only'),organizationOnly:process.argv.includes('--codex-organization-only'),only:process.argv.find(arg=>arg.startsWith('--codex-only='))?.slice('--codex-only='.length),deadline:Number(process.argv.find(arg=>arg.startsWith('--codex-deadline='))?.slice('--codex-deadline='.length))||undefined},qaHooks);
+  // exiftool can take minutes to end on a loaded machine; the QA result is already written, so its exit waits at most 15 s.
+  const closing=Date.now();await Promise.race([closeMetadata(),new Promise(resolve=>setTimeout(resolve,15000))]);console.log(`QA exit: metadata reader closed in ${((Date.now()-closing)/1000).toFixed(1)} s`);app.exit(passed?0:1);}
 }
 if(!qa&&!hardwareTest&&!app.requestSingleInstanceLock())app.quit();else app.whenReady().then(boot).catch(error=>{dialog.showErrorBox('Unable to start',errorText(error));app.quit();});
 app.on('second-instance',()=>{if(window?.isMinimized())window.restore();window?.focus();});

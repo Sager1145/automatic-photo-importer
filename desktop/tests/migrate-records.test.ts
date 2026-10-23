@@ -156,6 +156,35 @@ test('R: publication receipts: gone or complete file → removed; any other file
  assert.equal((await openReceiptsFor(f.destination)).size,1);
 });
 
+test('R: a direct copy\'s receipts keep their direct fields: one that binds tolerantly is finished by a re-import, an unbound one only loses its receipt',async t=>{
+ const f=await card(t);
+ await fs.writeFile(f.entry.destination,f.bytes);
+ const whole=await fs.lstat(f.entry.destination,{bigint:true});
+ // Dates applied: the file no longer shows the birth time the receipt named, only one it lists as final.
+ const direct=(stat:BigIntStats,finalBirth:string)=>({mode:'direct',size:String(f.bytes.length),fileIdentity:`${stat.dev}:${stat.ino}:1`,finalBirth:[finalBirth]});
+ const tolerantReceipt=await legacyReceipt(await f.record('publication',f.entry.destination,direct(whole,String(whole.birthtimeNs))));
+ // Another file at its name, binding neither exactly nor tolerantly.
+ const other=path.join(path.dirname(f.entry.destination),'OTHER.NEF');await fs.writeFile(other,f.bytes);
+ const otherReceipt=await legacyReceipt(await f.record('publication',other,{...direct(await fs.lstat(other,{bigint:true}),'1'),destination:other}));
+ assert.deepEqual((await migrateDrive([f.destination])).problems,[]);
+ for(const file of [tolerantReceipt,otherReceipt])assert.equal(await exists(file),false,file);
+ const open=[...(await openReceiptsFor(f.destination)).values()].find(record=>record.file===f.entry.destination);
+ assert.equal(open?.mode,'direct');assert.deepEqual(open?.finalBirth,[String(whole.birthtimeNs)]);assert.equal(open?.size,String(f.bytes.length));
+ const {findPublication}=await import('../core/import-recovery');
+ const found=await findPublication({...f.entry,digest:createHash('sha256').update(f.bytes).digest('hex')},f.transfer.root,new Map());
+ assert.equal(found?.tolerant,true,'a re-import finishes it');
+ const residue=await findResidue([f.destination]);
+ assert.deepEqual(residue.items.filter(item=>item.kind==='unbound').map(item=>item.file),[other]);assert.equal(residue.unbound?.files,1);
+ const before=await fs.readFile(other);
+ const {cleanResidue}=await import('../core/residue');
+ await cleanResidue(residue,{keepResumable:true});
+ assert.ok([...(await openReceiptsFor(f.destination)).values()].some(record=>record.file===other),'the automatic cleanup keeps it');
+ await cleanResidue(residue,{keepResumable:false});
+ assert.deepEqual(await fs.readFile(other),before,'the file is never touched');
+ assert.ok(![...(await openReceiptsFor(f.destination)).values()].some(record=>record.file===other),'Clean up closes its receipt');
+ assert.ok([...(await openReceiptsFor(f.destination)).values()].some(record=>record.file===f.entry.destination),'the tolerant one stays open');
+});
+
 // ---- C: caches ----
 test('C: the earlier version\'s index, duplicate store and drive markers are moved into the store, sealed; the old files go',async t=>{
  for(const point of [undefined,'C:written'] as const){

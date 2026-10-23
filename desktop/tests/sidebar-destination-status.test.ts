@@ -97,5 +97,5 @@ test('every new string is translated in all four locales',()=>{
 });
 
 test('the smoke test checks that the destination status line exists',()=>{
- assert.match(readFileSync(new URL('../qa/codex-smoke.ts',import.meta.url),'utf8'),/sidebar-destination-status/);
+ assert.match(readFileSync(new URL('../qa/ui/checks/navigation.ts',import.meta.url),'utf8'),/sidebar-destination-status/);
 });
