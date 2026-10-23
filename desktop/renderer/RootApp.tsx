@@ -4,7 +4,7 @@ import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
@@ -1652,8 +1652,9 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
@@ -1680,13 +1681,16 @@ function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queu
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
     {reviewing && !active && !queued && <OperationProgress progress={reviewProgress} label={t("Review progress")} testId="source-review-progress" className="progress-in-card" />}
-    <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+    <div className="source-step-row" data-testid="source-step-row">
+      <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+      <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
+    </div>
     {job?.space && !already && (job.phase === 'queued' || activePhases.includes(job.phase)) && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
-    <details className="source-disclosure">
-      <summary aria-label={t("Drive details")}><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
+    <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+      <summary aria-hidden="true"><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div></summary>
       <div className="source-expanded-details">
         <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
