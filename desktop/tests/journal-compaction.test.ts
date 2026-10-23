@@ -12,6 +12,8 @@ import type {Metadata} from '../shared';
 // records, unchanged and still signed, into the event log and then removes the files.
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
+// These tests drive the conversion by hand; the automatic one (auto-conversion.test.ts) stays off here.
+core.setConversionGate(()=>false);
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
 const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const names=['A.JPG','B.JPG','C.JPG','D.MOV'];
@@ -53,7 +55,7 @@ test('Recheck folds the per-event files into the log; state, signatures and list
  assert.ok((await core.finalizeOrganization(photos,id)).removed>0);
 });
 
-test('Only an explicit Recheck or Resume compacts: listing never writes',async t=>{
+test('With the automatic conversion held off (a job on the drive), a listing writes nothing',async t=>{
  const {photos,id,folder,lines}=await legacy(t);
  await core.getOrganizationRecovery(photos);await core.getOrganizationRecovery(photos,{verifyContents:false});
  assert.equal((await legacyFiles(folder)).length,lines.length);

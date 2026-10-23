@@ -7,7 +7,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
-import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,setConversionGate,stopConversions,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {makeParent,syncParents,within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
@@ -71,6 +71,9 @@ let refreshing=false;
 setMoveObserver(carryRouting);
 /** A job planning, copying or verifying (or a review being built) needs the drive's file calls: the organization listing gives way to it. */
 const drivesInUse=()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'||job.phase==='copying');
+/** Any job at all on a drive: converting an old organization record waits for none to be running. */
+const jobsActive=()=>drivesInUse()||active.size>0||resumingOrganizations.size>0||!!duplicateControl||!!residueControl||!!residueTask;
+setConversionGate(()=>!jobsActive());
 let listingControl:AbortController|undefined;
 const recoveryRefresh=deferredRefresh({planning:drivesInUse,run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
 let recoveryScope='';
@@ -241,6 +244,7 @@ function refreshOrganizations():Promise<void>{
 }
 /** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
 function yieldListing(){
+ if(jobsActive()&&stopConversions())recoveryRefresh.defer();
  if(listingControl){if(!listingControl.signal.aborted&&drivesInUse())listingControl.abort();}
  else if(!drivesInUse())recoveryRefresh.resume();
 }
@@ -275,7 +279,12 @@ async function listOrganizations(signal:AbortSignal){
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
-    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,signal,onProgress:update=>{state.organizationRecoveryProgress={phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share:Math.min(.99,(position+update.share)/locations.length),speed:0,file:update.file||path.basename(location.root)};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,signal,onProgress:update=>{
+     const share=Math.min(.99,(position+update.share)/locations.length),file=update.file||path.basename(location.root);
+     // What the listing is doing now: converting a finished journal, reading a journal's events, or checking its entries.
+     state.organizationRecoveryProgress=update.convert?{phase:'planning',step:update.convert.step,completed:update.convert.done,total:update.convert.total,bytes:0,totalBytes:0,share,speed:0,file}
+      :update.read!==undefined?{phase:'planning',step:'records',completed:update.read,total:update.total??0,bytes:0,totalBytes:0,share,speed:0,file}
+      :{phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share,speed:0,file};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
     // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
     if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
     // The sibling backup folders those journals list are read too, on the same drive.

@@ -71,6 +71,22 @@ async function locked<T>(key:string,work:()=>Promise<T>):Promise<T> {
  const previous=locks.get(key)??Promise.resolve();let release!:()=>void;const next=new Promise<void>(r=>{release=r;});locks.set(key,next);
  await previous.catch(()=>{});try{return await work();}finally{release();if(locks.get(key)===next)locks.delete(key);}
 }
+/** Jobs writing to a recovery root (organize, resume, finalize, undo, delete): no conversion runs on that root meanwhile. */
+const writers=new Map<string,number>();
+/** Conversions running, by the root they work in; a job starting on that root stops them first. */
+const conversions=new Map<AbortController,string>();
+/** Stops every conversion (all roots, or one); each is resumable, and the next listing starts it again. */
+export function stopConversions(root?:string):boolean{
+ let any=false;for(const [control,at] of conversions)if(root===undefined||at===root){control.abort();any=true;}
+ return any;
+}
+/** Whether a job other than the recovery's own (an import, a duplicates run, residue cleanup) is using the drive of `root`. */
+let conversionGate:(root:string)=>boolean=()=>true;
+export function setConversionGate(allowed:(root:string)=>boolean):void{conversionGate=allowed;}
+async function writing<T>(root:string,work:()=>Promise<T>):Promise<T>{
+ stopConversions(root);writers.set(root,(writers.get(root)??0)+1);
+ try{return await work();}finally{const left=(writers.get(root)??1)-1;if(left)writers.set(root,left);else writers.delete(root);}
+}
 function snapshot(stat:BigIntStats):FileIdentity {return {dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)};}
 /** An empty file has no stable inode on exFAT (a synthetic number that changes on rename),
  * so it is identified by device, size and times only. */
@@ -110,6 +126,8 @@ async function logMark(handle:fs.FileHandle,offset:number):Promise<LogMark>{
 }
 const finishedJournals=new Map<string,JournalCache>();
 /** Per-event files a read stopped part-way had already read, by the same key as `finishedJournals`; see readEvents. */
+/** Finished journals whose every per-event file was just read: the listing converts them (convertRead). */
+const convertible=new Map<string,Manifest>();
 const partialReads=new Map<string,{dev:bigint;ino:bigint;manifest:string;log:string;texts:Map<string,string>}>();
 const manifestKey=(m:Manifest)=>createHash('sha256').update(JSON.stringify(m)).digest('hex');
 const legacyEvent=/^event-[a-f0-9-]+\.json$/;
@@ -248,6 +266,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
    if(!fresh.length)onRead?.(names.length,names.length);
    if(finished(state))finishedJournals.set(cacheKey,{dev:own.dev,ino:own.ino,legacy,...(log?{log:log.mark}:{}),seen:new Set(seen),logTexts:new Set(logTexts),state:copyState(state)});
    else finishedJournals.delete(cacheKey);
+   if(finished(state)&&legacyNames.length)convertible.set(cacheKey,m);
    return finishJournalRead(m,state,chain,follow,onRead,signal);
   }
   // A per-event file disappeared without its record reaching the log: start again from the disk.
@@ -257,8 +276,9 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  // Journals from before the event log hold one small file per event (tens of thousands on a large
  // organization); on a USB drive these are read several at a time, then applied in folder order.
  const texts:(string|string[]|undefined)[]=new Array(names.length),legacy=new Map<string,string>();let log:Awaited<ReturnType<typeof readLog>>|undefined;
+ const legacyList=names.filter(name=>legacyEvent.test(name));
  {
-  const legacyList=names.filter(name=>legacyEvent.test(name)),logAt=names.indexOf(eventLog);
+  const logAt=names.indexOf(eventLog);
   // The log is one file; every other name counts as read once looked at.
   if(logAt>=0){checkAbort(signal);log=await readLog(0);texts[logAt]=log.lines;}
   read=names.length-legacyList.length;if(read)onRead?.(read,names.length,eventLog);
@@ -269,6 +289,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  partialReads.delete(cacheKey);
  if(finished(state))finishedJournals.set(cacheKey,{dev:own.dev,ino:own.ino,legacy,...(log?{log:log.mark}:{}),seen:new Set(seen),logTexts:new Set(logTexts),state:copyState(state)});
  else finishedJournals.delete(cacheKey);
+ if(finished(state)&&legacyList.length)convertible.set(cacheKey,m);
  return finishJournalRead(m,state,chain,follow,onRead,signal);
 }
 /** Checks that need the events of the whole journal, and its successor and hand-offs; never cached. */
@@ -942,7 +963,7 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  // No destination publication or original relocation occurs until the complete
  // immutable review and containing directories have been synchronized.
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
- const result=await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress,{appleDouble}));
+ const result=await writing(transfer.root,()=>locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress,{appleDouble})));
  // Release re-verifies every destination by checksum before removing a kept original.
  if(releaseDuplicates&&result.errors.length===0&&result.retained>0){
   try{
@@ -962,7 +983,7 @@ export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'r
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.root;folder=path.dirname(folder)){if(!beneath(folder,transfer.root))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
  validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
- return {id,result:await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress))};
+ return {id,result:await writing(transfer.root,()=>locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress)))};
 }
 /** The files (relative to `root`, with `/`) that an earlier, still live journal of this library placed or kept. Removing
  * one supersedes that journal, which ends its Undo, so Remove duplicates warns before it does. Best effort: a
@@ -983,10 +1004,34 @@ export async function placedByEarlierJournals(root:string,signal?:AbortSignal):P
  return placed;
 }
 /** Resume, or recheck a finished organization. A journal from before the event log is first
- * converted to it (compactLegacyEvents), which only this explicit action does. */
+ * converted to it (compactLegacyEvents). A finished one is also converted by the listing (convertRead),
+ * with the user's approval, whenever no job is using the drive. */
 export async function resumeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean}={}):Promise<ReorganizationResult> {
  await adoptLegacyStorage(root);
- const job=jobPath(root,id);return locked(job,async()=>{const m=await readManifest(root,id);await compactLegacyEvents(m,signal);return run(m,signal,onProgress,options);});
+ const job=jobPath(root,id);return writing(root,()=>locked(job,async()=>{const m=await readManifest(root,id);await compactLegacyEvents(m,signal,(step,completed,total,file)=>onProgress?.({phase:'verifying',step,completed,total,bytes:0,totalBytes:0,speed:0,file}));return run(m,signal,onProgress,options);}));
+}
+/** A finished journal whose per-event files readEvents has just read in full is converted to the event log in
+ * the same listing pass, from the state already read (nothing is read twice), with the user's approval of
+ * automatic conversion. Only while no job uses the drive: checked here and again under the journal's lock,
+ * and a job that starts stops it (each step is resumable; the next listing finishes it). A conversion that
+ * cannot finish (too large, a record that fails authentication) leaves the files exactly as they are. */
+async function convertRead(m:Manifest,signal?:AbortSignal,onProgress?:(step:'converting'|'cleaning',done:number,total:number,file:string)=>void):Promise<void>{
+ const key=`${m.root}\0${m.id}\0${m.rootIdentity}\0${mountDevices.get(m)??''}`;
+ if(!convertible.delete(key))return;
+ const idle=()=>!writers.get(m.root)&&conversionGate(m.root);
+ if(!idle()||!finishedJournals.has(key))return;
+ const control=new AbortController(),outside=()=>control.abort();
+ if(signal?.aborted)throw new DOMException('Import stopped','AbortError');
+ signal?.addEventListener('abort',outside,{once:true});conversions.set(control,m.root);
+ try{
+  await locked(jobPath(m.root,m.id),async()=>{
+   if(!idle()||control.signal.aborted)return;
+   await compactLegacyEvents(m,control.signal,onProgress);
+  });
+ }catch(error){
+  if(isAbort(error)){if(signal?.aborted)throw error;convertible.set(key,m);return;}
+  // Left as it is: reading counts every record once either way.
+ }finally{signal?.removeEventListener('abort',outside);conversions.delete(control);}
 }
 /** Fold a journal's one-file-per-event records (versions before the event log) into its event log,
  * so it reads in seconds instead of minutes. Every record is read and authenticated first; one that
@@ -994,7 +1039,7 @@ export async function resumeOrganization(root:string,id:string,signal?:AbortSign
  * signed, in the order the journal is read, skipping any already in the log; the log and its folder
  * are synchronized, and only then are the files removed. A stop at any point leaves records in the
  * log, in their files, or both, and reading counts each once; the next conversion finishes. */
-async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void> {
+async function compactLegacyEvents(m:Manifest,signal?:AbortSignal,onProgress?:(step:'converting'|'cleaning',done:number,total:number,file:string)=>void):Promise<void> {
  const folder=jobPath(m.root,m.id),files=(await fs.readdir(folder)).filter(name=>/^event-[a-f0-9-]+\.json$/.test(name));
  if(!files.length)return;
  await roots(m);
@@ -1003,16 +1048,18 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
  const key=`${m.root}\0${m.id}\0${m.rootIdentity}\0${mountDevices.get(m)??''}`,cached=finishedJournals.get(key),own=await fs.lstat(folder,{bigint:true});
  const known=cached&&cached.dev===own.dev&&cached.ino===own.ino&&files.every(name=>cached.legacy.has(name))?cached:undefined;
  // Read several at a time (one at a time takes far longer on a USB drive), kept in folder order.
- const texts:(string|undefined)[]=new Array(files.length);let next=0;
+ const texts:(string|undefined)[]=new Array(files.length);let next=0,fetched=0;
  const readOne=async(position:number)=>{
   checkAbort(signal);const name=files[position]!;
   if(known){texts[position]=known.legacy.get(name)!;return;}
+  onProgress?.('converting',++fetched,files.length,name);
   const file=path.join(folder,name);await contained(file,m.root);const handle=await regularHandle(file);
   try{if((await handle.stat()).size>2048)throw new Error(`Invalid recovery event: ${file}`);texts[position]=(await handle.readFile('utf8')).trim();}finally{await handle.close();}
  };
  await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),files.length)},async()=>{while(next<files.length)await readOne(next++);}));
- const records:string[]=[];
+ const records:string[]=[];onProgress?.('converting',0,texts.length,'');
  for(const [position,text] of texts.entries()){
+  if(known&&position%500===499){checkAbort(signal);onProgress?.('converting',position+1,texts.length,files[position]!);await new Promise<void>(resolve=>setImmediate(resolve));}
   // A file cut short by an interrupted write carries no event (reading skips it too): nothing to keep.
   let value:unknown;try{value=JSON.parse(text!);}catch(error){if(error instanceof SyntaxError)continue;throw error;}
   const record=authenticated(value);
@@ -1031,9 +1078,11 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
  // Stopping is safe at every step: before this nothing was written.
  checkAbort(signal);
  if(missing.length)await appendToLog(m,missing);
- else if(present){const handle=await fs.open(log,'r');try{await handle.sync();}finally{await handle.close();}await syncDirectory(folder);}
+ onProgress?.('converting',texts.length,texts.length,eventLog);
+ if(!missing.length&&present){const handle=await fs.open(log,'r');try{await handle.sync();}finally{await handle.close();}await syncDirectory(folder);}
  // Every record is now durable in the log: the files go, then the folder is synchronized.
- try{for(const name of files){checkAbort(signal);await fs.unlink(path.join(folder,name)).catch(error=>{if(code(error)!=='ENOENT')throw error;});}}
+ let removed=0;onProgress?.('cleaning',0,files.length,'');
+ try{for(const name of files){checkAbort(signal);await fs.unlink(path.join(folder,name)).catch(error=>{if(code(error)!=='ENOENT')throw error;});onProgress?.('cleaning',++removed,files.length,name);}}
  finally{await syncDirectory(folder);}
  // The session's cached copy moves on to the converted journal without its files. Its log position is
  // kept where it was: the next read takes everything appended since (the converted records, counted
@@ -1043,20 +1092,20 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
 /** Listing skips media reads. A recheck reads file contents for every entry the first time in a session
  * and for a full recheck, and later only for entries changed since their last verified pass (on exFAT and
  * FAT "changed" means size or dates; finalize and undo always read contents). */
-export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string;/** While a journal's events are read: records read so far and in all. */read?:number;total?:number})=>void;/** Stops the listing between files; what was read is kept for the next listing. */signal?:AbortSignal}={}):Promise<OrganizationRecovery[]> {
+export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string;/** While a journal's events are read: records read so far and in all. */read?:number;total?:number;/** While a finished journal is converted to the event log: the step and how far it is. */convert?:{step:'converting'|'cleaning';done:number;total:number}})=>void;/** Stops the listing between files; what was read is kept for the next listing. */signal?:AbortSignal}={}):Promise<OrganizationRecovery[]> {
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
  await adoptLegacyStorage(root);const folder=path.join(root,storage);await contained(folder,root);const stat=await maybeStat(folder);if(!stat)return[];if(!stat.isDirectory())throw new Error('Unsafe recovery storage');
  const jobs:OrganizationRecovery[]=[];
  const ids=(await fs.readdir(folder)).sort().filter(id=>uuid.test(id));let looked=0;
- const report=(position:number,within:number,file:string,counts?:{read:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{})});
+ const report=(position:number,within:number,file:string,counts?:{read:number;total:number},convert?:{step:'converting'|'cleaning';done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(convert?{convert}:{})});
  const {signal}=options;
  report(0,0,'');
  for(const [position,id] of ids.entries()) {
   checkAbort(signal);
   const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id,{read,total}),true,m.root,signal);if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id,{read,total}),true,m.root,signal);await convertRead(m,signal,(step,done,total,file)=>report(position,.5,file||id,undefined,{step,done,total}));if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
@@ -1115,7 +1164,7 @@ export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'
  */
 export async function finalizeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationFinalization>{
  await adoptLegacyStorage(root);
- return locked(jobPath(root,id),async()=>{
+ return writing(root,()=>locked(jobPath(root,id),async()=>{
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
@@ -1169,7 +1218,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   }
   await removeSiblingPointers(m);
   return result;
- });
+ }));
 }
 
 /** handedOff: files a later organization moved on, left where that one put them. */
@@ -1181,7 +1230,7 @@ export interface OrganizationUndo {restored:number;removed:number;handedOff:numb
  * so a finalized organization is refused. Nothing is overwritten or removed unchecked. */
 export async function undoOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationUndo>{
  await adoptLegacyStorage(root);
- return locked(jobPath(root,id),async()=>{
+ return writing(root,()=>locked(jobPath(root,id),async()=>{
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(state.finalizing.size||state.finalized.size)throw new Error('Kept originals were already released, so this organization cannot be undone');
@@ -1265,7 +1314,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   }
   await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
   return result;
- });
+ }));
 }
 
 /** files and bytes: everything deleting an organization's recovery files removes (its journal folder,
@@ -1423,7 +1472,7 @@ export async function deleteOrganizationRecovery(root:string,id:string,signal?:A
   const released=await finalizeOrganization(root,id,signal,onProgress);
   result.released=released.removed;result.files+=released.removed;result.bytes+=released.bytes;
  }
- return locked(jobPath(root,id),async()=>{
+ return writing(root,()=>locked(jobPath(root,id),async()=>{
   checkAbort(signal);const {m,state}=await check(),folder=await journalFolder(root,id);
   await checkJournalFolder(m,state,folder,signal,onProgress);
   const size=await tally(folder,signal),pointers=await ownPointers(m);
@@ -1444,5 +1493,5 @@ export async function deleteOrganizationRecovery(root:string,id:string,signal?:A
   await fs.rmdir(parent).then(()=>syncDirectory(root),()=>{});
   onProgress?.({step:'deleting',completed:size.files,total:size.files,file:folder});
   return result;
- });
+ }));
 }

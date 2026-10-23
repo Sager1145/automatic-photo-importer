@@ -89,10 +89,10 @@ export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>
   if (!progress) return undefined;
   switch (progress.step) {
     case 'listing': case 'scanning': return 'scan';
-    case 'checking': case 'reading': case 'history': case 'earlier': return 'read';
-    case 'comparing': case 'existing': case 'confirming': return 'compare';
+    case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'converting': case 'preparing': case 'index': return 'read';
+    case 'comparing': case 'existing': case 'confirming': case 'mirroring': return 'compare';
     case 'moving': return 'move';
-    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': return 'tidy';
+    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': case 'cleaning': case 'measuring': return 'tidy';
     case 'deleting': return 'delete';
     case 'downloading': return 'copy';
   }
@@ -1180,7 +1180,7 @@ export function shownPercent(fraction: number, finished: boolean): number {
   return finished ? 100 : Math.min(99, Math.floor(Math.max(0, fraction) * 100));
 }
 /** Steps that count files, not bytes: a rename moves no data, and checks, deletes and downloads read none. */
-const fileSteps = ['history', 'earlier', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
+const fileSteps = ['history', 'earlier', 'later', 'records', 'journals', 'converting', 'cleaning', 'measuring', 'preparing', 'mirroring', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
 /** How far a step is, the same number the count and the percent show. Undefined only while nothing can be estimated. */
 export function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
   const basis = copyBasis(progress);
@@ -1219,6 +1219,15 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'deleting') return t("{completed} of {total} files deleted", counts);
   if (progress.step === 'history') return t("Reading organization history: {completed} of {total} files", counts);
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
+  if (progress.step === 'later') return t("Reading later organizations: {completed} of {total}", counts);
+  if (progress.step === 'records') return t("Reading earlier organization records: {completed} of {total}", counts);
+  if (progress.step === 'journals') return t("Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}", { ...counts, journal: formatNumber(progress.journal?.index ?? 1), journals: formatNumber(progress.journal?.count ?? 1) });
+  if (progress.step === 'converting') return t("Converting the organization record: {completed} of {total}", counts);
+  if (progress.step === 'cleaning') return t("Removing old record files: {completed} of {total}", counts);
+  if (progress.step === 'measuring') return t("Measuring: {completed} files", counts);
+  if (progress.step === 'preparing') return t("Preparing destinations: {completed} of {total}", counts);
+  if (progress.step === 'mirroring') return t("Comparing the backup with the drive: {completed} of {total}", counts);
+  if (progress.step === 'index') return t("Loading the destination index: {size} of {totalSize}", { size: formatBytes ? formatBytes(progress.bytes) : counts.completed, totalSize: formatBytes ? formatBytes(progress.totalBytes) : counts.total });
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
