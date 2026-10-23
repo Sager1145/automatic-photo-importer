@@ -36,12 +36,24 @@ export function Boot() {
     if (box && box.offsetWidth) box.style.setProperty('--rise', String(8 * 1024 / box.offsetWidth));
   }, []);
   // Shared-element glide: the logo moves and shrinks onto the sidebar's real logo.
+  // The sidebar settles (fits its sections) right after the first state renders, so the target is read again on every frame:
+  // the logo always travels straight to where the sidebar logo really is, and ends exactly on it.
   useLayoutEffect(() => {
-    if (phase !== 'fly' || !logo.current) return;
-    const target = document.querySelector('.brand-logo')?.getBoundingClientRect();
-    const from = logo.current.getBoundingClientRect();
-    if (!target || !target.width || !from.width) return;
-    logo.current.animate([{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${target.left - from.left}px,${target.top - from.top}px) scale(${target.width / from.width})` }], { duration: bootTiming.fly, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'forwards' });
+    const box = logo.current;
+    if (phase !== 'fly' || !box) return;
+    const from = box.getBoundingClientRect();
+    if (!from.width) return;
+    const start = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const target = document.querySelector('.brand-logo')?.getBoundingClientRect();
+      if (!target || !target.width) return;
+      const progress = Math.min(1, (now - start) / bootTiming.fly), eased = 1 - (1 - progress) ** 4;
+      box.style.transform = `translate(${(target.left - from.left) * eased}px,${(target.top - from.top) * eased}px) scale(${1 + (target.width / from.width - 1) * eased})`;
+      if (progress < 1) frame = requestAnimationFrame(step);
+    };
+    step(start);
+    return () => cancelAnimationFrame(frame);
   }, [phase]);
   useEffect(() => {
     if (phase === 'done') return;
