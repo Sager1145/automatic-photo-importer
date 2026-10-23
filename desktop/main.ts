@@ -29,7 +29,7 @@ import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,c
 import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
-import {findResidue,cleanResidue} from './core/residue';
+import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
@@ -420,6 +420,7 @@ function scheduleMisplacedCheck(force=false){
 // scratch files, and camera and preview folders in the system temporary folder. Looked for while
 // nothing runs (after imports and organizations finish and when a destination connects) and
 // removed at once; copies a re-import could continue wait for Clean up.
+let residueItems:ResidueItem[]=[];
 let residueControl:AbortController|undefined,residueTask:Promise<void>|undefined,residueScope='',residuePaths:string[]=[];
 /** The backup folders of connected destinations, and folders organized in place on connected drives. */
 async function residueRoots():Promise<string[]>{
@@ -450,7 +451,8 @@ function checkResidue(all:boolean):Promise<void>{
   const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
   const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
-  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,checkedAt:now,...(cleaned?{cleaned}:{})};
+  residueItems=left.items;
+  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,...(left.unbound?.files?{unbound:left.unbound}:{}),checkedAt:now,...(cleaned?{cleaned}:{})};
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue){delete state.residue.checking;delete state.residue.progress;}emit();void releaseIfIdle();});
  residueTask=task;return task;
 }
@@ -785,6 +787,13 @@ async function action(input:Action):Promise<void>{
   case 'duplicatesStop':duplicateControl?.abort();break;
   case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;
   case 'refreshOrganization':await refreshOrganizations();break;
+  case 'removeReceipt':{
+   if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');
+   // Only a receipt the last check listed; removeUnboundReceipt checks it again, and never touches the file.
+   const item=residueItems.find(entry=>entry.kind==='unbound'&&entry.file===input.file);
+   if(item)await removeUnboundReceipt(item);
+   await checkResidue(false);break;
+  }
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id,'resume',undefined,undefined,input.full===true);break;
   case 'finalizeOrganization':await resumeOrganizationJob(input.root,input.id,'finalize');break;

@@ -80,7 +80,7 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
  * (size or mtime), so the copy cannot continue; a card not connected proves nothing. A source
  * volume whose device number had to be rewritten is not proven to be the same card (another one
  * may be mounted at the same path), so it is never stale. */
-export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean}>{
+export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;/** A direct copy's receipt (not the one written before the name existed) beside a regular file it binds neither exactly nor tolerantly. */unbound:boolean}>{
  const record=await rebaseMount((await readRecord(journal,root)).record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
@@ -90,7 +90,8 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
  const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
- return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale};
+ const unbound=record.mode==='direct'&&record.fileIdentity!==CREATING&&!!stat?.isFile()&&!bound&&!tolerantBinds(stat,record);
+ return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,unbound};
 }
 
 /** Record exclusive creation durably before the first byte is written. */

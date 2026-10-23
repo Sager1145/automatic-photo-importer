@@ -854,7 +854,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
 async function finishDirect(entry:PlanEntry,destination:string,sha:string,transfer:TransferPlan,recovery:RecoveryIndex,options:ExecutionOptions,signal?:AbortSignal):Promise<boolean> {
   const root=transfer.root,found=await findPublication({...entry,destination},root,recovery,signal);
   if(!found) {
-    if(await unboundDirect({...entry,destination},root,recovery)) throw new Error(`Unfinished copy does not match its receipt; retry after removing it: ${destination}`);
+    if(await unboundDirect({...entry,destination},root,recovery)) throw new MessageError('error.unboundReceipt',{path:destination});
     return false;
   }
   const output=await fs.open(destination,constants.O_RDWR|(constants.O_NOFOLLOW??0));
