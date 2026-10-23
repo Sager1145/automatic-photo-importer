@@ -653,7 +653,8 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   }, [errors, hidden]);
   useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, fresh.some(error => error.severity === 'error') ? 7000 : 4000); return () => window.clearTimeout(timer); }, [fresh]);
   // The toast lives in the top layer, above the page, the sidebar, the titlebar and any sheet already open.
-  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) node.showPopover(); });
+  // A View Transition draws above the top layer and takes every hit test, so one still running is finished first.
+  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) { interfaceTransition?.skipTransition(); node.showPopover(); } });
   if (!fresh.length || hidden) return null;
   // Errors take the toast; warnings alone get a calmer one that dismisses itself sooner.
   const newErrors = fresh.filter(error => error.severity === 'error'), shown = newErrors.length ? newErrors : fresh, severity: Severity = newErrors.length ? 'error' : 'warning';
@@ -882,7 +883,7 @@ export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Disp
   const files = (count: number) => count === 1 ? t("1 leftover file") : t("{count} leftover files", { count: formatNumber(count) });
   const status = residue?.checking ? t("Looking for leftover files…") : !residue?.checkedAt ? t("Not checked yet.") : residue.files ? `${files(residue.files)} · ${formatBytes(residue.bytes)}` : t("No leftover files.");
   return <div data-testid="residue-cleanup">
-    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
+    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} title={busy ? t("Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.") : undefined} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
     {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
     {!!residue?.recoverable?.files && <p className="settings-row-note" data-testid="residue-recoverable">{t("{count} complete copies whose card file changed are kept: {folder}", { count: formatNumber(residue.recoverable.files), folder: residue.recoverable.folder ?? '' })}</p>}
@@ -1555,7 +1556,7 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
     <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
-    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}<RevealButton path={job.source.path} act={act} /></p>
+    <p className="progress-job-place progress-job-place-action" title={organizationPlace(job, true)}><span>{organizationPlace(job, true)}</span><RevealButton path={job.source.path} act={act} /></p>
     <OrganizationProgress job={job} act={act} />
     <SkipFileNotice job={job} act={act} />
   </article>;
