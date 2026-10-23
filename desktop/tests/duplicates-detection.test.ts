@@ -5,11 +5,15 @@ import path from 'node:path';
 import os from 'node:os';
 import { plan } from '../core/index';
 import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
-import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
+import { destinationIndex, dropDestinationIndexes, indexTarget } from '../core/destination-index';
 import { identity } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
 import { buildGroups, candidates, classify, comparable, exifKey } from '../duplicate-rules';
 import type { DuplicateExif, DuplicateFile, DuplicateGroup, Metadata } from '../shared';
+/** The duplicate store of `root` as written (sealed), from the app's data folder. */
+const storedRecord = async (root: string) => JSON.parse(await fs.readFile(await indexTarget(root, 'duplicates.json'), 'utf8'));
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const exif = (patch: Partial<DuplicateExif> = {}): DuplicateExif => ({ date: '2024-05-06T07:08:09.12', camera: 'Nikon Z f', serial: '3000123', shutterCount: '1001', width: 6048, height: 4032, lens: '24-70mm', ...patch });
 const file = (name: string, patch: Partial<DuplicateFile> = {}): DuplicateFile => ({ path: name, size: 1000, kind: 'JPEG', edited: false, birth: 1, ctime: 1, ...patch });
@@ -107,8 +111,8 @@ test('stage 2 finds a renamed SHA duplicate that stage 1 could not match, and re
   assert.equal(result.groups.length, 1);
   assert.equal(result.groups[0]!.strength, 'sha');
   assert.deepEqual(result.groups[0]!.files.map(item => item.path).sort(), ['2024/202405/Nikon Z f/DSC_0001.NEF', 'Imported/holiday.nef']);
-  const saved = JSON.parse(await fs.readFile(path.join(root, `${DUPLICATES_PREFIX}.json`), 'utf8'));
-  assert.equal(saved.version, 2); assert.equal(saved.complete, true); assert.equal(saved.groups.length, 1);
+  const saved = await storedRecord(root);
+  assert.equal(saved.v, 5); assert.equal(saved.kind, 'duplicates'); assert.match(saved.seal, /^[a-f0-9]{64}$/); assert.equal(saved.complete, true); assert.equal(saved.groups.length, 1);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}.json`), true);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}-11111111-1111-4111-8111-111111111111.tmp`), true);
   assert.equal((await inventory(root, { backup: true })).files.some(item => item.path.includes(DUPLICATES_PREFIX)), false);
@@ -142,7 +146,7 @@ test('copies on different destinations are never paired: each root is scanned al
   const first = await scan(one), second = await scan(two);
   assert.equal(first.groups.length, 0); assert.equal(second.groups.length, 0);
   // Each root's record names only its own files.
-  for (const root of [one, two]) assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(root, `${DUPLICATES_PREFIX}.json`), 'utf8')).files), ['2024/202405/cam/IMG_1.JPG']);
+  for (const root of [one, two]) assert.deepEqual(Object.keys((await storedRecord(root)).files), ['2024/202405/cam/IMG_1.JPG']);
 });
 test('companions follow their primary and are not groups of their own', async t => {
   const base = await library(t), root = path.join(base, 'library');
@@ -228,22 +232,22 @@ test('app folders are skipped at any depth: a parent of one library never pairs 
   assert.deepEqual(result.groups, []);
 });
 
-test('a version 1 duplicate store is ignored and its files are read again; the store is written as version 2', async t => {
+test('a duplicate store that fails authentication is ignored and its files are read again; the store is written sealed again', async t => {
   const base = await library(t), root = path.join(base, 'library');
   await write(root, 'a/one.JPG', 'identical one'); await write(root, 'b/two.JPG', 'identical one');
   const counter = { reads: 0 };
   const deps = async () => ({ metadata: reader({}, counter), index: await destinationIndex(root, await identity(root)) });
   await scanDuplicates(root, await deps());
-  const storeFile = path.join(root, `${DUPLICATES_PREFIX}.json`);
+  const storeFile = await indexTarget(root, 'duplicates.json');
   const saved = JSON.parse(await fs.readFile(storeFile, 'utf8'));
-  assert.equal(saved.version, 2);
+  assert.equal(saved.v, 5);
   assert.equal(counter.reads, 2);
-  await fs.writeFile(storeFile, JSON.stringify({ ...saved, version: 1 }));
+  await fs.writeFile(storeFile, JSON.stringify({ ...saved, complete: !saved.complete }));
   dropDuplicateStores(); dropDestinationIndexes();
   const again = await scanDuplicates(root, await deps());
-  assert.equal(counter.reads, 4, 'v1 records are re-read, not trusted');
+  assert.equal(counter.reads, 4, 'records that fail authentication are re-read, not trusted');
   assert.equal(again.groups.length, 1);
-  assert.equal(JSON.parse(await fs.readFile(storeFile, 'utf8')).version, 2);
+  assert.equal((await storedRecord(root)).v, 5); assert.equal((await storedRecord(root)).complete, saved.complete);
 });
 
 test('duplicate MOVs of two copies of one Live Photo are found at import time', async t => {

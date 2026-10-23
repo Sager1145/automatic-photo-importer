@@ -6,12 +6,17 @@ import os from 'node:os';
 import {plan,execute} from '../core';
 import {MessageError,errorPath,filePath,toMessage} from '../messages';
 import {normalizePreferences,defaultPreferences} from '../preferences';
+import {openReceiptsFor,stagingFor} from './fixtures/receipts';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-/** Destination files without the checksum index and staging/receipt files. */
+/** Destination files without the app's data folder; that folder must hold no staged copy and no open receipt. */
 async function published(root:string):Promise<string[]>{
  const found:string[]=[];
- async function walk(folder:string){for(const item of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,item.name);if(item.isDirectory())await walk(file);else if(!item.name.startsWith('photo-importer-index'))found.push(path.relative(root,file));}}
- await walk(root);return found.sort();
+ async function walk(folder:string){for(const item of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,item.name);if(item.isDirectory()){if(file!==path.join(root,'Photo Importer Data'))await walk(file);}else if(!item.name.startsWith('photo-importer-index'))found.push(path.relative(root,file));}}
+ await walk(root);
+ assert.deepEqual(await fs.readdir(await stagingFor(root)),[]);assert.equal((await openReceiptsFor(root)).size,0);
+ return found.sort();
 }
 async function fixture(t:test.TestContext,names:string[]){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'skip-errors-')));

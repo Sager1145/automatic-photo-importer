@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { plan, execute, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
+import { openReceiptsFor, stagingFor } from './fixtures/receipts';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -38,10 +39,11 @@ async function source(t:test.TestContext):Promise<string> {
   for(let i=0;i<FILES;i++) await fs.writeFile(path.join(folder,`DSC_${String(i).padStart(4,'0')}.NEF`),randomBytes((MEGABYTES+(i%3))*1024*1024));
   return folder;
 }
+/** What an import leaves in the app's data folder: staged copies (paths) and open receipts ('receipt:' and the id). */
 async function leftovers(folder:string):Promise<string[]> {
-  const found:string[]=[];
-  for(const entry of await fs.readdir(folder,{withFileTypes:true,recursive:true}))
-    if(/^(?:\.import|photo-importer)-(?!index)/.test(entry.name)) found.push(path.join(entry.parentPath,entry.name));
+  const staging=await stagingFor(folder);
+  const found=(await fs.readdir(staging)).filter(name=>!name.startsWith("._")).map(name=>path.join(staging,name));
+  for(const rid of (await openReceiptsFor(folder)).keys()) found.push(`receipt:${rid}`);
   return found;
 }
 async function media(root:string):Promise<string[]> {
@@ -53,13 +55,12 @@ async function media(root:string):Promise<string[]> {
 async function assertOnlyEmptyOrphans(root:string,crashed:boolean) {
   const left=await leftovers(root);
   if(!crashed) return assert.deepEqual(left,[]);
+  const receipts=await openReceiptsFor(root);
   for(const file of left) {
-    if(file.endsWith('.json')) {
-      // A kill between writing a new receipt and removing the older one for the same file leaves the
-      // older receipt behind, pointing at a file the next import has already released.
-      // A receipt cut short by the kill grants no ownership and names nothing.
-      const named=await fs.readFile(file,'utf8').then(text=>JSON.parse(text).file as string,()=>undefined);
-      if(named===undefined) continue;
+    if(file.startsWith('receipt:')) {
+      // A kill between writing a new receipt and closing the older one for the same file leaves the
+      // older receipt open, pointing at a file the next import has already released.
+      const named=receipts.get(file.slice('receipt:'.length))!.file;
       assert.equal(await fs.lstat(named).then(()=>true,()=>false),false,`receipt for a file still there: ${file}`);
     } else assert.equal((await fs.stat(file)).size,0,`non-empty staging file left behind: ${file}`);
   }
@@ -121,7 +122,7 @@ test('a Stop while publishing to a large exFAT volume is finished by the next im
 test('receipts written before a large exFAT volume was attached again still resume and release',async t=>{
   const env=await ready(t);if(!env) return;
   await crash(env.card,env.root,'copy');
-  assert.ok((await leftovers(env.root)).some(file=>file.endsWith('.json')),'the killed run left stage receipts');
+  assert.ok((await leftovers(env.root)).some(file=>file.startsWith('receipt:')),'the killed run left stage receipts');
   const devices=await reattach(env.d,env.root);
   if(devices.after===devices.before) return t.skip('the device number did not change after 3 re-attaches');
   await reimport(env.card,env.root,true);

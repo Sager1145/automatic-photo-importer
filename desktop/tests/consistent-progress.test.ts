@@ -244,7 +244,7 @@ test('the leftover check and Clean up report progress',async t=>{
  for(const folder of ['2024','2025','2026']){await fs.mkdir(path.join(root,folder),{recursive:true});await fs.writeFile(path.join(root,folder,'a.jpg'),'x');}
  await fs.writeFile(path.join(root,'2025','.import-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.partial'),'partial');
  const scans:{looked:number;done:number;total:number;file:string}[]=[];
- const found=await findResidue([root],{onProgress:scan=>scans.push(scan)});
+ const found=await findResidue([root],{legacy:true,onProgress:scan=>scans.push(scan)});
  assert.ok(scans.length>=3);assert.ok(scans.every(scan=>scan.total===scans[0]!.total&&scan.done<=scan.total));
  assert.equal(scans.at(-1)!.done,scans.at(-1)!.total);assert.ok(scans.at(-1)!.looked>=4);
  const steps:[number,number][]=[];

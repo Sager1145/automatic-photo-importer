@@ -7,6 +7,8 @@ import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core/index';
 import {executeDestinations} from '../core/destinations';
 import type {Progress} from '../shared';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const temporary=async(t:test.TestContext)=>{const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'verify-progress-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));return base;};
 

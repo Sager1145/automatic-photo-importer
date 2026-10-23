@@ -8,6 +8,8 @@ import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core';
 import {destinationIndex} from '../core/destination-index';
 import {identity} from '../core/paths';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const sha=(data:Buffer)=>createHash('sha256').update(data).digest('hex');
 async function temporary(t:test.TestContext){

@@ -7,8 +7,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,createHash} from 'node:crypto';
 import {plan,execute,cleanStage,configureOrganizationRecovery} from '../core/index';
-import {sealImportRecord} from '../core/recovery';
-import {recordPartial,recordCreation,releaseCreations,findPartial,leftoverReceipt,rebaseMount} from '../core/import-recovery';
+import {sealedRecord} from './fixtures/records';
+import {stagePathFor,openReceiptsFor,receiptState,segmentsFor} from './fixtures/receipts';
+import {recordPartial,recordCreation,releaseCreations,findPartial,rebaseMount} from '../core/import-recovery';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -24,19 +25,20 @@ async function fixture(t:test.TestContext) {
   await fs.writeFile(path.join(card,'DSC_0002.NEF'),Buffer.alloc(5000,2));
   const reviewed=(await plan(card,[root],options,metadata)).plans[0]!,entry=reviewed.entries[0]!;
   await fs.mkdir(path.dirname(entry.destination),{recursive:true});
-  const copy=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+  const copy=await stagePathFor(root,randomUUID());
   await fs.writeFile(copy,Buffer.alloc(1000,1));
   const sha=(file:string)=>fs.readFile(path.join(card,file)).then(data=>createHash('sha256').update(data).digest('hex'));
   const second=reviewed.entries[1]!;
-  return {base,card,root,reviewed,entry,second,copy,digest:await sha(path.basename(entry.source)),secondDigest:await sha(path.basename(second.source))};
+  const place={scope:path.join(root,'Photo Importer Data'),target:path.dirname(entry.destination)};
+  return {base,card,root,reviewed,entry,second,copy,place,digest:await sha(path.basename(entry.source)),secondDigest:await sha(path.basename(second.source))};
 }
 
 test('a receipt with a temporary inode binds by device and birth time, and not when the birth time differs',async t=>{
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true});
   const same=await recordPartial('stage',f.copy,{...stat,ino:-5n} as typeof stat,f.entry,f.reviewed,new Map());
-  assert.equal((await leftoverReceipt(same.journal,f.root)).bound,true,'the same birth time is bound');
+  assert.equal((await receiptState(same)).bound,true,'the same birth time is bound');
   const other=await recordPartial('stage',f.copy,{...stat,ino:-5n,birthtimeNs:stat.birthtimeNs+1n} as typeof stat,f.entry,f.reviewed,new Map());
-  assert.equal((await leftoverReceipt(other.journal,f.root)).bound,false,'a different birth time is not bound');
+  assert.equal((await receiptState(other)).bound,false,'a different birth time is not bound');
 });
 
 test('a receipt whose root inode differs is not rebased, one with only another device number is',async t=>{
@@ -52,30 +54,31 @@ test('a receipt whose root inode differs is not rebased, one with only another d
 
 test('cleanStage leaves a file with a different birth time in place and says its identity differs',async t=>{
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),notes:string[]=[],issues:{code:string;severity:string;path:string}[]=[];
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,(text,issue)=>{notes.push(text);if(issue)issues.push(issue);});
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,(text,issue)=>{notes.push(text);if(issue)issues.push(issue);});
   assert.deepEqual(issues.map(issue=>[issue.code,issue.severity,issue.path]),[['staging-left','warning',f.copy]],'also reported as a structured warning');
   assert.ok(await fs.lstat(f.copy).then(()=>true,()=>false),'the file is still there');
   assert.equal(notes.length,1);assert.match(notes[0]!,/identity differs/);
   // A temporary inode with a different birth time is no better.
-  await cleanStage({file:f.copy,dev:stat.dev,ino:-3n,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:-3n,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
   assert.ok(await fs.lstat(f.copy).then(()=>true,()=>false));assert.equal(notes.length,2);
   // The matching identity does remove it.
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs,recovery:new Map()},f.root,true,text=>notes.push(text));
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs,recovery:new Map()},f.root,true,text=>notes.push(text));
   assert.equal(await fs.lstat(f.copy).then(()=>true,()=>false),false);
 });
 
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
-const receipts=async(folder:string)=>(await fs.readdir(folder)).filter(name=>name.startsWith('photo-importer-intent-'));
+/** The open receipts of the store `root` writes to. */
+const receipts=async(root:string)=>[...(await openReceiptsFor(root)).values()];
 
 test('a creation receipt with no file yet: the next run creates the file in place and leaves no receipt',async t=>{
   const f=await fixture(t),folder=path.dirname(f.entry.destination);
   await recordCreation(f.entry.destination,{...f.entry,digest:f.digest},f.reviewed,new Map());
-  assert.equal(await exists(f.entry.destination),false);assert.equal((await receipts(folder)).length,1);
+  assert.equal(await exists(f.entry.destination),false);assert.equal((await receipts(f.root)).length,1);
   const again=(await plan(f.card,[f.root],options,metadata)).plans[0]!;
   assert.equal(again.entries[0]!.destination,f.entry.destination,'planned at the real name');
   assert.deepEqual(await execute(again,undefined,undefined,{exclusiveCopy:true}),{copied:2,skipped:0,errors:[]});
   assert.deepEqual(await fs.readFile(f.entry.destination),await fs.readFile(f.entry.source));
-  assert.deepEqual(await receipts(folder),[]);assert.equal(await exists(path.join(folder,'Conflicts')),false);
+  assert.deepEqual(await receipts(f.root),[]);assert.equal(await exists(path.join(folder,'Conflicts')),false);
 });
 
 test('a creation receipt owns only an empty file with one link',async t=>{
@@ -105,7 +108,7 @@ test('an exclusive create that finds the name taken clears its receipt and leave
   try { result=await execute(reviewed,undefined,undefined,{exclusiveCopy:true}); } finally { t.mock.restoreAll();syncBuiltinESMExports(); }
   assert.equal(raced,true);
   assert.equal(await fs.readFile(f.entry.destination,'utf8'),'precious user data');
-  assert.deepEqual(await receipts(folder),[]);
+  assert.deepEqual(await receipts(f.root),[]);
   // The import itself moves on to a conflict folder rather than touching the file that took the name.
   assert.deepEqual(result.errors,[]);assert.equal(result.copied,2);
   const found=(await fs.readdir(folder,{recursive:true})).filter(name=>name.endsWith('DSC_0001.NEF'));
@@ -116,21 +119,26 @@ test('releaseCreations leaves receipts for other destinations and other roots in
   const f=await fixture(t),folder=path.dirname(f.entry.destination),index=new Map();
   const mine={...f.entry,digest:f.digest},other={...f.second,digest:f.secondDigest};
   await recordCreation(mine.destination,mine,f.reviewed,index);await recordCreation(other.destination,other,f.reviewed,index);
-  assert.equal((await receipts(folder)).length,2);
+  assert.equal((await receipts(f.root)).length,2);
   await releaseCreations(mine,path.join(f.base,'elsewhere'),new Map());
-  assert.equal((await receipts(folder)).length,2,'another root releases nothing');
+  assert.equal((await receipts(f.root)).length,2,'another root releases nothing');
   await releaseCreations(mine,f.root,index);
-  const left=await receipts(folder);assert.equal(left.length,1);
-  assert.equal(JSON.parse(await fs.readFile(path.join(folder,left[0]!),'utf8')).destination,other.destination);
+  const left=await receipts(f.root);assert.equal(left.length,1);
+  assert.equal(left[0]!.destination,other.destination);
 });
 
 test('a stage receipt written under another device number still binds, through the same rebase',async t=>{
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true});
-  const {journal}=await recordPartial('stage',f.copy,stat,f.entry,f.reviewed,new Map());
+  const made=await recordPartial('stage',f.copy,stat,f.entry,f.reviewed,new Map());
   const fake=String(stat.dev+11n),swap=(value:unknown)=>String(value).replace(/^\d+:/,fake+':');
-  const record=JSON.parse(await fs.readFile(journal,'utf8')) as Record<string,any>;
-  const {seal:_seal,...data}=record;void _seal;
-  await fs.writeFile(journal,JSON.stringify(sealImportRecord({...data,rootIdentity:swap(data.rootIdentity),parentIdentity:swap(data.parentIdentity),fileIdentity:swap(data.fileIdentity),sourceIdentity:swap(data.sourceIdentity),sourceStat:{...data.sourceStat,dev:fake}})));
-  assert.equal((await leftoverReceipt(journal,f.root)).bound,true);
+  const [segment]=await segmentsFor(f.root);
+  const lines=(await fs.readFile(segment!,'utf8')).split('\n').filter(Boolean).map(line=>{
+    const record=JSON.parse(line) as Record<string,any>;if(record.op!=='open'||record.rid!==made.rid)return line;
+    const {seal:_seal,...data}=record;void _seal;
+    return sealedRecord('receipt',{...data,rootIdentity:swap(data.rootIdentity),parentIdentity:swap(data.parentIdentity),fileIdentity:swap(data.fileIdentity),sourceIdentity:swap(data.sourceIdentity),sourceStat:{...data.sourceStat,dev:fake}});
+  });
+  await fs.writeFile(segment!,lines.join('\n')+'\n');
+  const rewritten=(await openReceiptsFor(f.root)).get(made.rid)!;
+  assert.equal((await receiptState({store:made.store,record:rewritten as never})).bound,true);
   assert.ok(await findPartial('stage',f.entry,f.root,new Map()),'the copy is found and can resume');
 });

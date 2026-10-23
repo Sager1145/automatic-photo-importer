@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import * as core from '../core/index';
 import {sameHardLink,sameFile,movedFileIdentity} from '../core/recovery';
+import {journalFileFor,journalFolderFor,journalLines} from './fixtures/records';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
@@ -21,7 +22,7 @@ async function fixture(t:test.TestContext,count=1){
  return {root,originals,original:originals[0]!,destination};
 }
 const prepare=async(root:string)=>(await core.plan(root,[root],options,metadata)).plans[0]!;
-const recoveryFiles=async(root:string,id:string)=>{const found:string[]=[];const walk=async(folder:string)=>{for(const entry of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())await walk(file);else found.push(path.relative(path.join(root,'Photo Importer Recovery',id),file));}};await walk(path.join(root,'Photo Importer Recovery',id,'originals')).catch(()=>{});return found;};
+const recoveryFiles=async(root:string,id:string)=>{const found:string[]=[],base=await journalFolderFor(root,id);const walk=async(folder:string)=>{for(const entry of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())await walk(file);else found.push(path.relative(base,file));}};await walk(path.join(base,'originals')).catch(()=>{});return found;};
 
 test('a same-volume organization renames the original into place without copying or keeping a duplicate',async t=>{
  const f=await fixture(t),before=await fs.lstat(f.original,{bigint:true});
@@ -188,10 +189,10 @@ test('an empty file is left where it is: it is not planned or moved',async t=>{
 
 const dated=async(root:string)=>(await core.plan(root,[root],options,async()=>({camera:'Sony',date:'2024-02-03T12:00:00',fields:{}}))).plans[0]!;
 // Journal events are signed lines of one log; each test rearranges or drops whole lines.
-const eventLog=(root:string,id:string)=>path.join(root,'Photo Importer Recovery',id,'event-log.jsonl');
-const eventLines=async(root:string,id:string)=>(await fs.readFile(eventLog(root,id),'utf8')).split('\n').filter(Boolean);
+// Header and entries are the first two lines; the rest are events (the signed lines of one journal).
+const eventLines=async(root:string,id:string)=>(await journalLines(root,id)).slice(2);
 const isEvent=(event:string)=>(line:string)=>JSON.parse(line).event===event;
-const rewriteLog=async(root:string,id:string,lines:string[])=>fs.writeFile(eventLog(root,id),lines.map(line=>line+'\n').join(''));
+const rewriteLog=async(root:string,id:string,lines:string[])=>fs.writeFile(await journalFileFor(root,id),[...(await journalLines(root,id)).slice(0,2),...lines].map(line=>line+'\n').join(''));
 
 test('a moved file given its capture date stays recognised however its journal events are ordered',async t=>{
  const f=await fixture(t,2);
@@ -233,16 +234,16 @@ test('a restored Modified date rounded to the filesystem resolution still identi
  assert.equal(movedFileIdentity(stat(1792573946340000000n),entry),false,'a second off is another date');
 });
 
-test('an organization journals into one append-only log, not one file per event',async t=>{
+test('an organization journals into one append-only file, not one file per event',async t=>{
  const f=await fixture(t,5);
  assert.deepEqual((await core.executeReorganization(await prepare(f.root),undefined,undefined,rename)).errors,[]);
  const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.status,'complete');
- const names=await fs.readdir(path.join(f.root,'Photo Importer Recovery',job!.id));
- assert.deepEqual(names.filter(name=>name.startsWith('event-')),['event-log.jsonl']);
- const log=path.join(f.root,'Photo Importer Recovery',job!.id,'event-log.jsonl');
- assert.ok(!(await fs.readFile(log,'utf8')).slice(0,-1).split('\n').includes(''),'one event per line, no blank lines');
+ const names=await fs.readdir(await journalFolderFor(f.root,job!.id));
+ assert.equal(names.includes('journal.jsonl'),true);assert.deepEqual(names.filter(name=>name.startsWith('event-')),[]);
+ const log=await journalFileFor(f.root,job!.id);
+ assert.ok(!(await fs.readFile(log,'utf8')).slice(0,-1).split('\n').includes(''),'one record per line, no blank lines');
  // A write cut short by power loss leaves a torn last line, which carries no event.
- await fs.appendFile(path.join(f.root,'Photo Importer Recovery',job!.id,'event-log.jsonl'),'{"id":"torn');
+ await fs.appendFile(log,'{"id":"torn');
  assert.equal((await core.getOrganizationRecovery(f.root))[0]!.status,'complete');
  assert.equal((await core.undoOrganization(f.root,job!.id)).restored,5);
  assert.match(await fs.readFile(log,'utf8'),/\{"id":"torn\n\{/,'the next event starts on its own line');

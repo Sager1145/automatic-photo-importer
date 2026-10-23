@@ -59,7 +59,7 @@ export class RecordTooLarge extends Error {constructor(file:string){super(`Recor
 /** Reads only whole lines, in 1 MiB chunks, from `from`. `capFor(n)` is the cap for the n-th line read in this
  * call. Lines within their cap go to `onLine` with their start offset; the final line without a newline goes to
  * `onTail` (an append cut short, or one still being written). Returns the offset after the last newline read. */
-export async function readLines(handle:fs.FileHandle,file:string,from:number,capFor:(n:number)=>number,onLine:(text:string,start:number,n:number)=>void|Promise<void>,options:{onTail?:(text:string,start:number,n:number)=>void|Promise<void>;signal?:AbortSignal;onBytes?:(position:number,size:number)=>void}={}):Promise<{end:number;lines:number}>{
+export async function readLines(handle:fs.FileHandle,file:string,from:number,capFor:(n:number)=>number,onLine:(text:string,start:number,n:number)=>void|Promise<void>,options:{onTail?:(text:string,start:number,n:number)=>void|Promise<void>;signal?:AbortSignal;onBytes?:(position:number,size:number)=>void;/** Stop after this many lines. */limit?:number}={}):Promise<{end:number;lines:number}>{
  const size=Number((await handle.stat()).size),buffer=Buffer.allocUnsafe(CHUNK);
  let position=from,lineStart=from,parts:Buffer[]=[],length=0,n=0;
  const finish=async(bytes:Buffer,start:number,tail:boolean)=>{
@@ -88,6 +88,7 @@ export async function readLines(handle:fs.FileHandle,file:string,from:number,cap
    parts=[];length=0;
    await finish(bytes,lineStart,false);
    offset=newline+1;lineStart=position+offset;
+   if(options.limit!==undefined&&n>=options.limit)return {end:lineStart,lines:n};
   }
   position+=bytesRead;options.onBytes?.(position,size);
  }
@@ -103,19 +104,19 @@ export async function openRegular(file:string,flags=constants.O_RDONLY):Promise<
 
 // ---- Group-committed append-only logs ----
 interface Waiter {lines:string[];check?:()=>Promise<void>;resolve:()=>void;reject:(error:unknown)=>void;}
-interface Log {waiting:Waiter[];chain:Promise<void>;scheduled:boolean;}
+interface Log {waiting:Waiter[];chain:Promise<void>;scheduled:boolean;create:boolean;}
 const logs=new Map<string,Log>();
 /** For tests: how many writes, file and folder synchronizations the logs made. */
 export const logStats={writes:0,fileSyncs:0,folderSyncs:0};
-const logFor=(file:string)=>{let log=logs.get(file);if(!log){log={waiting:[],chain:Promise.resolve(),scheduled:false};logs.set(file,log);}return log;};
+const logFor=(file:string)=>{let log=logs.get(file);if(!log){log={waiting:[],chain:Promise.resolve(),scheduled:false,create:true};logs.set(file,log);}return log;};
 /** Append lines to `file` and return once they are durable. Every append waiting when a write starts goes in
  * that one write, followed by one synchronization of the file and one of its folder (the folder holds the
  * file's size on FAT and exFAT). `check` runs right before the write (containment, identities); an append
  * whose check fails is refused alone. */
-export function appendLines(file:string,lines:string[],check?:()=>Promise<void>):Promise<void>{
+export function appendLines(file:string,lines:string[],check?:()=>Promise<void>,options:{/** false: the log must already exist (a journal, whose first lines are written when it is created). */create?:boolean}={}):Promise<void>{
  if(lines.some(line=>line.includes('\n')))return Promise.reject(new Error('Invalid record line'));
  return new Promise<void>((resolve,reject)=>{
-  const log=logFor(file);log.waiting.push({lines,check,resolve,reject});
+  const log=logFor(file);log.create=options.create!==false;log.waiting.push({lines,check,resolve,reject});
   if(!log.scheduled){log.scheduled=true;log.chain=log.chain.then(()=>flush(file,log));}
  });
 }
@@ -125,7 +126,7 @@ async function flush(file:string,log:Log):Promise<void>{
  for(const waiter of batch){try{await waiter.check?.();ready.push(waiter);}catch(error){waiter.reject(error);}}
  if(!ready.length)return;
  try{
-  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|constants.O_CREAT|(constants.O_NOFOLLOW??0),0o600);
+  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);
   try{
    const opened=await handle.stat();if(!opened.isFile()||opened.nlink!==1)throw new Error(`Unsafe record log: ${file}`);
    // Start on a fresh line if an interrupted write left a partial one.
@@ -235,8 +236,15 @@ export async function baseFor(library:string):Promise<string>{
  }
  return resolved;
 }
-/** The store at `base`, made if needed: the folder, then its sealed record (aside, then renamed into place). */
-export async function ensureStore(base:string):Promise<Store>{
+const creating=new Map<string,Promise<Store>>();
+/** The store at `base`, made if needed: the folder, then its sealed record (aside, then renamed into place). Callers
+ * that find it missing at the same time share one creation. */
+export function ensureStore(base:string):Promise<Store>{
+ let made=creating.get(base);
+ if(!made){made=createStore(base).finally(()=>{if(creating.get(base)===made)creating.delete(base);});creating.set(base,made);}
+ return made;
+}
+async function createStore(base:string):Promise<Store>{
  if(path.resolve(base)!==base||await fs.realpath(base)!==base)throw new Error(`Unsafe records location: ${base}`);
  const baseStat=await fs.lstat(base,{bigint:true});if(!baseStat.isDirectory())throw new Error(`Unsafe records location: ${base}`);
  const folder=path.join(base,APP_DATA_FOLDER);

@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {inventory,plan,execute} from '../core';
 import type {Metadata,UnknownFileRule} from '../shared';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const cameraRule={action:'camera' as const};

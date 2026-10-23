@@ -21,7 +21,7 @@ import { buildGroups } from '../duplicate-rules';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, APP_DATA_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
-import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,stagingFolder,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
@@ -592,7 +592,7 @@ async function familyPaths(family:PlanEntry[]):Promise<string[]|undefined> {
 }
 /** Thrown inside a hold on exact paths when allocation needs a conflict folder after all. */
 const WIDEN=Symbol('widen');
-interface Staged {streamDigest?:string;sourceStat?:import('node:fs').BigIntStats;verifiedStat?:import('node:fs').BigIntStats;file:string;dev:bigint;ino:bigint;birthtime:bigint;record?:OwnedPartial;recovery:RecoveryIndex;}
+interface Staged {streamDigest?:string;sourceStat?:import('node:fs').BigIntStats;verifiedStat?:import('node:fs').BigIntStats;file:string;dev:bigint;ino:bigint;birthtime:bigint;record?:OwnedPartial;recovery:RecoveryIndex;/** The records folder the staged copy is inside (it is removed only while still there), and the folder it is published into. */scope:string;target:string;}
 const claimedStages=new Set<string>();
 interface StageTarget {entry:PlanEntry;transfer:TransferPlan;recovery:RecoveryIndex;onBytes:(bytes:number)=>void;}
 interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<typeof fs.open>>;initialSize:number;error?:unknown;}
@@ -612,13 +612,15 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
   const candidate=await findPartial('stage',entry,transfer.root,recovery,signal);
   const recovered=candidate&&!claimedStages.has(candidate.file)?candidate:undefined;
   if(recovered)claimedStages.add(recovered.file);
-  const file=recovered?.file??path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+  // Staged copies wait in the records folder's staging folder, on the destination's volume, then are linked or copied into place.
+  const staging=await stagingFolder(transfer.root,path.dirname(entry.destination)).catch(error=>{if(recovered)claimedStages.delete(recovered.file);throw error;});
+  const file=recovered?.file??path.join(staging.folder,`${randomUUID()}.partial`);
   let output:Awaited<ReturnType<typeof fs.open>>;
   try{output=recovered?await openPartial(recovered,transfer.root):await fs.open(file,'wx',0o600);}catch(error){claimedStages.delete(file);throw error;}
   claimedStages.add(file);
   let outputStat;
   try{outputStat=await output.stat({bigint:true});}catch(error){await output.close().catch(()=>{});claimedStages.delete(file);if(!recovered)await fs.unlink(file).catch(()=>{});throw error;}
-  return {target,output,initialSize:Number(outputStat.size),staged:{file,dev:outputStat.dev,ino:outputStat.ino,birthtime:outputStat.birthtimeNs,record:recovered,recovery}};
+  return {target,output,initialSize:Number(outputStat.size),staged:{file,dev:outputStat.dev,ino:outputStat.ino,birthtime:outputStat.birthtimeNs,record:recovered,recovery,scope:recovered?.store.path??staging.store.path,target:path.dirname(entry.destination)}};
 }
 /** exFAT gives an empty file a temporary inode and assigns the real one (its first cluster)
  * when data is written, so the staging identity is re-read through the open descriptor,
@@ -721,7 +723,7 @@ const message=(error:unknown)=>error instanceof Error?error.message:String(error
 export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string,issue?:ExecutionIssue)=>void=text=>console.warn(text)):Promise<void> {
   claimedStages.delete(staged.file);
   try {
-    await contained(staged.file,root);
+    await contained(staged.file,staged.scope);
     const current=await fs.lstat(staged.file,{bigint:true});
     if(!current.isFile()) return;
     const exact=current.dev===staged.dev&&current.ino===staged.ino&&sameBirth(staged.birthtime,current.birthtimeNs);
@@ -768,7 +770,7 @@ export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
 async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal):Promise<import('node:fs').BigIntStats|undefined> {
-  await rootUnchanged(transfer.root,transfer.rootIdentity); await makeParent(destination,transfer.root,transfer.rootIdentity); await contained(staged.file,transfer.root);
+  await rootUnchanged(transfer.root,transfer.rootIdentity); await makeParent(destination,transfer.root,transfer.rootIdentity); await contained(staged.file,staged.scope);
   const verified=staged.verifiedStat;
   if(!verified || !sameStat(verified,await fs.lstat(staged.file,{bigint:true}))) throw new Error(`Staged file changed: ${entry.source}`);
   const publicationEntry={...entry,destination};
@@ -1001,8 +1003,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       await exclusive(async()=>{
         await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else run.result.errors.push(line);}));
         for(const folder of new Set(stages.map(temporary=>path.dirname(temporary.file))))await syncDirectory(folder).catch(()=>{});
-      // Keyed by folder: unlinking a stage still linked to its published file changes that file.
-      },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);
+      // Keyed by the staging folder and the folders the stages were published into: unlinking a stage still linked to its published file changes that file.
+      },[...new Set(stages.flatMap(temporary=>[path.dirname(temporary.file),temporary.target]))]);
     }
     for(const run of runs) if(run.index) await flushIndex(run.index);
     runs.forEach((_run,position)=>{if(!settled.has(position))onSettled?.(position);});

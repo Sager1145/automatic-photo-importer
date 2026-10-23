@@ -149,3 +149,10 @@ test('partitions are stable per folder, case and composition insensitive',()=>{
  assert.equal(store.pointerPartition('/Volumes/A006/2023').split(' ')[1],store.pointerPartition('/Volumes/A006/2023'.normalize('NFD')).split(' ')[1]);
  assert.match(store.libraryPartition({base:'/Volumes/A006'},'/Volumes/A006'),/^A006 /);
 });
+
+test('many callers making the same store at once share one creation',async t=>{
+ const root=await drive(t);
+ const stores=await Promise.all(Array.from({length:20},()=>store.ensureStore(root)));
+ assert.ok(stores.every(item=>item.path===stores[0]!.path&&item.ino===stores[0]!.ino));
+ assert.deepEqual((await fs.readdir(path.join(root,'Photo Importer Data'))).sort(),['store.json']);
+});

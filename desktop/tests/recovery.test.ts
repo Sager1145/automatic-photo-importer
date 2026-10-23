@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import * as core from '../core/index';
+import {journalFolderFor,journalFileFor,editJournalLine} from './fixtures/records';
 
 async function singlePlan(source:string,root:string,...args:Parameters<typeof core.plan> extends [string,string[],...infer Rest]?Rest:never){return (await core.plan(source,[root],...args)).plans[0]!;}
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -17,7 +18,7 @@ async function fixture(t:test.TestContext) {
  return {root,original};
 }
 async function retained(root:string,id:string,index=0):Promise<string> {
- const folder=path.join(root,'Photo Importer Recovery',id,'originals',String(index));
+ const folder=path.join(await journalFolderFor(root,id),'originals',String(index));
  for(const slot of await fs.readdir(folder)){const contents=await fs.readdir(path.join(folder,slot));if(contents.length)return path.join(folder,slot,contents[0]!);}
  throw new Error('Retained original missing');
 }
@@ -46,7 +47,7 @@ async function crash(t:test.TestContext,when:'publish'|'stash'|'copy') {
  const original=${JSON.stringify(f.original)},root=${JSON.stringify(f.root)};
  const originalRename=filesystem.rename,originalLink=filesystem.link;
  filesystem.rename=async(...args)=>{const r=await originalRename(...args);if(args[0]===original&&${JSON.stringify(when)}==='stash')process.exit(91);return r;};
- filesystem.link=async(...args)=>{if(${JSON.stringify(when)}==='copy')throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});const r=await originalLink(...args);if(!String(args[1]).includes('Photo Importer Recovery')&&${JSON.stringify(when)}==='publish')process.exit(91);return r;};
+ filesystem.link=async(...args)=>{if(${JSON.stringify(when)}==='copy')throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});const r=await originalLink(...args);if(!String(args[1]).includes('Photo Importer Data')&&${JSON.stringify(when)}==='publish')process.exit(91);return r;};
  const originalOpen=filesystem.open;filesystem.open=async(...args)=>{const h=await originalOpen(...args);if(${JSON.stringify(when)}==='copy'&&String(args[0]).endsWith('/2024/202402/Sony/JPEG/A.JPG')){const write=h.write.bind(h);h.write=async(...writeArgs)=>{await write(writeArgs[0],writeArgs[1],Math.min(4,writeArgs[2]),writeArgs[3]);process.exit(91);};}return h;};
  const {plans:[p]}=await plan(root,[root],${JSON.stringify(options)},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
  await executeReorganization(p);process.exit(0);`);
@@ -73,8 +74,10 @@ test('recovery keeps corrupt published data and original bytes without overwriti
 });
 test('recovery rejects symbolic recovery directories and traversal identifiers',async t=>{
  const {root}=await fixture(t);const outside=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-outside-'));t.after(()=>fs.rm(outside,{recursive:true,force:true}));
- await fs.symlink(outside,path.join(root,'Photo Importer Recovery'),'dir');
- await assert.rejects(core.getOrganizationRecovery(root),/symbolic|unsafe/i);
+ await fs.symlink(outside,path.join(root,'Photo Importer Data'),'dir');
+ // A linked records folder is never read, and never written to.
+ assert.deepEqual(await core.getOrganizationRecovery(root),[]);
+ await assert.rejects(core.executeReorganization(await singlePlan(root,root,options,metadata)),/unsafe/i);
  await assert.rejects(core.resumeOrganization(root,'../escape'),/invalid|unsafe/i);assert.deepEqual(await fs.readdir(outside),[]);
 });
 
@@ -90,11 +93,11 @@ test('cancellation after the first relocation retains every original and a later
  const result=await core.resumeOrganization(root,job.id);assert.deepEqual(result.errors,[]);assert.equal(result.moved,2);
 });
 test('hostile journal traversal and symbolic saved-original paths cannot redirect recovery',async t=>{
- const f=await crash(t,'publish'),manifestPath=path.join(f.root,'Photo Importer Recovery',f.id,'manifest.json');
- const text=await fs.readFile(manifestPath,'utf8'),manifest=JSON.parse(text);manifest.entries[0].source=path.join(f.root,'../outside.JPG');
- await fs.writeFile(manifestPath,JSON.stringify(manifest));await assert.rejects(core.resumeOrganization(f.root,f.id),/unsafe|invalid|authentication/i);
+ const f=await crash(t,'publish'),journal=await journalFileFor(f.root,f.id);
+ const text=await fs.readFile(journal,'utf8');await editJournalLine(f.root,f.id,1,entries=>{entries.entries[0].source=path.join(f.root,'../outside.JPG');return entries;});
+ await assert.rejects(core.resumeOrganization(f.root,f.id),/unsafe|invalid|authentication/i);
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
- await fs.writeFile(manifestPath,text);const saved=path.join(f.root,'Photo Importer Recovery',f.id,'originals');await fs.symlink(path.dirname(f.original),saved,'dir');
+ await fs.writeFile(journal,text);const saved=path.join(await journalFolderFor(f.root,f.id),'originals');await fs.symlink(path.dirname(f.original),saved,'dir');
  const result=await core.resumeOrganization(f.root,f.id);assert.ok(result.errors.length);assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
 });
 test('an absent recovery root returns no jobs and creates no directories',async t=>{
@@ -114,16 +117,15 @@ test('unsupported directory synchronization prevents relocation and retains orig
 test('fresh process resumes an interrupted exclusive publication while retaining the incomplete target',async t=>{
  const f=await crash(t,'copy');const result=await core.resumeOrganization(f.root,f.id);assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.equal(await fs.readFile(f.destination,'utf8'),'precious original');
- const job=path.join(f.root,'Photo Importer Recovery',f.id);const failed=await fs.readdir(job);assert.ok(failed.some(name=>name.startsWith('incomplete-')));
+ const job=await journalFolderFor(f.root,f.id);const failed=await fs.readdir(job);assert.ok(failed.some(name=>name.startsWith('incomplete-')));
  assert.equal(await fs.readFile(await retained(f.root,f.id),'utf8'),'precious original');
 });
 
 test('a forged valid journal cannot authorize moving another file',async t=>{
- const f=await crash(t,'publish'),manifestPath=path.join(f.root,'Photo Importer Recovery',f.id,'manifest.json');
+ const f=await crash(t,'publish');
  const foreign=path.join(f.root,'incoming/foreign.JPG');await fs.writeFile(foreign,'precious original');const stat=await fs.lstat(foreign,{bigint:true});
- const manifest=JSON.parse(await fs.readFile(manifestPath,'utf8'));manifest.entries[0].source=foreign;
- manifest.entries[0].stat={dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)};
- await fs.writeFile(manifestPath,JSON.stringify(manifest));await assert.rejects(core.resumeOrganization(f.root,f.id),/authentication/i);
+ await editJournalLine(f.root,f.id,1,entries=>{entries.entries[0].source=foreign;entries.entries[0].stat={dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)};return entries;});
+ await assert.rejects(core.resumeOrganization(f.root,f.id),/authentication/i);
  assert.equal(await fs.readFile(foreign,'utf8'),'precious original');assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
  assert.match((await core.getOrganizationRecovery(f.root))[0]!.error!,/authentication/i);
 });

@@ -60,7 +60,7 @@ const scan = async (root: string, table: Record<string, DuplicateExif> = {}) => 
   await fs.mkdir(root, { recursive: true });
   return scanDuplicates(root, { metadata: async (target): Promise<Metadata> => { const found = table[path.basename(target)]; return { fields: {}, ...(found ? { camera: found.camera, date: found.date, fingerprint: found } : {}) }; }, index: await destinationIndex(await fs.realpath(root), await identity(root)) });
 };
-const kept = 'Photo Importer Recovery';
+const kept = path.join('Photo Importer Data', 'Organizations');
 
 test('a SHA duplicate is set aside into the recovery store, can be undone, and is released only on request', async t => {
   const root = await library(t);
@@ -75,7 +75,7 @@ test('a SHA duplicate is set aside into the recovery store, can be undone, and i
   assert.equal(removal.removed, 1); assert.equal(removal.groups, 1);
   assert.equal(await exists(path.join(root, 'Imported/copy of DSC_0001.JPG')), false, 'set aside, not at its place');
   assert.equal(await fs.readFile(path.join(root, '2024/202405/Nikon Z f/DSC_0001.JPG'), 'utf8'), 'the same photo');
-  assert.ok(await exists(path.join(root, kept, removal.id!, 'manifest.json')));
+  assert.ok(await exists(path.join(root, kept, removal.id!, 'journal.jsonl')));
   assert.ok(steps.has('stashing'));
   // Nothing is deleted: the bytes are in the recovery store.
   const listed = (await getOrganizationRecovery(root)).find(job => job.id === removal.id)!;

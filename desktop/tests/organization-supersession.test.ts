@@ -4,8 +4,9 @@ import * as fs from 'node:fs/promises';
 import filesystem from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {createHmac,randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import * as core from '../core/index';
+import {appendJournalLine,editJournalLine,journalFolderFor,journalLines,sealedEvent} from './fixtures/records';
 
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
@@ -17,13 +18,13 @@ async function fixture(t:test.TestContext){
 }
 async function plan(root:string,folder:string){return (await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat' as const,unknownRules:{}},metadata)).plans[0]!;}
 async function saved(root:string,id:string){
- const directory=path.join(root,'Photo Importer Recovery',id,'originals','0');
+ const directory=path.join(await journalFolderFor(root,id),'originals','0');
  const [slot]=await fs.readdir(directory);return path.join(directory,slot!,'A.JPG');
 }
+/** Append an event to the journal, sealed with this host's key or (unsigned) without any seal. */
 async function writeEvent(root:string,id:string,extra:Record<string,unknown>,seal=true){
- const record={id,root,event:'superseded',...extra};
- const value=seal?{...record,seal:createHmac('sha256',secret).update(JSON.stringify(record)).digest('hex')}:record;
- const file=path.join(root,'Photo Importer Recovery',id,`event-${randomUUID()}.json`);await fs.writeFile(file,JSON.stringify(value));return file;
+ const record={id,root,event:'superseded',at:new Date().toISOString(),...extra};
+ await appendJournalLine(root,id,seal?sealedEvent(record):JSON.stringify({v:5,kind:'event',...record}));
 }
 
 test('successive layouts retain all prior originals and list only the latest recovery job',async t=>{
@@ -56,7 +57,7 @@ test('resume finishes predecessor marking after interruption before the supersed
  let intercepted=false;
  t.mock.method(filesystem,'open',async(...args:Parameters<typeof open>)=>{
   const handle=await open(...args);
-  if(String(args[0]).includes(path.join(old,'event-'))){const write=handle.writeFile.bind(handle);handle.writeFile=async(...values:Parameters<typeof handle.writeFile>)=>{if(String(values[0]).includes('"event":"superseded"')){intercepted=true;throw new Error('simulated interruption');}return write(...values);};}
+  if(String(args[0]).endsWith(path.join(old,'journal.jsonl'))){const write=handle.writeFile.bind(handle);handle.writeFile=async(...values:Parameters<typeof handle.writeFile>)=>{if(String(values[0]).includes('"event":"superseded"')){intercepted=true;throw new Error('simulated interruption');}return write(...values);};}
   return handle;
  });
  const result=await core.executeReorganization(await plan(root,'second'));t.mock.restoreAll();
@@ -98,8 +99,8 @@ test('an unresolved finalization intent blocks overlapping organization without 
 
 for(const authentication of ['unsigned','tampered'] as const)test(`${authentication} successor events cannot hide recovery jobs`,async t=>{
  const {root}=await fixture(t);await core.executeReorganization(await plan(root,'first'));const [job]=await core.getOrganizationRecovery(root);
- const file=await writeEvent(root,job!.id,{successor:randomUUID()},authentication!=='unsigned');
- if(authentication==='tampered'){const record=JSON.parse(await fs.readFile(file,'utf8'));record.successor=randomUUID();await fs.writeFile(file,JSON.stringify(record));}
+ await writeEvent(root,job!.id,{successor:randomUUID()},authentication!=='unsigned');
+ if(authentication==='tampered')await editJournalLine(root,job!.id,(await journalLines(root,job!.id)).length-1,record=>({...record,successor:randomUUID()}));
  const [visible]=await core.getOrganizationRecovery(root);assert.equal(visible!.id,job!.id);assert.equal(visible!.status,'pending');assert.match(visible!.error!,/authentication/);
  await assert.rejects(core.resumeOrganization(root,job!.id),/authentication/);
  assert.equal(await fs.readFile(await saved(root,job!.id),'utf8'),'precious original');

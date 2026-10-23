@@ -6,7 +6,7 @@ import os from 'node:os';
 import {fork} from 'node:child_process';
 import {createHash} from 'node:crypto';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
-const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
+const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index')&&name!=='Photo Importer Data');
 
 
 // These are actual SIGKILL process-termination tests. They do not emulate loss
@@ -60,7 +60,7 @@ async function killedWithoutFinally(base:string,mode:string) {
   await assert.rejects(fs.stat(path.join(base,`finally-${mode}`)),{code:'ENOENT'});
 }
 async function operation(library:string) {
-  const storage = path.join(library,'Photo Importer Recovery');
+  const storage = path.join(library,'Photo Importer Data','Organizations');
   const [id] = await visible(storage);assert.ok(id);
   return {id,folder:path.join(storage,id)};
 }
@@ -131,7 +131,7 @@ for(const mode of ['finalize-intent','finalize-unlink'])test(`SIGKILL ${mode} al
   assert.equal(await fileHash(f.target),expectedHash);
   if(mode === 'finalize-intent')assert.equal(await fileHash(saved),expectedHash);
   else await assert.rejects(fs.stat(saved),{code:'ENOENT'});
-  const events = (await fs.readFile(path.join(job.folder,'event-log.jsonl'),'utf8')).split('\n').filter(Boolean).map(line=>JSON.parse(line));
+  const events = (await fs.readFile(path.join(job.folder,'journal.jsonl'),'utf8')).split('\n').filter(Boolean).map(line=>JSON.parse(line)).filter(line=>line.kind==='event');
   assert.ok(events.some(event=>event.event==='finalize-intent'));assert.ok(!events.some(event=>event.event==='finalized'));
   const retry = await worker(t,'retry-finalize',f.base,false,id);
   assert.equal(retry.result?.removed,mode === 'finalize-intent'?1:0);assert.equal(retry.result?.finalized,1);assert.equal(retry.jobs?.[0]?.status,'complete');
