@@ -18,7 +18,7 @@ import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
-import { remainingBucket } from '../eta-format';
+import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
@@ -603,7 +603,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => job.phase === 'complete')}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
-        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined}
+        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
         file={lead?.progress?.file} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
@@ -1029,6 +1029,8 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
+  // Verifying also shows how many bytes of the copied files are published.
+  if (progress.phase === 'verifying' && progress.work?.totalBytes && formatBytes) return t("{completed} of {total} files verified · {size} of {totalSize}", { ...counts, size: formatBytes(progress.work.bytes), totalSize: formatBytes(progress.work.totalBytes) });
   return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : progress.renames ? "{completed} of {total} files moved" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
 export function formatDuration(ms: number): string {
@@ -1083,13 +1085,19 @@ export function formatRemaining(seconds: number, t: ReturnType<typeof createTran
   if (bucket.unit === 'min') return t("about {minutes} min", { minutes: bucket.minutes });
   return bucket.unit === 'hm' ? t("about {hours} h {minutes} min", { hours: bucket.hours, minutes: bucket.minutes }) : t("about {hours} h", { hours: bucket.hours });
 }
+/** A time left as "about 12 min", or "about 2–4 h" while the estimate is still wide. */
+export function formatEstimate(seconds: number, t: ReturnType<typeof createTranslator>, range?: { low: number; high: number }): string {
+  const wide = range && remainingRange(seconds, range.low, range.high);
+  if (!wide) return formatRemaining(seconds, t);
+  return wide.unit === 'min' ? t("about {low}–{high} min", { low: wide.low, high: wide.high }) : t("about {low}–{high} h", { low: wide.low, high: wide.high });
+}
 /** Time left for a running job, and for its current step when that ends well before the job does. */
 function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>): string | undefined {
   const progress = job.progress;
   if (!progress) return undefined;
   const step = progress.eta, all = job.eta ?? step;
   if (all === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
-  return t("{time} left", { time: formatRemaining(all, t) }) + (step !== undefined && all - step >= 60 ? ` · ${t("{time} left in this step", { time: formatRemaining(step, t) })}` : '');
+  return t("{time} left", { time: formatEstimate(all, t, job.etaRange) }) + (step !== undefined && all - step >= 60 ? ` · ${t("{time} left in this step", { time: formatRemaining(step, t) })}` : '');
 }
 /** A speed whose unit holds near a boundary while this display stays on screen (see speedUnit). */
 function Speed({ value }: { value: number }) {
