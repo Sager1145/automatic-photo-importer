@@ -5,6 +5,7 @@ import { randomUUID, createHash, createHmac, timingSafeEqual } from 'node:crypto
 import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
+import { streams, STREAMS } from './devices';
 import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
@@ -224,7 +225,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   else if(legacyEvent.test(name)){const text=await readLegacy(name);legacy.set(name,text);texts[position]=text;}
   onRead?.(++read,names.length,name);
  };
- await Promise.all(Array.from({length:Math.min(journalReaders,names.length)},async()=>{while(next<names.length)await readOne(next++);}));
+ await Promise.all(Array.from({length:Math.min(await journalReaderCount(job),names.length)},async()=>{while(next<names.length)await readOne(next++);}));
  for(const text of texts){
   if(Array.isArray(text)){for(const line of text)once(line);}
   else if(text!==undefined)once(text);
@@ -942,7 +943,7 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
   const file=path.join(folder,name);await contained(file,m.root);const handle=await regularHandle(file);
   try{if((await handle.stat()).size>2048)throw new Error(`Invalid recovery event: ${file}`);texts[position]=(await handle.readFile('utf8')).trim();}finally{await handle.close();}
  };
- await Promise.all(Array.from({length:Math.min(journalReaders,files.length)},async()=>{while(next<files.length)await readOne(next++);}));
+ await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),files.length)},async()=>{while(next<files.length)await readOne(next++);}));
  const records:string[]=[];
  for(const [position,text] of texts.entries()){
   // A file cut short by an interrupted write carries no event (reading skips it too): nothing to keep.
@@ -1206,8 +1207,11 @@ export interface RecoveryDeletion {files:number;bytes:number;released:number;}
  * deletion stopped before it was gone. */
 export const deletingPattern=new RegExp(`^deleting-${UUID_PATTERN}-${UUID_PATTERN}$`);
 const journalFile=/^(?:manifest\.json|event-log\.jsonl|event-[a-f0-9-]+\.json|stage-[0-9a-f-]{36}\.partial|incomplete-[0-9a-f-]{36}|originals)$/;
-/** Readers at once. Node has 4 threads for file calls: more only queue behind each other and starve the listing that runs beside. */
-const journalReaders=4;
+/** Readers at once on the journal's device: twice its stream limit (spinning disk 2, card 4, SSD 8), because small
+ * reads mostly wait on the device. The main process has a 16-thread libuv pool (threadpool.ts), so they do not starve the listing beside. */
+export async function journalReaderCount(folder:string):Promise<number> {
+ return STREAMS[await streams.kind(folder).catch(()=>'unknown' as const)]*2;
+}
 /** One small per-event file: opened without following a link, judged by its own handle (regular, at most 2048 bytes), read once. */
 async function readEventFile(file:string,tooBig:()=>Error):Promise<string>{
  const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
@@ -1223,7 +1227,7 @@ async function readEventFile(file:string,tooBig:()=>Error):Promise<string>{
 async function tally(folder:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
  let files=0,bytes=0;const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
  // Several at a time: a journal from an earlier version holds tens of thousands of small files.
- await Promise.all(Array.from({length:Math.min(journalReaders,entries.length)},async()=>{while(next<entries.length){
+ await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),entries.length)},async()=>{while(next<entries.length){
   checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);
   if(entry.isDirectory()){const inner=await tally(file,signal);files+=inner.files;bytes+=inner.bytes;}
   else{const stat=await maybeStat(file);if(stat){files++;bytes+=Number(stat.size);}}
