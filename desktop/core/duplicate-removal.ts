@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { DuplicateGroup, DuplicateStrength, Progress } from '../shared';
 import type { ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
-import { checkAbort, contained, digest, directory, identity } from './paths';
+import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
 
 /** One line of the per-file report. primary: a duplicate removed; companion: its sidecar, proxy or audio file.
  * removed: set aside in the recovery store; carried: a companion the kept copy lacked, published next to it;
@@ -68,6 +68,8 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       // Companions follow their primary.
       for (const companion of companions.get(file.path) ?? []) {
         const from = abs(companion), target = companionTarget(file.path, companion, keepPath), line = { ...context, role: 'companion' as const, file: companion };
+        // Beside each other with one stem (IMG_1.JPG and IMG_1.jpeg), the sidecar is the kept copy's own.
+        if (pathKey(from) === pathKey(target)) { report.push({ ...line, size: 0, result: 'left', reason: 'it also belongs to the copy to keep' }); continue; }
         const own = await stat(from).catch(() => undefined);
         if (!own) { report.push({ ...line, size: 0, result: 'left', reason: 'the file changed or is gone since the scan' }); continue; }
         const ownSha = await digest(from, signal), there = await stat(target).catch(() => undefined);

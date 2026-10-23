@@ -176,3 +176,17 @@ test('copies on different destinations are never paired by a removal', async t =
   assert.equal((await removeDuplicates(root, resolveGroups(first.groups, 3), first.companions)).id, undefined);
   assert.equal(await exists(path.join(other, '2024/202405/cam/a.JPG')), true);
 });
+
+test('a sidecar shared by the kept and the removed copy (IMG_1.JPG and IMG_1.jpeg beside one IMG_1.xmp) stays, and the removal releases', async t => {
+  const root = await library(t);
+  await write(root, 'a/IMG_1.JPG', 'the same photo'); await write(root, 'a/IMG_1.jpeg', 'the same photo'); await write(root, 'a/IMG_1.xmp', 'edits');
+  const { groups, companions } = await scan(root);
+  assert.equal(groups.length, 1);
+  const removal = await removeDuplicates(root, resolveGroups(groups, 2), companions);
+  assert.deepEqual(removal.result!.errors, []);
+  assert.equal(removal.removed, 1);
+  assert.equal(await fs.readFile(path.join(root, 'a/IMG_1.xmp'), 'utf8'), 'edits', 'the kept photo keeps its only sidecar');
+  assert.ok(removal.report.filter(line => line.role === 'companion').every(line => line.result === 'left'));
+  assert.equal((await finalizeOrganization(root, removal.id!)).removed, 1);
+  assert.equal(await fs.readFile(path.join(root, 'a/IMG_1.xmp'), 'utf8'), 'edits');
+});
