@@ -168,3 +168,30 @@ test('a stopped import still remembers its checksums, and the next plan does not
  reads.stop();
  assert.deepEqual(reads.files(),Object.fromEntries([['first',first],['second',second]].filter(([,file])=>!verified[file!]).map(([name])=>[name,1])));
 });
+
+// exFAT reports a change time equal to the modified time, so no stat proves a file unchanged: a job that finds
+// the copy already there still reads it once to plan and once to confirm, as before, in a later session too.
+test('on exFAT the destination is still read twice per job that skips it',async t=>{
+ const {dropDestinationIndexes}=await import('../core/destination-index');
+ const base=await folder(t,'verify-once-exfat-'),card=path.join(base,'card'),drive=path.join(base,'exfat'),source=path.join(card,'A.bin');
+ await photo(source,Buffer.alloc(SIZE,4));await fs.mkdir(drive);
+ const exfat=<T,>(file:string,stat:T):T=>{const value=stat as {mtimeNs?:bigint;ctimeNs?:bigint;mtimeMs?:number;ctimeMs?:number};if(typeof value?.mtimeNs==='bigint'&&file.startsWith(drive+path.sep)){value.ctimeNs=value.mtimeNs;value.ctimeMs=value.mtimeMs;}return stat;};
+ const lstat=fs.lstat.bind(fs),stat=fs.stat.bind(fs),open=fs.open.bind(fs),read:Record<string,number>={};
+ t.mock.method(fs,'lstat',async(...args:Parameters<typeof fs.lstat>)=>exfat(String(args[0]),await lstat(...args)));
+ t.mock.method(fs,'stat',async(...args:Parameters<typeof fs.stat>)=>exfat(String(args[0]),await stat(...args)));
+ t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
+  const handle=await open(...args),file=String(args[0]),own=handle.stat.bind(handle),reading=handle.read.bind(handle);
+  t.mock.method(handle,'stat',async(...values:Parameters<typeof handle.stat>)=>exfat(file,await own(...values)));
+  if(file.startsWith(drive+path.sep)&&!file.endsWith('.partial'))t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await reading(...values);read.destination=(read.destination??0)+result.bytesRead;return result;});
+  return handle;
+ });syncBuiltinESMExports();
+ t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+ const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const job=async()=>{read.destination=0;const {plans:[transfer]}=await core.plan(card,[drive],options,none);return {result:await core.execute(transfer!,undefined,undefined,{exclusiveCopy:true}),reads:read.destination/SIZE};};
+ assert.equal((await job()).result.copied,1);
+ for(const later of [false,true]){
+  if(later)dropDestinationIndexes();
+  const {result,reads}=await job();
+  assert.deepEqual({skipped:result.skipped,reads},{skipped:1,reads:2});
+ }
+});
