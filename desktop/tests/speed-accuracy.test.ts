@@ -84,6 +84,26 @@ for (const [name, scenario] of scenarios) {
   });
 }
 
+test('small-file steps show files per second together with MB/s', () => {
+  const result = simulate({ files: 5000, size: 200e3, bw: 100 * MB / 1000, pre: 5, post: 20, workers: 4, phase: 'copying' });
+  assert.ok(result.settled.every(s => s.speed > 0 && s.fileRate !== undefined && s.fileRate > 0), 'both rates on every settled sample');
+  const last = result.settled.at(-1)!;
+  const average = 5000 / result.seconds;
+  assert.ok(Math.abs(last.fileRate! - average) / average < 0.15, `files/s ${last.fileRate} against an average of ${average}`);
+});
+
+test('metadata checking shows files per second and never MB/s', () => {
+  const tracker = new EtaTracker();
+  const job: Job = { id: 'j', source: card, phase: 'verifying', errors: [], backup: false };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  for (let t = 0; t <= 10; t++) {
+    job.progress = { phase: 'planning', step: 'checking', completed: t * 40, total: 1000, bytes: t * 400e6, totalBytes: 10e9, speed: 0, file: 'f' };
+    stampEstimates(state, tracker, 1e9 + t * 1000);
+  }
+  assert.equal(job.progress!.speed, 0);
+  assert.ok(Math.abs(job.progress!.fileRate! - 40) < 1, `${job.progress!.fileRate}`);
+});
+
 test('the speed window follows a steady rate, shows nothing for its first 2 s and falls to zero within 5 s of a stall', () => {
   const meter = new RateMeter();
   assert.equal(meter.next(0, 0), undefined);

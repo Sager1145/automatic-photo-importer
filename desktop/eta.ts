@@ -306,9 +306,8 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   let speed=0;
   if(dataKeys.has(key)){speed=measured??0;if(!(speed>0))speed=0;}
   progress.speed=speed;
-  // Metadata checking shows both: files per second and the bytes of the files it has covered, per second.
-  if(key==='planning:checking'){progress.speed=measured&&measured>0?measured:0;if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;}
-  else if(speed>0)delete progress.fileRate;else if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;
+  // Metadata checking reads headers, not the files: it shows files per second only (its bytes are the size of the files covered, not data moved).
+  if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;
  };
  /** An operation that is not a job: time left, when it began, and its speed. */
  const alone=(name:string,progress:Progress)=>{progress.eta=stepOnly(name,progress,{kind:'import',destinations:1,verify});progress.startedAt=since('start:'+name);speeds('speed:'+name,progress);};
