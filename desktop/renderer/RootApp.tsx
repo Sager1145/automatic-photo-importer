@@ -1,6 +1,8 @@
 import { flushSync } from 'react-dom';
 import {createStateReceiver} from '../state-channel';
-import {driveName,gatherErrors,type Severity} from '../error-log';
+import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
+import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
+import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
@@ -351,16 +353,18 @@ export default function RootApp() {
   if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
+  // The badge counts rows (groups needing attention), from the summaries; paths are never iterated.
+  const badge = useMemo(() => rowCounts(buildRows(errors)), [errors]);
   // Window-only errors clear here; the rest ask the main process, which leaves every job as it is.
   const clearErrorItems = (ids?: string[], severity?: Severity) => {
     const local = new Set((ids ?? errors.flatMap(error => error.id?.startsWith('local:') && (!severity || error.severity === severity) ? [error.id] : [])).filter(id => id.startsWith('local:')).map(id => id.slice(6)));
     for (const detail of local) localErrorTimes.current.delete(detail);
     if (local.has(connectionError)) setConnectionError('');
     setInspectionErrors(list => list.filter(detail => !local.has(detail)));
-    if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else for (const id of ids) if (!id.startsWith('local:')) act({ type: 'clearError', id, ...(severity ? { severity } : {}) });
+    if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else { const real = ids.filter(id => !id.startsWith('local:')); if (real.length) act({ type: 'clearErrorIds', ids: real, ...(severity ? { severity } : {}) }); }
   };
   return <I18nProvider language={language}><div className="app-shell">
-    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={errors.filter(error => error.severity === 'error').length} warningCount={errors.filter(error => error.severity === 'warning').length} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
+    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
@@ -470,7 +474,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string};
+type DisplayError = {code?: string; count?: number; items?: {path: string; detail?: string}[]; id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -544,7 +548,7 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   // Errors take the toast; warnings alone get a calmer one that dismisses itself sooner.
   const newErrors = fresh.filter(error => error.severity === 'error'), shown = newErrors.length ? newErrors : fresh, severity: Severity = newErrors.length ? 'error' : 'warning';
   const first = explainError(shown[0]!.message, shown[0]!.kind, language);
-  return <div ref={toast} popover="manual" data-error-layer className={`error-toast is-${severity}`} data-severity={severity} role="status" data-testid={severity === 'error' ? 'error-toast' : 'warning-toast'}><Icon icon={severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{shown.length > 1 ? t(severity === 'error' ? "{count} new issues" : "{count} new warnings", { count: formatNumber(shown.length) }) : t(first.title)}</strong>{shown[0]!.source && <span>{shown[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
+  return <div ref={toast} popover="manual" data-error-layer className={`error-toast is-${severity}`} data-severity={severity} role="status" data-testid={severity === 'error' ? 'error-toast' : 'warning-toast'}><Icon icon={severity === 'error' ? CircleAlert : Info} size={16} /><div><strong>{shown.length > 1 ? t(severity === 'error' ? "{count} new issues" : "{count} new warnings", { count: formatNumber(shown.length) }) : shown[0]!.count !== undefined && shown[0]!.code ? groupInfo(shown[0]!.code, shown[0]!.count, shown[0]!.drive || shown[0]!.source, t, formatNumber).title : t(first.title)}</strong>{shown[0]!.source && <span>{shown[0]!.source}</span>}</div><Button kind="quiet" onClick={() => { setFresh([]); onView(); }}>{t("View")}</Button><Button kind="quiet" icon={X} aria-label={t("Dismiss")} onClick={dismiss} /></div>;
 }
 
 /** Copying, planning a review, showing one, or scanning sources: pages lock the settings these depend on. */
@@ -579,6 +583,71 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
 }
 
+type Translate = ReturnType<typeof useTranslation>['t'];
+/** The plain-language title and one-sentence explanation of a group of like problems. */
+export function groupInfo(code: string, count: number, drive: string, t: Translate, formatNumber: (value: number) => string): { title: string; text?: string } {
+  const n = formatNumber(count), one = count === 1;
+  switch (code) {
+    case 'staging-left': return { title: one ? t("1 temporary copy was left on {drive} — your photo is safe", { drive }) : t("{count} temporary copies were left on {drive} — your photos are safe", { count: n, drive }), text: t("These are scratch files from the copy step. Every real copy was checked and is complete; Clean up removes the leftovers.") };
+    case 'unreadable': return { title: one ? t("1 file could not be read for photo details") : t("{count} files could not be read for photo details", { count: n }), text: t("The files are still copied; their dates may come from the file instead.") };
+    case 'zero-byte': return { title: one ? t("1 empty file was left out") : t("{count} empty files were left out", { count: n }), text: t("Empty files hold no photo data.") };
+    case 'copy-failed': return { title: one ? t("1 file could not be copied") : t("{count} files could not be copied", { count: n }), text: t("These files are not in the backup yet. Retry runs the job again.") };
+    case 'file-skipped': return { title: one ? t("1 file was skipped because it failed") : t("{count} files were skipped because they failed", { count: n }), text: t("The other files were copied. Retry runs the job again, including these files.") };
+    default: return { title: one ? t("1 issue needs attention") : t("{count} issues need attention", { count: n }) };
+  }
+}
+/** The finished job (still with errors) a list of errors belongs to, when it can be marked as done. */
+function skippableJob(state: AppState, list: DisplayError[]): boolean {
+  const jobId = list.find(error => error.jobId)?.jobId;
+  return jobId !== undefined && state.jobs.some(job => job.id === jobId && (job.phase === 'error' || job.phase === 'stopped') && !job.stopping);
+}
+const rowDrive = (row: ErrorRow<DisplayError>) => row.entries[0]!.drive || row.entries[0]!.source;
+/** A group as text: its title, then the first paths with their technical detail. */
+function rowReport(row: ErrorRow<DisplayError>, t: Translate, formatNumber: (value: number) => string): string {
+  const info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber);
+  return [`${row.entries[0]!.source || t("App")}: ${info.title}`, ...row.items.map(item => `  ${item.path ?? ''}${(item.detail ?? (item.entry ? t(item.entry.message) : '')) ? ' — ' + (item.detail ?? t(item.entry!.message)) : ''}`)].join('\n') + (row.count > row.items.length ? `\n  ${t("and {count} more", { count: formatNumber(row.count - row.items.length) })}` : '');
+}
+/** The latest handlers of the panel, behind a stable ref so memoized rows do not re-render when only these change. */
+type RowApi = { current: { act: Dispatch; copy: (text: string) => void; clear: (ids?: string[], severity?: Severity) => void; onOpenSource?: (sourceId: string) => void; close: () => void } };
+const ITEM_PAGE = 200;
+/** One group row: title, count, explanation and actions. Its affected paths load only when expanded, 200 at a time. */
+const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { row: ErrorRow<DisplayError>; api: RowApi; retryable: boolean; skippable: boolean }) {
+  const { t, formatNumber } = useTranslation();
+  const [open, setOpen] = useState(false), [shown, setShown] = useState(ITEM_PAGE);
+  const first = row.entries[0]!, info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber);
+  const visible = open ? row.items.slice(0, shown) : [];
+  const copyAll = () => {
+    const local = row.entries.flatMap(entry => entry.items ? [] : [pathOf(entry.message) ?? ''].filter(Boolean));
+    if (row.count > row.items.length && first.jobId && window.importer?.errorPaths) void window.importer.errorPaths(first.jobId, row.code).then(paths => api.current.copy(paths.join('\n'))).catch(() => {});
+    else api.current.copy((local.length ? local : row.items.map(item => item.path ?? '')).join('\n'));
+  };
+  return <li className={`error-item error-group-row is-${row.severity}`} data-severity={row.severity} data-testid="error-group" data-code={row.code} data-count={row.count}>
+    <div className="error-summary"><Icon icon={row.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title" data-testid="error-group-title">{info.title}</p>{info.text && <p className="error-hint">{info.text}</p>}</div></div>
+    <div className="card-actions error-group-actions">
+      <Button kind="quiet" icon={Copy} data-testid="error-group-copy" onClick={() => api.current.copy(rowReport(row, t, formatNumber))}>{t("Copy details")}</Button>
+      {first.sourceId && api.current.onOpenSource && <Button kind="quiet" icon={ArrowUpRight} data-testid="error-group-drive" onClick={() => { api.current.onOpenSource!(first.sourceId!); api.current.close(); }}>{t("Show drive")}</Button>}
+      {retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-group-retry" onClick={() => api.current.act({ type: 'retryJob', jobId: first.jobId! })}>{t("Retry all")}</Button>}
+      {row.code === 'staging-left' && <Button kind="quiet" icon={Trash2} data-testid="error-group-cleanup" onClick={() => api.current.act({ type: 'cleanResidue' })}>{t("Clean up")}</Button>}
+      {skippable && <Button kind="quiet" icon={CheckCheck} data-testid="error-group-skip" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => api.current.act({ type: 'acknowledgeErrors', jobId: first.jobId!, codes: [row.code] })}>{t("Skip these")}</Button>}
+      <Button kind="quiet" icon={X} data-testid="error-group-clear" onClick={() => api.current.clear(row.entries.flatMap(entry => entry.id ? [entry.id] : []), row.severity)}>{t("Clear group")}</Button>
+      <Button kind="quiet" icon={open ? ChevronDown : ChevronRight} data-testid="error-group-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? t("Hide affected files") : t("Show affected files")}</Button>
+    </div>
+    {first.drive && <p className="error-meta"><span><Icon icon={HardDrive} size={13} />{first.drive}</span></p>}
+    {open && <>
+      <ul className="error-group-items" data-testid="error-group-items">{visible.map((item, index) => <li key={index} className="error-group-item" data-testid="error-group-item">
+        <code className="error-path">{item.path ?? t(item.entry!.message)}</code>
+        {item.path && <RevealButton path={item.path} act={api.current.act} />}
+        <details className="error-details"><summary>{t("Technical detail")}</summary><div><p>{item.detail ?? (item.entry ? t(item.entry.message) : '')}</p></div></details>
+      </li>)}</ul>
+      <div className="card-actions">
+        {shown < row.items.length && <Button kind="quiet" data-testid="error-group-more" onClick={() => setShown(value => value + ITEM_PAGE)}>{t("Show more")}</Button>}
+        {row.count > Math.min(shown, row.items.length) && <span className="error-more" data-testid="error-group-remaining">{t("and {count} more", { count: formatNumber(row.count - Math.min(shown, row.items.length)) })}</span>}
+        <Button kind="quiet" icon={Copy} data-testid="error-group-copy-paths" onClick={copyAll}>{t("Copy all paths")}</Button>
+      </div>
+    </>}
+  </li>;
+}, (a, b) => a.row.key === b.row.key && a.row.count === b.row.count && a.row.entries.length === b.row.entries.length && a.row.severity === b.row.severity && a.retryable === b.retryable && a.skippable === b.skippable && a.api === b.api);
+
 export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSource, onClear, target, onShowAll}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[], severity?: Severity) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
   const { t, formatNumber, language } = useTranslation();
   const errors = useMemo(() => target ? errorsFor(allErrors, target) : allErrors, [allErrors, target]);
@@ -586,19 +655,23 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
   const close = useAnimatedClose(dialog,onClose);
   useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
-  const report = (items: DisplayError[]) => items.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n');
+  const api = useRef<RowApi['current']>(null as unknown as RowApi['current']);
+  const report = (items: DisplayError[]) => buildRows(items).map(row => row.merged ? rowReport(row, t, formatNumber) : row.entries.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n')).join('\n');
   const clear = onClear ?? ((ids?: string[], severity?: Severity) => { const extra = severity ? { severity } : {}; if (!ids) act({ type: 'clearErrors', ...extra }); else for (const id of ids) act({ type: 'clearError', id, ...extra }); });
+  api.current = { act, copy, clear, onOpenSource, close };
   const section = (severity: Severity) => {
-    const items = errors.filter(error => error.severity === severity), plural = severity === 'error' ? 'errors' : 'warnings';
+    const items = errors.filter(error => error.severity === severity), plural = severity === 'error' ? 'errors' : 'warnings', rows = buildRows(items);
     const map = new Map<string, DisplayError[]>(); for (const error of items) map.set(error.source, [...(map.get(error.source) ?? []), error]);
     const clearable = items.some(error => error.id);
     const clearShown = () => target ? clear(items.flatMap(error => error.id ? [error.id] : []), severity) : clear(undefined, severity);
     const label = severity === 'error' ? (target ? t("Clear all errors for {name}", { name: target.name }) : t("Clear all errors")) : (target ? t("Clear all warnings for {name}", { name: target.name }) : t("Clear all warnings"));
     return <section className={`error-section is-${severity}`} data-testid={`${plural}-section`} data-severity={severity} aria-labelledby={`${plural}-heading`}>
-      <div className="error-section-heading"><h3 id={`${plural}-heading`}>{severity === 'error' ? t("Errors") : t("Warnings")}<span className="error-section-count" data-testid={`${plural}-section-count`}>{formatNumber(items.length)}</span></h3><div className="card-actions">{items.length > 0 && <Button kind="quiet" icon={Copy} data-testid={`${plural}-copy-all`} onClick={() => copy(report(items))}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid={`${plural}-clear-all`} aria-label={label} onClick={clearShown}>{t("Clear all")}</Button>}</div></div>
+      <div className="error-section-heading"><h3 id={`${plural}-heading`}>{severity === 'error' ? t("Errors") : t("Warnings")}<span className="error-section-count" data-testid={`${plural}-section-count`}>{formatNumber(rows.length)}</span></h3><div className="card-actions">{items.length > 0 && <Button kind="quiet" icon={Copy} data-testid={`${plural}-copy-all`} onClick={() => copy(report(items))}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid={`${plural}-clear-all`} aria-label={label} onClick={clearShown}>{t("Clear all")}</Button>}</div></div>
       {items.length ? <div className="error-groups">{[...map].map(([source, list]) => <section key={source || 'app'} className="error-group">
-        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}</div>
-        <ul className="all-errors">{list.map((error, index) => {
+        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}{severity === 'error' && skippableJob(state, list) && <Button kind="quiet" icon={CheckCheck} data-testid="job-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: list.find(error => error.jobId)!.jobId! })}>{t("Skip all and mark as done")}</Button>}</div>
+        <ul className="all-errors">{buildRows(list).map((row, index) => {
+          if (row.merged) return <MergedRow key={row.key} row={row} api={api} skippable={row.severity === 'error' && skippableJob(state, row.entries)} retryable={row.severity === 'error' && row.entries[0]!.jobId !== undefined && state.jobs.some(job => job.id === row.entries[0]!.jobId && job.phase === 'error' && !!job.retryable)} />;
+          const error = row.entries[0]!;
           if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
           const explained = explainError(error.message, error.kind, language);
           const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
@@ -1282,7 +1355,7 @@ export function OriginalsConfirm({ step, name, size, onCancel, onConfirm }: { st
 export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; size?: AppState['originalsSize']; act: Dispatch; busy?: boolean }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const [step, setStep] = useState<DeleteRecoveryStep>('closed');
-  if (job.source.transport !== 'folder' || job.organization || job.phase !== 'complete') return null;
+  if (job.source.transport !== 'folder' || job.organization || !(job.phase === 'complete' || job.phase === 'error' && errorTotal(job) === 0 && !job.failedFiles)) return null;
   const measured = size?.jobId === job.id ? size : undefined;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
     const next = nextDeleteRecoveryStep(step, choice);
@@ -1302,12 +1375,14 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
 }
 
 function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
-  const { t } = useTranslation();
+  const { t, formatNumber } = useTranslation();
+  if (job.phase === 'complete' && job.acknowledged) return <div className="source-choice job-skipped-note" data-testid="job-skipped-note"><details><summary><Icon icon={CheckCircle2} size={14} />{job.acknowledged.errorCount === 1 ? t("1 issue skipped") : t("{count} issues skipped", { count: formatNumber(job.acknowledged.errorCount) })}</summary><ul>{job.acknowledged.groups.map(group => <li key={group.severity + group.code}>{groupInfo(group.code, group.count, job.source.name, t, formatNumber).title}</li>)}</ul><p>{t("Skipping only changes the status. Nothing is deleted.")}</p></details></div>;
   if (job.phase !== 'error') return null;
+  const skipAll = <Button icon={CheckCheck} data-testid="job-card-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: job.id })}>{t("Skip all and mark as done")}</Button>;
   const retry = job.retryable ? <Button icon={RotateCcw} data-testid="retry-button" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: job.id })}>{t("Retry")}</Button> : null;
-  if (!job.skippablePath) return retry && <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}</div></div>;
+  if (!job.skippablePath) return <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}{skipAll}</div></div>;
   const file = job.skippablePath;
-  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
