@@ -331,7 +331,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
   if(options.duplicates&&!options.backup&&!options.reorganize&&!options.misplacedOnly) {
     const edited=options.editedFolder??'editied';
-    const items:DuplicateFile[]=files.filter(file=>file.kind!=='Other'&&!file.companionOf&&sourceStats.has(file.path)&&file.size>0).map(file=>{
+    const items:DuplicateFile[]=files.filter(file=>file.kind!=='Other'&&(!file.companionOf||livePaired.has(file.path))&&sourceStats.has(file.path)&&file.size>0).map(file=>{
       const stat=sourceStats.get(file.path)!,info=infos.get(file.path),exif=info?.fingerprint;
       return {path:file.path,size:file.size,kind:file.kind,edited:info?.edited===true||file.relative.split(path.sep).slice(0,-1).includes(edited),...(exif&&Object.keys(exif).length?{exif}:{}),birth:Number(stat.birthtimeNs)/1e6,ctime:Number(stat.ctimeNs)/1e6};
     });

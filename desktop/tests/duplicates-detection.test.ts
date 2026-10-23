@@ -245,3 +245,16 @@ test('a version 1 duplicate store is ignored and its files are read again; the s
   assert.equal(again.groups.length, 1);
   assert.equal(JSON.parse(await fs.readFile(storeFile, 'utf8')).version, 2);
 });
+
+test('duplicate MOVs of two copies of one Live Photo are found at import time', async t => {
+  const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'library');
+  await fs.mkdir(root, { recursive: true });
+  for (const folder of ['100APPLE', '101APPLE']) { await write(source, `DCIM/${folder}/IMG_0001.HEIC`, 'live still bytes'); await write(source, `DCIM/${folder}/IMG_0001.MOV`, 'live movie bytes'); }
+  const live = exif({ camera: 'Apple iPhone 15', date: '2024-05-06T07:10:00.50' });
+  const apple = async (target: string): Promise<Metadata> => ({ camera: 'Apple iPhone 15', make: 'Apple', date: live.date, contentId: 'LIVE-1', fields: {}, fingerprint: live });
+  const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
+  const groups = planned.duplicates!.groups.map(group => [group.strength, group.files.map(item => path.relative(source, item.path)).sort()]);
+  assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.MOV')) && (names as string[]).length === 2), `MOV pair grouped: ${JSON.stringify(groups)}`);
+  assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.HEIC')) && (names as string[]).length === 2), `HEIC pair grouped: ${JSON.stringify(groups)}`);
+  assert.equal(groups.length, 2, 'a still and its own movie are never grouped together');
+});
