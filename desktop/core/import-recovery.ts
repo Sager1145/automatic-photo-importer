@@ -140,6 +140,14 @@ const publicationNames=(records:FolderReceipts,entry:PlanEntry)=>{
  for(const sha of new Set([entry.digest??'','']))for(const [name,record] of records.get(recordKey({kind:'publication',source:entry.source,destination:entry.destination,sha256:sha}))??[])if(sha===(entry.digest??'')||record.mode==='direct')names.set(name,record);
  return names;
 };
+/** Whether an authenticated direct-copy receipt names this destination yet binds no file there (the receipt written before the
+ * name existed is not counted: it proves nothing about a whole file). Such a file is not known to be finished, so it is neither
+ * skipped nor released. */
+export async function unboundDirect(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
+ const records=await receiptNames(path.dirname(entry.destination),root,index);
+ for(const record of publicationNames(records,entry).values())if(record.mode==='direct'&&record.fileIdentity!==CREATING&&record.file===entry.destination&&record.root===root)return true;
+ return false;
+}
 async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal:AbortSignal|undefined,finish:boolean):Promise<OwnedPartial|undefined>{
  const folder=path.dirname(entry.destination),records=await receiptNames(folder,root,index);
  // A stage partial is bound to its source by stat identity and a byte-prefix

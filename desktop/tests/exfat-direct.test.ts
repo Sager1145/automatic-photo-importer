@@ -65,8 +65,8 @@ async function assertNothingOwned(root:string) {
     assert.equal(named,undefined,`a receipt still names ${named}`);
   }
 }
-async function reimport(card:string,root:string) {
-  const result=await execute((await plan(card,[root],options,metadata)).plans[0]!);
+async function reimport(card:string,root:string,execution:{direct?:boolean}={}) {
+  const result=await execute((await plan(card,[root],options,metadata)).plans[0]!,undefined,undefined,execution);
   assert.deepEqual(result.errors,[]);
   const found=await media(root);
   assert.equal(found.length,FILES);
@@ -121,6 +121,29 @@ test('three interruptions in a row (after the name is created, mid-stream, befor
   await crash(env.card,env.root,'mid-stream');
   await crash(env.card,env.root,'full-unverified');
   await reimport(env.card,env.root);
+});
+
+test('a whole file left before its dates were set is finished, not just skipped, even when the next import is forced onto the staged path',async t=>{
+  const env=await ready(t);if(!env) return;
+  await crash(env.card,env.root,'full-unverified');
+  await reimport(env.card,env.root,{direct:false});
+});
+
+test('a whole file whose direct receipt no longer binds it is neither skipped nor released',async t=>{
+  const env=await ready(t);if(!env) return;
+  await crash(env.card,env.root,'full-unverified');
+  let target:string|undefined;
+  for(const file of await media(env.root)) if((await fs.stat(file)).size===(await fs.stat(path.join(env.card,path.basename(file)))).size){target=file;break;}
+  assert.ok(target,'the killed run left a whole file');
+  // Another creation date, far from anything the receipt allows.
+  const handle=await fs.open(target!,'r+');
+  await applyFileTimestamps(handle,await fs.lstat(path.join(env.card,path.basename(target!)),{bigint:true}),CAPTURE+400*86400*1000);await handle.sync();await handle.close();
+  const before=await leftovers(env.root);
+  const result=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!);
+  assert.ok(result.errors.some(error=>error.includes(path.basename(target!))&&/does not match its receipt/.test(error)),`reported: ${result.errors.join(' | ')}`);
+  assert.ok(before.length>0);
+  assert.ok((await leftovers(env.root)).some(file=>file.endsWith('.json')),'its receipts were not released');
+  assert.equal(Math.round((await fs.stat(target!)).birthtimeMs/1000),Math.round((CAPTURE+400*86400*1000)/1000),'the file was not touched');
 });
 
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{

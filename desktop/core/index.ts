@@ -21,7 +21,7 @@ import { buildGroups } from '../duplicate-rules';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
-import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,openPartial,clearPartialRecord,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,openPartial,clearPartialRecord,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {constants} from 'node:fs';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
@@ -848,6 +848,32 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
 // receipt exactly is continued after a byte-prefix check; one that binds only tolerantly (its dates were applied) is
 // finished only if its bytes already equal the source's; anything else is left alone and the copy goes to Conflicts/.
 // Lock order: the publication lock first, then stream slots; a slot is never held while waiting for the lock or for digest().
+/** A whole file at its final name whose bytes equal the source's. If a direct copy's receipt binds it, the copy is finished (dates, one
+ * flush, folder flush) and its receipts released: true. If a direct receipt names it but binds nothing, it is not known to be ours
+ * and finished, so this throws and leaves everything as it is. Otherwise false. Used by the staged path's skip branch as well. */
+async function finishDirect(entry:PlanEntry,destination:string,sha:string,transfer:TransferPlan,recovery:RecoveryIndex,options:ExecutionOptions,signal?:AbortSignal):Promise<boolean> {
+  const root=transfer.root,found=await findPublication({...entry,destination},root,recovery,signal);
+  if(!found) {
+    if(await unboundDirect({...entry,destination},root,recovery)) throw new Error(`Unfinished copy does not match its receipt; retry after removing it: ${destination}`);
+    return false;
+  }
+  const output=await fs.open(destination,constants.O_RDWR|(constants.O_NOFOLLOW??0));
+  try {
+    const stat=await output.stat({bigint:true});
+    if(!sameStat(found.stat,stat)||!sameStat(stat,await fs.lstat(destination,{bigint:true}))||stat.nlink!==1n) throw new Error('Incomplete copy changed before finishing');
+    const source=await fs.lstat(entry.source,{bigint:true});
+    if(entry.sourceIdentity!==undefined&&statKey(source)!==entry.sourceIdentity) throw sourceChanged(entry);
+    await applyFileTimestamps(output,source,entry.captureTimeMs);
+    await output.sync();
+    if(!sameStat(await output.stat({bigint:true}),await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while finishing');
+  } finally { await output.close(); }
+  await syncParents(destination,root);
+  if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
+  // A leftover receipt beside a finished file is silent, so a failed removal is not a failed copy.
+  try { await clearPartialRecord(found,root,recovery,'lazy').catch(error=>{if(code(error)!=='ENOENT')throw error;});await releaseCreations({...entry,destination,digest:sha},root,recovery,'lazy'); }
+  catch(error) { if(isAbort(error)) throw error; }
+  return true;
+}
 const claimedDirect=new Set<string>();
 const NOT_DIRECT=Symbol('not-direct');
 const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=2n**63n;
@@ -871,23 +897,9 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   };
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
   const present=async(entry:PlanEntry,destination:string)=>{
-    const sha=await resolve(entry),found=await findPublication({...entry,destination},root,recovery,signal);
-    if(found) {
-      const output=await fs.open(destination,constants.O_RDWR|(constants.O_NOFOLLOW??0));
-      try {
-        const stat=await output.stat({bigint:true});
-        if(!sameStat(found.stat,stat)||!sameStat(stat,await fs.lstat(destination,{bigint:true}))||stat.nlink!==1n) throw new Error('Incomplete copy changed before finishing');
-        const source=await fs.lstat(entry.source,{bigint:true});
-        if(entry.sourceIdentity!==undefined&&statKey(source)!==entry.sourceIdentity) throw sourceChanged(entry);
-        await applyFileTimestamps(output,source,entry.captureTimeMs);
-        await output.sync();
-        if(!sameStat(await output.stat({bigint:true}),await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while finishing');
-      } finally { await output.close(); }
-      await syncParents(destination,root);
-      if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
-      await release(entry,destination,found);
-      result.copied++;
-    } else {
+    const sha=await resolve(entry);
+    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) result.copied++;
+    else {
       await syncFile(destination);await syncParents(destination,root);
       if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
       const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
@@ -1176,7 +1188,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){if(await finishDirect(entry,item.destination,entry.digest!,transfer,recovery,options,signal)){result.copied++;i++;continue;}await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
