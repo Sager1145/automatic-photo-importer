@@ -2,7 +2,8 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { hasher } from './hasher';
-import { streams, mountOf, volumeOf } from './devices';
+import { streams } from './devices';
+import { mountedVolumes, volumeOf } from '../platform/volumes';
 import { execFile } from 'node:child_process';
 
 export function checkAbort(signal?:AbortSignal):void {
@@ -221,8 +222,8 @@ const directVolumes=new Map<string,Promise<boolean>>();
 export async function directCapable(root:string,_rootIdentity:string,exclusiveCopy=false):Promise<boolean> {
   if(process.platform!=='darwin') return false;
   const answer=async():Promise<boolean> => {
-    const {uuid,type}=await volumeOf(await mountOf(root));
-    if(type!=='exfat') return false;
+    const volume=volumeOf(await mountedVolumes(),root),uuid=volume?.volumeId;
+    if(volume?.fsType!=='exfat') return false;
     const key=`${uuid??''}\0${exclusiveCopy}`;
     const check=async()=>exclusiveCopy||(await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim()))))==='1';
     if(!uuid) return check();

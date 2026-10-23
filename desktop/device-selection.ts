@@ -4,12 +4,19 @@ type Remembered=NonNullable<Preferences['rememberedDevices']>;
 type Ignored=NonNullable<Preferences['ignoredDevices']>;
 type History=NonNullable<Preferences['deviceHistory']>;
 
-/** A device id that names the same card or camera across connections: the volume
- * UUID or the camera's id. Mount paths are reused by other disks ("Untitled"), and
- * folders are chosen explicitly, so neither is remembered. */
+/** A device id that names the same card or camera across connections: the volume UUID
+ * (a volume without one has its mount path as its id) or `camera:<id>`. Mount paths are
+ * reused by other disks ("Untitled"), and folders are chosen explicitly, so neither is
+ * remembered. */
 export function deviceId(source:Source):string|undefined {
-  if(source.transport==='folder' || !source.id || source.id.startsWith('/') || source.id.startsWith('folder:')) return undefined;
-  return source.id;
+  if(source.transport==='camera') return source.id;
+  return source.transport==='storage' && source.id && source.id!==source.path ? source.id : undefined;
+}
+/** Keys saved before device ids were UUIDs only: a mount path, drive letter, /dev node or diskN
+ * identifier. They are dropped when settings are read rather than matched against forever. */
+const savedByPath=/^(?:\/|[a-z]:[\\/]?$|disk\d|folder:|filesystem:)/i;
+export function stableDevices<T>(records:Record<string,T>):Record<string,T> {
+  return Object.fromEntries(Object.entries(records).filter(([key])=>!savedByPath.test(key)));
 }
 
 /** Which connected sources the user wants imported. Drives the user has not
@@ -44,6 +51,12 @@ export class DeviceSelection {
     if(device===undefined) return;
     if(selected) {remembered[device]={name:source.name,lastSelected:now};delete ignored[device];}
     else {delete remembered[device];ignored[device]={name:source.name,ignoredAt:now};}
+  }
+  /** A chosen folder the system now detects as a volume at the same path keeps the user's choice under the volume's id. */
+  replace(from:string,to:string):void {
+    const selected=this.selected.get(from);
+    if(selected===undefined) return;
+    this.selected.delete(from);this.selected.set(to,selected);
   }
   /** The user saw the reconnection notice for one device, or for all of them. */
   dismissReconnected(id?:string):void {this.reconnectedDevices=id===undefined?[]:this.reconnectedDevices.filter(item=>item!==id);}

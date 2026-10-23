@@ -1,9 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DestinationStatus, DriveActivity, Source } from '../shared';
-import { within } from '../core/paths';
 import { RateMeter } from '../eta';
-import type { MountedVolume } from './volumes';
+import { volumeOf, type MountedVolume } from './volumes';
 
 const exec = promisify(execFile);
 /** Cumulative IOBlockStorageDriver "Statistics" of one block-storage driver (one physical disk). */
@@ -174,16 +173,15 @@ export async function runIoreg(withMedia:boolean):Promise<string> {
 /** The whole disks behind every connected source (keyed by source id) and destination (keyed by its path):
  * a folder maps to the volume it lives on. Cameras and unknown volumes have no entry. */
 export function activityTargets(volumes:Pick<MountedVolume,'path'|'physicalId'>[],sources:Pick<Source,'id'|'path'|'transport'>[],destinations:Pick<DestinationStatus,'path'|'physicalId'|'available'>[]):Record<string,string[]> {
-  const volumeOf=(target:string)=>volumes.filter(volume=>within(target,volume.path)).sort((a,b)=>b.path.length-a.path.length)[0];
   const result:Record<string,string[]>={};
   for(const source of sources){
     if(source.transport==='camera')continue;
-    const disks=wholeDisks(volumeOf(source.path)?.physicalId);
+    const disks=wholeDisks(volumeOf(volumes,source.path)?.physicalId);
     if(disks.length)result[source.id]=disks;
   }
   for(const destination of destinations){
     if(!destination.available)continue;
-    const disks=wholeDisks(destination.physicalId??volumeOf(destination.path)?.physicalId);
+    const disks=wholeDisks(destination.physicalId??volumeOf(volumes,destination.path)?.physicalId);
     if(disks.length)result[destination.path]=disks;
   }
   return result;

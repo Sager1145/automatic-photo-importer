@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { mountedVolumes, volumeOf } from '../platform/volumes';
 import { cpuWorkers, governor, memoryBudgetBytes, type MemoryGovernor } from '../resource-limits';
 
 /** What a storage device is, as far as streaming it is concerned. */
@@ -14,40 +14,9 @@ export const STREAMS:Record<DeviceKind,number>={hdd:1,card:2,ssd:4,unknown:2};
 export const CHUNK:Record<DeviceKind,number>={hdd:8*1024*1024,card:1024*1024,ssd:1024*1024,unknown:1024*1024};
 
 type Classify=(file:string)=>Promise<DeviceKind>;
-const run=(command:string,args:string[])=>new Promise<string>((resolve,reject)=>execFile(command,args,{timeout:10000,maxBuffer:1024*1024},(error,stdout)=>error?reject(error):resolve(stdout)));
-/** The mount point of `file`'s volume, as df reports it (firmlinked folders such as /Users are
- * not mount points themselves). */
-export async function mountOf(file:string):Promise<string> {
-  const mount=(await run('/bin/df',['-P',file])).trim().split('\n')[1]?.match(/\d+%\s+(\/.*)$/)?.[1];
-  if(!mount) throw new Error('No mount point');
-  return mount;
-}
-/** The volume mounted at `mount`, from diskutil: its UUID (the same volume under any path or device number) and file system type ("exfat", "msdos", "apfs"...). */
-export async function volumeOf(mount:string):Promise<{uuid?:string;type?:string}> {
-  const info=await run('/usr/sbin/diskutil',['info','-plist',mount]);
-  const text=(name:string)=>info.match(new RegExp(`<key>${name}</key>\\s*<string>([^<]*)</string>`))?.[1];
-  return {uuid:text('VolumeUUID'),type:text('FilesystemType')};
-}
-/** macOS: diskutil names the bus and medium. Linux: sysfs. Anything else stays unknown. */
-async function classify(file:string,dev:bigint):Promise<DeviceKind> {
-  try {
-    if(process.platform==='darwin') {
-      const info=await run('/usr/sbin/diskutil',['info','-plist',await mountOf(file)]);
-      const key=(name:string)=>info.match(new RegExp(`<key>${name}</key>\\s*<(true|false|string>([^<]*)</string)`))?.slice(1);
-      if(key('BusProtocol')?.[1]==='Secure Digital' || key('RemovableMedia')?.[0]==='true') return 'card';
-      const solid=key('SolidState')?.[0];
-      return solid==='true'?'ssd':solid==='false'?'hdd':'unknown';
-    }
-    if(process.platform==='linux') {
-      const major=Number(((dev>>8n)&0xfffn)|((dev>>32n)&~0xfffn)),minor=Number((dev&0xffn)|((dev>>12n)&~0xffn));
-      const device=await fs.realpath(`/sys/dev/block/${major}:${minor}`);
-      if(/\/mmcblk\d+/.test(device)) return 'card';
-      // A partition keeps its queue on the whole disk, one folder up.
-      const rotational=await fs.readFile(path.join(device,'queue','rotational'),'utf8').catch(()=>fs.readFile(path.join(device,'..','queue','rotational'),'utf8'));
-      return rotational.trim()==='1'?'hdd':'ssd';
-    }
-  } catch { /* Unknown devices get the middle setting. */ }
-  return 'unknown';
+/** The medium `file` is on, from the mount snapshot that already described its volume (platform/volumes). */
+async function classify(file:string):Promise<DeviceKind> {
+  return volumeOf(await mountedVolumes(),file)?.kind ?? 'unknown';
 }
 
 /** Per-device stream slots shared by every job in this process, so two imports reading or
@@ -69,7 +38,7 @@ export class DeviceStreams {
     const id=dev??await this.device(file);
     let kind=this.kinds.get(id);
     if(!kind) {
-      kind=(this.kindOf?this.kindOf(file):classify(file,id)).catch(()=>'unknown' as const);this.kinds.set(id,kind);
+      kind=(this.kindOf??classify)(file).catch(()=>'unknown' as const);this.kinds.set(id,kind);
       void kind.then(value=>{this.known.set(id,value);const slot=this.slots.get(id);if(slot){slot.limit=STREAMS[value];this.wake(slot);}});
     }
     return kind;
@@ -96,8 +65,8 @@ export class DeviceStreams {
   }
   /** Run `work` holding one stream on each device the files are on (taken in a fixed order, so
    * two callers can never wait on each other). `chunk` is the read size suited to them; with
-   * `signal`, Stop ends the wait for a slot at once. Classifying a device can take a second
-   * under load (diskutil), so until it answers its streams use the middle setting. */
+   * `signal`, Stop ends the wait for a slot at once. A device's kind waits for the mount snapshot
+   * (diskutil, seconds under load), so until it answers its streams use the middle setting. */
   run<T>(files:string[],work:(chunk:number)=>Promise<T>,signal?:AbortSignal):Promise<T> {
     // Memory governor: while the app is above 90% of its memory limit, a new file waits here (work already running is untouched).
     return this.gate.govern(()=>this.stream(files,work,signal),signal);
@@ -142,11 +111,11 @@ export async function mapPool<T,R>(items:readonly T[],limit:number,work:(item:T,
   return results;
 }
 
-/** Whether another job may start reading a device: jobs on one physical device share its stream
- * limit (a spinning disk serves one, so two folders on it take turns while folders on other
- * disks run in parallel). `running` holds the devices of the jobs already going; a source with
- * no known device (a card reader or camera) is never held back. */
-export function deviceHasRoom(drive:{device:string;kind?:DeviceKind}|undefined,running:readonly ({device:string}|undefined)[]):boolean {
-  if(!drive) return true;
-  return running.filter(item=>item?.device===drive.device).length<STREAMS[drive.kind??'unknown'];
+/** Whether another job may start reading a device: jobs on one physical disk (the snapshot's
+ * physicalId) share its stream limit (a spinning disk serves one, so two folders on it take turns
+ * while folders on other disks run in parallel). `running` holds the drives of the jobs already
+ * going; a source with no known physical disk (a card, a camera) is never held back. */
+export function deviceHasRoom(drive:{physicalId?:string;kind?:DeviceKind}|undefined,running:readonly ({physicalId?:string}|undefined)[]):boolean {
+  if(!drive?.physicalId) return true;
+  return running.filter(item=>item?.physicalId===drive.physicalId).length<STREAMS[drive.kind??'unknown'];
 }

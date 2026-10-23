@@ -32,8 +32,8 @@ export const PROBLEM_FILE_GROUPS={empty:'Empty files',unreadable:'Unreadable fil
 /** A file that is never imported or filed normally. empty: 0 bytes; emptyPrimary: companion of an empty file (a family stays together); unreadable: could not be read or accessed.
  * collected: an organization moves it into the Problem files folder; otherwise it stays where it is (imports never copy these). */
 export interface ProblemFile {path:string;relative:string;reason:'empty'|'emptyPrimary'|'unreadable';group:keyof typeof PROBLEM_FILE_GROUPS;collected:boolean;}
-/** The drive a chosen folder lives on. device is the physical disk (several volumes can share one); kind sets how many jobs may read it at once. */
-export interface SourceDrive {volumeId:string;name:string;mount:string;physicalId?:string;device:string;kind?:'hdd'|'ssd'|'card'|'unknown';/** The folder is on the same volume as a configured destination: importing copies onto the drive it comes from. */sameAsDestination:boolean;}
+/** The drive a chosen folder lives on. physicalId is the physical disk (several volumes can share one); kind sets how many jobs may read it at once. */
+export interface SourceDrive {volumeId:string;name:string;mount:string;physicalId?:string;kind?:'hdd'|'ssd'|'card'|'unknown';}
 export interface Source {id:string;name:string;path:string;transport:'storage'|'camera'|'folder';selected?:boolean;camera?:boolean;total?:number;free?:number;drive?:SourceDrive;}
 /** How much the diagnostic log records, least first. */
 export const LOG_LEVELS=['off','normal','detailed','trace'] as const;

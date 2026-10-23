@@ -2,6 +2,7 @@ import {defaultLimits,clampCpuThreads,clampMemoryLimitMB,savedLimits} from './re
 import type {DriveCameraRecord,MediaLayout,NoMetadataHandling,Preferences} from './shared';
 import {LOG_LEVELS,UNKNOWN_FILES_FOLDER} from './shared';
 import {validNoMetadataFolder} from './no-metadata';
+import {stableDevices} from './device-selection';
 
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
@@ -63,9 +64,9 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   collectProblemFiles:value.collectProblemFiles===undefined?base.collectProblemFiles!==false:value.collectProblemFiles!==false,
   autoOrganizeBackup:oneOf(value.autoOrganizeBackup,['off','ask','auto'] as const,base.autoOrganizeBackup??'ask'),
   unknownDefault:oneOf(value.unknownDefault,['skip','other','ask'] as const,base.unknownDefault??'skip'),
-  rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected']),
-  ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt']),
-  deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:history(value.deviceHistory),
+  rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:stableDevices(records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected'])),
+  ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:stableDevices(records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt'])),
+  deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:stableDevices(history(value.deviceHistory)),
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
   noMetadataHandling:oneOf(value.noMetadataHandling,noMetadataModes,base.noMetadataHandling??'keep'),
   noMetadataFolder:validNoMetadataFolder(value.noMetadataFolder)?value.noMetadataFolder:validNoMetadataFolder(base.noMetadataFolder)?base.noMetadataFolder:UNKNOWN_FILES_FOLDER,

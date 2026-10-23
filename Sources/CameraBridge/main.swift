@@ -31,7 +31,7 @@ struct NativeCameraBridge {
                 do {
                     switch command.command {
                     case "list":
-                        let cameras = discovery.sources.map { ["id": "camera:\($0.id)", "name": $0.name, "cameraID": $0.id] }
+                        let cameras = discovery.sources.map { ["name": $0.name, "cameraID": $0.id] }
                         emit(["id": command.id, "result": cameras])
                     case "stage":
                         guard let cameraID = command.cameraID, let directory = command.directory,

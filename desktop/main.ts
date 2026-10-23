@@ -20,7 +20,7 @@ import {executeDestinations} from './core/destinations';
 import {routingChanged,rememberRouting} from './platform/routing-memory';
 import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,placedEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
-import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
+import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
 import {backupFolders,destinationRoots,libraryRoots} from './platform/destination-roots';
 import {resolveFolderSources} from './folder-sources';
@@ -81,6 +81,8 @@ let timer:NodeJS.Timeout|undefined;
 let activityLoop:ReturnType<typeof startActivityLoop>|undefined;
 const driveSampler=createDriveSampler({run:runIoreg});
 let refreshing=false;
+/** The mounted volumes as the last refresh described them; paths resolve to drives against this, not a new sweep. */
+let mounts:MountedVolume[]=[];
 /** Where the diagnostic log is and how large; size rounded so the state does not change with every line. */
 function logInfo():AppState['logInfo']{const stats=activeLogger()?.stats();return stats?{dir:stats.dir,...(stats.latest?{latest:stats.latest}:{}),bytes:Math.ceil(stats.bytes/1024)*1024}:undefined;}
 // The recovery listing waits while a review or a job is planning: its file calls would queue ahead of the planner's.
@@ -189,7 +191,7 @@ const errorCache=createErrorLogCache(errorLog);
 const etaTracker=new EtaTracker();
 /** The drive a path is on, as the time-left model remembers drives: the volume id (hashed before it is saved), kind, file system and whether it is external. */
 function etaDrive(volumes:MountedVolume[],target:string,transport:string):DriveInfo{
- const volume=volumes.filter(item=>within(target,item.path)).sort((x,y)=>y.path.length-x.path.length)[0];
+ const volume=volumeOf(volumes,target);
  return {...(volume?.volumeId?{id:volume.volumeId}:{}),transport,fsType:volume?.fsType,external:volume?.external===true};
 }
 /** What a plan will do, as the time-left model counts it: files and bytes to copy, and files to verify and publish. */
@@ -224,13 +226,14 @@ async function allowed(file:string){const real=await fs.realpath(file);for(const
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
-  const volumes=await mountedVolumes();const destinations=await Promise.all(state.preferences.destinations.map(p=>volumeInfo(p,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);
+  const volumes=mounts=await mountedVolumes();const destinations=await Promise.all(state.preferences.destinations.map(p=>volumeInfo(p,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);
   state.destinationStatus=destinations;
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...state.preferences.destinations,...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
   // getSources leaves out the destinations, so every detected drive is a source.
   const detected=found;
-  for(const source of detected){const selected=Array.from(folders.entries()).find(([,value])=>value.source.path===source.path);if(selected&&selected[0]!==source.id){folders.delete(selected[0]);folders.set(source.id,{source,backup:selected[1].backup});}}
+  // A chosen folder the system now detects as a volume at the same path becomes that volume, still chosen.
+  for(const source of detected){const selected=Array.from(folders.entries()).find(([,value])=>value.source.path===source.path);if(selected&&selected[0]!==source.id){folders.delete(selected[0]);folders.set(source.id,{source,backup:selected[1].backup});selection.replace(selected[0],source.id);}}
   state.sources=selection.apply([...detected,...Array.from(folders.values(),v=>v.source).filter(source=>source.transport==='folder'&&!detected.some(s=>s.path===source.path))],state.preferences.rememberedDevices??={},state.preferences.ignoredDevices??={},state.preferences.deviceHistory??={});publishDevices();loadRememberedScans();
   const connected=new Set(state.sources.map(s=>s.id));for(const id of Object.keys(state.sourceInventories??{}))if(!connected.has(id)){delete state.sourceInventories![id];delete state.sourceCameraInfo?.[id];scanControls.get(id)?.abort();}for(const id of seen)if(!connected.has(id))seen.delete(id);
   // Automatic imports wait until every destination the copy policy needs is connected;
@@ -238,8 +241,9 @@ async function refresh(){
   const required=state.preferences.copyMode==='single'?1:2,ready=destinations.length>=required&&destinations.slice(0,required).every(info=>info.available);
   // Automatic import only takes drives the user selected (now or on a previous connection).
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
-  // Folders' free space is re-read like a card's, so a capacity bar follows copies and deletions.
-  for(const source of state.sources)if(source.transport==='folder')await updateFolderCapacity(source);
+  // Folders' free space is re-read like a card's, so a capacity bar follows copies and deletions; so is a library's while a job runs on it.
+  const shown=new Map([...state.sources,...state.jobs.map(job=>job.source)].map(source=>[source.id,source]));
+  for(const source of shown.values())if(source.transport==='folder')await updateFolderCapacity(source);
   driveSampler.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
   emit();pump();scheduleMisplacedCheck();scheduleOldRecordsCheck();scheduleResidueCheck();
   const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
@@ -344,7 +348,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  assertIdle('error.busyResume');
  if(!location.folder&&!state.preferences.destinations.some((destination,index)=>destination===location.destination&&state.preferences.destinationIds?.[index]===location.volumeId))throw new MessageError('error.organizationDestination');
  const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':kind==='delete'?'job.recheckDelete':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=startJob(job);emit();
- if(kind!=='delete')etaTracker.plan(job.id,{kind:kind==='finalize'?'finalize':kind==='undo'?'undo':'organization',destinations:[etaDrive(await mountedVolumes(),root,'storage')]});
+ if(kind!=='delete')etaTracker.plan(job.id,{kind:kind==='finalize'?'finalize':kind==='undo'?'undo':'organization',destinations:[etaDrive(mounts,root,'storage')]});
  void settle(withJob(job.id,async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{const verifying=progress.step==='checking'||recordSteps.includes(progress.step);job.phase=verifying?'verifying':'copying';job.progress={phase:verifying?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=recordsDetail(progress)??message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
@@ -635,7 +639,7 @@ function availableFor(owner:string,infos:DestinationStatus[]):number[]{
 async function prepare(owner:string,source:Source,backup:boolean,request:RunRequest,signal:AbortSignal,onCamera:(done:number,total:number)=>void,onProgress:PlanProgress,onPlanning?:()=>void):Promise<Prepared>{
  const {prefs,reorganize,sourceFolders}=request;
  const {roots,videoRoots,infos,volumes}=await destinationRoots(prefs,state.sources,reorganize?undefined:source);
- const eta={source:etaDrive(volumes,source.path,source.transport),destinations:infos.map(info=>etaDrive(volumes.filter(item=>item.volumeId===info.volumeId),info.path,'storage'))};
+ const eta={source:etaDrive(volumes,source.path,source.transport),destinations:infos.map(info=>etaDrive(volumes,info.path,'storage'))};
  etaTracker.plan(owner,{kind:reorganize?'organization':'import',...eta});
  const mirror=backup&&prefs.backupMode==='mirror';
  if(mirror&&prefs.copyMode==='sequential')throw new MessageError('error.mirrorSequential');
@@ -658,7 +662,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   // Selected folders are sized from the files an earlier scan found inside them; the whole drive's used space would overestimate them.
   const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
-  const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
+  const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
   const {inventory,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
    // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.
    const {kept,bytes}=fillFirst(first,availableFor(owner,infos)[0]!);reservations.set(owner,[{volume:infos[0]!.volumeId??infos[0]!.path,bytes}]);return kept;
@@ -905,7 +909,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
  const real=await fs.realpath(root);
  await rememberLibrary(scope);
  const job:Job={id:randomUUID(),source:{id:'duplicates:'+root,name:scope.name,path:root,transport:'folder'},organization:true,phase:'verifying',detail:message('job.removingDuplicates'),errors:[],backup:false};
- etaTracker.plan(job.id,{kind:'duplicates',destinations:[etaDrive(await mountedVolumes(),real,'storage')]});
+ etaTracker.plan(job.id,{kind:'duplicates',destinations:[etaDrive(mounts,real,'storage')]});
  state.jobs.unshift(job);const control=startJob(job);dup.status='removing';emit();
  void settle(withJob(job.id,async()=>{
   const reports=path.join(app.getPath('userData'),'operation-reports',job.id);
@@ -942,7 +946,7 @@ async function removeOriginals(jobId:string){
  const control=new AbortController();originalsControls.set(job.id,control);
  try{
   // Only APFS and HFS+ keep change times that prove an unchanged source; on any other volume every source is read.
-  const changeTimes=['apfs','hfs'].includes(etaDrive(await mountedVolumes(),kept.root,'folder').fsType??'');
+  const changeTimes=['apfs','hfs'].includes(volumeOf(await mountedVolumes(),kept.root)?.fsType??'');
   // The drive's capacity bar follows the files as they go, re-read about once a second.
   let capacityRead=0;
   const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,changeTimes,protect:state.sources.map(item=>item.path),onFolders:(completed,total)=>{job.deletingOriginals={...job.deletingOriginals!,folders:{completed,total}};progressEmit();},onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};const now=Date.now();if(now-capacityRead>=1000){capacityRead=now;void updateFolderCapacity(job.source).then(progressEmit,()=>{});}progressEmit();}}));

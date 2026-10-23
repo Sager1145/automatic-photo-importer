@@ -4,13 +4,16 @@ import { access, readdir, readFile, realpath, stat, statfs } from 'node:fs/promi
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { DestinationStatus, Source } from '../shared';
+import type { DeviceKind } from '../core/devices';
 import { within } from '../core/paths';
 import { MessageError } from '../messages';
 import { cameraSources } from './camera-bridge';
 
 const exec = promisify(execFile);
 const commandOptions = { timeout: 8000, maxBuffer: 4 * 1024 * 1024, windowsHide: true };
-export interface MountedVolume { path:string; name?:string; volumeId?:string; physicalId?:string; removable?:boolean; external?:boolean; virtual?:boolean; diskImage?:boolean; readOnly?:boolean; total?:number; free?:number; /** File system type (exfat, msdos, apfs, ntfs...), lowercase; used to predict how files are published. */fsType?:string; }
+/** One mounted volume as the snapshot describes it. `volumeId` is the volume or partition UUID only: mount paths, drive
+ * letters and diskN or /dev names are reused by other disks. `kind` is the medium, for the stream limits. */
+export interface MountedVolume { path:string; name?:string; volumeId?:string; physicalId?:string; kind?:DeviceKind; removable?:boolean; external?:boolean; virtual?:boolean; diskImage?:boolean; readOnly?:boolean; total?:number; free?:number; /** File system type (exfat, msdos, apfs, ntfs...), lowercase; used to predict how files are published. */fsType?:string; }
 
 /** Only camera directory layouts or OS-identified removable media are automatic sources. */
 export function classifyVolume(volume:MountedVolume, children:string[]) {
@@ -29,7 +32,8 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
     const disk=parent ?? device;
     for (const mount of (Array.isArray(device.mountpoints) ? device.mountpoints : [device.mountpoint])) {
       if(typeof mount!=='string' || !mount.startsWith('/')) continue;
-      result.push({path:mount,name:device.label || path.basename(mount),volumeId:device.uuid || device.path,physicalId:disk.path || `/dev/${disk.name}`,removable:bool(disk.rm)||disk.tran==='mmc',external:bool(disk.hotplug)||disk.tran==='usb',readOnly:bool(device.ro),total:finite(device.size),free:finite(device.fsavail),fsType:fsType(device.fstype)});
+      const card=disk.tran==='mmc' || /^mmcblk\d/.test(String(disk.name??''));
+      result.push({path:mount,name:device.label || path.basename(mount),volumeId:device.uuid || undefined,physicalId:disk.path || `/dev/${disk.name}`,kind:card?'card':disk.rota===undefined||disk.rota===null?undefined:bool(disk.rota)?'hdd':'ssd',removable:bool(disk.rm)||disk.tran==='mmc',external:bool(disk.hotplug)||disk.tran==='usb',readOnly:bool(device.ro),total:finite(device.size),free:finite(device.fsavail),fsType:fsType(device.fstype)});
     }
     for(const child of objects(device.children)) walk(child,disk);
   }
@@ -37,7 +41,7 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
   return result;
 }
 export function parseWindowsVolumes(data:unknown):MountedVolume[] {
-  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || v.Path,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
+  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || undefined,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
 }
 function fsType(value:unknown):string|undefined {return typeof value==='string'&&value.trim()?value.trim().toLowerCase():undefined;}
 function finite(value:unknown):number|undefined {const n=Number(value); return value!==null && value!==undefined && value!=='' && Number.isFinite(n) && n>=0 ? n : undefined;}
@@ -67,14 +71,18 @@ export function resolveMacPhysicalIdentity(volume:MountedVolume, stores:Map<stri
   // Synthesized APFS disk numbers identify containers, not independent physical drives.
   return volume.virtual ? stores.get(volume.physicalId) : volume.physicalId;
 }
+/** The one description of a mounted volume, from `diskutil info -plist`: identity, capacity and medium together. */
+export function parseMacVolume(info:Record<string,any>, mount:string):MountedVolume {
+  const kind:DeviceKind|undefined=info.BusProtocol==='Secure Digital' || bool(info.RemovableMedia) ? 'card' : info.SolidState===true ? 'ssd' : info.SolidState===false ? 'hdd' : undefined;
+  return {path:info.MountPoint || mount,name:info.VolumeName || path.basename(mount),volumeId:info.VolumeUUID || info.DiskUUID || undefined,...(kind?{kind}:{}),physicalId:info.APFSContainerReference || info.ParentWholeDisk || info.DeviceIdentifier,diskImage:/disk image/i.test(String(info.BusProtocol??'')),virtual:/virtual/i.test(String(info.VirtualOrPhysical??'')) || /apfs/i.test(String(info.FilesystemType??info.FileSystemPersonality??'')) || !!info.APFSContainerReference,removable:bool(info.RemovableMedia)||bool(info.Removable),external:info.Internal===false,readOnly:info.Writable===false||bool(info.ReadOnlyVolume),total:finite(info.VolumeTotalSpace??info.TotalSize),free:finite(info.VolumeFreeSpace),fsType:fsType(info.FilesystemType??info.FileSystemType)};
+}
 async function macVolume(mount:string):Promise<MountedVolume> {
   const {stdout}=await exec('/usr/sbin/diskutil',['info','-plist',mount],commandOptions);
-  const info=await plistJSON(stdout);
-  return {path:info.MountPoint || mount,name:info.VolumeName || path.basename(mount),volumeId:info.VolumeUUID || info.DiskUUID || info.DeviceIdentifier,physicalId:info.APFSContainerReference || info.ParentWholeDisk || info.DeviceIdentifier,diskImage:/disk image/i.test(String(info.BusProtocol??'')),virtual:/virtual/i.test(String(info.VirtualOrPhysical??'')) || /apfs/i.test(String(info.FilesystemType??info.FileSystemPersonality??'')) || !!info.APFSContainerReference,removable:bool(info.RemovableMedia)||bool(info.Removable),external:info.Internal===false,readOnly:info.Writable===false||bool(info.ReadOnlyVolume),total:finite(info.VolumeTotalSpace??info.TotalSize),free:finite(info.VolumeFreeSpace),fsType:fsType(info.FilesystemType??info.FileSystemType)};
+  return parseMacVolume(await plistJSON(stdout),mount);
 }
 async function linuxVolumes():Promise<MountedVolume[]> {
   try {
-    const {stdout}=await exec('lsblk',['--json','--bytes','--output','NAME,PATH,TYPE,RM,HOTPLUG,TRAN,RO,MOUNTPOINTS,UUID,LABEL,SIZE,FSAVAIL,FSTYPE'],commandOptions);
+    const {stdout}=await exec('lsblk',['--json','--bytes','--output','NAME,PATH,TYPE,RM,ROTA,HOTPLUG,TRAN,RO,MOUNTPOINTS,UUID,LABEL,SIZE,FSAVAIL,FSTYPE'],commandOptions);
     return parseLinuxVolumes(JSON.parse(stdout));
   } catch {
     // util-linux may be absent or older. Mounted filesystem roots still support camera discovery.
@@ -147,10 +155,19 @@ export function singleFlight<T>(work:()=>Promise<T>):()=>Promise<T> {
  * load one diskutil sweep over all mounts takes seconds; concurrent sweeps multiply it. */
 const sharedVolumes=singleFlight(enumerateVolumes);
 export async function mountedVolumes():Promise<MountedVolume[]> {return [...await sharedVolumes()];}
+/** Local disks mounted outside /Volumes and the system's own volumes (a disk image attached with
+ * -mountpoint, an fstab entry), from `mount` output: without them a path on such a disk would be
+ * taken for the startup disk. */
+export function otherMacMounts(table:string):string[] {
+  return table.split('\n').flatMap(line=>{
+    const mount=line.match(/^\/dev\/disk\S+ on (.+?) \([^()]*\)$/)?.[1];
+    return mount && mount!=='/' && !/^\/(?:Volumes|System\/Volumes)(?:\/|$)/.test(mount) ? [mount] : [];
+  });
+}
 async function enumerateVolumes():Promise<MountedVolume[]> {
   if(process.platform==='darwin') {
     const entries=await readdir('/Volumes',{withFileTypes:true});
-    const mounts=entries.filter(e=>e.isDirectory()||e.isSymbolicLink()).map(e=>path.join('/Volumes',e.name));
+    const mounts=[...entries.filter(e=>e.isDirectory()||e.isSymbolicLink()).map(e=>path.join('/Volumes',e.name)),...otherMacMounts((await exec('/sbin/mount',[],commandOptions)).stdout)];
     const volumes=await describeVolumes(mounts);
     // Include the system filesystem for destination identity, but never as an automatic source.
     if(!volumes.some(v=>v.path==='/')){const [root]=await describeVolumes(['/']);if(root?.volumeId)volumes.push(root);}
@@ -204,7 +221,7 @@ export async function getSources(volumes:MountedVolume[],options:ClassifyDeps&{d
   const sources=await Promise.all(volumes.map(async volume=>{
     // The operating system root is never an automatic camera source.
     if(volume.path===path.parse(volume.path).root && process.platform!=='win32')return null;
-    if(options.destinations?.some(d=>(d.volumeId&&d.volumeId===(volume.volumeId||volume.path))||within(volume.path,d.path)||within(d.path,volume.path)))return null;
+    if(options.destinations?.some(d=>(!!volume.volumeId&&d.volumeId===volume.volumeId)||within(volume.path,d.path)||within(d.path,volume.path)))return null;
     const classification=await classifyMounted(volume,options); if(!classification.source)return null;
     try {
       const capacity=await statfs(volume.path);return {id:volume.volumeId||volume.path,name:volume.name||path.basename(volume.path),path:volume.path,transport:'storage' as const,camera:classification.camera,total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};
@@ -213,6 +230,12 @@ export async function getSources(volumes:MountedVolume[],options:ClassifyDeps&{d
   // A camera-protocol failure must not hide working mounted camera cards.
   let cameras:Source[]=[];try{cameras=await cameraSources();}catch{/* Mounted storage remains available. */}
   return [...sources.filter((source):source is NonNullable<typeof source>=>source!==null),...cameras].sort((a,b)=>a.name.localeCompare(b.name));
+}
+/** The deepest volume in `volumes` holding `target`: the one lookup from a path to its mounted volume. */
+export function volumeOf<V extends Pick<MountedVolume,'path'>>(volumes:readonly V[], target:string):V|undefined {
+  let found:V|undefined;
+  for(const volume of volumes)if(within(target,volume.path)&&(!found||volume.path.length>found.path.length))found=volume;
+  return found;
 }
 export async function existingAncestor(target:string):Promise<string> {
   let current=path.resolve(target);
@@ -226,18 +249,18 @@ async function requireMountedRoot(target:string):Promise<void> {
     if(match)try{await stat(match[0]);}catch{throw new Error('The destination volume is not mounted or available.');}
   }
 }
-/** A backed-up drive or folder is identified by its filesystem UUID and the folder inside
- * it. Mount paths, /dev nodes and diskN identifiers are reused by other disks, so they
- * are reported unstable and must not authorize mirror moves. */
+/** A backed-up drive or folder is identified by its volume UUID and the folder inside it. A
+ * volume without one is known only by its path, which other disks reuse, so it is reported
+ * unstable and must not authorize mirror moves. */
 export function driveIdentity(resolved:string, volume?:Pick<MountedVolume,'path'|'volumeId'>):{identity:string;stable:boolean} {
   const id=volume?.volumeId;
-  if(!volume || !id || id===volume.path || /^(?:\/dev\/|disk\d|filesystem:)/i.test(id) || /^[a-z]:\\?$/i.test(id)) return {identity:`path:${resolved}`,stable:false};
+  if(!volume || !id) return {identity:`path:${resolved}`,stable:false};
   return {identity:`volume:${id}:${path.relative(volume.path,resolved).split(path.sep).join('/')}`,stable:true};
 }
 export async function backupDriveIdentity(target:string, volumes?:MountedVolume[]):Promise<{identity:string;stable:boolean}> {
   const resolved=await realpath(target);
   let volume:MountedVolume|undefined;
-  try {volume=(volumes??await mountedVolumes()).filter(v=>within(resolved,v.path)).sort((a,b)=>b.path.length-a.path.length)[0];} catch {}
+  try {volume=volumeOf(volumes??await mountedVolumes(),resolved);} catch {}
   return driveIdentity(resolved,volume);
 }
 /** Total and free space of the volume a chosen source folder lives on; empty when it cannot be read. */
@@ -245,21 +268,21 @@ export async function folderCapacity(folder:string):Promise<{total?:number;free?
   try {const capacity=await statfs(folder);return {total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};}
   catch {return {};}
 }
-/** The volume and physical disk a chosen folder lives on, found from the mounted volumes (the
- * filesystem id stands in when no volume describes it). */
+/** The volume, physical disk and medium a chosen folder lives on, from the mount snapshot (the
+ * filesystem id groups folders on a volume no snapshot entry names). */
 export async function folderDrive(folder:string, volumes?:MountedVolume[]):Promise<NonNullable<Source['drive']>> {
   const resolved=await realpath(folder),dev=(await stat(resolved,{bigint:true})).dev;
   let volume:MountedVolume|undefined;
-  try {volume=(volumes??await mountedVolumes()).filter(v=>within(resolved,v.path)).sort((a,b)=>b.path.length-a.path.length)[0];} catch {}
+  try {volume=volumeOf(volumes??await mountedVolumes(),resolved);} catch {}
   const volumeId=volume?.volumeId ?? `filesystem:${dev}`,mount=volume?.path ?? path.parse(resolved).root;
-  return {volumeId,name:volume?.name || path.basename(mount) || mount,mount,...(volume?.physicalId?{physicalId:volume.physicalId}:{}),device:volume?.physicalId ?? volumeId,sameAsDestination:false};
+  return {volumeId,name:volume?.name || path.basename(mount) || mount,mount,...(volume?.physicalId?{physicalId:volume.physicalId}:{}),kind:volume?.kind??'unknown'};
 }
 export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promise<DestinationStatus> {
   try {
     await requireMountedRoot(target);
     const ancestor=await existingAncestor(target);const resolved=await realpath(ancestor);const capacity=await statfs(ancestor);
     let volume:MountedVolume|undefined;
-    try {volume=(volumes??await mountedVolumes()).filter(v=>within(resolved,v.path)).sort((a,b)=>b.path.length-a.path.length)[0];} catch {}
+    try {volume=volumeOf(volumes??await mountedVolumes(),resolved);} catch {}
     return {path:target,available:true,total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail),volumeId:volume?.volumeId ?? `filesystem:${(await stat(ancestor)).dev}`,physicalId:volume?.physicalId,detail:volume?.readOnly && !(process.platform==='darwin' && volume.path==='/')?'Read-only filesystem':undefined};
   } catch(error){return {path:target,available:false,detail:(error as Error).message};}
 }

@@ -12,7 +12,8 @@ import {createHash, randomBytes} from 'node:crypto';
 import {plan, execute, configureOrganizationRecovery} from '../core/index';
 import {findResidue, cleanResidue} from '../core/residue';
 import {recordPartial} from '../core/import-recovery';
-import {STREAMS, mountOf, volumeOf} from '../core/devices';
+import {STREAMS} from '../core/devices';
+import {mountedVolumes, volumeOf} from '../platform/volumes';
 import {directCapable, identity} from '../core/paths';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import type {Metadata} from '../shared';
@@ -237,8 +238,8 @@ test('a read-back mismatch in a file resumed from an earlier run keeps the file 
 
 test('only an exFAT volume is direct: it is recognised by its UUID, and an APFS folder is not',async t=>{
   const env=await ready(t);if(!env) return;
-  const volume=await volumeOf(await mountOf(env.root));
-  assert.equal(volume.type,'exfat');assert.match(volume.uuid??'',/^[0-9A-F-]{36}$/i,'the volume has a UUID');
+  const volume=volumeOf(await mountedVolumes(),env.root);
+  assert.equal(volume?.fsType,'exfat');assert.match(volume?.volumeId??'',/^[0-9A-F-]{36}$/i,'the volume has a UUID');
   assert.equal(await directCapable(env.root,await identity(env.root)),true);
   assert.equal(await directCapable(env.root,'0:0'),true,'the answer does not depend on a path or device number');
   const apfs=await fs.realpath(os.tmpdir());

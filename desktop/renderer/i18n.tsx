@@ -465,6 +465,7 @@ A verified copy on both drives.|在两个驱动器上各保存一份校验副本
 Apply or discard the review.|请应用或放弃此审核。|請套用或放棄此審核。|確認内容を適用するか破棄してください。
 Backup matches the drive. Removed files are moved aside, not deleted.|备份与驱动器保持一致。已删除的文件会被移开，不会被删除。|備份與磁碟保持一致。已刪除的檔案會被移開，不會被刪除。|バックアップをドライブと一致させます。削除されたファイルは移動され、消去されません。
 Camera folders (DCIM) found.|找到相机文件夹（DCIM）。|找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）があります。
+Connected as a camera over USB.|已作为相机通过 USB 连接。|已作為相機透過 USB 連接。|USBでカメラとして接続されています。
 Change this any time in Drives.|可随时在“驱动器”中更改。|可隨時在「磁碟」中變更。|「ドライブ」でいつでも変更できます。
 Checking files. Nothing is copied yet.|正在检查文件，尚未复制任何内容。|正在檢查檔案，尚未複製任何內容。|ファイルを確認中です。まだ何もコピーしていません。
 Connect a memory card or camera to start.|连接存储卡或相机即可开始。|連接記憶卡或相機即可開始。|メモリーカードかカメラを接続して開始します。
