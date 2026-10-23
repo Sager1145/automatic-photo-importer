@@ -10,7 +10,7 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
-import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
@@ -18,7 +18,9 @@ import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
 import { confirmCandidates, type PlanDuplicates } from './duplicates';
 import { buildGroups } from '../duplicate-rules';
-import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
+import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, type OrganizationEntry } from './recovery';
+import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
+export type { AppleDoubleReport } from './appledouble';
 import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
@@ -756,7 +758,13 @@ export interface ExecutionOptions {
   /** Called for every file whose copy is verified or confirmed already present, with the
    * plan-time source identity, so a later plan can recognise the unchanged source. */
   onVerified?:(source:string,sha256:string,identity:string)=>void;
+  /** Remove the macOS "._" file beside each published file (see appledouble.ts); results are in ExecutionResult.appleDouble. */
+  removeAppleDouble?:boolean;
 }
+/** The file just published: unlinking a hard-linked stage moves its ctime, so identity here is device, inode (birth time where no inode is reliable), size and modification time. */
+const samePlaced=(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStats)=>a.dev===b.dev&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&(unreliableIno(a)&&unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino);
+/** Folders no "._" cleanup touches: recovery storage, Problem files and Drive backups. */
+export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
 async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal):Promise<import('node:fs').BigIntStats|undefined> {
@@ -827,14 +835,14 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   if(owned)await clearPartialRecord(owned,transfer.root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;});
   return bound;
 }
-export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];}
+export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];appleDouble?:AppleDoubleReport;}
 export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:ExecutionOptions={}):Promise<ExecutionResult> {
   const [result]=await executeMany([transfer],signal,onProgress&&((_index,value)=>onProgress(value)),options);
   if(result instanceof Error) throw result;
   return result!;
 }
 interface Run {
-  transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;
+  transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;appleDouble?:AppleDoubleCleaner;
   batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[]}[];pending:Set<string>;
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
   /** Bytes of the files staged for this run, of those published so far, and whether any was published by copying instead of linking. */
@@ -845,7 +853,10 @@ interface Run {
  * A destination that cannot start returns an Error in its slot; Stop throws. */
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false}));
+  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,
+    // A drive backup mirrors a drive as it is: nothing in it is removed.
+    ...(options.removeAppleDouble&&!transfer.drive?{appleDouble:appleDoubleCleaner()}:{})}));
+  for(const run of runs)if(run.appleDouble)run.result.appleDouble=run.appleDouble.report;
   const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...skippedOf(run.transfer),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file,
    // What the time-left estimate counts: copying moves bytes; verifying publishes the staged files (bytes of files already in the backup add files only).
    work:run.phase==='copying'?{files:run.completed,bytes:run.bytes,totalFiles:run.transfer.entries.length,totalBytes:Math.max(run.totalBytes,run.bytes)}:{files:run.completed,bytes:run.verifiedBytes,totalFiles:run.transfer.entries.length,totalBytes:run.stagedBytes,...(run.publishCopy?{publishCopy:true}:{})}});};
@@ -934,7 +945,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       await pool(run.batches,STREAM_CONCURRENCY,async batch=>{
         const {family,staged,failed}=batch;
         checkAbort(signal);
-        const published:{file:string;sha256:string;stat:import('node:fs').BigIntStats}[]=[];
+        const published:{file:string;sha256:string;stat:import('node:fs').BigIntStats}[]=[],placed:{file:string;stat:import('node:fs').BigIntStats}[]=[];
         if(!failed)try{
           const {verifiedSources,members}=await check(batch),known:Resolve=async entry=>entry.digest!;
           // A destination taken meanwhile sends the family to a conflict folder: then it gives
@@ -957,7 +968,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
-              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
+              if(run.appleDouble)await run.appleDouble.noteExisting(item.destination);
+              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
               catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);
@@ -970,7 +982,9 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
-        },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file)]);
+          // After the last write, timestamps, sync and the staged copy's removal: the "._" beside each file just published, while it is still that file.
+          if(run.appleDouble)for(const item of placed)await run.appleDouble.besideFile(item.file,transfer.root,now=>samePlaced(now,item.stat));
+        },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file),...placed.map(item=>item.file)]);
         run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
         staged.clear();
         progress(position,path.basename(family[family.length-1]!.source));
@@ -996,7 +1010,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   checkAbort(signal);
   return runs.map(run=>run.error??run.result);
 }
-export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{strategy?:import('./recovery').OrganizationStrategy;keepSourceFolders?:boolean;/** After a clean run, remove the confirmed duplicates kept in recovery storage. */releaseDuplicates?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
+export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{strategy?:import('./recovery').OrganizationStrategy;keepSourceFolders?:boolean;/** After a clean run, remove the confirmed duplicates kept in recovery storage. */releaseDuplicates?:boolean;/** Remove macOS "._" files beside moved files and in the library (see appledouble.ts). */removeAppleDouble?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
   const review=reorganizationReviews.get(transfer),scope=reorganizationScopes.get(transfer);
   if(!review || !scope || scope.source!==transfer.source || scope.root!==transfer.root || scope.rootIdentity!==transfer.rootIdentity || (transfer.source!==transfer.root && !beneath(transfer.root,transfer.source)) || review.size!==transfer.entries.length || transfer.entries.some(entry=>{
     const original=review.get(entry.id);
@@ -1014,7 +1028,7 @@ export async function executeReorganization(transfer:TransferPlan,signal?:AbortS
     }
     // Organization renames files; drop the cached checksums for this library.
     index.clear();
-    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries,options.releaseDuplicates);
+    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries,options.releaseDuplicates,options.removeAppleDouble?appleDoubleCleaner():undefined);
   });
   await flushIndex(index);
   return result;

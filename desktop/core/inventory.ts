@@ -7,7 +7,7 @@ import { beneath, checkAbort, contained, directory, pathKey, validateRelative } 
 
 /** Entries of a folder looked at (lstat) at once. */
 const LISTING_STATS=8;
-const sidecars=new Set('xmp aae thm xml moi wav bwf m4a mp3 aac srt dop cos pp3 comask on1 acr dr4 vrd rmd sidecar bim'.split(' '));
+export const sidecars=new Set('xmp aae thm xml moi wav bwf m4a mp3 aac srt dop cos pp3 comask on1 acr dr4 vrd rmd sidecar bim'.split(' '));
 const videoOnly=new Set('xml moi srt thm wav bwf m4a mp3 aac bim'.split(' '));
 /** Low-resolution proxies: real video, kept with their original or imported alone. */
 const proxies=new Set(['lrf','lrv']);

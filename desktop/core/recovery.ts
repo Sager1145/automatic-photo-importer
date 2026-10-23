@@ -6,11 +6,12 @@ import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { streams, STREAMS } from './devices';
-import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile } from './paths';
+import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
+import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
-export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;}
+export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;/** What removing macOS "._" files did; present only when it was on. */appleDouble?:AppleDoubleReport;}
 /** rename: move each file on its volume with rename(2); copy: verified copy plus a retained original. */
 export type OrganizationStrategy='rename'|'copy';
 /** kept: a duplicate removal's entry names the copy that stays as its destination; that copy may differ from the removed file's bytes (EXIF-identical duplicates), so its own size and SHA-256 are checked instead. */
@@ -770,7 +771,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
 /** Per journal, for each entry whose check reads file contents: what was verified at its last clean
  * pass in this session (the files' identities and the entry's journal state). */
 const verifiedPasses=new Map<string,Map<number,string>>();
-async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean}={}):Promise<ReorganizationResult> {
+async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean;appleDouble?:AppleDoubleCleaner}={}):Promise<ReorganizationResult> {
  // A journal written one file per event can hold tens of thousands: its first read reports how many are read.
  const state=await readEvents(m,undefined,(completed,total,name)=>onProgress?.({phase:'verifying',step:'history',completed,total,bytes:0,totalBytes:0,speed:0,file:name??m.id}));
  if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
@@ -784,8 +785,21 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   const signature=[await fileKey(entry.destination),await fileKey(saved),state.finalizing.has(index),state.finalized.has(index),state.slots.get(index)?.join(','),state.renamed.has(index)].join('|');
   passed.set(index,signature);return verified.get(index)!==signature;
  };
- const result:ReorganizationResult={copied:0,skipped:0,errors:[],moved:0,retained:0,retainedBytes:0};const undated:string[]=[];let completed=0,bytes=0;const started=performance.now(),totalBytes=m.entries.reduce((n,e)=>n+e.size,0);
+ const sidecars=options.appleDouble,result:ReorganizationResult={copied:0,skipped:0,errors:[],moved:0,retained:0,retainedBytes:0,...(sidecars?{appleDouble:sidecars.report}:{})};const undated:string[]=[];let completed=0,bytes=0;const started=performance.now(),totalBytes=m.entries.reduce((n,e)=>n+e.size,0);
  const renames=m.strategy==='rename'?{renames:true as const}:{};
+ // macOS "._" files: a rename on exFAT may carry the one beside the file along or leave it behind, so both places are looked at.
+ const tidyMoved=async(entry:Entry,index:number)=>{
+  if(!sidecars)return;
+  await sidecars.besideFile(entry.destination,m.root,stat=>movedIdentity(stat,entry,state.dated.get(index)));
+  if(entry.move)await sidecars.besideGone(entry.source,m.source);
+ };
+ const tidyCopied=async(entry:Entry)=>{
+  if(!sidecars)return;
+  try{
+   const placed=await maybeStat(entry.destination);
+   if(placed)await sidecars.besideFile(entry.destination,m.root,stat=>sameStat(stat,placed));
+  }catch(error){sidecars.warn(entry.destination,error);}
+ };
  const progress=(file:string)=>onProgress?.({phase:'copying',step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file,...renames});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
@@ -806,7 +820,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
     if(!await targetMatches(entry,m,signal,await deep(index,entry)))throw new Error('Finalized destination unavailable');
     if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;
    }
-   if(m.strategy==='rename'&&entry.move&&!state.fallback.has(index)&&!state.slots.get(index)?.length&&!state.finalizing.has(index)&&await relocate(entry,index,m,state,message=>undated.push(message),signal)==='moved'){result.moved++;completed++;progress(path.basename(entry.source));continue;}
+   if(m.strategy==='rename'&&entry.move&&!state.fallback.has(index)&&!state.slots.get(index)?.length&&!state.finalizing.has(index)&&await relocate(entry,index,m,state,message=>undated.push(message),signal)==='moved'){result.moved++;await tidyMoved(entry,index);completed++;progress(path.basename(entry.source));continue;}
    const saved=await savedOriginal(m,index,state);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
    const source=await maybeStat(entry.source),stash=saved?await maybeStat(saved):undefined;
    if(state.finalizing.has(index)){
@@ -822,7 +836,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    let present:boolean;try{present=await targetMatches(entry,m,signal,contents);}catch(error){if(!await preserveIncomplete(entry,index,m,stash?saved!:entry.source,state,signal))throw error;present=false;}
    if(!present&&entry.kept)throw new Error(`The copy to keep is missing; the duplicate stays where it is: ${entry.destination}`);
    if(!present){await copy(entry,index,m,stash?saved!:entry.source,signal,count=>{bytes+=count;progress(path.basename(entry.source));});result.copied++;}else result.skipped++;
-   completed++;progress(path.basename(entry.source));
+   await tidyCopied(entry);completed++;progress(path.basename(entry.source));
   }
   // Setting aside the originals that were moved is its own step: it can take minutes on a slow drive.
   const stashing=m.entries.reduce((count,entry,index)=>count+(entry.move&&!state.finalizing.has(index)&&!state.renamed.has(index)&&!state.handedOff.has(index)?1:0),0);
@@ -849,12 +863,29 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    // deleted, even when the process exits immediately after this operation.
    await fs.rename(entry.source,saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
    await validateOriginal(saved,entry,m.root,true,signal);await checkpoint(m,'stashed',index);result.moved++;
+   await sidecars?.besideGone(entry.source,m.source);
   }
   // Closing the journal, then the emptied folders: each counted, the journal last.
   const folders=m.keepFolders?0:emptiable(m,state.finalized).length;
   const tidy=(done:number,file:string)=>onProgress?.({phase:'copying',step:'tidying',completed:done,total:folders+1,bytes:0,totalBytes:0,speed:0,file,renames:true});
   tidy(0,'');
   await checkpoint(m,'complete');
+  // The organization is complete: what follows can only add warnings. The "._" files already in the folders this
+  // organization touched, beside a media file or companion or left without their main file.
+  if(sidecars){
+   const touched=new Map<string,string>();
+   for(const [index,entry] of m.entries.entries()){
+    if(state.handedOff.has(index))continue;
+    touched.set(path.dirname(entry.destination),m.root);
+    if(entry.move)touched.set(path.dirname(entry.source),m.source);
+   }
+   const total=touched.size,scoped=new Map<string,string[]>();
+   for(const [folder,scope] of touched)scoped.set(scope,[...(scoped.get(scope)??[]),folder]);
+   let looked=0;
+   try{
+    for(const [scope,folders] of scoped)await sidecars.sweep(scope,folders,signal,(_done,folder)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total,bytes:0,totalBytes:0,speed:0,file:path.basename(folder),renames:true});});
+   }catch(error){sidecars.warnFolder(m.root,error);}
+  }
   // The user can keep emptied source folders; the choice is part of the signed journal.
   await removeSiblingPointers(m);
   if(!m.keepFolders)await removeEmptySourceFolders(m,state.finalized,signal,(done,folder)=>tidy(done,path.basename(folder)));
@@ -867,7 +898,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  for(const [index,entry] of m.entries.entries())if(!state.finalizing.has(index)&&await savedOriginal(m,index,state).catch(()=>undefined)){result.retained++;result.retainedBytes+=entry.size;}
  return result;
 }
-export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false):Promise<ReorganizationResult> {
+export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false,appleDouble?:AppleDoubleCleaner):Promise<ReorganizationResult> {
  checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
  const id=randomUUID(),manifest:Manifest={version:1,id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,sourceIdentity:await identity(transfer.source),entries:[],...(strategy==='rename'?{strategy:'rename' as const}:{}),...(keepFolders?{keepFolders:true as const}:{}),...(libraries.length?{libraries}:{})};
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.source;folder=path.dirname(folder)){if(!beneath(folder,transfer.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
@@ -875,7 +906,7 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  // No destination publication or original relocation occurs until the complete
  // immutable review and containing directories have been synchronized.
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
- const result=await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress));
+ const result=await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress,{appleDouble}));
  // Release re-verifies every destination by checksum before removing a kept original.
  if(releaseDuplicates&&result.errors.length===0&&result.retained>0){
   try{

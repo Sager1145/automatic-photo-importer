@@ -1,13 +1,14 @@
 import {executeMany,executeReorganization,type OrganizationStrategy} from './index';
 import {destinationEntries,destinationParts,requiredTransferSpace} from './allocation';
 import type {ExecutionIssue,Progress,TransferPlan} from '../shared';
+import {addAppleDoubleReport,emptyAppleDoubleReport} from './appledouble';
 
 /** Execute independent destination copies; one unavailable disk must not cancel the
  * other. Copies to several destinations share one read of each source file. A destination's
  * video folder (video-root layout) runs as its own plan but is validated, reported and
  * settled as part of that destination. */
 export async function executeDestinations(plans:TransferPlan[],options:{
- signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;keepSourceFolders?:boolean;releaseDuplicates?:boolean;
+ signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;removeAppleDouble?:boolean;keepSourceFolders?:boolean;releaseDuplicates?:boolean;
  onVerified?:(source:string,sha256:string,identity:string)=>void;
  validate(index:number):Promise<void>;
  progress(index:number,value:Progress,pendingBytes:number):void;
@@ -23,7 +24,8 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
  const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>),works=slots.map(()=>undefined as Progress['work']);
  const finished=new Set<number>();
- const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];warnings?:ExecutionIssue[];notes:string[]};
+ const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];warnings?:ExecutionIssue[];notes:string[];appleDouble?:import('./appledouble').AppleDoubleReport};
+ if(options.removeAppleDouble)result.appleDouble=emptyAppleDoubleReport();
  const report=(slot:number,value:Progress)=>{
   // Checks before anything is written (an organization's journal and files, a copy's existing files) count records or files, not the plan's work.
   if(value.step==='existing')existing[slot]=value.completed;
@@ -49,7 +51,8 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    try{
     await options.validate(index);
     for(const [slot,{part}] of slots.entries())if(slots[slot].index===index){
-     const moved=await executeReorganization(part,options.signal,value=>report(slot,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders,releaseDuplicates:options.releaseDuplicates});
+     const moved=await executeReorganization(part,options.signal,value=>report(slot,value),{strategy:options.strategy,keepSourceFolders:options.keepSourceFolders,releaseDuplicates:options.releaseDuplicates,removeAppleDouble:options.removeAppleDouble});
+     addAppleDoubleReport(result.appleDouble!,moved.appleDouble);
      result.copied+=moved.copied;result.skipped+=moved.skipped;result.moved+=Number(moved.moved);result.retained+=Number(moved.retained);result.retainedBytes+=moved.retainedBytes;if(moved.released){result.released=(result.released??0)+moved.released;result.releasedBytes=(result.releasedBytes??0)+(moved.releasedBytes??0);}result.notes.push(...moved.notes??[]);
      result.errors.push(...moved.errors.map(error=>`Destination ${index+1}: ${error}`));
     }
@@ -67,11 +70,11 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    try{await options.validate(index);ready.push(...slots.flatMap((slot,position)=>slot.index===index?[position]:[]));}
    catch(error){if(options.signal.aborted)throw error;failed(index,error);settle(index);}
   }
-  const results=await executeMany(ready.map(slot=>slots[slot].part),options.signal,(position,value)=>report(ready[position],value),{verify:options.verify,onVerified:options.onVerified},position=>{finished.add(ready[position]);const index=slots[ready[position]].index;if(slots.every((slot,other)=>slot.index!==index||finished.has(other)))settle(index);});
+  const results=await executeMany(ready.map(slot=>slots[slot].part),options.signal,(position,value)=>report(ready[position],value),{verify:options.verify,onVerified:options.onVerified,removeAppleDouble:options.removeAppleDouble},position=>{finished.add(ready[position]);const index=slots[ready[position]].index;if(slots.every((slot,other)=>slot.index!==index||finished.has(other)))settle(index);});
   results.forEach((value,position)=>{
    const index=slots[ready[position]].index;
    if(value instanceof Error){failed(index,value);return;}
-   result.copied+=value.copied;result.skipped+=value.skipped;result.removed+=value.removed??0;
+   result.copied+=value.copied;result.skipped+=value.skipped;result.removed+=value.removed??0;addAppleDoubleReport(result.appleDouble!,value.appleDouble);
    result.errors.push(...value.errors.map(error=>`Destination ${index+1}: ${error}`));
    for(const issue of value.warnings??[])(result.warnings??=[]).push({...issue,destination:index+1});
   });
