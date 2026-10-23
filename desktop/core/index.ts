@@ -595,7 +595,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const parts=[transfer,...(transfer.videos?[transfer.videos]:[])];
     const pending=parts.flatMap(part=>part.entries.filter(entry=>!entry.skip&&entry.size>0));
     if(!pending.length) return 0;
-    if(options.lookElsewhere&&!await options.lookElsewhere(parts.map(part=>part.rootIdentity))) return 0;
+    if(options.lookElsewhere&&!await options.lookElsewhere(parts.map(part=>part.rootIdentity))) {log('detailed','plan','locating',{destination:destination.root,decision:'skip',reason:'the lookup is not allowed for this destination (not a fresh, unchanged backup)',toCopy:pending.length});return 0;}
     const limits={candidates:options.elsewhereLimits?.candidates??2000,bytes:options.elsewhereLimits?.bytes??20e9};
     let looked=0;lookingUp=true;readToLocate=0;
     const locating=(file:string,count=looked,total=pending.length)=>onProgress?.(count,file,{step:'locating',total,bytes:readToLocate,totalBytes:0});
@@ -617,7 +617,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         const candidates=sizes.get(size)?.filter(file=>!entries.some(entry=>pathKey(file)===pathKey(entry.source)))??[];
         const done=(count:number)=>{if(!signal?.aborted){looked+=count;locating(path.relative(sourceRoot,entries[0]!.source));}};
         if(!candidates.length) {done(entries.length);continue;}
-        if(candidates.length>limits.candidates||candidates.length*size>limits.bytes) {elsewhereSkipped.push({size,candidates:candidates.length});done(entries.length);continue;}
+        if(candidates.length>limits.candidates||candidates.length*size>limits.bytes) {elsewhereSkipped.push({size,candidates:candidates.length});log('detailed','plan','locating',{destination:destination.root,decision:'skip-size',size,candidates:candidates.length,files:entries.length,reason:'too many same-size files to read'});done(entries.length);continue;}
         try {
           const partOf=(file:string)=>parts.find(item=>beneath(file,item.root));
           const candidatePrefix=new Map<string,string>();
@@ -648,7 +648,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
                   await contained(candidate,part.root);
                   const stat=await fs.lstat(candidate,{bigint:true});
                   if(!stat.isFile()||stat.size!==BigInt(entry.size)) continue;
-                  found.set(entry.id,{path:candidate,part,digest:sha256});break;
+                  found.set(entry.id,{path:candidate,part,digest:sha256});log('detailed','plan','locating',{destination:destination.root,decision:'found',source:entry.source,wanted:entry.destination,at:candidate,sha256});break;
                 } catch(error) { if(isAbort(error)) throw error; }
               }
             } catch(error) { if(isAbort(error)) throw error; /* The copy checks this file again and reports it where it always has. */ }
@@ -675,6 +675,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     // A file that stays keeps the checksum this lookup computed, so the plan never reads it twice.
     for(const part of parts) for(const entry of part.entries) if(!entry.digest) {const known=resolved.get(entry.source);if(known)entry.digest=known;}
     elsewhereFiles+=moved.size;
+    log('detailed','plan','locating',{destination:destination.root,decision:'done',looked:pending.length,found:found.size,movedAsAlreadyThere:moved.size,partialFamilies:partial,readBytes:readToLocate});
     return partial;
   }
   let elsewhereFiles=0,partialFamilies=0,elsewhereSkipped:{size:number;candidates:number}[]=[];

@@ -62,6 +62,7 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
     if(receipt.kind==='publication'&&receipt.present) continue;
     if(receipt.resumable&&receipt.file) resumable.add(receipt.file);
     if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) (receipt.complete?recoverable:dead).add(receipt.file);
+    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) log('detailed','residue','classified',{file:receipt.file,kind:receipt.complete?'recoverable':'partial',reason:receipt.complete?'complete staged copy whose card file changed or vanished':'incomplete staged copy whose source changed'});
     pending.push({file,stat,resumable:receipt.resumable,...(receipt.kind==='stage'&&receipt.owned&&receipt.present&&receipt.file?{target:receipt.file}:{})});
   }
   // A receipt goes with its copy: kept while the copy is kept, removed once the copy is dead or gone.
@@ -191,7 +192,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
-    if(item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) continue;
+    if(item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':'copy a re-import could continue'});continue;}
     handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);

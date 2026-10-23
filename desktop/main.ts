@@ -252,8 +252,8 @@ function refreshOrganizations():Promise<void>{
 /** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
 function yieldListing(){
  if(jobsActive()&&stopConversions())recoveryRefresh.defer();
- if(listingControl){if(!listingControl.signal.aborted&&drivesInUse())listingControl.abort();}
- else if(!drivesInUse())recoveryRefresh.resume();
+ if(listingControl){if(!listingControl.signal.aborted&&drivesInUse()){log('detailed','listing','yield',{reason:'a job needs the drive; what was read is kept'});listingControl.abort();}}
+ else if(!drivesInUse()){if(state.organizationRecoveryPaused)log('detailed','listing','resume',{reason:'no job is using the drive'});recoveryRefresh.resume();}
 }
 async function listOrganizations(signal:AbortSignal){
  const destinations=state.preferences.destinations;
