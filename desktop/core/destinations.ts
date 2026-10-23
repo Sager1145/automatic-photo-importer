@@ -21,14 +21,18 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  // Publication workspace is one related family per destination, as requiredTransferSpace reserved it.
  const workspace=plans.map(plan=>requiredTransferSpace(plan)-bytesOf(plan));
  const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
- const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0);
+ const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>);
+ const finished=new Set<number>();
  const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];notes:string[]};
  const report=(slot:number,value:Progress)=>{
   // Checks before anything is written (an organization's journal and files, a copy's existing files) count records or files, not the plan's work.
   if(value.step==='existing')existing[slot]=value.completed;
   if(value.step==='earlier'||value.step==='confirming'||value.step==='existing'||value.step==='removing'||value.step==='stashing'||value.step==='tidying'||value.step==='releasing'||value.step==='checking'&&value.phase==='verifying'){const index=slots[slot].index;options.progress(index,value.step==='existing'?{...value,total,completed:existing.reduce((a,b)=>a+b,0)}:value,slots.reduce((rest,item,other)=>item.index===index?rest+Math.max(0,pending[other]-latest[other].bytes):rest,0)+workspace[index]);return;}
-  const required=Math.max(pending[slot],value.totalBytes,value.bytes);pending[slot]=required;latest[slot]={bytes:value.bytes,completed:value.completed};
-  const sum=(key:'bytes'|'completed')=>latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
+  const required=Math.max(pending[slot],value.totalBytes,value.bytes);pending[slot]=required;latest[slot]={bytes:value.bytes,completed:value.completed};phases[slot]=value.phase??'copying';
+  // While verifying, a piece still waiting counts nothing yet (its copy count is not verification) and a finished piece counts all its files.
+  const verifying=value.phase==='verifying';
+  const done=()=>latest.reduce((count,item,other)=>count+(verifying?finished.has(other)?slots[other].part.entries.length:phases[other]==='verifying'?item.completed:0:item.completed),0);
+  const sum=(key:'bytes'|'completed')=>key==='completed'?done():latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
   const grown=own.some(other=>pending[other]>initialPending[other]);
   options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed')},own.reduce((rest,other)=>rest+Math.max(0,pending[other]-latest[other].bytes),0)+(grown?fullWorkspace[index]:workspace[index]));
  };
@@ -52,7 +56,6 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  const ready:number[]=[],settled=new Set<number>();
  // A destination settles once each of its plans has.
  const settle=(index:number)=>{if(!settled.has(index)){settled.add(index);options.settled(index);}};
- const finished=new Set<number>();
  try{
   for(let index=0;index<plans.length;index++){
    options.signal.throwIfAborted();
