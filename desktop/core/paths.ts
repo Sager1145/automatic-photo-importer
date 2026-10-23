@@ -231,15 +231,15 @@ export function directCapable(root:string,rootIdentity:string,exclusiveCopy=fals
   const key=`${root}\0${rootIdentity}\0${exclusiveCopy}`;
   let found=directRoots.get(key);
   if(!found) {
-    found=(async()=>{
-      try {
-        const type=await filesystemOf(await mountOf(root));
-        if(type!=='exfat'&&type!=='msdos') return false;
-        if(exclusiveCopy) return true;
-        const links=await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:10000},(error,stdout)=>error?reject(error):resolve(stdout.trim())));
-        return links==='1';
-      } catch { return false; }
-    })();
+    const answer=async():Promise<boolean> => {
+      const type=await filesystemOf(await mountOf(root));
+      if(type!=='exfat'&&type!=='msdos') return false;
+      if(exclusiveCopy) return true;
+      const links=await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim())));
+      return links==='1';
+    };
+    // A tool that fails or times out (a busy machine) is asked again once and, if it still fails, answers "staged" for this run only: it is not remembered.
+    found=(async()=>{try { return await answer(); } catch { return answer().catch(()=>{directRoots.delete(key);return false;}); }})();
     directRoots.set(key,found);
   }
   return found;
