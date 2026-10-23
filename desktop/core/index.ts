@@ -226,7 +226,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }
   const allRoots=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
   if(options.drive&&!options.backup)throw new Error('Only drive backups use a drive folder.');
-  const unknownMode:NoMetadataHandling=options.backup?'fileDate':options.noMetadata??'fileDate',unknownFolder=unknownMode==='folder'?noMetadataFolderName(options.noMetadataFolder):options.noMetadataFolder??UNKNOWN_FILES_FOLDER;
+  const unknownMode:NoMetadataHandling=options.backup?'fileDate':options.noMetadata??'fileDate',unknownFolder=unknownMode==='folder'?noMetadataFolderName(options.noMetadataFolder,[options.editedFolder??'editied']):options.noMetadataFolder??UNKNOWN_FILES_FOLDER;
   if(!options.backup) {folder({fields:{}},new Date(0),undefined,options);folder({fields:{}},new Date(0),{video:true,format:'MOV'},options);}
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   // The Problem files folder is the app's own, like Drive backups: never organized again, never misplaced.
@@ -429,9 +429,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // decided by its primary, so it is kept or filed apart whole.
   const unknownFiles:NoMetadataFile[]=[],unknownCounts:Record<NoMetadataReason,number>={noDate:0,noCamera:0,unreadable:0};
   const validCapture=(date:string|undefined)=>{const day=date?.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/)?.[1],calendar=day?new Date(day+'T00:00:00Z'):null;return !!calendar&&Number.isFinite(calendar.getTime())&&calendar.toISOString().slice(0,10)===day;};
-  const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean):NoMetadataReason|undefined=>{
+  const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean,context?:Metadata):NoMetadataReason|undefined=>{
     if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf&&!cameraRule))return undefined;
-    const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=infos.get(root.path);
+    const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=cameraRule?context:infos.get(root.path);
     if(root.kind==='Other'&&!cameraRule)return undefined;
     if(unreadableMeta.has(root.path))return 'unreadable';
     if(!validCapture(info?.date))return 'noDate';
@@ -453,7 +453,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let relative:string,place:ReturnType<typeof folder>|undefined,forcedRoot:'photos'|'videos'|undefined;
-    const unknown=unknownReason(file,primary,file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera');
+    const unknown=unknownReason(file,primary,file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera',info);
     if(unknown) {
       unknownFiles.push({path:file.path,relative:file.relative,reason:unknown});unknownCounts[unknown]++;
       log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(unknownMode==='folder'?{destination:unknownRelative(file)}:{})});

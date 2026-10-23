@@ -1,6 +1,9 @@
-/** Whether a job that found unknown files must stop at a confirmation before it starts. A started job
- * (Start, Import now, Organize now, Organize backup...) asks; an automatic one never waits, it records a warning
- * instead; one the user already confirmed (and its retries) does not ask again. */
-export function needsUnknownConfirmation(input:{found:boolean;automatic:boolean;confirmed:boolean;queuedAutomatically:boolean}):boolean {
- return input.found&&!input.automatic&&!input.confirmed&&!input.queuedAutomatically;
+/** What a job that has planned does about unknown files it found.
+ * run: go on (nothing found, an automatic job that records a warning instead, or already confirmed).
+ * park: a job someone started stops at the review's confirmation (nothing has been written).
+ * defer: a review is open or another job is running, so it waits its turn and plans again later; it never opens a second
+ * review over the first and never starts a review beside running work. */
+export function unknownDecision(input:{found:boolean;automatic:boolean;confirmed:boolean;queuedAutomatically:boolean;reviewOpen:boolean;othersRunning:boolean}):'run'|'park'|'defer' {
+ if(!input.found||input.automatic||input.confirmed||input.queuedAutomatically)return 'run';
+ return input.reviewOpen||input.othersRunning?'defer':'park';
 }
