@@ -365,6 +365,18 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    if(clipped.length)console.log(`CLIPPED CONTROLS ${clipped.length} ${JSON.stringify(clipped.slice(0,40))}`);
    assert.deepEqual(clipped,[],'Controls clipped or overflowing');
   });
+  await check('Review actions Copy reviewed files and Discard review stay fully inside the viewport at every window and text size',async()=>{
+   const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();const bad:Record<string,unknown>[]=[];
+   try{
+    await action({type:'preview',sourceId:'fixture:1'});await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click()");await wait(()=>js<boolean>("document.querySelector('.review-footer button')!==null"),'review footer');
+    for(const [w,h] of [[1000,720],[1440,940]]){window.setContentSize(w,h);
+     for(const scale of [1,2]){await action({type:'preferences',patch:{textScale:scale}});await wait(()=>js<boolean>(`getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()===${JSON.stringify(String(scale))}`),`text scale ${scale}`);await new Promise(r=>setTimeout(r,300));
+      const found=await js<Record<string,unknown>[]>(`(()=>Array.from(document.querySelectorAll('.review-footer button')).map(b=>{const r=b.getBoundingClientRect();return {text:b.textContent.trim(),top:r.top,bottom:r.bottom,height:r.height,vh:window.innerHeight,ok:r.top>=0&&r.bottom<=window.innerHeight+0.5&&r.height>=28};}))()`);
+      if(found.length<2)bad.push({window:`${w}x${h}`,scale,found});for(const f of found)if(!f.ok)bad.push({window:`${w}x${h}`,scale,...f});}}
+   }finally{await action({type:'preferences',patch:{textScale:original}});window.setContentSize(width,height);await action({type:'discardReview'});}
+   if(bad.length)console.log(`REVIEW FOOTER ${JSON.stringify(bad)}`);
+   assert.deepEqual(bad,[],'Review actions not fully visible');
+  });
   if(!uiOnly){
   await check('Five sources run and the sixth queues; Stop settles every job',async()=>{
    await action({type:'preferences',patch:{parallel:5}});const started=await action({type:'start'});
