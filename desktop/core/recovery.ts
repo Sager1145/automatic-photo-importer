@@ -1114,7 +1114,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
-    looked++;if(index%5===0){checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);}
+    looked++;checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);
     // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
     if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m,(done,total,file)=>report(position,.5,file||id,undefined,undefined,{done,total}),signal))){
      // Any kept original of it stays, but is not among those a finalize would release.
@@ -1169,6 +1169,8 @@ export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'
 export async function finalizeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationFinalization>{
  await adoptLegacyStorage(root);
  return writing(root,()=>locked(jobPath(root,id),async()=>{
+  // Every slow call inside an entry can repeat the last report, so a long entry never looks frozen.
+  let last:OrganizationProgress|undefined;const report=(progress:OrganizationProgress)=>{last=progress;onProgress?.(progress);},tick=()=>{if(last)onProgress?.(last);};
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,m.root,signal);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
@@ -1177,24 +1179,25 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   // Check every entry before authorizing the first deletion, including entries
   // that stay at their original paths and previously finalized destinations.
   for(const [index,entry]of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
+   checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
    if(state.undone.size)throw new Error('This organization was undone');
    // A later organization took this file over: its kept original, if any, is kept, not released
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
    if(state.renamed.has(index)){const target=await maybeStat(entry.destination);if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
-   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');continue;}
+   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');tick();continue;}
    const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!entry.move)await parents(entry,m);
    if(entry.move){
     if(source)throw new Error('Original path reappeared; retained originals preserved');
-    if(saved)await validateOriginal(saved,entry,m.root,true,signal);
+    if(saved){await validateOriginal(saved,entry,m.root,true,signal);tick();}
     else if(!state.finalizing.has(index))throw new Error('Retained original unavailable without a finalization intent');
    }else if(!state.finalizing.has(index))await validateOriginal(entry.source,entry,m.source,false,signal);
    if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable; retained originals preserved');
+   tick();
   }
   const result:OrganizationFinalization={removed:0,bytes:0,finalized:0,handedOff:0};
   for(const [index,entry]of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
+   checkAbort(signal);report({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index))){result.handedOff++;continue;}
    // A moved file has no kept duplicate to release.
    if(state.renamed.has(index))continue;
@@ -1205,19 +1208,20 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    // Publish and synchronize the remaining copy before the authenticated intent.
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable; retained originals preserved');
-   await syncFile(entry.destination);await syncParents(entry.destination,m.root);
+   tick();await syncFile(entry.destination);await syncParents(entry.destination,m.root);tick();
    if(!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed while synchronizing');
    if(!entry.move){
     if(saved)throw new Error('Unexpected retained original');
     if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal);await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
    }else if(saved){
-    await validateOriginal(saved,entry,m.root,true,signal);const originalStat=await fs.lstat(saved,{bigint:true});
+    await validateOriginal(saved,entry,m.root,true,signal);tick();const originalStat=await fs.lstat(saved,{bigint:true});
     if(!state.finalizing.has(index)){await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
     checkAbort(signal);await roots(m);await contained(saved,m.root);await contained(entry.destination,m.root);
     if(await maybeStat(entry.source)||!matches(await fs.lstat(saved,{bigint:true}),snapshot(originalStat))||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('A verified file changed before finalization');
-    await fs.unlink(saved);await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
+    await fs.unlink(saved);tick();await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
    }else if(!state.finalizing.has(index))throw new Error('Retained original disappeared before authorization');
    if(!state.finalized.has(index)){await checkpoint(m,'finalized',index);state.finalized.add(index);}
+   tick();
    result.finalized++;
   }
   await removeSiblingPointers(m);
@@ -1235,6 +1239,7 @@ export interface OrganizationUndo {restored:number;removed:number;handedOff:numb
 export async function undoOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationUndo>{
  await adoptLegacyStorage(root);
  return writing(root,()=>locked(jobPath(root,id),async()=>{
+  let last:OrganizationProgress|undefined;const report=(progress:OrganizationProgress)=>{last=progress;onProgress?.(progress);},tick=()=>{if(last)onProgress?.(last);};
   checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,m.root,signal);
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(state.finalizing.size||state.finalized.size)throw new Error('Kept originals were already released, so this organization cannot be undone');
@@ -1276,16 +1281,16 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   // from both places are all named, and nothing is changed.
   const missing:string[]=[];
   for(const [index,entry] of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});if(state.undone.has(index))continue;
+   checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});if(state.undone.has(index))continue;
    await contained(entry.source,m.source);await contained(entry.destination,m.root);
-   if(await handedOff(index))continue;
+   if(await handedOff(index))continue;tick();
    if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
-   const saved=await savedOriginal(m,index,state);
-   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,m.root,true,signal);}
+   const saved=await savedOriginal(m,index,state);tick();
+   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,m.root,true,signal);tick();}
   }
   if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
   for(const [step,index] of [...m.entries.keys()].reverse().entries()){
-   checkAbort(signal);onProgress?.({step:'restoring',completed:step+1,total:m.entries.length,file:m.entries[index]!.source});if(state.undone.has(index))continue;await roots(m);
+   checkAbort(signal);report({step:'restoring',completed:step+1,total:m.entries.length,file:m.entries[index]!.source});if(state.undone.has(index))continue;await roots(m);
    const entry=m.entries[index]!,handed=await handedOff(index);if(handed)result.handedOff++;
    // A moved file a later organization took over is left with it; a kept original still comes back.
    if(handed&&moved(index)){}
@@ -1305,16 +1310,16 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     }
    } else {
     const saved=await savedOriginal(m,index,state);
-    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;}
+    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;tick();}
     // Only a copy this organization published is removed, and only once the reviewed
     // original is verified at its own path, so the copy is never the last one.
     if(state.published.has(index)&&await maybeStat(entry.destination)&&await maybeStat(entry.source)){
      // Restoring a kept original moves its change time; its contents are still hashed.
-     await validateOriginal(entry.source,entry,m.source,true,signal);
-     if(await targetMatches(entry,m,signal)){await fs.unlink(entry.destination);await syncParents(entry.destination,m.root);result.removed++;}
+     await validateOriginal(entry.source,entry,m.source,true,signal);tick();
+     if(await targetMatches(entry,m,signal)){tick();await fs.unlink(entry.destination);await syncParents(entry.destination,m.root);result.removed++;}
     }
    }
-   await checkpoint(m,'undone',index);state.undone.add(index);
+   tick();await checkpoint(m,'undone',index);state.undone.add(index);
   }
   await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
   return result;
@@ -1404,19 +1409,21 @@ function deletable(m:Manifest,state:JournalState):void{
  * go first; without this journal, they could no longer be checked. Read in this journal's folder, the
  * folders it lists or leaves pointers in, its neighbours, the folders pointers here name, and the folders
  * each journal found lists. A journal that cannot be read stops the deletion: it may name this one. */
-async function dependents(m:Manifest):Promise<string[]>{
- const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
+async function dependents(m:Manifest,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<string[]>{
+ let done=0,found=0;const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
  for(const name of await fs.readdir(path.join(m.root,storage)).catch(()=>[] as string[])){const pointed=await siblingPointer(m.root,name).catch(()=>undefined);if(pointed&&!folders.includes(pointed))folders.push(pointed);}
  const unreadable=(id:string,folder:string,error:unknown)=>new Error(`Organization ${id} in ${folder} cannot be read, so it is not known whether it still relies on this one; nothing was deleted (${error instanceof Error?error.message:String(error)})`);
  for(let position=0;position<folders.length;position++){
-  const folder=folders[position]!;
-  for(const id of await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[])){
+  const folder=folders[position]!,listed=await fs.readdir(path.join(folder,storage)).catch(()=>[] as string[]);
+  found+=listed.filter(id=>id!==m.id&&uuid.test(id)).length;onLater?.(done,found,folder);
+  for(const id of listed){
    if(id===m.id||!uuid.test(id))continue;
+   checkAbort(signal);onLater?.(done++,found,id);
    // A folder with no manifest holds no journal; one another host signed was never written by this app.
    const other=await readManifest(folder,id).catch(error=>{if(code(error)==='ENOENT'||error instanceof Error&&error.message.startsWith('Recovery journal authentication failed'))return undefined;throw unreadable(id,folder,error);});
    if(!other)continue;
    for(const library of other.libraries??[])if(!folders.includes(library))folders.push(library);
-   const state=await readEvents(other,undefined,undefined,false).catch(error=>{throw unreadable(id,folder,error);});
+   const state=await readEvents(other,undefined,undefined,false,other.root,signal).catch(error=>{if(isAbort(error))throw error;throw unreadable(id,folder,error);});
    const replaced=state.superseded===m.id&&(state.successorRoot??other.root)===m.root;
    const handed=!state.undoComplete&&[...state.handedOff.values()].some(handOff=>handOff.successor===m.id&&handOff.successorRoot===m.root);
    if(replaced||handed)names.push(id);
@@ -1479,7 +1486,7 @@ export async function deleteOrganizationRecovery(root:string,id:string,signal?:A
  await adoptLegacyStorage(root);
  const check=async()=>{
   const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,m.root,signal);deletable(m,state);
-  const needed=await dependents(m);
+  const needed=await dependents(m,(done,total,file)=>onProgress?.({step:'later',completed:done,total,file}),signal);
   if(needed.length)throw new Error(`Organization ${needed.join(', ')} still relies on this organization's records; delete ${needed.length===1?'that one':'those'} first`);
   return {m,state};
  };

@@ -100,3 +100,21 @@ test('every new progress label and job message exists in all four languages',()=
   for(const language of ['en','zh-Hans','zh-Hant','ja'] as const)assert.ok(entry[language],`${key} ${language}`);
  }
 });
+
+test('readEvents of 5,000 per-event files reports at least every 100 files, on a full read and on the incremental one',async t=>{
+ const secret='fixture-only-host-recovery-secret-32bytes';
+ const {photos,id}=await finished(t);
+ const folder=path.join(photos,'Photo Importer Recovery',id),log=path.join(folder,'event-log.jsonl');
+ const lines=(await fs.readFile(log,'utf8')).split('\n').filter(Boolean);
+ const {createHmac,randomUUID}=await import('node:crypto');
+ const checked=(index:number)=>{const record={id,root:photos,event:'checked',index:0,at:new Date(Date.UTC(2026,9,21,0,0,0,index)).toISOString()};return JSON.stringify({...record,seal:createHmac('sha256',secret).update(JSON.stringify(record)).digest('hex')});};
+ for(let index=0;lines.length<2500;index++)lines.push(checked(index));
+ await Promise.all(lines.map(line=>fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),line)));await fs.rm(log);
+ const reads=async()=>{const seen:number[]=[];await core.getOrganizationRecovery(photos,{verifyContents:false,onProgress:update=>{if(update.read!==undefined)seen.push(update.read);}});return seen;};
+ const gaps=(seen:number[],name:string)=>{let last=0,widest=0;for(const read of seen){widest=Math.max(widest,read-last);last=Math.max(last,read);}assert.ok(widest<=100,`${name}: widest step ${widest}`);};
+ const full=await reads();gaps(full,'full read');assert.ok(Math.max(...full)>=2500);
+ // 2,500 more files of a finished, cached journal: only those are read, and they are counted as they go.
+ for(let index=0;index<2500;index++)await fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),checked(10000+index));
+ const incremental=await reads();gaps(incremental,'incremental read');
+ assert.ok(incremental.filter(read=>read>0&&read<2500).length>=20,'counted file by file, not once at the end');
+});
