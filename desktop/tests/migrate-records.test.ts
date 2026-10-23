@@ -216,3 +216,16 @@ test('R: a resumed conversion whose earlier v5 receipt names the same file as th
  assert.ok(await exists(partial));assert.ok(await exists(earlier!.file));assert.ok(await exists(receipt));
  assert.equal((await fs.readdir(await stagingFor(f.destination))).length,1,'no fresh name was tried');
 });
+
+test('R: the receipt log is read once per walk, not once per converted receipt',async t=>{
+ const f=await card(t);
+ for(let index=0;index<25;index++){const partial=oldStage(f.entry);await fs.writeFile(partial,f.bytes.subarray(0,100+index));await legacyReceipt(await f.record('stage',partial));}
+ const files=(await import('node:fs/promises')).default,{syncBuiltinESMExports}=await import('node:module');
+ const open=files.open.bind(files);let reads=0;
+ t.mock.method(files,'open',async(...args:Parameters<typeof files.open>)=>{if(/receipts-\d{6}\.jsonl$/.test(String(args[0]))&&(args[1]===undefined||args[1]==='r'||args[1]===0||typeof args[1]==='number'&&!(args[1]&1)&&!(args[1]&2)))reads++;return open(...args);});
+ syncBuiltinESMExports();t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+ assert.deepEqual((await migrateDrive([f.destination])).problems,[]);
+ t.mock.restoreAll();syncBuiltinESMExports();
+ assert.equal((await openReceiptsFor(f.destination)).size,25);
+ assert.ok(reads<=3,`segment reads: ${reads}`);
+});
