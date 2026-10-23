@@ -1398,8 +1398,8 @@ async function dependents(m:Manifest,onLater?:(done:number,total:number,file:str
  const unreadable=(id:string,folder:string,error:unknown)=>new Error(`Organization ${id} in ${folder} cannot be read, so it is not known whether it still relies on this one; nothing was deleted (${error instanceof Error?error.message:String(error)})`);
  for(let position=0;position<folders.length;position++){
   const folder=folders[position]!;
-  // A folder that resolves elsewhere (a link) can never get a notice, so it never refuses.
-  if(folder===m.root||await fs.realpath(folder).then(real=>real===folder,()=>false))await refuseOldRecords(folder);
+  // A folder that is itself a link can never get a notice, so it never refuses (a real folder reached through a linked parent does).
+  if(folder===m.root||await fs.lstat(folder).then(stat=>!stat.isSymbolicLink(),()=>true))await refuseOldRecords(folder);
   const listed=(await journalsIn(folder)).filter(journal=>journal.id!==m.id);
   found+=listed.length;onLater?.(done,found,folder);
   for(const {id} of listed){

@@ -553,7 +553,9 @@ let oldRecordsAgain:NodeJS.Timeout|undefined;
 onOldRecordsFound(folder=>{if(folder)oldRecords.note(folder);if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
 /** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the reviewed list. */
 async function acknowledgeDrive(drive:string){
- if(oldRecordsTask)await oldRecordsTask;
+ // No scan may start again meanwhile and race the acknowledgement.
+ oldRecordsPending=false;
+ while(oldRecordsTask)await oldRecordsTask;
  const count=await oldRecords.acknowledge(drive);
  log('normal','records','old-records-acknowledged',{drive,items:count});
  if(oldRecords.drives.length)state.oldRecords=[...oldRecords.drives];else delete state.oldRecords;

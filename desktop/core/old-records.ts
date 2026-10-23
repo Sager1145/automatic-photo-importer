@@ -150,11 +150,11 @@ export async function refuseOldRecords(...roots:string[]):Promise<void>{
 /** A drive as the app knows it (a configured destination) with the folders it looks at there. */
 export interface DriveRoots {drive:string;key:string;roots:string[];}
 /** The notice: which drives hold old records this Mac wrote and the user has not acknowledged. The folders to look at
- * are the configured ones plus every folder a refusal or an inventory named (an unconfigured sibling beside a library
- * is checked when a journal is deleted, so its records must be acknowledgeable too), each put with the configured
- * drive on its device, or else with its own volume. */
+ * are the configured ones plus every folder a refusal named (an unconfigured sibling beside a library is checked when
+ * a journal is deleted, so its records must be acknowledgeable too), each put with the configured drive on its
+ * device, or else with its own volume. An inventory never adds a folder. */
 export class OldRecordsNotice {
- /** Folders named by a refusal or an inventory, beyond the configured ones. */
+ /** Folders a refusal named, beyond the configured ones. */
  readonly extra=new Set<string>();
  /** Drives holding unacknowledged old records, as of the last scan. */
  drives:string[]=[];
