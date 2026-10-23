@@ -81,7 +81,6 @@ Last verified: {completed} of {total} files|上次校验：{completed}/{total} �
 Photo Importer|照片导入器|照片匯入器|写真インポーター
 Automatic Photo Importer|自动照片导入器|自動照片匯入器|自動写真インポーター
 Opening your camera workbench…|正在打开相机工作台…|正在開啟相機工作台…|カメラワークベンチを開いています…
-Try again|重试|重試|再試行
 Import desk|导入工作台|匯入工作台|インポート
 Organization|整理|整理|整理
 History|历史记录|歷史記錄|履歴
@@ -117,6 +116,8 @@ Ocean accent|海洋蓝|海洋藍|オーシャン
 Forest accent|森林绿|森林綠|フォレスト
 Import dashboard|导入仪表板|匯入儀表板|インポートダッシュボード
 Import overview|导入概览|匯入概覽|インポート概要
+Overview|概览|概覽|概要
+Show or hide the import overview|显示或隐藏导入概览|顯示或隱藏匯入概覽|インポート概要の表示/非表示
 Transfers running|正在传输|正在傳輸|転送中
 Review pending|等待审核|等待審核|確認待ち
 Idle|空闲|閒置|待機中

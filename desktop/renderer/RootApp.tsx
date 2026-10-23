@@ -4,7 +4,7 @@ import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
@@ -15,9 +15,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
+import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
-import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
+import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
@@ -54,9 +54,11 @@ const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
   { value: 'flat', title: 'Everything in the camera folder', detail: 'Photos and videos side by side.' },
   { value: 'video-root', title: 'A separate video backup folder', detail: 'Videos go to their own backup folder beside the photo backup folder.' },
 ];
-function samplePath(template: string): string[] { return template.replaceAll('{yearMonthName}', '2026-10 October').replaceAll('{monthName}', '10 October').replaceAll('{year}', '2026').replaceAll('{yyyymm}', '202610').replaceAll('{month}', '10').replaceAll('{day}', '20').replaceAll('{yyyyMMdd}', '20261020').replaceAll('{camera}', 'Nikon Z6III').split('/').filter(Boolean); }
+// The Settings previews expand the templates exactly as imports do, for one sample capture.
+const sampleValues = templateValues(new Date('2026-10-20T00:00:00Z'), 'Nikon Z6III');
+function samplePath(template: string): string[] { return expandTemplate(template, sampleValues).split('/').filter(Boolean); }
 const defaultFolderPath = parseTemplate('{year}/{yyyymm}/{camera}')!;
-const monthSample = ({ full, english }: FolderPath['month']) => english ? (full ? '2026-10 October' : '10 October') : (full ? '202610' : '10');
+const monthSample = (month: FolderPath['month']) => expandTemplate(monthToken(month), sampleValues);
 /** Date first or camera first, then a toggle per date level. It edits the folder template, the one stored form. */
 function FolderPathBuilder({ template, onChange, testId }: { template: string; onChange: (template: string) => void; testId: string }) {
   const { t } = useTranslation();
@@ -181,22 +183,29 @@ export function sourceCapacity(state: AppState, source: Source): SourceCapacity 
   const holder = holders[0];
   return holder ? { total: holder.total, free: holder.free, drive: holder.name } : {};
 }
+/** The one reading of a drive's total and free bytes: free is clamped into 0..total, `fraction` is the used share and `low` is above 90% used. */
+export function capacityUse(total?: number, free?: number): { known: boolean; used: number; free: number; fraction: number; low: boolean } {
+  if (!total || !Number.isFinite(total) || total < 0 || free === undefined || !Number.isFinite(free)) return { known: false, used: 0, free: 0, fraction: 0, low: false };
+  const available = Math.max(0, Math.min(total, free)), fraction = (total - available) / total;
+  return { known: true, used: total - available, free: available, fraction, low: fraction > .9 };
+}
 export function CapacityBar({ total, free, inventory, scanning, unavailable = 'Capacity unavailable', driveName }: { total?: number; free?: number; inventory?: Inventory; scanning?: boolean; unavailable?: string; driveName?: string }) {
   const { t, formatBytes: bytes } = useTranslation();
-  if (!total || !Number.isFinite(total) || total < 0 || free === undefined || !Number.isFinite(free)) return <div className="capacity-unavailable"><Icon icon={HardDrive} size={13} />{t(unavailable)}</div>;
-  const available = Math.max(0,Math.min(total,free)), used=total-available;
+  const use = capacityUse(total, free);
+  if (!use.known) return <div className="capacity-unavailable"><Icon icon={HardDrive} size={13} />{t(unavailable)}</div>;
+  const { free: available, used, fraction, low } = use, size = total!;
   const classified=inventory?formatSegments(inventory):[];
   const classifiedBytes=classified.reduce((sum,item)=>sum+item.size,0);
   // Logical media sizes may exceed physical usage (compression/shared extents).
   // Keep the meter within actual used capacity; the legend reports scanned sizes.
   const scale=classifiedBytes>used&&classifiedBytes?used/classifiedBytes:1;
-  const segments=[...classified.map(item=>({...item,width:item.size*scale/total*100,label:item.kind})),{kind:'other',color:'var(--storage-used)',size:Math.max(0,used-classifiedBytes*scale),width:Math.max(0,used-classifiedBytes*scale)/total*100,label:inventory?t('Other or unscanned'):t('Used')}].filter(item=>item.width>0);
-  const percent=used/total*100;
-  return <div className={`capacity storage-capacity ${percent>90?'capacity-low':''}`} data-testid="storage-capacity">
-    <div className="storage-heading"><span>{t("{free} free of {total}",{free:bytes(available),total:bytes(total)})}{driveName ? ` · ${driveName}` : ''}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
-    <div className="storage-track" role="meter" aria-label={t("Storage used")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{used} used, {free} free, {total} total",{used:bytes(used),free:bytes(available),total:bytes(total)})}>
+  const segments=[...classified.map(item=>({...item,width:item.size*scale/size*100,label:item.kind})),{kind:'other',color:'var(--storage-used)',size:Math.max(0,used-classifiedBytes*scale),width:Math.max(0,used-classifiedBytes*scale)/size*100,label:inventory?t('Other or unscanned'):t('Used')}].filter(item=>item.width>0);
+  const percent=fraction*100;
+  return <div className={`capacity storage-capacity ${low?'capacity-low':''}`} data-testid="storage-capacity">
+    <div className="storage-heading"><span>{t("{free} free of {total}",{free:bytes(available),total:bytes(size)})}{driveName ? ` · ${driveName}` : ''}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
+    <div className="storage-track" role="meter" aria-label={t("Storage used")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{used} used, {free} free, {total} total",{used:bytes(used),free:bytes(available),total:bytes(size)})}>
       {segments.map(segment=><span key={segment.kind} className="storage-segment" data-storage-kind={segment.kind} title={`${segment.label}: ${bytes(segment.size)}`} style={{width:`${segment.width}%`,background:segment.color}} />)}
-      <span className="storage-free" data-storage-kind="free" style={{width:`${available/total*100}%`}} title={t("{size} free",{size:bytes(available)})}>{available/total>=.18&&<span>{bytes(available)}</span>}</span>
+      <span className="storage-free" data-storage-kind="free" style={{width:`${available/size*100}%`}} title={t("{size} free",{size:bytes(available)})}>{available/size>=.18&&<span>{bytes(available)}</span>}</span>
     </div>
     <div className="storage-legend">{segments.map(segment=><span key={segment.kind} title={`${segment.label}: ${bytes(segment.size)}`}><i style={{background:segment.color}} />{segment.label}</span>)}<span className="storage-free-label"><i />{t("{size} free",{size:bytes(available)})}</span></div>
     {classifiedBytes>used&&<small className="storage-logical-note">{t("Media categories use scanned file sizes.")}</small>}
@@ -367,7 +376,7 @@ export default function RootApp() {
   // The start-up splash finishes once the first state has been rendered (a layout effect, so the sidebar logo can be measured).
   const hasState = !!state;
   useLayoutEffect(() => { if (hasState) markAppReady(); }, [hasState]);
-  if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
+  if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Retry")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
   // The badge counts rows (groups needing attention), from the summaries; paths are never iterated.
@@ -413,17 +422,16 @@ export default function RootApp() {
 // The name gets the full first line; capacity bar and status share the second; free space is the third.
 function SidebarCapacity({ total, free, unavailable, status, activity }: { total?: number; free?: number; unavailable: string; status?: ReactNode; activity?: DriveActivity }) {
   const { t, formatBytes: bytes } = useTranslation();
-  const known = !!total && free !== undefined && Number.isFinite(total) && Number.isFinite(free);
-  const used = known ? Math.min(1, Math.max(0, 1 - free! / total!)) : 0;
+  const { known, free: left, fraction: used, low } = capacityUse(total, free);
   return <>
-    <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${used > .9 ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
-    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(free), total: bytes(total) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{t("{size} free", { size: bytes(free) })}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
+    <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${low ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
+    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(left), total: bytes(total!) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{t("{size} free", { size: bytes(left) })}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
     <SidebarActivity activity={activity} />
   </>;
 }
 
 // The sidebar widens to fit "342.9 GB free of 2.00 TB" when the window has room; a line that
-// still does not fit switches to "342.9 GB/2.00 TB". Measured after every render and on resize,
+// still does not fit switches to "342.9 GB free". Measured after every render and on resize,
 // and applied to the DOM directly so measuring never re-renders.
 function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
   const fit = useCallback(() => {
@@ -511,21 +519,21 @@ function SidebarErrors({ errors, target, onErrors }: { errors?: DisplayError[]; 
   // Errors get the red count; warnings only a small amber mark that never competes with it.
   return <>{warnings.length > 0 && <button type="button" className="sidebar-warning-indicator" data-testid="sidebar-warnings" aria-label={t("{count} warnings", { count: formatNumber(warnings.length) })} title={t("Show warnings for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={Info} size={13} /></button>}{own.length > 0 && <button type="button" className="sidebar-error-badge" data-testid="sidebar-errors" data-level="error" aria-label={t("{count} errors", { count: formatNumber(own.length) })} title={t("Show errors for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={CircleAlert} size={13} /><span>{formatNumber(own.length)}</span></button>}</>;
 }
-type ErrorExplanation = { title: string; hint?: string; severity: 'error' | 'warning' };
-// Turns a raw technical message into a plain title, a next step and a severity. Keys are translated at render time.
+type ErrorExplanation = { title: string; hint?: string };
+// Turns a raw technical message into a plain title and a next step. Keys are translated at render time.
 export function explainError(message: Message, kind: ErrorKind = 'app', language: Language = 'en'): ErrorExplanation {
   const text = formatMessage(message, 'en').toLowerCase();
-  if (kind === 'format') return { title: "Unknown file formats", severity: 'warning' };
-  if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination.", severity: 'error' };
-  if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security.", severity: 'error' };
-  if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import.", severity: 'error' };
-  if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept.", severity: 'error' };
-  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive.", severity: 'warning' };
-  if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again.", severity: 'error' };
-  if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader.", severity: 'error' };
-  if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this.", severity: 'error' };
-  if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead.", severity: 'warning' };
-  return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]!, severity: 'error' };
+  if (kind === 'format') return { title: "Unknown file formats" };
+  if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination." };
+  if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security." };
+  if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import." };
+  if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept." };
+  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive." };
+  if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again." };
+  if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader." };
+  if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this." };
+  if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead." };
+  return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]! };
 }
 // The main process rebuilds errorLog exactly when the errors change, so the same errorLog object means the same errors.
 let gathered: { log: AppState['errorLog']; errors: ReturnType<typeof gatherErrors> } | undefined;
@@ -604,7 +612,8 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   const live = state.jobs.filter(job => activePhases.includes(job.phase));
   const winding = live.length > 0 && live.every(job => job.stopping) && !state.jobs.some(job => job.phase === 'queued') && !scanning && !state.review && !state.busyReview;
   const stopping = winding && live.some(job => job.stopping === 'stop');
-  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
+  const showing = state.preferences.showDashboard !== false;
+  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button><Button className="automatic-button" icon={Gauge} data-testid="titlebar-overview" aria-pressed={showing} title={t("Show or hide the import overview")} onClick={() => act({type:'preferences',patch:{showDashboard:!showing}})}>{t("Overview")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
 }
 
 type Translate = ReturnType<typeof useTranslation>['t'];
@@ -700,7 +709,7 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
           const error = row.entries[0]!;
           if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
           const explained = explainError(error.message, error.kind, language);
-          const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
+          const shown = pathOf(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
           const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
           return <li key={index} className={`error-item is-${error.severity}`} data-severity={error.severity}>
             <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
@@ -734,11 +743,11 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
   const filesLabel = doing.size === 1 ? ({ checked: "Files checked", verified: "Files verified", moved: "Files moved", copied: "Files copied", processed: "Files processed" } as const)[[...doing][0] as 'checked'] : "Files processed";
-  const warnings = loggedErrors(state).filter(error => error.severity === 'warning').length;
+  const warnings = collectErrors(state).filter(error => error.severity === 'warning').length;
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
-  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta ?? Math.max(...active.map(job => job.eta!)) : undefined;
+  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
@@ -767,7 +776,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && totalFraction(job, verify) === 1)}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
-        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
+        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
         step={stepKind(lead?.progress)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
@@ -940,7 +949,7 @@ export function RetainedOriginals({ job, act, busy, recoverySize }: { job: NonNu
   if (!retainedFiles && !job.undoable && !job.missing && !deletable) return null;
   const measured = recoverySize?.root === job.root && recoverySize.id === job.id ? recoverySize : undefined;
   const deleteChoice = (choice: 'open' | 'confirm' | 'cancel') => {
-    const next = nextDeleteRecoveryStep(deleteStep, choice);
+    const next = nextConfirmStep(deleteStep, choice);
     if (choice === 'open') act({ type: 'measureOrganizationRecovery', root: job.root, id: job.id });
     setDeleteStep(next.step);
     if (next.delete) act({ type: 'recovery', op: 'delete', root: job.root, id: job.id });
@@ -959,22 +968,27 @@ export function RetainedOriginals({ job, act, busy, recoverySize }: { job: NonNu
   </section>;
 }
 
+/** The skeleton every confirmation shares: a sheet with a title, a body and Cancel / danger buttons. A 'second' step opens with Cancel focused, so Return never confirms by accident. */
+export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
+  const { t } = useTranslation();
+  const dialog = useRef<HTMLDialogElement>(null), heading = useId();
+  const close = useAnimatedClose(dialog, onCancel);
+  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
+  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby={heading} data-testid={testId} onCancel={event => { event.preventDefault(); close(); }}>
+    <div className="dialog-heading"><h2 id={heading}>{title}</h2></div>
+    <div className="activity-content">{children}</div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
+  </dialog>;
+}
 export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {
   const { t } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="release-heading" data-testid="release-confirm" onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="release-heading">{t("Release {size}?", { size })}</h2></div>
-    <div className="activity-content"><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></div>
-    <div className="dialog-footer"><Button onClick={close}>{t("Cancel")}</Button><Button kind="danger" icon={Trash2} onClick={onConfirm}>{t("Release {size}", { size })}</Button></div>
-  </dialog>;
+  return <ConfirmSheet title={t("Release {size}?", { size })} confirmLabel={t("Release {size}", { size })} testId="release-confirm" onCancel={onCancel} onConfirm={onConfirm}><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></ConfirmSheet>;
 }
 
 /** Deleting recovery files asks twice: the first sheet says undo goes away and how much is freed, the
  * second asks again with the exact amount, Cancel focused. Only confirming the second deletes. */
 export type DeleteRecoveryStep = 'closed' | 'first' | 'second';
-export function nextDeleteRecoveryStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
+export function nextConfirmStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
   if (choice === 'cancel') return { step: 'closed', delete: false };
   if (choice === 'open') return { step: step === 'closed' ? 'first' : step, delete: false };
   if (step === 'first') return { step: 'second', delete: false };
@@ -985,21 +999,13 @@ export const recoveryDeletable = (job: NonNullable<AppState['organizationRecover
 
 export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }: { step: 'first' | 'second'; root: string; size?: AppState['recoverySize']; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  // The second sheet opens with Cancel focused, so Return never deletes by accident.
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!) } : undefined;
   const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Measuring recovery files…")}</p>;
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-recovery-heading" data-testid={`delete-recovery-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="delete-recovery-heading">{step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")}</h2></div>
-    <div className="activity-content">
-      {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
-      {detail}<p className="recovery-root">{root}</p>
-    </div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
-  </dialog>;
+  return <ConfirmSheet step={step} title={step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")} confirmLabel={step === 'first' ? t("Continue…") : t("Delete permanently")} confirmDisabled={!amount} testId={`delete-recovery-${step}`} onCancel={onCancel} onConfirm={onConfirm}>
+    {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
+    {detail}<p className="recovery-root">{root}</p>
+  </ConfirmSheet>;
 }
 
 function UnknownDefaultControl({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
@@ -1047,7 +1053,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const active = jobs.filter(job => activePhases.includes(job.phase));
   const queued = jobs.slice().reverse().filter(job => job.phase === 'queued');
   // The order queued jobs will start in, as the importer publishes it; longest waiting first otherwise.
-  const startOrder = state.queueOrder ?? queued.map(job => job.id);
+  const startOrder = state.queueOrder ?? [];
   const selectedJob = jobs.find(job => job.id === selectedJobId && !job.organization) ?? jobs.find(job => job.inventory && !job.organization);
   const latestJobs = jobs.filter((job,index)=>!job.organization && jobs.findIndex(item=>item.source.id===job.source.id)===index);
   const idleSources = state.sources.filter(source => !jobs.some(job => job.source.id === source.id));
@@ -1384,21 +1390,14 @@ export function RevealButton({ path, act, name }: { path: string; act: Dispatch;
  * verified files and how much space, the second asks again with Cancel focused. Only the second confirmation deletes. */
 export function OriginalsConfirm({ step, name, size, onCancel, onConfirm }: { step: 'first' | 'second'; name: string; size?: AppState['originalsSize']; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!), name } : undefined;
   const none = measured && size.files === 0;
   const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Counting verified originals…")}</p>;
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-originals-heading" data-testid={`delete-originals-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="delete-originals-heading">{step === 'first' ? t("Delete originals already in the backup?") : t("Delete originals permanently?")}</h2></div>
-    <div className="activity-content">
-      {step === 'first' ? <><p>{t("Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.")}</p>{amount && !none && <p>{t("{count} files ({size}) will be deleted from {name}.", amount)}</p>}{none && <p>{t("No verified originals to delete.")}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.", amount)}</p>}
-      {detail}{measured && !!size.kept && <p className="muted">{t("{count} files will stay where they are.", { count: formatNumber(size.kept) })}</p>}
-    </div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount || none} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
-  </dialog>;
+  return <ConfirmSheet step={step} title={step === 'first' ? t("Delete originals already in the backup?") : t("Delete originals permanently?")} confirmLabel={step === 'first' ? t("Continue…") : t("Delete permanently")} confirmDisabled={!amount || none} testId={`delete-originals-${step}`} onCancel={onCancel} onConfirm={onConfirm}>
+    {step === 'first' ? <><p>{t("Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.")}</p>{amount && !none && <p>{t("{count} files ({size}) will be deleted from {name}.", amount)}</p>}{none && <p>{t("No verified originals to delete.")}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.", amount)}</p>}
+    {detail}{measured && !!size.kept && <p className="muted">{t("{count} files will stay where they are.", { count: formatNumber(size.kept) })}</p>}
+  </ConfirmSheet>;
 }
 
 /** The separate "Delete originals already in the backup" step on a finished folder import's card. */
@@ -1408,7 +1407,7 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
   if (job.source.transport !== 'folder' || job.organization || !(job.phase === 'complete' || job.phase === 'error' && errorTotal(job) === 0 && !job.failedFiles)) return null;
   const measured = size?.jobId === job.id ? size : undefined;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
-    const next = nextDeleteRecoveryStep(step, choice);
+    const next = nextConfirmStep(step, choice);
     if (choice === 'open') act({ type: 'measureOriginals', jobId: job.id });
     setStep(next.step);
     if (next.delete) act({ type: 'deleteOriginals', jobId: job.id });
@@ -1763,7 +1762,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
       </SettingsSection>
       <SettingsSection title={t("Edited exports folder")} icon={Folder}>
         <TextPreference label={t("Edited exports folder")} value={editedFolder} placeholder="editied" onSave={editedFolder => act({type:'preferences',patch:{editedFolder}})} description={t("Edited exports go here, inside each month folder.")} />
-        <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath),'2026','202610',editedFolder,'Nikon Z6III','DSC_0001.jpg']} testId="edited-export-preview" />
+        <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath), ...samplePath(editedTemplate(editedFolder)), 'DSC_0001.jpg']} testId="edited-export-preview" />
       </SettingsSection>
   </div>;
 }

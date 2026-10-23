@@ -26,7 +26,7 @@ test('source cards, organization cards and the dashboard show time left, or that
   const { ImportDesk, OrganizationProgress, formatRemaining } = await import('../renderer/RootApp');
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
-    const desk = (job: Job, extra: Partial<AppState> = {}) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', ...extra }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    const desk = (job: Job, extra: Partial<AppState> = {}) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', ...(job.eta !== undefined ? { etaTotal: { eta: job.eta } } : {}), ...extra }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     const copying: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 2 * 3600 + 15 * 60, progress: { phase: 'copying', completed: 50, total: 200, bytes: 1e9, totalBytes: 8e9, speed: 1e8, file: 'a', eta: 3600 + 30 * 60 } };
     const page = desk(copying);
     assert.ok(page.includes(t('{time} left', { time: formatRemaining(copying.eta!, t) })), `${language}: job time left on the card`);
@@ -57,7 +57,7 @@ test('estimates are stamped on running jobs and cleared when they stop', () => {
 test('a copy with already-verified files counts only the files being copied, with one time left per display', async () => {
   const { ImportDesk, ImportDashboard } = await import('../renderer/RootApp');
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 3600, progress: { phase: 'copying', completed: 24994, skipped: 21972, total: 43539, bytes: 12.7e9, totalBytes: 211.2e9, speed: 1e8, file: 'A.NEF', eta: 4800 } };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', etaTotal: { eta: 3600 } };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const page = render(createElement(ImportDesk, { state, act: () => {}, inspect: () => {}, onOrganization: () => {} } as never));

@@ -94,7 +94,7 @@ test('every progress display shows elapsed time and time left together, and the 
     const estimating = desk({ ...base, eta: undefined, progress: { ...base.progress!, eta: undefined } });
     together(estimating, t('Estimating time left…'), 'estimating');
 
-    const dashboard = render(createElement(ImportDashboard, { state: { preferences, sources: [card], jobs: [base], history: [], platform: 'darwin' }, act: () => {} }));
+    const dashboard = render(createElement(ImportDashboard, { state: { preferences, sources: [card], jobs: [base], history: [], platform: 'darwin', etaTotal: { eta: 480 } }, act: () => {} }));
     const total = dashboard.slice(dashboard.indexOf('data-testid="total-progress"'));
     together(total, left(480), 'dashboard total');
     assert.match(total, /data-testid="total-eta"/);

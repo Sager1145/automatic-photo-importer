@@ -91,3 +91,18 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
  const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
  assert.ok(!html.includes('sidebar-errors')&&html.includes('sidebar-warnings'));
 });
+
+test('the dashboard counts the warnings All errors shows: a cleared warning is not counted',async()=>{
+ const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider}=await import('../renderer/i18n');
+ const {ImportDashboard}=await import('../renderer/RootApp');
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
+ const value=state({jobs:[job({errors:[message('error.userSkipped'),message('error.folderCleanup',{error:text('x')})]})]});
+ value.errorLog=new ErrorLog().update(gatherErrors(value));
+ assert.match(render(value),/2 warnings/);
+ const [first]=gatherErrors(value).filter(item=>item.severity==='warning');
+ value.errorLog={...value.errorLog,cleared:[first!.id]};
+ assert.match(render(value),/1 warnings/);
+ value.errorLog={...value.errorLog,cleared:gatherErrors(value).map(item=>item.id)};
+ assert.doesNotMatch(render(value),/warnings/);
+});
