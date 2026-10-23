@@ -42,7 +42,7 @@ test('an import, a drive backup and an organization leave no hidden file, and no
  assert.ok(await exists(path.join(folder,'photo-importer-drive.json')));assert.deepEqual(await dotted(f.root),[]);
  const library=path.join(f.base,'library');await fs.mkdir(path.join(library,'stray'),{recursive:true});await fs.writeFile(path.join(library,'stray','B.JPG'),'bytes of B');
  const reviewed=(await plan(library,[library],{...options,reorganize:true},metadata)).plans[0]!;
- const result=await executeReorganization(reviewed,undefined,undefined,{strategy:'rename'});
+ const result=await executeReorganization(reviewed,undefined,undefined);
  assert.equal(result.moved,1);assert.deepEqual(result.errors,[]);assert.deepEqual(await dotted(library),[]);assert.deepEqual(await appNamed(library),[]);
  assert.deepEqual((await fs.readdir(library)).sort(),['2024','Photo Importer Data'],'the journal is in the records folder, the emptied folder is gone');
  assert.equal((await findMisplaced(library,library,options,metadata)).count,0);

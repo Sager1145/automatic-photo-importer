@@ -47,7 +47,7 @@ test('organizing the backup folder moves misplaced files without reading organiz
   t.after(()=>fs.chmod(organized,0o644).catch(()=>{}));
   const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
   assert.deepEqual(reviewed.entries.map(entry=>entry.source),[stray]);
-  const result=await executeReorganization(reviewed,undefined,undefined,{strategy:'rename'});
+  const result=await executeReorganization(reviewed,undefined,undefined);
   assert.equal(result.moved,1);assert.deepEqual(result.errors,[]);
   assert.equal(await fs.readFile(path.join(root,'2024/202402/Sony A7/JPEG/A.JPG'),'utf8'),'bytes of wrong place/A.JPG');
   await assert.rejects(fs.stat(stray),{code:'ENOENT'});

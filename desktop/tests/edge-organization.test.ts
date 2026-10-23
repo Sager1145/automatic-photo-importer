@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import * as core from '../core/index';
+import {organizeAs} from './fixtures/records';
 import type {MediaLayout,Metadata,TransferPlan} from '../shared';
 import {parts,put,temporary,tree} from './fixtures/edge';
 
@@ -30,7 +31,7 @@ const settings=(layout:MediaLayout,photos:string,videos:string)=>({backup:false,
 async function organize(drive:string,photos:string,videos:string,layout:MediaLayout,strategy:'rename'|'copy',signal?:AbortSignal,onProgress?:()=>void){
  const source=layout==='video-root'?drive:photos;
  const {plans:[transfer]}=await core.plan(source,[photos],settings(layout,photos,videos),metadata);
- const results=[];for(const part of parts(transfer!))results.push(await core.executeReorganization(part,signal,onProgress,{strategy}));
+ const results=[];for(const part of parts(transfer!))results.push(await organizeAs(strategy,part,signal,onProgress));
  return {transfer:transfer!,results};
 }
 const jobs=async(...roots:string[])=>(await Promise.all(roots.map(root=>core.getOrganizationRecovery(root)))).flat();
@@ -88,7 +89,7 @@ test('an organization stopped part-way resumes, and an undo stopped part-way fin
  const before=await snapshot(drive);
  const control=new AbortController();let seen=0;
  const source=photos,{plans:[transfer]}=await core.plan(source,[photos],settings('type-format',photos,videos),metadata);
- await assert.rejects(core.executeReorganization(transfer!,control.signal,()=>{if(++seen===3)control.abort();},{strategy:'rename'}),{name:'AbortError'});
+ await assert.rejects(core.executeReorganization(transfer!,control.signal,()=>{if(++seen===3)control.abort();}),{name:'AbortError'});
  const [stopped]=await jobs(photos);assert.equal(stopped?.status,'pending');
  const resumed=await core.resumeOrganization(photos,stopped.id);assert.deepEqual(resumed.errors,[]);
  assert.equal((await jobs(photos))[0]?.status,'complete');
@@ -104,7 +105,7 @@ test('two organizations started at once on one library: the second waits or refu
  const contents=new Set((await tree(drive)).values());
  const plans:TransferPlan[]=[];
  for(const layout of ['format','flat'] as const)plans.push((await core.plan(photos,[photos],settings(layout,photos,videos),metadata)).plans[0]!);
- const outcomes=await Promise.allSettled(plans.map(transfer=>core.executeReorganization(transfer,undefined,undefined,{strategy:'rename'})));
+ const outcomes=await Promise.allSettled(plans.map(transfer=>core.executeReorganization(transfer,undefined,undefined)));
  // The first runs; the second, reviewed before the first moved anything, finds its files moved and stops.
  assert.equal(outcomes[0]!.status,'fulfilled');
  if(outcomes[0]!.status==='fulfilled')assert.deepEqual(outcomes[0]!.value.errors,[]);

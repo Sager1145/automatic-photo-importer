@@ -113,7 +113,7 @@ test('undoing a folder-mode organization puts every file back where it was',asyn
   await f.put(f.library,'old/trip/SNAP_1.PNG','snap');await f.put(f.library,'old/IMG_2.JPG','img');await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_3.JPG','nocam');
   const meta=async(file:string):Promise<Metadata>=>/NOCAM/.test(file)?{date:'2021-03-04T10:00:00Z',fields:{}}:/SNAP/.test(file)?{fields:{}}:known;
   const found=await plan(f.library,[f.library],{...base,reorganize:true,noMetadata:'folder'},meta);
-  assert.deepEqual((await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'})).errors,[]);
+  assert.deepEqual((await executeReorganization(found.plans[0]!,undefined,undefined)).errors,[]);
   assert.equal(await exists(path.join(f.library,'Unknown files/old/trip/SNAP_1.PNG')),true);
   const [job]=await getOrganizationRecovery(f.library);
   await undoOrganization(f.library,job!.id);

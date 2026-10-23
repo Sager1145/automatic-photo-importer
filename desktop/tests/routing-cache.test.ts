@@ -65,7 +65,7 @@ test('an organization that moves files tells the observer where each went, with 
  for(const name of names){const stat=await fs.lstat(path.join(card,name),{bigint:true});before.set(path.join(card,name),JSON.stringify(identity(stat)));}
  const calls:{from:string;reviewed:string;to:string;now:string}[]=[];
  core.setMoveObserver((from,reviewed,to,now)=>{calls.push({from,reviewed:JSON.stringify({dev:reviewed.dev,ino:reviewed.ino,size:reviewed.size,mtime:reviewed.mtime,ctime:reviewed.ctime}),to,now:`${now.ino}:${now.size}:${now.mtimeNs}:${now.ctimeNs}`});});
- assert.deepEqual((await core.executeReorganization(plan,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await core.executeReorganization(plan,undefined,undefined)).errors,[]);
  assert.equal(calls.length,names.length);
  for(const call of calls){
   assert.equal(call.reviewed,before.get(call.from),'the reviewed identity is the one a scan cached');

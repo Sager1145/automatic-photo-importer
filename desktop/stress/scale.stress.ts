@@ -104,7 +104,7 @@ test('organize thousands of misplaced files in place, check, and undo to the exa
  await card(path.join(library,'unsorted'),files);
  const before=await tree(library);
  let started=performance.now();const {plans:[transfer]}=await core.plan(library,[library],{...options,reorganize:true},metadata);await record('organization plan',started,{files});
- started=performance.now();const result=await core.executeReorganization(transfer!,undefined,undefined,{strategy:'rename'});await record('organization (rename)',started,{files,moved:result.moved});
+ started=performance.now();const result=await core.executeReorganization(transfer!,undefined,undefined);await record('organization (rename)',started,{files,moved:result.moved});
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,files);
  started=performance.now();assert.equal((await core.findMisplaced(library,library,options,metadata)).count,0);await record('misplaced check after organizing',started,{files});
  const [job]=await core.getOrganizationRecovery(library,{verifyContents:false});assert.equal(job?.status,'complete');
@@ -121,7 +121,7 @@ test('exFAT drive: import and organize in place without hard links, then undo',a
  await assertCopied(transfer!);assert.deepEqual(await leftovers(exfat),[]);
  const before=await tree(backup);
  started=performance.now();const {plans:[organize]}=await core.plan(backup,[backup],{...options,reorganize:true},metadata);
- const result=await core.executeReorganization(organize!,undefined,undefined,{strategy:'rename'});await record('exFAT organization (rename)',started,{files,moved:result.moved});
+ const result=await core.executeReorganization(organize!,undefined,undefined);await record('exFAT organization (rename)',started,{files,moved:result.moved});
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,files);
  assert.equal((await core.findMisplaced(backup,backup,options,metadata)).count,0);
  const [job]=await core.getOrganizationRecovery(backup);assert.equal(job?.status,'complete',JSON.stringify(job));

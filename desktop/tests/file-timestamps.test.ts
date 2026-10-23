@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {configureOrganizationRecovery,execute,executeReorganization,getOrganizationRecovery,plan,resumeOrganization} from '../core/index';
+import {organizeByCopy} from './fixtures/records';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -41,7 +42,7 @@ test('timezone-free capture timestamps use local wall clock once during planning
 });
 test('organization recovery retains capture timestamps without rereading metadata',async t=>{
  const {source,original}=await fixture(t);const {plans:[transfer]}=await plan(source,[source],{...options,reorganize:true},async()=>({date:capture,camera:'Camera',fields:{}}));
- const result=await executeReorganization(transfer!);assert.equal(result.errors.length,0);assert.equal(result.moved,1);
+ const result=await organizeByCopy(transfer!);assert.equal(result.errors.length,0);assert.equal(result.moved,1);
  const [job]=await getOrganizationRecovery(source);const destination=transfer!.entries[0]!.destination;
  close((await fs.stat(destination)).mtimeMs,captureMs);if(process.platform==='darwin')close((await fs.stat(destination)).birthtimeMs,captureMs);
  await fs.unlink(destination);{const resumed=await resumeOrganization(source,job!.id);assert.deepEqual({...resumed,retainedBytes:undefined},{copied:1,skipped:0,errors:[],moved:1,retained:1,retainedBytes:undefined});}

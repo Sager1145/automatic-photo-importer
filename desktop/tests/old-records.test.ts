@@ -10,7 +10,7 @@ import {acknowledgeOldRecords,findOldRecords,OldRecordsNotice,onOldRecordsFound,
 import {beginDuplicateRemoval,storePointerLeftover,deleteOrganizationRecovery,finalizeOrganization,resumeOrganization,undoOrganization} from '../core/recovery';
 import {findResidue} from '../core/residue';
 import {openV5,sealV5,storeFor} from '../core/app-store';
-import {appendJournalLine,journalFileFor,journalFolderFor,pointerFor,resealJournalLine,sealedEvent,sealedRecord} from './fixtures/records';
+import {appendJournalLine,journalFileFor,journalFolderFor,organizeByCopy,pointerFor,resealJournalLine,sealedEvent,sealedRecord} from './fixtures/records';
 import {identity} from '../core/paths';
 import {OLD_HIDDEN_FOLDER,OLD_FOLDER,oldJournal,oldPointer,oldReceipt} from './fixtures/old-records';
 
@@ -191,7 +191,7 @@ test('a library found to hold old receipts while listing tells the app, so the n
 });
 test('a journal converted only in part is an old record: in the notice, refused by resume, undo, finalize and delete, and kept by the automatic cleanup',async t=>{
  const root=await fixture(t);
- const done=await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ const done=await organizeByCopy((await core.plan(root,[root],options,metadata)).plans[0]!);
  assert.equal(done.errors.length,0);
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  assert.deepEqual(await findOldRecords(root),[]);
@@ -219,7 +219,7 @@ test('a refusal on an unconfigured sibling folder makes the notice appear for it
  const root=path.join(parent,'library'),neighbour=path.join(parent,'OldLibrary');
  await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(neighbour);
  await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
- await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ await organizeByCopy((await core.plan(root,[root],options,metadata)).plans[0]!);
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  await undoOrganization(root,id);
  // The app knows only the library's drive (the destination); the sibling is not configured anywhere.
@@ -244,7 +244,7 @@ test('the automatic cleanup keeps the empty slots and the pointers of a half-con
  const root=path.join(parent,'library'),sibling=path.join(parent,'sibling');
  await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(sibling);
  await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
- await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'rename'});
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined);
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  const slot=path.join(await journalFolderFor(root,id),'originals','0','5b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f');await fs.mkdir(slot,{recursive:true});
  const pointer=await pointerFor(sibling,id);await fs.mkdir(path.dirname(pointer),{recursive:true});
@@ -301,7 +301,7 @@ test('a library folder reached through a link never refuses a delete (it could n
  t.after(()=>fs.rm(outside,{recursive:true,force:true}));
  await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(elsewhere);
  await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
- await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ await organizeByCopy((await core.plan(root,[root],options,metadata)).plans[0]!);
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  await undoOrganization(root,id);
  const link=path.join(root,'link');await fs.symlink(elsewhere,link);

@@ -626,6 +626,7 @@ Not checked yet.|尚未检查。|尚未檢查。|まだ確認していません�
 No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファイルはありません。
 Clean up|清理|清理|クリーンアップ
 {count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
+{count} copies could not be proven unneeded ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个副本无法确认已不再需要（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個副本無法確認已不再需要（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個のコピーは不要と確認できませんでした（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
 {count} complete copies whose card file changed are kept: {folder}|{count} 个完整副本的存储卡文件已更改，已保留：{folder}|{count} 個完整副本的記憶卡檔案已變更，已保留：{folder}|カード上のファイルが変わった完全なコピー {count} 個を保管しています：{folder}
 A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.|{path} 处的文件有一份旧的复制回执，与它已不相符；文件会保留。请移除该回执，以便继续导入。|{path} 處的檔案有一份舊的複製回執，與它已不相符；檔案會保留。請移除該回執，以便繼續匯入。|{path} のファイルに、一致しなくなった古いコピーの受領記録があります。ファイルはそのままです。インポートを続けるには受領記録を削除してください。
 Remove receipt|移除回执|移除回執|受領記録を削除

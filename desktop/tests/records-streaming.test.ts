@@ -32,7 +32,7 @@ async function library(t:test.TestContext){
 test('a 300 MiB journal is read whole, streaming, with no read past 1 MiB',{timeout:240000},async t=>{
  const root=await library(t);
  const reviewed=(await core.plan(root,[root],{backup:false,template:'{year}/{camera}',unknownRules:{},layout:'flat',reorganize:true,sourceFolders:['incoming']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(reviewed,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await core.executeReorganization(reviewed,undefined,undefined)).errors,[]);
  const [job]=await core.getOrganizationRecovery(root);
  // The identity the journal recorded last for the moved file.
  const renamed=(await journalLines(root,job!.id)).map(line=>JSON.parse(line)).filter(record=>record.event==='renamed'||record.event==='timed').at(-1);

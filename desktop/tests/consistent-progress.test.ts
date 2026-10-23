@@ -8,6 +8,7 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import * as core from '../core/index';
 import {findResidue,cleanResidue} from '../core/residue';
+import {organizeByCopy} from './fixtures/records';
 import {EtaTracker,stampEstimates} from '../eta';
 import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
 import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,progressCount,progressFraction,ReviewPanel} from '../renderer/RootApp';
@@ -232,8 +233,10 @@ test('stashing the duplicates, closing the journal and releasing report their ow
  for(let index=0;index<6;index++){const file=path.join(root,'incoming',`A${index}.JPG`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,`original ${index}`);}
  const plan=(await core.plan(root,[root],options,metadata)).plans[0]!;
  const events:Progress[]=[];
- const result=await core.executeReorganization(plan,undefined,value=>events.push({...value}),{strategy:'copy',releaseDuplicates:true});
+ const result=await organizeByCopy(plan,undefined,value=>events.push({...value}));
  assert.deepEqual(result.errors,[]);
+ const releasing:{completed:number;total:number}[]=[];
+ await core.finalizeOrganization(root,result.id,undefined,value=>{if(value.step==='releasing')releasing.push(value);});
  const of=(step:string)=>events.filter(event=>event.step===step);
  const stash=of('stashing');
  assert.ok(stash.length>=2,'stashing reports');
@@ -242,8 +245,7 @@ test('stashing the duplicates, closing the journal and releasing report their ow
  assert.ok(stash.every((event,index)=>index===0||event.completed>=stash[index-1]!.completed));
  const tidy=of('tidying');
  assert.ok(tidy.length>=2);assert.equal(tidy.at(-1)!.completed,tidy.at(-1)!.total);assert.equal(tidy[0]!.completed,0);
- const released=of('releasing');
- assert.ok(released.length>0&&released.at(-1)!.completed===released.at(-1)!.total,'the release after organizing reports');
+ assert.ok(releasing.length>0&&releasing.at(-1)!.completed===releasing.at(-1)!.total,'the release reports');
  assert.ok(events.filter(event=>event.step==='moving').every(event=>event.phase==='copying'),'moves carry their phase');
 });
 
@@ -251,7 +253,7 @@ test('the leftover check and Clean up report progress',async t=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'residue-progress-')));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(let index=0;index<3;index++){const file=path.join(root,'incoming',`A${index}.JPG`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,`original ${index}`);}
- await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'rename'});
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined);
  const scans:{looked:number;done:number;total:number;file:string}[]=[];
  const found=await findResidue([root],{onProgress:scan=>scans.push(scan)});
  assert.ok(scans.length>=2);assert.ok(scans.every(scan=>scan.total===scans[0]!.total&&scan.done<=scan.total));
@@ -265,7 +267,7 @@ test('the recovery listing reports its share as it reads',async t=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'listing-progress-')));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  for(let index=0;index<3;index++){const file=path.join(root,'incoming',`A${index}.JPG`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,`original ${index}`);}
- await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'rename'});
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined);
  const updates:{share:number;looked:number}[]=[];
  await core.getOrganizationRecovery(root,{includeEnded:true,onProgress:update=>updates.push(update)});
  assert.ok(updates.length>=2&&updates.every(update=>update.share>=0&&update.share<=1));

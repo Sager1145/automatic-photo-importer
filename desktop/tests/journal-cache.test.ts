@@ -6,7 +6,7 @@ import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import * as core from '../core/index';
 import type {Metadata} from '../shared';
-import {appendJournalLine,journalFileFor,journalFolderFor} from './fixtures/records';
+import {appendJournalLine,journalFileFor,journalFolderFor,organizeByCopy} from './fixtures/records';
 
 // A finished journal's events are read once per app session: a large journal from an earlier
 // version (tens of thousands of event files on a USB drive) would otherwise be read again by every
@@ -24,7 +24,7 @@ async function library(t:test.TestContext,{stop=false}:{stop?:boolean}={}){
  for(const name of ['A.JPG','B.JPG','C.JPG'])await fs.writeFile(path.join(card,name),'bytes of '+name);
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
  const controller=new AbortController();
- const run=core.executeReorganization(plan,stop?controller.signal:undefined,stop?value=>{if(value.step==='moving'&&value.completed>=1)controller.abort();}:undefined,{strategy:'rename'});
+ const run=core.executeReorganization(plan,stop?controller.signal:undefined,stop?value=>{if(value.step==='moving'&&value.completed>=1)controller.abort();}:undefined);
  if(stop)await assert.rejects(run,{name:'AbortError'});else assert.deepEqual((await run).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
  const log=await journalFileFor(photos,journal!.id);
@@ -89,7 +89,7 @@ async function copied(t:test.TestContext){
  await fs.writeFile(path.join(card,'BIG.MOV'),Buffer.alloc(160*1024*1024,7));
  for(const name of ['A.JPG','B.JPG'])await fs.writeFile(path.join(card,name),'bytes of '+name);
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(plan,undefined,undefined,{strategy:'copy'})).errors,[]);
+ assert.deepEqual((await organizeByCopy(plan)).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
  return {drive,photos,id:journal!.id,folder:await journalFolderFor(photos,journal!.id)};
 }

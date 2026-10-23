@@ -1,66 +1,73 @@
 import * as fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
-import { beneath, code, contained, syncDirectory, within } from './paths';
-import { destinationEntries, destinationParts } from './allocation';
-import { isRecordFolderName } from './legacy-names';
-import type { TransferPlan } from '../shared';
-import { logDeletion } from '../logger';
+import { beneath, code, contained, identity, sameStat, syncDirectory } from './paths';
+import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
+import { log, logDeletion } from '../logger';
 
 /** Files the operating system creates that are not user content. The app's own recovery
  * files (.import-*, photo-importer-*, .photo-importer-*) are deliberately absent: they are never removed here. */
 const serviceNames=new Set(['.ds_store','thumbs.db','desktop.ini','icon\r']);
 /** An OS bookkeeping file name other than a `._` sidecar (those need their contents judged). */
 export const isServiceName=(name:string)=>serviceNames.has(name.toLowerCase());
-const serviceFile=(name:string)=>name.startsWith('._')||serviceNames.has(name.toLowerCase());
 
-/** Remove folders under the chosen source folders that hold nothing but service files once
- * their media has moved. A folder with any user file, link or app recovery data is kept, as is
- * everything inside a kept folder (the backup). Returns how many folders were removed. */
-export async function removeRedundantFolders(library:string,folders:string[],keep:string[]):Promise<number> {
-  const root=await fs.realpath(library),kept=keep.map(folder=>path.resolve(folder));
-  let removed=0;
-  async function sweep(folder:string):Promise<boolean> {
-    await contained(path.join(folder,'.sweep-check'),root);
-    const stat=await fs.lstat(folder);
-    if(!stat.isDirectory()||stat.isSymbolicLink()) return false;
-    let removable=!kept.some(item=>within(item,folder));
-    const service:string[]=[];
-    for(const entry of await fs.readdir(folder,{withFileTypes:true})) {
-      const child=path.join(folder,entry.name);
-      if(entry.isSymbolicLink()) removable=false;
-      else if(entry.isDirectory()) {
-        if(kept.some(item=>within(child,item))||isRecordFolderName(entry.name)) removable=false;
-        else if(!await sweep(child)) removable=false;
-      } else if(entry.isFile()&&serviceFile(entry.name)) service.push(child);
-      else removable=false;
-    }
-    if(!removable) return false;
-    for(const file of service) {await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});logDeletion('folders',file,'operating-system service file in a folder whose media all moved','the folder holds only service files, no links, no user files and no app recovery data; inside the chosen folders and outside the kept backup',{folder});}
-    try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST'].includes(code(error)??''))return false; throw error; }
-    logDeletion('folders',folder,'folder left with no user files after organizing','rmdir succeeded, which only removes empty folders; every entry was a service file or an already-swept subfolder',{serviceFiles:service.length});await syncDirectory(path.dirname(folder));removed++;
-    return true;
-  }
-  for(const chosen of folders) {
-    const folder=path.resolve(chosen);
-    if(folder===root) throw new Error('Choose folders inside the library, not the library root itself.');
-    if(!beneath(folder,root)) throw new Error(`Only folders inside the library can be cleaned up: ${folder}`);
-    if(kept.some(item=>within(folder,item))) throw new Error(`The backup folder is never cleaned up: ${folder}`);
-    if(await fs.lstat(folder).then(()=>true,()=>false)) await sweep(folder);
-  }
-  return removed;
+/** Why a folder entry is OS bookkeeping, or undefined when it is anything else (so the folder stays). */
+async function bookkeeping(file:string,name:string,root:string):Promise<string|undefined> {
+  if(isServiceName(name)) return 'operating-system service file';
+  if(!name.startsWith('._')||name.length<3) return undefined;
+  const before=await fs.lstat(file,{bigint:true});
+  if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)) return undefined;
+  await contained(file,root);
+  const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try {
+    const opened=await handle.stat({bigint:true});
+    if(!opened.isFile()||!sameStat(before,opened)) return undefined;
+    if(!inspectAppleDouble(await handle.readFile()).safe) return undefined;
+  } finally { await handle.close(); }
+  return 'AppleDouble sidecar holding only bookkeeping (no resource fork, tags, label or comment)';
 }
-
-/** Cleanup after an organization of `source` that produced `plans`. Chosen `sourceFolders`
- * outside the backup are swept whole. A backup folder organized in place (the source itself, or
- * both folders of the video-root layout, which are named as source folders) has the top-level
- * folders inside it that files moved out of swept; the backup folder itself always stays. */
-export async function removeOrganizedFolders(source:string,plans:TransferPlan[],sourceFolders:string[]=[]):Promise<number> {
-  const roots=plans.flatMap(plan=>destinationParts(plan).map(part=>part.root)),chosen=sourceFolders.map(folder=>path.join(source,folder));
-  const outside=chosen.filter(folder=>!roots.includes(folder)),inPlace=roots.filter(root=>root===source||chosen.includes(root));
-  let removed=outside.length?await removeRedundantFolders(source,outside,roots):0;
-  for(const root of inPlace) {
-    const moved=new Set(plans.flatMap(plan=>destinationEntries(plan)).filter(entry=>beneath(entry.source,root)).map(entry=>path.relative(root,entry.source).split(path.sep)).filter(parts=>parts.length>1).map(parts=>path.join(root,parts[0]!)));
-    if(moved.size) removed+=await removeRedundantFolders(root,[...moved],[]);
+/** Removes those of `folders` (inside `root`) that now hold nothing but OS bookkeeping, deepest first, on `root`'s
+ * device, links never followed. Bookkeeping files go first, then a non-recursive rmdir that fails (and keeps the
+ * folder) if anything else appeared. `root`, `protect` and everything outside `root` are never touched; a folder
+ * whose identity differs from the one in `identities` is kept. Returns how many folders were removed. */
+export async function removeEmptiedFolders(root:string,folders:Iterable<string>,options:{signal?:AbortSignal;protect?:string[];/** Folders looked at so far of all the candidates. */onFolders?:(done:number,total:number,folder:string)=>void;
+  /** Folder identities (`dev:ino`) recorded when the run began. */identities?:ReadonlyMap<string,string>;/** false: bookkeeping keeps a folder too, so only folders already empty go. */bookkeeping?:boolean;
+  /** Log area, and what emptied the folders ("Delete originals"). */area:string;after:string}):Promise<number> {
+  const protect=(options.protect??[]).map(item=>path.resolve(item));
+  const candidates=[...new Set([...folders].map(folder=>path.resolve(folder)))].filter(folder=>beneath(folder,root)&&!protect.includes(folder)).sort((a,b)=>b.length-a.length);
+  if(!candidates.length||options.signal?.aborted) return 0;
+  let device:bigint;
+  try { device=(await fs.lstat(root,{bigint:true})).dev; } catch { return 0; }
+  let removed=0,done=0;
+  options.onFolders?.(0,candidates.length,'');
+  for(const folder of candidates) {
+    if(options.signal?.aborted) break;
+    options.onFolders?.(++done,candidates.length,folder);
+    try {
+      await contained(path.join(folder,'.x'),root);
+      // Already gone (an earlier pass of the same run, or a recheck): nothing to keep or remove.
+      const stat=await fs.lstat(folder,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
+      if(!stat||!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==device) continue;
+      const expected=options.identities?.get(folder);
+      if(expected!==undefined&&await identity(folder)!==expected) {log('normal',options.area,'folder-kept',{path:folder,code:'replaced',reason:'not the folder recorded when the run began'});continue;}
+      const found:[string,string][]=[];
+      let empty=true;
+      for(const entry of await fs.readdir(folder,{withFileTypes:true})) {
+        const file=path.join(folder,entry.name),why=options.bookkeeping!==false&&entry.isFile()?await bookkeeping(file,entry.name,root).catch(()=>undefined):undefined;
+        if(why) found.push([file,why]); else {empty=false;break;}
+      }
+      if(!empty) continue;
+      for(const [file,why] of found) {
+        await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+        logDeletion(options.area,file,`${why} in a folder emptied by ${options.after}`,'the folder held nothing else; the file is bookkeeping, not user content',{folder});
+      }
+      // Anything that appeared since the listing keeps the folder; rmdir refuses a folder that is not empty.
+      if((await fs.readdir(folder)).length) continue;
+      try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST','ENOENT'].includes(code(error)??'')) continue; throw error; }
+      logDeletion(options.area,folder,`folder left with no files after ${options.after}`,'rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
+      await syncDirectory(path.dirname(folder));
+      removed++;
+    } catch(error) { if(options.signal?.aborted) break; log('normal',options.area,'folder-kept',{path:folder,code:code(error)??'error',error}); }
   }
   return removed;
 }

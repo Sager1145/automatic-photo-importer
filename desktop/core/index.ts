@@ -14,7 +14,6 @@ import { formatFolder, layoutFolders } from '../media-formats';
 import { editedTemplate, expandTemplate, templateValues } from '../folder-template';
 import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
-export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
 import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
@@ -31,7 +30,7 @@ import { log, logDeletion } from '../logger';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
 import { refuseOldRecords } from './old-records';
 export { findOldRecords, acknowledgeOldRecords, refuseOldRecords, driveName, onOldRecordsFound } from './old-records';
-export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
+export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationUndo } from './recovery';
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
 const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
@@ -57,7 +56,7 @@ type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
 const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>();
 // Mirror moves are likewise limited to removals found by plan() for that plan.
 const mirrorReviews=new WeakMap<TransferPlan,ReviewedRemoval[]>();
-const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[]}>();
+const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[];/** The chosen source folders, absolute. */folders?:string[]}>();
 /** The media a file is filed as: its own, or for a companion its original's. Absent for a file
  * with neither, which stays directly in the camera folder. */
 interface Media {video:boolean;format:string;}
@@ -609,7 +608,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     if(options.reorganize){
       await rootUnchanged(sourceRoot,sourceIdentity);
       reorganizationReviews.set(transfer,new Map(entries.map(entry=>[entry.id,{captureTimeMs:entry.captureTimeMs,stat:sourceStats.get(entry.source)!,source:entry.source,destination:entry.destination,digest:entry.digest}])));
-      reorganizationScopes.set(transfer,{source:sourceRoot,sourceIdentity,root:destinationRoot,rootIdentity,libraries:allRoots.map(({root})=>root).filter(root=>root!==destinationRoot)});
+      reorganizationScopes.set(transfer,{source:sourceRoot,sourceIdentity,root:destinationRoot,rootIdentity,libraries:allRoots.map(({root})=>root).filter(root=>root!==destinationRoot),...(options.sourceFolders?.length?{folders:options.sourceFolders.map(folder=>path.join(sourceRoot,folder))}:{})});
     }
     return transfer;
   }
@@ -1474,7 +1473,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   checkAbort(signal);
   return runs.map(run=>run.error??run.result);
 }
-export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{strategy?:import('./recovery').OrganizationStrategy;keepSourceFolders?:boolean;/** After a clean run, remove the confirmed duplicates kept in recovery storage. */releaseDuplicates?:boolean;/** Remove macOS "._" files beside moved files and in the library (see appledouble.ts). */removeAppleDouble?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
+export async function executeReorganization(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{keepSourceFolders?:boolean;/** After a clean run, remove the confirmed duplicates kept in recovery storage. */releaseDuplicates?:boolean;/** Remove macOS "._" files beside moved files and in the library (see appledouble.ts). */removeAppleDouble?:boolean}={}):Promise<import('./recovery').ReorganizationResult> {
   const review=reorganizationReviews.get(transfer),scope=reorganizationScopes.get(transfer);
   if(!review || !scope || scope.source!==transfer.source || scope.root!==transfer.root || scope.rootIdentity!==transfer.rootIdentity || (transfer.source!==transfer.root && !beneath(transfer.root,transfer.source)) || review.size!==transfer.entries.length || transfer.entries.some(entry=>{
     const original=review.get(entry.id);
@@ -1494,7 +1493,7 @@ export async function executeReorganization(transfer:TransferPlan,signal?:AbortS
     await refuseOldRecords(transfer.root,...(scope.libraries??[]));
     // Organization renames files; drop the cached checksums for this library.
     index.clear();
-    return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries,options.releaseDuplicates,options.removeAppleDouble?appleDoubleCleaner():undefined);
+    return beginOrganization(transfer,entries,signal,onProgress,{keepFolders:options.keepSourceFolders,libraries:scope.libraries,folders:scope.folders,releaseDuplicates:options.releaseDuplicates,...(options.removeAppleDouble?{appleDouble:appleDoubleCleaner()}:{})});
   });
   await flushIndex(index);
   return result;

@@ -7,7 +7,7 @@ import * as core from '../core/index';
 import type {Metadata,Progress} from '../shared';
 import {translationCatalogs} from '../renderer/i18n';
 import {backendMessages} from '../messages';
-import {journalFolderFor} from './fixtures/records';
+import {journalFolderFor,organizeAs} from './fixtures/records';
 
 // "Everything must update": each phase of reading, checking, converting and deleting organization records counts its own work.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -16,14 +16,14 @@ const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
 const names=['C0016.MOV','C0017.MOV','A.JPG','B.JPG','D.JPG'];
 
-async function finished(t:test.TestContext,strategy:core.OrganizationStrategy='copy'){
+async function finished(t:test.TestContext,strategy:'rename'|'copy'='copy'){
  const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'recovery-progress-')));
  t.after(()=>fs.rm(drive,{recursive:true,force:true}));
  const photos=path.join(drive,'photobackup'),card=path.join(drive,'2025');
  for(const folder of [photos,card])await fs.mkdir(folder,{recursive:true});
  for(const name of names)await fs.writeFile(path.join(card,name),'bytes of '+name);
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(plan,undefined,undefined,{strategy})).errors,[]);
+ assert.deepEqual((await organizeAs(strategy,plan)).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
  return {drive,photos,id:journal!.id};
 }
@@ -74,12 +74,12 @@ test('looking for the later organization that took files over counts the journal
  for(const name of names)await fs.writeFile(path.join(card,name),'bytes of '+name);
  const a=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
  const controller=new AbortController();
- await assert.rejects(core.executeReorganization(a,controller.signal,value=>{if(value.step==='moving'&&/\.MOV$/i.test(value.file))controller.abort();},{strategy:'rename'}),{name:'AbortError'});
+ await assert.rejects(core.executeReorganization(a,controller.signal,value=>{if(value.step==='moving'&&/\.MOV$/i.test(value.file))controller.abort();}),{name:'AbortError'});
  const [journal]=await core.getOrganizationRecovery(photos);const A=journal!.id;
  const store=await journalFolderFor(photos,A),hidden=path.join(drive,'hidden-'+A);
  await fs.rename(store,hidden);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
- assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined)).errors,[]);
  await fs.mkdir(path.dirname(store),{recursive:true});await fs.rename(hidden,store);
  assert.ok((await fs.readdir(path.join(videos,camera))).length>0);
  const listing:{done:number;total:number}[]=[];

@@ -35,7 +35,7 @@ test('an import never touches its source, even with saved preferences that would
  const prefs=normalizePreferences({removeEmptySourceFolders:true,releaseDuplicatesAfterOrganizing:true,copyMode:'mirror',backupMode:'mirror'});
  for(const choice of [freshOrganizeOptions(),{removeEmptyFolders:true,releaseDuplicates:true}]){
   const policy=sourcePolicy('import',choice,prefs);
-  assert.deepEqual(policy,{sourceAction:'copy',strategy:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,verifyCopies:true});
+  assert.deepEqual(policy,{sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,verifyCopies:true});
  }
  const {source,files}=await imported(t);
  assert.equal(files.length,3);assert.deepEqual(await listing(source),['DCIM','DCIM/A.JPG','DCIM/B.JPG','DCIM/C.JPG']);
@@ -44,7 +44,7 @@ test('an import never touches its source, even with saved preferences that would
 
 test('organizing defaults to move, remove emptied folders and release duplicates, and each run starts from those defaults',()=>{
  const prefs=normalizePreferences({removeEmptySourceFolders:false,releaseDuplicatesAfterOrganizing:false});
- assert.deepEqual(sourcePolicy('reorganize',undefined,prefs),{sourceAction:'move',strategy:'rename',removeEmptySourceFolders:true,releaseDuplicates:true,verifyCopies:true});
+ assert.deepEqual(sourcePolicy('reorganize',undefined,prefs),{sourceAction:'move',removeEmptySourceFolders:true,releaseDuplicates:true,verifyCopies:true});
  const run=freshOrganizeOptions();run.removeEmptyFolders=false;
  assert.equal(sourcePolicy('reorganize',run,prefs).removeEmptySourceFolders,false);
  // The next run does not inherit the previous run's choice.

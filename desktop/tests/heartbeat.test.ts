@@ -6,7 +6,7 @@ import os from 'node:os';
 import * as core from '../core/index';
 import {findResidue} from '../core/residue';
 import {heartbeat,slowFileSystem} from './fixtures/slow-fs';
-import {appendJournalLine,journalFileFor,journalFolderFor,sealedEvent} from './fixtures/records';
+import {appendJournalLine,journalFileFor,journalFolderFor,organizeByCopy,sealedEvent} from './fixtures/records';
 import type {Metadata} from '../shared';
 
 // "No phase may show a frozen counter": with every file-system call taking 20 ms (a slow USB drive), each of these
@@ -24,7 +24,7 @@ async function organized(t:test.TestContext,count=24){
  for(const folder of [photos,card])await fs.mkdir(folder,{recursive:true});
  for(let index=0;index<count;index++)await fs.writeFile(path.join(card,`IMG_${String(index).padStart(4,'0')}.JPG`),'bytes of '+index);
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(plan,undefined,undefined,{strategy:'copy'})).errors,[]);
+ assert.deepEqual((await organizeByCopy(plan)).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);const id=journal!.id;
  const folder=await journalFolderFor(photos,id),log=await journalFileFor(photos,id);
  return {drive,photos,card,id,folder,log};

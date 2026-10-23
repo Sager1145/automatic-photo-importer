@@ -10,6 +10,7 @@ import { deleteOriginals } from '../core/originals';
 import { findResidue, cleanResidue } from '../core/residue';
 import { configureLogger, resetLogger, withJob, type Logger, type LogLevel } from '../logger';
 import { PhaseLog } from '../job-log';
+import { organizeByCopy } from './fixtures/records';
 import type { Job, Metadata } from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -135,7 +136,7 @@ test('finalizing releases a retained original and undo removes a published copy,
   const organizing = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'format' as const, unknownRules: {}, reorganize: true };
   const sony = async () => ({ camera: 'Sony', date: '2024-02-03', fields: {} });
   const reviewed = (await plan(root, [root], organizing, sony)).plans[0]!;
-  await executeReorganization(reviewed, undefined, undefined, { strategy: 'rename' });
+  await executeReorganization(reviewed, undefined, undefined);
   const [job] = await getOrganizationRecovery(root);
   assert.ok(job!.finalizable);
   await finalizeOrganization(root, job!.id);
@@ -144,7 +145,7 @@ test('finalizing releases a retained original and undo removes a published copy,
   const second = await folder(t, 'log-undo-'), copy = async (relative: string, contents: string) => { const file = path.join(second, relative); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, contents); };
   await copy('incoming/B.JPG', 'bbbb');
   const toCopy = (await plan(second, [second], organizing, sony)).plans[0]!;
-  await executeReorganization(toCopy, undefined, undefined, { strategy: 'copy' });
+  await organizeByCopy(toCopy);
   const [undoJob] = await getOrganizationRecovery(second);
   await undoOrganization(second, undoJob!.id);
   const lines = await read(dir);

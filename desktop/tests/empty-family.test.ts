@@ -31,7 +31,7 @@ for(const reorganize of [true,false]) {
       assert.deepEqual(found.inventory.skipped?.slice().sort((a,b)=>a.path.localeCompare(b.path)),[{path:original,reason:'empty'},{path:sidecar,reason:'emptyPrimary'}].sort((a,b)=>a.path.localeCompare(b.path)));
       assert.equal(found.inventory.empty,1);
       assert.deepEqual(found.plans[0]!.entries.map(entry=>path.basename(entry.source)),['B.JPG']);
-      const result=reorganize?await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'}):await execute(found.plans[0]!);
+      const result=reorganize?await executeReorganization(found.plans[0]!,undefined,undefined):await execute(found.plans[0]!);
       assert.deepEqual(result.errors,[]);
       assert.equal((await fs.stat(original)).size,0);
       assert.equal(await fs.readFile(sidecar,'utf8'),'companion bytes');
@@ -51,7 +51,7 @@ for(const reorganize of [true,false]) {
     const entries=found.plans[0]!.entries;
     assert.deepEqual(entries.map(entry=>path.basename(entry.source)).sort(),['A.CR3','A.wav','A.xmp']);
     assert.equal(new Set(entries.map(entry=>entry.family)).size,1);
-    const result=reorganize?await executeReorganization(found.plans[0]!,undefined,undefined,{strategy:'rename'}):await execute(found.plans[0]!);
+    const result=reorganize?await executeReorganization(found.plans[0]!,undefined,undefined):await execute(found.plans[0]!);
     assert.deepEqual(result.errors,[]);
     for(const name of ['A.CR3','A.wav','A.xmp']) assert.equal(await fs.readFile(path.join(f.root,'2022/202205/Camera',name),'utf8'),name==='A.CR3'?'raw bytes':'');
     if(reorganize) await assert.rejects(fs.stat(f.old),{code:'ENOENT'});

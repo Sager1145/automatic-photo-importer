@@ -91,6 +91,7 @@ async function run() {
   }
   syncBuiltinESMExports();
   const core = await import('../../core/index.ts');
+  const {organizeAs} = await import('./records.ts');
   core.configureOrganizationRecovery('process-crash-host-authentication-secret-32bytes');
   if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'retry-import') {
     const {plans:[plan]} = await core.plan(source,[destination],importOptions,metadata);
@@ -101,8 +102,7 @@ async function run() {
   if (mode === 'resume-organization') return {result:await core.resumeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   if (mode === 'finalize-intent' || mode === 'finalize-unlink' || mode === 'retry-finalize') return {result:await core.finalizeOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};
   const {plans:[plan]} = await core.plan(library,[library],organizationOptions,metadata);
-  const strategy = mode.startsWith('organization-rename') ? 'rename' as const : 'copy' as const;
-  return {result:await core.executeReorganization(plan!,undefined,undefined,{strategy}),jobs:await core.getOrganizationRecovery(library),target};
+  return {result:await organizeAs(mode.startsWith('organization-rename') ? 'rename' : 'copy',plan!),jobs:await core.getOrganizationRecovery(library),target};
 }
 try {
   let result;

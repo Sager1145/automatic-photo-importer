@@ -169,7 +169,7 @@ test('an orphan present before an import stays; organization removes moved-file 
   await fs.writeFile(path.join(library,'incoming','._GONE.JPG'),appleDouble([provenance]));
   await fs.writeFile(path.join(library,'incoming','._TAGGED.JPG'),appleDouble([provenance,tags]));
   const review=(await plan(library,[library],{...importOptions,reorganize:true},metadata)).plans[0]!;
-  const result=await executeReorganization(review,undefined,undefined,{strategy:'rename',removeAppleDouble:true});
+  const result=await executeReorganization(review,undefined,undefined,{removeAppleDouble:true});
   assert.deepEqual(result.errors,[]);
   assert.deepEqual((await sidecars(library)).map(name=>path.basename(name)).filter(name=>name!=='._notes.txt'),['._TAGGED.JPG']);
   assert.ok(result.appleDouble!.orphans>=1&&result.appleDouble!.removed>=1);
@@ -256,7 +256,7 @@ async function library(t:test.TestContext){
   const review=(await plan(root,[root],{...importOptions,reorganize:true},metadata)).plans[0]!;
   return {root,review};
 }
-const organize={strategy:'rename' as const,removeAppleDouble:true};
+const organize={removeAppleDouble:true};
 
 test('organizing one file looks only at the folders it touched',async t=>{
   const {root,review}=await library(t);

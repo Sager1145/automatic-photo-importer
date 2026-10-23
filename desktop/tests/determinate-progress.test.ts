@@ -73,7 +73,7 @@ test('reading a journal reports the history step with the event file it is on',a
  const {drive,photos}=await tree(t);
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
  const controller=new AbortController();
- await assert.rejects(core.executeReorganization(plan,controller.signal,value=>{if(value.step==='moving'&&value.completed>=1)controller.abort();},{strategy:'rename'}),{name:'AbortError'});
+ await assert.rejects(core.executeReorganization(plan,controller.signal,value=>{if(value.step==='moving'&&value.completed>=1)controller.abort();}),{name:'AbortError'});
  const [journal]=await core.getOrganizationRecovery(photos);
  const seen:{completed:number;total:number;file:string}[]=[];
  await core.resumeOrganization(photos,journal!.id,undefined,value=>{if(value.step==='history')seen.push(value);});

@@ -12,18 +12,20 @@ import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
+import { removeEmptiedFolders } from './redundant-folders';
 import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
-export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;/** What removing macOS "._" files did; present only when it was on. */appleDouble?:AppleDoubleReport;}
-/** rename: move each file on its volume with rename(2); copy: verified copy plus a retained original. */
-export type OrganizationStrategy='rename'|'copy';
+export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;/** What removing macOS "._" files did; present only when it was on. */appleDouble?:AppleDoubleReport;/** Source folders this run removed because it left them empty; present only when there were some. */foldersRemoved?:number;}
 /** kept: a duplicate removal's entry names the copy that stays as its destination; that copy may differ from the removed file's bytes (EXIF-identical duplicates), so its own size and SHA-256 are checked instead. */
 export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;kept?:{digest:string;size:number};}
 interface FileIdentity {dev:string;ino:string;size:string;mtime:string;ctime:string;}
 interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
-interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];}
+interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];/** rename: each file moves on its volume with rename(2), every new organization's. Absent (journals of earlier
+ * versions): a verified copy plus a retained original. */strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];
+ /** The chosen source folders (the source itself when none were chosen): only folders inside them that the run emptied
+ * are removed, OS bookkeeping included. Absent (earlier versions' journals): only folders already empty go, up to the source. */cleanupScope?:string[];}
 import {APP_DATA_FOLDER,isRecordFolderName} from './legacy-names';
 export {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from './legacy-names';
 /** This app's record folders, current and earlier: never organized, listed or cleaned as user files. */
@@ -241,7 +243,7 @@ async function proven(file:string,check:()=>Promise<void>):Promise<BigIntStats|u
 const unchangedSince=(proof:BigIntStats|undefined,now:BigIntStats)=>!!proof&&provable(now)&&sameStat(proof,now)&&proof.birthtimeNs===now.birthtimeNs;
 function validateManifest(value:unknown,root:string,id:string):Manifest {
  const m=value as Manifest;
- if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.kind!==undefined&&m.kind!=='duplicates')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source)))))throw new Error('Invalid or unsafe organization recovery journal');
+ if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.kind!==undefined&&m.kind!=='duplicates')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source))))||(m.cleanupScope!==undefined&&(m.keepFolders||!Array.isArray(m.cleanupScope)||!m.cleanupScope.length||m.cleanupScope.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!within(folder,m.source)||path.relative(m.source,folder).split(path.sep).some(p=>isRecoveryName(p))))))throw new Error('Invalid or unsafe organization recovery journal');
  const sources=new Set<string>();
  for(const entry of m.entries) {
   if(!entry||(entry.captureTimeMs!==undefined&&(!Number.isFinite(entry.captureTimeMs)||Math.abs(entry.captureTimeMs)>8640000000000000))||typeof entry.source!=='string'||typeof entry.destination!=='string'||!beneath(entry.source,m.source)||path.resolve(entry.source)!==entry.source||!beneath(entry.destination,root)||path.resolve(entry.destination)!==entry.destination||typeof entry.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.digest)||!Number.isSafeInteger(entry.size)||entry.size<0||typeof entry.move!=='boolean'||!entry.stat||!entry.parents||typeof entry.parents!=='object')throw new Error('Invalid or unsafe organization recovery entry');
@@ -272,7 +274,7 @@ async function readJournalHead(journal:string,scope:string,entries:boolean):Prom
 function manifestFrom(header:Record<string,unknown>,entries:Record<string,unknown>,root:string,id:string):Manifest {
  if(header.id!==id||entries.id!==id||!Array.isArray(entries.entries))throw new Error('Invalid or unsafe organization recovery journal');
  const m={version:1,...(header.dupKind!==undefined?{kind:header.dupKind}:{}),id:header.id,root:header.root,rootIdentity:header.rootIdentity,source:header.source,sourceIdentity:header.sourceIdentity,entries:entries.entries,
-  ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{})};
+  ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{}),...(header.cleanupScope!==undefined?{cleanupScope:header.cleanupScope}:{})};
  return validateManifest(m,root,id);
 }
 interface Found {store:Store;folder:string;journal:string;}
@@ -419,20 +421,14 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
 /** Only reviewed obsolete source parents can be removed, and only by nonrecursive rmdir.
  * Stashed originals are independent of these paths, so recovery remains usable.
  */
-/** The source folders an organization may remove once empty, deepest first. */
-function emptiable(m:Manifest,finalized:Set<number>):[string,string][]{
+/** The source folders an organization may remove once it emptied them, with their identities when it began: the
+ * folders its moved files were in and their ancestors, inside its cleanup scope; none when it keeps its folders. */
+function emptiable(m:Manifest,finalized:Set<number>):Map<string,string>{
  const candidates=new Map<string,string>();
- for(const [index,entry]of m.entries.entries())if(entry.move&&!finalized.has(index))for(const [folder,expected]of Object.entries(entry.parents))candidates.set(folder,expected);
- return [...candidates].sort(([a],[b])=>b.length-a.length);
-}
-async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?:AbortSignal,onFolder?:(done:number,folder:string)=>void):Promise<void>{
- let done=0;
- for(const [folder,expected]of emptiable(m,finalized)){
-  checkAbort(signal);done++;onFolder?.(done,folder);if(folder===m.root||folder===m.source||m.libraries?.includes(folder))continue;
-  await contained(folder,m.source);const stat=await maybeStat(folder);if(!stat)continue;
-  if(!stat.isDirectory()||stat.isSymbolicLink()||await identity(folder)!==expected)throw new Error('Original folder changed; retained without cleanup');
-  try{await fs.rmdir(folder);logDeletion('organize',folder,'original folder left empty after its files were organized','rmdir only removes empty folders; the folder identity matched the journal',{});await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
- }
+ if(m.keepFolders)return candidates;
+ for(const [index,entry]of m.entries.entries())if(entry.move&&!finalized.has(index))for(const [folder,expected]of Object.entries(entry.parents))
+  if(folder!==m.root&&!m.libraries?.includes(folder)&&(!m.cleanupScope||m.cleanupScope.some(scope=>within(folder,scope))))candidates.set(folder,expected);
+ return candidates;
 }
 /** The folders next to `root` on the same drive (none when `root` is a drive's top folder, so the
  * other mounted volumes are never read), skipping hidden ones. */
@@ -950,7 +946,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await sidecars?.besideGone(entry.source,m.source);
   }
   // Closing the journal, then the emptied folders: each counted, the journal last.
-  const folders=m.keepFolders?0:emptiable(m,state.finalized).length;
+  const emptied=emptiable(m,state.finalized),folders=emptied.size;
   const tidy=(done:number,file:string)=>onProgress?.({phase:'copying',step:'tidying',completed:done,total:folders+1,bytes:0,totalBytes:0,speed:0,file,renames:true});
   tidy(0,'');
   await checkpoint(m,'complete');completedRun=true;
@@ -972,7 +968,10 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   }
   // The user can keep emptied source folders; the choice is part of the signed journal.
   await removeSiblingPointers(m);
-  if(!m.keepFolders)await removeEmptySourceFolders(m,state.finalized,signal,(done,folder)=>tidy(done,path.basename(folder)));
+  // A journal without a cleanup scope keeps its earlier meaning: only folders already empty.
+  const removed=await removeEmptiedFolders(m.source,emptied.keys(),{signal,identities:emptied,bookkeeping:!!m.cleanupScope,area:'organize',after:'organizing',onFolders:(done,_total,folder)=>tidy(done,path.basename(folder))});
+  if(removed)result.foldersRemoved=removed;
+  if(folders)checkAbort(signal);
   tidy(folders+1,'journal');
  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
  // A clean pass becomes the reference for the next recheck in this session.
@@ -985,14 +984,22 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
 }
 /** The header and entries lines that open a journal. */
 function journalHead(m:Manifest):string {
- const header=sealedLine('organization',{id:m.id,root:m.root,rootIdentity:m.rootIdentity,source:m.source,sourceIdentity:m.sourceIdentity,...(m.strategy?{strategy:m.strategy}:{}),...(m.keepFolders?{keepFolders:m.keepFolders}:{}),...(m.libraries?{libraries:m.libraries}:{}),...(m.kind?{dupKind:m.kind}:{}),folders:pointerFolders(m)});
+ const header=sealedLine('organization',{id:m.id,root:m.root,rootIdentity:m.rootIdentity,source:m.source,sourceIdentity:m.sourceIdentity,...(m.strategy?{strategy:m.strategy}:{}),...(m.keepFolders?{keepFolders:m.keepFolders}:{}),...(m.libraries?{libraries:m.libraries}:{}),...(m.cleanupScope?{cleanupScope:m.cleanupScope}:{}),...(m.kind?{dupKind:m.kind}:{}),folders:pointerFolders(m)});
  const entries=sealedLine('entries',{id:m.id,entries:m.entries});
  if(Buffer.byteLength(header)>LINE_CAPS.header||Buffer.byteLength(entries)>LINE_CAPS.entries)throw new Error('This organization is too large to record');
  return `${header}\n${entries}\n`;
 }
-/** Make a new journal in the store its library writes to: its folder, then its header and entries written
- * aside, synchronized, and renamed into place under the both-names rule. */
-async function createJournal(m:Manifest):Promise<void>{
+/** What a new journal records besides its entries; its id and the source's identity are added here. */
+type JournalSpec=Pick<Manifest,'kind'|'root'|'rootIdentity'|'source'|'strategy'|'keepFolders'|'libraries'|'cleanupScope'>;
+/** Make a new journal for `entries` in the store its library writes to: each entry's source identity and those of the
+ * folders above it, the manifest checked like any read one, then its header and entries written aside, synchronized,
+ * and renamed into place under the both-names rule. No destination publication or original relocation occurs until
+ * this complete immutable review and the folders containing it have been synchronized. */
+async function createJournal(spec:JournalSpec,entries:OrganizationEntry[],signal?:AbortSignal):Promise<Manifest>{
+ checkAbort(signal);requireHostKey();await rootUnchanged(spec.root,spec.rootIdentity);await refuseOldRecords(spec.root,...spec.libraries??[]);
+ const id=randomUUID(),m:Manifest={version:1,...spec,id,sourceIdentity:spec.source===spec.root?spec.rootIdentity:await identity(spec.source),entries:[]};
+ for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==spec.source;folder=path.dirname(folder)){if(!beneath(folder,spec.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}m.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
+ validateManifest(m,spec.root,id);
  const store=await storeFor(m.root);
  if(store.dev!==(await fs.lstat(m.root,{bigint:true})).dev)throw new Error('Recovery records and the library must remain on the same filesystem');
  const folder=await storeFolder(store,ORGANIZATIONS,m.id),journal=path.join(folder,JOURNAL);
@@ -1001,20 +1008,19 @@ async function createJournal(m:Manifest):Promise<void>{
  await writeNewFile(temporary,head);
  if(await renameChecked(temporary,journal)!=='done')throw new Error(`Unable to create ${journal}`);
  locations.set(m,{folder,journal,scope:store.path,store,eventsFrom:Buffer.byteLength(head)});
+ await roots(m);
+ return m;
 }
-export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false,appleDouble?:AppleDoubleCleaner):Promise<ReorganizationResult> {
- checkAbort(signal);requireHostKey();await rootUnchanged(transfer.root,transfer.rootIdentity);await refuseOldRecords(transfer.root,...libraries);
- const id=randomUUID(),manifest:Manifest={version:1,id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,sourceIdentity:await identity(transfer.source),entries:[],...(strategy==='rename'?{strategy:'rename' as const}:{}),...(keepFolders?{keepFolders:true as const}:{}),...(libraries.length?{libraries}:{})};
- for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.source;folder=path.dirname(folder)){if(!beneath(folder,transfer.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
- validateManifest(manifest,transfer.root,id);
- // No destination publication or original relocation occurs until the complete
- // immutable review and containing directories have been synchronized.
- await createJournal(manifest);await roots(manifest);
- const result=await locked(lockKey(transfer.root,id),()=>run(manifest,signal,onProgress,{appleDouble}));
+/** Organize `entries` of a reviewed plan: every file moves by rename(2) where its volume allows. `folders`: the chosen
+ * source folders, the only ones emptied folders are removed from (the whole source when none were chosen). */
+export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{keepFolders?:boolean;libraries?:string[];folders?:string[];releaseDuplicates?:boolean;appleDouble?:AppleDoubleCleaner}={}):Promise<ReorganizationResult> {
+ const libraries=options.libraries??[],scope=options.folders?.length?options.folders.map(folder=>path.resolve(transfer.source,folder)):[transfer.source];
+ const manifest=await createJournal({root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,strategy:'rename',...(options.keepFolders?{keepFolders:true as const}:{cleanupScope:scope}),...(libraries.length?{libraries}:{})},entries,signal);
+ const result=await locked(lockKey(transfer.root,manifest.id),()=>run(manifest,signal,onProgress,{appleDouble:options.appleDouble}));
  // Release re-verifies every destination by checksum before removing a kept original.
- if(releaseDuplicates&&result.errors.length===0&&result.retained>0){
+ if(options.releaseDuplicates&&result.errors.length===0&&result.retained>0){
   try{
-   const released=await finalizeOrganization(transfer.root,id,signal,step=>onProgress?.({phase:step.step==='checking'?'verifying':'copying',step:step.step,completed:step.completed,total:step.total,bytes:0,totalBytes:0,speed:0,file:step.file,renames:true}));
+   const released=await finalizeOrganization(transfer.root,manifest.id,signal,step=>onProgress?.({phase:step.step==='checking'?'verifying':'copying',step:step.step,completed:step.completed,total:step.total,bytes:0,totalBytes:0,speed:0,file:step.file,renames:true}));
    result.released=released.removed;result.releasedBytes=released.bytes;
    result.retained=Math.max(0,result.retained-released.removed);result.retainedBytes=Math.max(0,result.retainedBytes-released.bytes);
   }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
@@ -1025,11 +1031,8 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  * the copy kept. Nothing is copied unless an entry has no `kept` (a companion carried next to the kept file).
  * `root` is the library; the journal lives in its recovery folder, like an organization's. */
 export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'rootIdentity'>,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<{id:string;result:ReorganizationResult}> {
- checkAbort(signal);requireHostKey();await rootUnchanged(transfer.root,transfer.rootIdentity);await refuseOldRecords(transfer.root);
- const id=randomUUID(),manifest:Manifest={version:1,kind:'duplicates',id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.root,sourceIdentity:transfer.rootIdentity,entries:[],keepFolders:true};
- for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.root;folder=path.dirname(folder)){if(!beneath(folder,transfer.root))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
- validateManifest(manifest,transfer.root,id);await createJournal(manifest);await roots(manifest);
- return {id,result:await locked(lockKey(transfer.root,id),()=>run(manifest,signal,onProgress))};
+ const manifest=await createJournal({kind:'duplicates',root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.root,keepFolders:true},entries,signal);
+ return {id:manifest.id,result:await locked(lockKey(transfer.root,manifest.id),()=>run(manifest,signal,onProgress))};
 }
 /** The files (relative to `root`, with `/`) that an earlier, still live journal of this library placed or kept. Removing
  * one supersedes that journal, which ends its Undo, so Remove duplicates warns before it does. Best effort: a

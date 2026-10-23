@@ -7,12 +7,11 @@ import {spawnSync} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import * as core from '../core/index';
 import {sameHardLink,sameFile,movedFileIdentity} from '../core/recovery';
-import {journalFileFor,journalFolderFor,journalLines} from './fixtures/records';
+import {journalFileFor,journalFolderFor,journalLines,organizeByCopy} from './fixtures/records';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
-const rename={strategy:'rename' as const};
 async function fixture(t:test.TestContext,count=1){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-rename-')));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -29,7 +28,7 @@ test('a same-volume organization renames the original into place without copying
  const p=await prepare(f.root);
  const read={bytes:0},open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{const handle=await open(...args);if(String(args[0]).endsWith('.JPG')){const reader=handle.read.bind(handle);t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await reader(...values);read.bytes+=result.bytesRead;return result;});}return handle;});syncBuiltinESMExports();
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);assert.equal(result.retained,0);assert.equal(result.retainedBytes,0);
  assert.equal(read.bytes,0,'a rename reads no media bytes');
@@ -41,11 +40,32 @@ test('a same-volume organization renames the original into place without copying
  assert.deepEqual(await recoveryFiles(f.root,job!.id),[]);
 });
 
+test('a new organization is recorded as a rename without being asked for one',async t=>{
+ const f=await fixture(t);
+ const result=await core.executeReorganization(await prepare(f.root));
+ assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);assert.equal(result.retained,0);
+ const [job]=await core.getOrganizationRecovery(f.root);
+ assert.equal(JSON.parse((await journalLines(f.root,job!.id))[0]!).strategy,'rename');
+});
+
+test('a journal recorded without a strategy (an earlier version\'s copy) still runs as a verified copy and its signed header is never rewritten',async t=>{
+ const f=await fixture(t);
+ const result=await organizeByCopy(await prepare(f.root));
+ assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
+ assert.equal(result.retained,1,'the copy keeps the original for undo');
+ const header=(await journalLines(f.root,result.id))[0]!;
+ assert.equal(JSON.parse(header).strategy,undefined);
+ assert.deepEqual((await core.resumeOrganization(f.root,result.id)).errors,[]);
+ assert.equal((await journalLines(f.root,result.id))[0],header,'the header stays as it was signed');
+ assert.equal(await fs.readFile(f.destination(),'utf8'),'precious original 0');
+ const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.retainedFiles,1);assert.equal(job!.finalizable,true);
+});
+
 test('a destination appearing during the move is never overwritten',async t=>{
  const f=await fixture(t),p=await prepare(f.root);
  const link=fs.link.bind(fs);
  t.mock.method(fs,'link',async(from:string,to:string)=>{if(to===f.destination())await fs.writeFile(to,'someone else');return link(from,to);});syncBuiltinESMExports();
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.equal(result.moved,0);assert.match(result.errors.join('\n'),/appeared|changed/i);
  assert.equal(await fs.readFile(f.destination(),'utf8'),'someone else');
@@ -56,7 +76,7 @@ test('a cross-device move falls back to the verified copy that keeps the origina
  const f=await fixture(t),p=await prepare(f.root);
  const link=fs.link.bind(fs);
  t.mock.method(fs,'link',async(from:string,to:string)=>{if(from===f.original||to===f.destination())throw Object.assign(new Error('cross-device link'),{code:'EXDEV'});return link(from,to);});syncBuiltinESMExports();
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.equal(result.retained,1);assert.equal(result.retainedBytes,Buffer.byteLength('precious original 0'));
@@ -68,7 +88,7 @@ test('a cross-device move falls back to the verified copy that keeps the origina
 test('a source changed after review is not moved',async t=>{
  const f=await fixture(t),p=await prepare(f.root);
  await fs.chmod(f.original,0o600);
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  assert.match(result.errors.join('\n'),/changed/i);assert.equal(result.moved,0);
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');
  await assert.rejects(fs.lstat(f.destination()),{code:'ENOENT'});
@@ -76,7 +96,7 @@ test('a source changed after review is not moved',async t=>{
 
 test('undo moves renamed files back and is journaled so it cannot run twice',async t=>{
  const f=await fixture(t,2),before=await fs.lstat(f.original,{bigint:true});
- await core.executeReorganization(await prepare(f.root),undefined,undefined,rename);
+ await core.executeReorganization(await prepare(f.root),undefined,undefined);
  const [job]=await core.getOrganizationRecovery(f.root);
  await fs.rm(path.join(f.root,'incoming'),{recursive:true,force:true});
  const undone=await core.undoOrganization(f.root,job!.id);
@@ -90,7 +110,7 @@ test('undo moves renamed files back and is journaled so it cannot run twice',asy
 
 test('undo of a copied organization restores the kept original and removes only the published copy',async t=>{
  const f=await fixture(t);
- await core.executeReorganization(await prepare(f.root));
+ await organizeByCopy(await prepare(f.root));
  const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.retainedFiles,1);
  const undone=await core.undoOrganization(f.root,job!.id);
  assert.equal(undone.restored,1);assert.equal(undone.removed,1);
@@ -100,7 +120,7 @@ test('undo of a copied organization restores the kept original and removes only 
 
 test('a finalized organization cannot be undone',async t=>{
  const f=await fixture(t);
- await core.executeReorganization(await prepare(f.root));
+ await organizeByCopy(await prepare(f.root));
  const [job]=await core.getOrganizationRecovery(f.root);
  const released=await core.finalizeOrganization(f.root,job!.id);assert.equal(released.removed,1);
  const [after]=await core.getOrganizationRecovery(f.root);
@@ -118,7 +138,7 @@ for(const when of ['after-intent','after-link','after-rename'] as const)test(`a 
  filesystem.link=async(from,to)=>{if(from===original&&when==='after-intent')process.exit(91);if(from===original&&when==='after-rename')throw Object.assign(new Error('no links'),{code:'ENOTSUP'});const result=await link(from,to);if(from===original&&when==='after-link')process.exit(91);return result;};
  filesystem.rename=async(from,to)=>{const result=await rename(from,to);if(from===original&&when==='after-rename')process.exit(91);return result;};
  const {plans:[p]}=await plan(root,[root],${JSON.stringify(options)},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
- await executeReorganization(p,undefined,undefined,{strategy:'rename'});process.exit(0);`);
+ await executeReorganization(p,undefined,undefined);process.exit(0);`);
  const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});
  assert.equal(child.status,91,child.stderr);await fs.unlink(script);
  const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.status,'pending');
@@ -132,7 +152,7 @@ for(const when of ['after-intent','after-link','after-rename'] as const)test(`a 
 test('a file changed after review stops the run before any file is moved',async t=>{
  const f=await fixture(t,3),p=await prepare(f.root);
  await fs.writeFile(f.originals[2]!,'edited after review, longer');
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  assert.match(result.errors.join('\n'),/changed/i);assert.equal(result.moved,0);
  for(const [index,file] of f.originals.entries())assert.ok((await fs.readFile(file,'utf8')).startsWith(index===2?'edited':'precious'));
  for(let index=0;index<3;index++)await assert.rejects(fs.lstat(f.destination(index)),{code:'ENOENT'});
@@ -143,7 +163,7 @@ test('a capture date the filesystem cannot store keeps the moved file and its or
  const p=await (await core.plan(f.root,[f.root],options,async()=>({camera:'Sony',date:'2024-02-03T12:00:00',fields:{}}))).plans[0]!;
  const futimes=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{const handle=await futimes(...args);if(String(args[0])===f.destination())t.mock.method(handle,'utimes',async()=>{throw Object.assign(new Error('date out of range'),{code:'EINVAL'});});return handle;});syncBuiltinESMExports();
- const result=await core.executeReorganization(p,undefined,undefined,rename);
+ const result=await core.executeReorganization(p,undefined,undefined);
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.match((result.notes??[]).join('\n'),/kept their original dates/i);
@@ -163,7 +183,7 @@ test('an organization stopped partway can be undone, and an interrupted undo can
  const f=await fixture(t,3),p=await prepare(f.root),controller=new AbortController();
  let moves=0;const link=fs.link.bind(fs);
  t.mock.method(fs,'link',async(from:string,to:string)=>{const result=await link(from,to);if(f.originals.includes(from)&&++moves===2)controller.abort();return result;});syncBuiltinESMExports();
- await core.executeReorganization(p,controller.signal,undefined,rename).catch(()=>{});
+ await core.executeReorganization(p,controller.signal,undefined).catch(()=>{});
  t.mock.restoreAll();syncBuiltinESMExports();
  let [job]=await core.getOrganizationRecovery(f.root);
  assert.equal(job!.status,'pending');assert.equal(job!.undoable,true,'a partly moved organization can be undone');
@@ -182,7 +202,7 @@ test('an empty file is left where it is: it is not planned or moved',async t=>{
  const f=await fixture(t);await fs.writeFile(f.original,'');
  const reviewed=await prepare(f.root);
  assert.deepEqual(reviewed.entries,[]);
- const result=await core.executeReorganization(reviewed,undefined,undefined,rename);
+ const result=await core.executeReorganization(reviewed,undefined,undefined);
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,0);
  assert.equal((await fs.lstat(f.original)).size,0);
 });
@@ -196,7 +216,7 @@ const rewriteLog=async(root:string,id:string,lines:string[])=>fs.writeFile(await
 
 test('a moved file given its capture date stays recognised however its journal events are ordered',async t=>{
  const f=await fixture(t,2);
- await core.executeReorganization(await dated(f.root),undefined,undefined,rename);
+ await core.executeReorganization(await dated(f.root),undefined,undefined);
  const [job]=await core.getOrganizationRecovery(f.root);
  assert.equal(job!.status,'complete');
  const lines=await eventLines(f.root,job!.id);assert.ok(lines.some(isEvent('timed')),'dates were applied and journaled');
@@ -209,7 +229,7 @@ test('a moved file given its capture date stays recognised however its journal e
 
 test('a crash after a moved file was dated but before that was journaled still resumes and undoes',async t=>{
  const f=await fixture(t);
- await core.executeReorganization(await dated(f.root),undefined,undefined,rename);
+ await core.executeReorganization(await dated(f.root),undefined,undefined);
  const [job]=await core.getOrganizationRecovery(f.root);
  await rewriteLog(f.root,job!.id,(await eventLines(f.root,job!.id)).filter(line=>!isEvent('timed')(line)));
  assert.equal((await core.getOrganizationRecovery(f.root))[0]!.status,'complete');
@@ -236,7 +256,7 @@ test('a restored Modified date rounded to the filesystem resolution still identi
 
 test('an organization journals into one append-only file, not one file per event',async t=>{
  const f=await fixture(t,5);
- assert.deepEqual((await core.executeReorganization(await prepare(f.root),undefined,undefined,rename)).errors,[]);
+ assert.deepEqual((await core.executeReorganization(await prepare(f.root),undefined,undefined)).errors,[]);
  const [job]=await core.getOrganizationRecovery(f.root);assert.equal(job!.status,'complete');
  const names=await fs.readdir(await journalFolderFor(f.root,job!.id));
  assert.equal(names.includes('journal.jsonl'),true);assert.deepEqual(names.filter(name=>name.startsWith('event-')),[]);

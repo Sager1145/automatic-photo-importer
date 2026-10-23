@@ -23,7 +23,7 @@ export type ResidueKind='partial'|'resumable'|'kept'|'recoverable'|'receipt'|'in
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat?:BigIntStats;/** unbound: the file the receipt names and its stat when found. */file?:string;fileStat?:BigIntStats;
  /** Records v5: the store it is in, and the receipt to close once it is handled. */store?:Store;rid?:string;
  /** An ended organization (kind 'journal'). */journal?:{root:string;id:string};}
-export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};/** Receipts of unfinished direct copies that no longer match their files, and (up to 5) those files. */unbound?:{files:number;paths:string[]};}
+export interface Residue {items:ResidueItem[];files:number;bytes:number;/** Staged copies a re-import could continue. */resumable:{files:number;bytes:number};/** Staged copies not proven dead; only Clean up removes them. */kept:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};/** Receipts of unfinished direct copies that no longer match their files, and (up to 5) those files. */unbound?:{files:number;paths:string[]};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -232,15 +232,16 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
   }
   return summary(items);
 }
+/** What automatic cleanup (keepResumable) leaves: resumable and kept copies alike, recoverable copies and unbound receipts' files. */
 const keptKinds=new Set<ResidueKind>(['resumable','kept','recoverable','unbound']);
 const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':kind==='sidecar'?'macOS "._" file in the records folder holding only bookkeeping':kind==='segment'?'receipt log segment whose receipts are all closed':'leftover of an interrupted run (staging file, receipt or scratch file)';
 function summary(items:ResidueItem[]):Residue {
   // A receipt to close is not a file the user has; it is still done by the next cleanup.
   const counted=items.filter(item=>!(item.kind==='receipt'&&item.rid));
-  const resumable=counted.filter(item=>item.kind==='resumable'||item.kind==='kept'),recoverable=counted.filter(item=>item.kind==='recoverable');
+  const resumable=counted.filter(item=>item.kind==='resumable'),kept=counted.filter(item=>item.kind==='kept'),recoverable=counted.filter(item=>item.kind==='recoverable');
   const sum=(list:ResidueItem[])=>list.reduce((total,item)=>total+item.bytes,0);
   const unbound=items.filter(item=>item.kind==='unbound');
-  return {items,files:counted.length,bytes:sum(counted),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:recoverable.length,bytes:sum(recoverable),...(recoverable[0]?{folder:path.dirname(recoverable[0].path)}:{})},unbound:{files:unbound.length,paths:unbound.slice(0,5).map(item=>item.file!)}};
+  return {items,files:counted.length,bytes:sum(counted),resumable:{files:resumable.length,bytes:sum(resumable)},kept:{files:kept.length,bytes:sum(kept)},recoverable:{files:recoverable.length,bytes:sum(recoverable),...(recoverable[0]?{folder:path.dirname(recoverable[0].path)}:{})},unbound:{files:unbound.length,paths:unbound.slice(0,5).map(item=>item.file!)}};
 }
 
 /** Remove what findResidue listed, each only while it is still the very file or folder found. Folders go only

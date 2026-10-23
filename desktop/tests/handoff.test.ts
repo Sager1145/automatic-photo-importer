@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import * as core from '../core/index';
 import type {Metadata} from '../shared';
-import {journalFolderFor,journalFileFor} from './fixtures/records';
+import {journalFolderFor,journalFileFor,organizeAs} from './fixtures/records';
 
 // The A006 pair: library organization A (photobackup) was stopped part-way; an older build then ran
 // organization B (videobackup), which moved some of A's already-moved videos on into videobackup
@@ -17,7 +17,7 @@ const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
 const names=['C0016.MOV','C0017.MOV','A.JPG','B.JPG','D.JPG'];
 
-async function pair(t:test.TestContext,{strategy='rename',finishA=false,finalizeA=false,from='2025'}:{strategy?:core.OrganizationStrategy;finishA?:boolean;finalizeA?:boolean;from?:string}={}){
+async function pair(t:test.TestContext,{strategy='rename',finishA=false,finalizeA=false,from='2025'}:{strategy?:'rename'|'copy';finishA?:boolean;finalizeA?:boolean;from?:string}={}){
  const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'handoff-')));
  t.after(()=>fs.rm(drive,{recursive:true,force:true}));
  const photos=path.join(drive,'photobackup'),videos=path.join(drive,'videobackup'),card=path.join(drive,from);
@@ -26,7 +26,7 @@ async function pair(t:test.TestContext,{strategy='rename',finishA=false,finalize
  // A: the card folder into photobackup, stopped right after its first video moved (unless finished).
  const a=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:[from.split('/')[0]!]},metadata)).plans[0]!;
  const controller=new AbortController();
- const run=core.executeReorganization(a,finishA?undefined:controller.signal,finishA?undefined:value=>{if(value.step==='moving'&&/\.MOV$/i.test(value.file))controller.abort();},{strategy});
+ const run=organizeAs(strategy,a,finishA?undefined:controller.signal,finishA?undefined:value=>{if(value.step==='moving'&&/\.MOV$/i.test(value.file))controller.abort();});
  if(finishA)assert.deepEqual((await run).errors,[]);else await assert.rejects(run,{name:'AbortError'});
  const [journal]=await core.getOrganizationRecovery(photos);const A=journal!.id;
  if(finalizeA)assert.ok((await core.finalizeOrganization(photos,A)).removed>0);
@@ -34,7 +34,7 @@ async function pair(t:test.TestContext,{strategy='rename',finishA=false,finalize
  const store=await journalFolderFor(photos,A),hidden=path.join(drive,'hidden-'+A);
  await fs.rename(store,hidden);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
- assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined)).errors,[]);
  await fs.mkdir(path.dirname(store),{recursive:true});await fs.rename(hidden,store);
  const [later]=await core.getOrganizationRecovery(videos);
  const handed=(await fs.readdir(path.join(videos,camera)).catch(()=>[] as string[])).filter(name=>names.includes(name));
@@ -138,14 +138,14 @@ test('like A006: a finished, finalized journal whose copies were moved on lists 
  const again=await core.finalizeOrganization(photos,A);assert.equal(again.removed,0);assert.ok(again.handedOff>0);
 });
 
-async function finished(t:test.TestContext,strategy:core.OrganizationStrategy='rename',release=false){
+async function finished(t:test.TestContext,strategy:'rename'|'copy'='rename',release=false){
  const drive=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'handoff-')));
  t.after(()=>fs.rm(drive,{recursive:true,force:true}));
  const photos=path.join(drive,'photobackup'),card=path.join(drive,'2025');
  for(const folder of [photos,card])await fs.mkdir(folder,{recursive:true});
  for(const name of names)await fs.writeFile(path.join(card,name),'bytes of '+name);
  const a=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(a,undefined,undefined,{strategy})).errors,[]);
+ assert.deepEqual((await organizeAs(strategy,a)).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
  if(release)assert.ok((await core.finalizeOrganization(photos,journal!.id)).removed>0);
  // Moved away by hand, with no journal recording it.
@@ -160,7 +160,7 @@ for(const [strategy,release] of [['rename',false],['copy',true]] as const)test(`
  assert.equal(listed?.error,undefined);assert.equal(listed?.status,'pending');assert.equal(listed?.missing,1);assert.equal(listed?.completed,names.length-1);
  // It never blocks a new organization either.
  const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
- assert.deepEqual((await core.executeReorganization(next,undefined,undefined,{strategy:'rename'})).errors,[]);
+ assert.deepEqual((await core.executeReorganization(next,undefined,undefined)).errors,[]);
 });
 
 test('undoing a finished journal whose file was later moved away names that file and changes nothing',async t=>{

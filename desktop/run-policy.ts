@@ -9,7 +9,6 @@ export const freshOrganizeOptions=():OrganizeOptions=>({...organizeDefaults});
 export interface SourcePolicy {
   /** copy: the source is left exactly as it was. move: files are renamed into place and the originals no longer exist at the source. */
   sourceAction:'copy'|'move';
-  strategy:'copy'|'rename';
   /** Remove source folders left without user files. */
   removeEmptySourceFolders:boolean;
   /** Remove confirmed duplicates instead of keeping them for undo. */
@@ -18,6 +17,6 @@ export interface SourcePolicy {
 }
 export function sourcePolicy(kind:'import'|'reorganize',options:OrganizeOptions=organizeDefaults,prefs?:Pick<Preferences,'verifyCopies'>):SourcePolicy {
   const verifyCopies=prefs?.verifyCopies!==false;
-  if(kind==='import') return {sourceAction:'copy',strategy:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,verifyCopies};
-  return {sourceAction:'move',strategy:'rename',removeEmptySourceFolders:options.removeEmptyFolders,releaseDuplicates:options.releaseDuplicates,verifyCopies};
+  if(kind==='import') return {sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,verifyCopies};
+  return {sourceAction:'move',removeEmptySourceFolders:options.removeEmptyFolders,releaseDuplicates:options.releaseDuplicates,verifyCopies};
 }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import * as core from '../core/index';
+import {organizeByCopy} from './fixtures/records';
 import {findResidue,cleanResidue} from '../core/residue';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -19,7 +20,7 @@ async function fixture(t:test.TestContext){
 }
 async function organize(root:string,folder:string,signal?:AbortSignal,onProgress?:()=>void){
  const p=(await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat' as const,unknownRules:{}},metadata)).plans[0]!;
- return {result:await core.executeReorganization(p,signal,onProgress),destination:p.entries[0]!.destination};
+ return {result:await organizeByCopy(p,signal,onProgress),destination:p.entries[0]!.destination};
 }
 const ids=async(root:string)=>(await fs.readdir(storage(root))).filter(name=>/^[0-9a-f-]{36}$/.test(name));
 
