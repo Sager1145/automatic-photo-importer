@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { ConflictNaming, DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import type { ConflictNaming, DuplicateFile, ExecutionIssue, Inventory, InventoryFile, Listing, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { LEGACY_UNKNOWN_CAMERA_FOLDER, PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
 import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
@@ -55,15 +55,15 @@ export interface FolderRules {
   /** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;
 }
 /** How the source is listed. */
-interface Listing {
+interface ListingOptions {
   sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;
   /** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;
-  /** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;
+  /** The last whole-source listing, reused while its folders are unchanged. */reuse?:Listing;
   /** A file whose name is taken at its destination by other content (ConflictNaming). Absent: folder. */conflictNaming?:ConflictNaming;
   /** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];
 }
 /** What a copy (an import or a drive backup) adds: which source files it takes and what it already knows of them. */
-interface Copy extends Listing {
+interface Copy extends ListingOptions {
   unknownRules:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;
   /** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;
   /** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;
@@ -79,12 +79,12 @@ export interface ImportRequest extends FolderRules,Copy {
 /** Backing up a drive as it is laid out, into its drive folder (`drive`) of each destination. */
 export interface DriveRequest extends Copy {backup:true;drive?:Drive;}
 /** Organizing a library in place (or a folder beneath it on the same filesystem) by its folder rules. Unknown files stay put. */
-export interface OrganizeRequest extends FolderRules,Listing {
+export interface OrganizeRequest extends FolderRules,ListingOptions {
   backup:false;reorganize:true;/** Move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;
 }
 export type PlanRequest=ImportRequest|DriveRequest|OrganizeRequest;
 /** The read-only check of an organized library (findMisplaced). */
-export interface MisplacedRequest extends FolderRules,Pick<Listing,'sourceFolders'|'listingHint'|'onListed'> {
+export interface MisplacedRequest extends FolderRules,Pick<ListingOptions,'sourceFolders'|'listingHint'|'onListed'> {
   /** True for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */
   inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;
 }
@@ -225,15 +225,9 @@ export function pairLivePhotos(files:InventoryFile[],scanned:InventoryFile[],inf
   }
   return {paired,dropped};
 }
-export async function plan(source:string,roots:string[],options:PlanRequest,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
-  if(!options.reuse) return planOnce(source,roots,options,metadata,signal,onProgress);
-  // A file rewritten in place leaves its folder unchanged, so a remembered listing
-  // can hold a stale size. List the card again once rather than failing.
-  const changed=(error:unknown)=>error instanceof MessageError && error.key==='error.sourceChanged';
-  // A skipped change may be the stale listing too, so it is listed again before anything is skipped.
-  try { const result=await planOnce(source,roots,options,metadata,signal,onProgress); if(!result.failures.some(failure=>changed(failure.error))) return result; }
-  catch(error) { if(isAbort(error) || !changed(error)) throw error; }
-  return planOnce(source,roots,{...options,reuse:undefined},metadata,signal,onProgress);
+/** `listing`: the record a later listing of this source reuses; only for a whole source (no sourceFolders). */
+export async function plan(source:string,roots:string[],options:PlanRequest,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;listing?:Listing;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
+  return planOnce(source,roots,options,metadata,signal,onProgress);
 }
 /** Read-only check of an organized library: the files in `source` (relative to it) that are not
  * where the folder rules put them under `root` (and the video root of the video-root layout).
@@ -250,7 +244,7 @@ export async function findMisplaced(source:string,root:string,options:MisplacedR
  * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, of totalBytes: the size of the files with a same-size file at a destination; matched, matchedBytes: files found identical there, which are not copied);
  * 'locating': files to copy looked for elsewhere in the backup, by content (an import after the folder rules changed). */
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number;matched?:number;matchedBytes?:number})=>void;
-async function planOnce(source:string,roots:string[],request:Request,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
+async function planOnce(source:string,roots:string[],request:Request,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;listing?:Listing;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   checkAbort(signal);
   // A drive backup keeps the drive's own layout; every other plan files by the folder rules.
   const options:Options=request,folderRules=request.backup?undefined:request;
@@ -300,14 +294,14 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     for(const item of items){const key=family(item);if(key!==undefined&&failed.has(key)&&!failures.has(file(item)))failures.set(file(item),failed.get(key)!);}
   };
   const listingStart=performance.now();
-  const scan=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
+  const {listing,...scan}=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
   options.onListed?.(scan.files.length,scan.files.reduce((sum,file)=>sum+file.size,0));
-  log('detailed','plan','inventory',()=>{const skipped:Record<string,number>={};for(const item of scan.skipped??[])skipped[item.reason]=(skipped[item.reason]??0)+1;return {source:sourceRoot,folders:scan.listing?.folders.length,files:scan.files.length,media:scan.media,companions:scan.companions,unknown:scan.unknown,systemJunkSkipped:scan.system??0,emptyFiles:scan.empty??0,skipped,bytes:scan.bytes,reusedListing:!!options.reuse,elapsedMs:Math.round(performance.now()-listingStart),scanElapsedMs:scan.elapsedMs,sourceFolders:options.sourceFolders,reorganize:!!options.reorganize,backup:!!options.backup};});
+  log('detailed','plan','inventory',()=>{const skipped:Record<string,number>={};for(const item of scan.skipped??[])skipped[item.reason]=(skipped[item.reason]??0)+1;return {source:sourceRoot,folders:listing?.folders.length,files:scan.files.length,media:scan.media,companions:scan.companions,unknown:scan.unknown,systemJunkSkipped:scan.system??0,emptyFiles:scan.empty??0,skipped,bytes:scan.bytes,reusedListing:!!options.reuse,elapsedMs:Math.round(performance.now()-listingStart),scanElapsedMs:scan.elapsedMs,sourceFolders:options.sourceFolders,reorganize:!!options.reorganize,backup:!!options.backup};});
   let files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
   // 0-byte files and their families are never imported. An organization may collect them (below); every one is reported.
   const problems:ProblemFile[]=[],scanned=new Map(scan.files.map(file=>[file.path,file]));
   for(const item of scan.skipped??[]) if((item.reason==='empty'||item.reason==='emptyPrimary')&&!organizationOwned(item.path)) problems.push({path:item.path,relative:path.relative(sourceRoot,item.path),reason:item.reason,group:'empty',collected:false});
-  const listedBytes=files.reduce((sum,file)=>sum+file.size,0);let checkedBytes=0;
+  let listedBytes=files.reduce((sum,file)=>sum+file.size,0),checkedBytes=0;
   const unreadableMeta=new Set<string>(), infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for
   // files library organization will move or when a same-size file already occupies a destination.
@@ -333,9 +327,34 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     for(const file of files) if(!trusted.has(file.path)) hot.add(familyOf(file));
     for(const file of files) if(trusted.has(file.path)&&hot.has(familyOf(file))) trusted.delete(file.path);
   }
+  // A file rewritten in place leaves its folder's identity and names unchanged, so a reused listing can hold a stale size.
+  // A folder that came from the record is read again then (once): its files take their current sizes, and this plan goes on.
+  // A file that became empty, or stopped being empty, keeps its old size: whether it is imported was decided by it, so it fails as changed.
+  const reusedFolders=new Set(options.reuse?.folders.map(folder=>folder.relative)),reread=new Map<string,Promise<void>>();
+  // Built at the first re-read: the listed files by folder, those this plan checks, and the record's entries.
+  let byFolder:Map<string,InventoryFile[]>|undefined,checks:Set<InventoryFile>|undefined,kept:Map<string,Listing['files'][number]>|undefined;
+  const readAgain=(folder:string)=>{
+    let reading=reread.get(folder);
+    if(!reading){
+      reading=(async()=>{
+        if(!byFolder){byFolder=new Map();for(const file of scan.files){const parent=path.dirname(file.path);const list=byFolder.get(parent);if(list)list.push(file);else byFolder.set(parent,[file]);}checks=new Set(files);kept=new Map(listing?.files.map(file=>[file.relative,file]));}
+        const names=new Set(await fs.readdir(folder));
+        for(const file of byFolder.get(folder)??[]){
+          // A file that cannot be looked at fails at its own turn.
+          const stat=names.has(path.basename(file.path))?await fs.lstat(file.path).catch(()=>undefined):undefined;
+          if(!stat?.isFile()||stat.size===file.size||(stat.size>0)!==(file.size>0))continue;
+          if(file.included){scan.bytes+=stat.size-file.size;if(checks!.has(file))listedBytes+=stat.size-file.size;}
+          file.size=stat.size;const record=kept?.get(file.relative);if(record)record.size=stat.size;
+        }
+      })();
+      reread.set(folder,reading);
+    }
+    return reading;
+  };
   async function examine(file:InventoryFile,position:number):Promise<void> {
     await contained(file.path,sourceRoot);
     const originalStat=await fs.lstat(file.path,{bigint:true});
+    if(originalStat.isFile() && !originalStat.isSymbolicLink() && originalStat.size!==BigInt(file.size) && reusedFolders.has(path.dirname(file.relative)==='.'?'':path.dirname(file.relative))) await readAgain(path.dirname(file.path));
     if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new MessageError('error.sourceChanged',{path:file.path});
     mtimes.set(file.path,originalStat.mtime);
     if(!options.backup && file.kind!=='Other' && !trusted.has(file.path)) {
@@ -815,7 +834,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   for(const item of problems) item.collected=item.collected&&planned.has(item.path);
   log('detailed','plan','plan-done',()=>({source:sourceRoot,destinations:plans.length,files:plans.reduce((sum,item)=>sum+item.entries.length,0),toCopy:plans.reduce((sum,item)=>sum+item.entries.filter(entry=>!entry.skip).length,0),alreadyThere:plans.reduce((sum,item)=>sum+item.entries.filter(entry=>entry.skip).length,0),failedFiles:failures.size,problemFiles:problems.length,reorganize:!!options.reorganize}));
   const noMetadata:NoMetadataSummary|undefined=unknownFiles.length&&(unknownMode==='keep'||unknownMode==='folder')?{handling:unknownMode,folder:unknownFolder,count:unknownFiles.length,counts:unknownCounts,files:unknownFiles}:undefined;
-  return {inventory:scan,plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(noMetadata?{noMetadata}:{}),...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies,skipped:elsewhereSkipped}}:{})};
+  return {inventory:scan,...(listing?{listing}:{}),plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(noMetadata?{noMetadata}:{}),...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies,skipped:elsewhereSkipped}}:{})};
 }
 
 // Destination checks, publication and staging-link cleanup share this lock:

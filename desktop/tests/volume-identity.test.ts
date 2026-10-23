@@ -85,3 +85,14 @@ test('one path\'s volume is described from its own mount, not a sweep of every d
  assert.deepEqual(described,[['/Volumes/A']]);
  assert.equal((await volumeAt('/Users/me',{mounts,describe}))?.path,'/');
 });
+
+test('a volume another process described is adopted for its mount, and used only while the mount is the same filesystem',async()=>{
+ const {adoptVolumes,describeChanged}=await import('../platform/volumes');
+ const memory=new Map(),card:MountedVolume={path:'/Volumes/CARD',name:'CARD',volumeId:'CARD-UUID',kind:'card',fsType:'exfat'};
+ await adoptVolumes([card],async()=>'fs-card',memory);
+ const never=async():Promise<MountedVolume>=>{throw new Error('described again');};
+ const [same]=await describeChanged([card.path],['fs-card'],never,async()=>7,memory);
+ assert.deepEqual(same,{status:'fulfilled',value:{...card,free:7}});
+ const [other]=await describeChanged([card.path],['fs-other'],never,async()=>7,memory);
+ assert.equal(other!.status,'rejected');
+});

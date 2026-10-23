@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Inventory, InventoryFile, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
+import type { Inventory, InventoryFile, Listing, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { isOldReceiptName } from './legacy-names';
@@ -55,14 +55,14 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   }
   return result;
 }
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;reuse?:Inventory;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
   // Listing a large card takes a while; report what has been found so far.
   let listedBytes=0,reported=0,reportedAt=0,topDone=0,topTotal=0;
   const report=(final=false)=>{if(!options.onProgress||(!final&&files.length-reported<500&&performance.now()-reportedAt<100))return;reported=files.length;reportedAt=performance.now();options.onProgress(files.length,listedBytes,topTotal>0?{done:topDone,total:topTotal}:undefined,files.at(-1)?.relative);};
-  const listedFolders:[string,string,string[]?][]=[];
+  const listedFolders:Listing['folders']=[];
   const folderKey=(stat:import('node:fs').BigIntStats)=>`${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;
   // The last listing of the same scope, per folder: a folder whose identity is
   // unchanged (adding, removing or renaming an entry changes it) keeps its entries
@@ -70,11 +70,12 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   // A folder is reused when its identity is unchanged (same mount, this session) or, failing that,
   // when its entry names are unchanged. Names are what a listing remembered across a remount is
   // checked by: camera firmware may add files without updating a folder's stored timestamp.
-  const remembered=new Map<string,{key:string;names?:string[];files:InventoryFile[];folders:string[]}>();
-  if(options.reuse?.listing && !options.folders && options.reuse.listing.backup===!!options.backup) {
-    for(const [relative,key,names] of options.reuse.listing.folders) remembered.set(relative,{key,names,files:[],folders:[]});
+  // Paths are relative to the source root, so selected folders reuse the whole source's record.
+  const remembered=new Map<string,{key?:string;names:string[];files:Listing['files'];folders:string[]}>();
+  if(options.reuse && options.reuse.backup===!!options.backup) {
+    for(const {relative,key,names} of options.reuse.folders) remembered.set(relative,{key,names,files:[],folders:[]});
     const parent=(relative:string)=>{const folder=path.dirname(relative);return folder==='.'?'':folder;};
-    for(const [relative] of options.reuse.listing.folders) if(relative) remembered.get(parent(relative))?.folders.push(relative);
+    for(const {relative} of options.reuse.folders) if(relative) remembered.get(parent(relative))?.folders.push(relative);
     for(const file of options.reuse.files) remembered.get(parent(file.relative))?.files.push(file);
   }
   const add=(file:string,size:number)=>{files.push({path:file,relative:path.relative(root,file),size,kind:mediaKindForPath(file),included:false});listedBytes+=size;report();};
@@ -86,8 +87,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     await contained(path.join(folder,'.inventory-path-check'),root);
     // Taken before listing: an entry added meanwhile changes it and forces a new listing later.
     const relative=path.relative(root,folder),key=folderKey(await fs.lstat(folder,{bigint:true})),known=remembered.get(relative);
-    const reuse=async(names:string[]|undefined)=>{
-      listedFolders.push([relative,key,names]);
+    const reuse=async(names:string[])=>{
+      listedFolders.push({relative,key,names});
       // Same name order as a fresh listing.
       const children=[...known!.files.map(file=>({name:path.basename(file.relative),file})),...known!.folders.map(child=>({name:path.basename(child),file:undefined}))].sort((a,b)=>a.name.localeCompare(b.name));
       if(isRoot)topTotal=children.filter(child=>!child.file).length;
@@ -95,8 +96,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     };
     if(known && known.key===key) return reuse(known.names);
     const entries=await fs.readdir(folder,{withFileTypes:true}),names=entries.map(entry=>entry.name).sort();
-    if(known?.names && known.names.length===names.length && known.names.every((name,index)=>name===names[index])) return reuse(names);
-    listedFolders.push([relative,key,names]);
+    if(known && known.names.length===names.length && known.names.every((name,index)=>name===names[index])) return reuse(names);
+    listedFolders.push({relative,key,names});
     entries.sort((a,b)=>a.name.localeCompare(b.name));
     if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name)).length;
     // The entries that need a look, in name order. Their lstats run LISTING_STATS at a time (one at a time
@@ -189,5 +190,5 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   const unknown=files.filter(f=>f.kind==='Other' && !f.companionOf && !f.system && (options.backup || f.size>0)), unknownExtensions:Record<string,number>={};
   for(const file of unknown) {const ext=extension(file.path); unknownExtensions[ext]=(unknownExtensions[ext]??0)+1;}
-  return {files,media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:{backup:!!options.backup,folders:listedFolders}}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,systemKinds,skipped,elapsedMs:performance.now()-started};
+  return {files,media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:{backup:!!options.backup,folders:listedFolders,files:files.map(file=>({relative:file.relative,size:file.size}))}}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,systemKinds,skipped,elapsedMs:performance.now()-started};
 }

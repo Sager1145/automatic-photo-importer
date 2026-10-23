@@ -7,7 +7,7 @@ import {plan} from '../core/index';
 import {captureTimestamp} from '../capture-time';
 import {formatCaptureDateTime} from '../renderer/metadata-display';
 
-const options={backup:false,template:'{year}/{yyyyMMdd}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyyMMdd}',layout:'flat' as const,unknownRules:{}};
 async function folderFor(t:test.TestContext,date:string):Promise<string> {
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'capture-day-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));
  const source=path.join(base,'card'),root=path.join(base,'library');await fs.mkdir(source);await fs.mkdir(root);await fs.writeFile(path.join(source,'A.JPG'),'bytes');

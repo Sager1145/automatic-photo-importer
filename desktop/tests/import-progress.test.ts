@@ -9,7 +9,7 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {plan,executeMany,type PlanProgress} from '../core';
 import {I18nProvider} from '../renderer/i18n';
-import {ImportDashboard,ImportDesk,importFraction} from '../renderer/RootApp';
+import {ImportDashboard,ImportDesk,cardFraction} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -110,23 +110,18 @@ test('the source card names the step it is on and its own progress',()=>{
  const destination=desk(job(comparing));
  assert.ok(destination.includes('Checking existing files'));
  assert.ok(destination.includes('Checking the destination: 3,000 of 64,832 files · 36.0 GB read'));
- assert.ok(destination.includes('aria-valuenow="5"'),'the bar shows the comparison, not the finished metadata check');
+ assert.ok(!destination.includes('progress-in-card')||!/progress-in-card[^>]*aria-valuenow/.test(destination),'without a measured share the card bar is indeterminate');
  const verifying=desk(job({phase:'verifying',completed:5,total:10,bytes:0,totalBytes:0,speed:0,file:''}));
  assert.ok(verifying.includes('Verifying copied files'));
 });
 
-test('total progress covers the whole import and is not full right after scanning',()=>{
- assert.ok(importFraction(job(checked))!<=.2,'the metadata check is only the start of an import');
- assert.ok(importFraction(job(comparing))!>importFraction(job(checked))!);
- const copying=importFraction(job({phase:'copying',completed:10,total:64832,bytes:417e9,totalBytes:834e9,speed:1,file:''},'copying'))!;
- assert.ok(copying>.4&&copying<.8,`half copied: ${copying}`);
- const verifying=importFraction(job({phase:'verifying',completed:32416,total:64832,bytes:0,totalBytes:0,speed:0,file:''}))!;
- assert.ok(verifying>copying&&verifying<1);
- assert.equal(importFraction(job(checked,'complete')),1);
- const total=dashboard(job(checked));
- assert.ok(!total.includes('99%')&&!total.includes('100%'));
- assert.ok(total.includes('10%'));
- assert.ok(total.includes('Reading metadata'));
+test('total progress is the job\'s measured share, and nothing is guessed before it is measured',()=>{
+ const unmeasured=dashboard(job(checked));
+ assert.ok(!unmeasured.includes('progress-percent')&&!unmeasured.includes('aria-valuenow'),'no hard-coded share of the import');
+ assert.ok(unmeasured.includes('Reading metadata'));
+ const measured=dashboard({...job(checked),fraction:.1,cost:{done:10,total:100}});
+ assert.ok(measured.includes('10%'));
+ assert.equal(cardFraction(job(checked,'complete')),1);
 });
 
 test('with several files compared at once, the file count rises while they are still being read',async t=>{

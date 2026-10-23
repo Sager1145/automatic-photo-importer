@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createTranslator, I18nProvider, languages } from '../renderer/i18n';
 import { EtaTracker, stampEstimates } from '../eta';
+import { listingEstimate } from '../listing-estimate';
 import type { AppState, Job } from '../shared';
 
 const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
@@ -46,10 +47,11 @@ test('estimates are stamped on running jobs and cleared when they stop', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 0, total: 100, bytes: 0, totalBytes: 10e9, speed: 0, file: '' } };
   const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', scanProgress: { card: { files: 10, bytes: 1e9 } } };
-  for (let t = 0; t <= 20; t++) { job.progress = { ...job.progress!, completed: t * 2, bytes: t * 100e6 }; state.scanProgress!.card = { files: t * 100, bytes: t * 1e9 }; stampEstimates(state, tracker, t * 1000); }
+  for (let t = 0; t <= 20; t++) { job.progress = { ...job.progress!, completed: t * 2, bytes: t * 100e6 }; state.scanProgress!.card = { files: t * 100, bytes: t * 1e9, share: listingEstimate({ bytes: card.total! - card.free! }, { files: t * 100, bytes: t * 1e9 }).share }; stampEstimates(state, tracker, t * 1000); }
   assert.ok(job.progress!.eta! > 60 && job.progress!.eta! < 120, `copy step ${job.progress!.eta}`);
   assert.ok(job.eta! > job.progress!.eta!, 'the job adds verification');
-  assert.ok(state.scanProgress!.card!.eta! > 50 && state.scanProgress!.card!.eta! < 80, `listing against used space ${state.scanProgress!.card!.eta}`);
+  // 20 of 88 GB listed at 1 GB/s: 68 s to go. The model starts from its prior (500 files/s, here 100) and is still converging.
+  assert.ok(state.scanProgress!.card!.eta! > 68 * 0.6 && state.scanProgress!.card!.eta! < 68 * 1.2, `listing against used space ${state.scanProgress!.card!.eta}`);
   job.phase = 'complete'; stampEstimates(state, tracker, 21000);
   assert.equal(job.eta, undefined); assert.equal(job.progress!.eta, undefined);
 });
@@ -77,4 +79,21 @@ test('a copy with already-verified files counts only the files being copied, wit
   const en = createTranslator('en');
   assert.equal(en('{completed} of {total} files copied', { completed: '3,022', total: '21,567' }), '3,022 of 21,567 files copied');
   assert.equal(en('{count} already in the backup', { count: '21,972' }), '21,972 already in the backup');
+});
+
+test('the window holds one time left per job: an upward jump is held, and every place shows the same value', async t => {
+  const { OrganizationProgress, EtaHolds, formatRemaining } = await import('../renderer/RootApp');
+  const { DisplayHold } = await import('../eta-format');
+  const tr = createTranslator('en'), holds = new Map<string, InstanceType<typeof DisplayHold>>();
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  const job = (eta: number): Job => ({ id: 'o', source: { id: 'l', name: 'Library', path: '/b', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false, startedAt: new Date(0).toISOString(), eta, progress: { phase: 'copying', step: 'moving', completed: 3, total: 10, bytes: 0, totalBytes: 0, speed: 0, file: 'x', eta } });
+  const shown = (eta: number) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(EtaHolds.Provider, { value: holds, children: [createElement(OrganizationProgress, { key: 1, job: job(eta) }), createElement(OrganizationProgress, { key: 2, job: job(eta) })] }) }));
+  const left = (seconds: number) => tr('{time} left', { time: formatRemaining(seconds, tr) });
+  const count = (html: string, text: string) => html.split(text).length - 1;
+  assert.equal(count(shown(600), left(600)), 2);
+  t.mock.timers.tick(1000);
+  assert.equal(count(shown(901), left(600)), 2, 'a jump up is held, in both places');
+  t.mock.timers.tick(21_000);
+  assert.equal(count(shown(901), left(900)), 2, 'after 20 s it is shown');
+  t.mock.timers.reset();
 });

@@ -3,7 +3,8 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createTranslator, formatSpeed, I18nProvider, languages, speedUnit } from '../renderer/i18n';
-import { EtaTracker, RateMeter, stampEstimates } from '../eta';
+import { EtaTracker, stampEstimates } from '../eta';
+import { RateMeter } from '../rate-meter';
 import type { AppState, Job, Progress } from '../shared';
 
 const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
@@ -115,7 +116,7 @@ test('every progress display shows elapsed time and time left together, and the 
     const scanning = render(createElement(ScanProgress, { sourceName: 'Card', cameraInfo: { status: 'reading', hints: [], models: [], checked: 10, total: 100, unknown: 0, eta: 480, startedAt: ago(723_000), fileRate: 8.5 } }));
     together(scanning, left(480), 'scan');
     assert.ok(scanning.includes(t('{count} files/s', { count: '8.5' })), `${language}: metadata read rate`);
-    const listing = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 10, bytes: 1e6, eta: 480, startedAt: ago(723_000) }, usedBytes: 1e9 }));
+    const listing = render(createElement(ScanProgress, { sourceName: 'Card', listing: { files: 10, bytes: 1e6, share: 1e-3, eta: 480, startedAt: ago(723_000) } }));
     together(listing, left(480), 'listing');
   }
 });

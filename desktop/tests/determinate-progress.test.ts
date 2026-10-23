@@ -95,19 +95,20 @@ test('a long path is cut in the middle',()=>{
  assert.equal(truncateMiddle('a/b.jpg'),'a/b.jpg');
 });
 test('the scanning card shows the file, speed and time left',()=>{
- const markup=render(createElement(ScanProgress,{sourceName:'A006',listing:{files:1200,bytes:3e9,file:'DCIM/100NIKON/DSC_0001.NEF',fileRate:850,eta:120,startedAt:new Date(0).toISOString()},usedBytes:12e9}));
+ const markup=render(createElement(ScanProgress,{sourceName:'A006',listing:{files:1200,bytes:3e9,file:'DCIM/100NIKON/DSC_0001.NEF',fileRate:850,eta:120,startedAt:new Date(0).toISOString(),share:.25}}));
  assert.ok(markup.includes('DCIM/100NIKON/DSC_0001.NEF'),markup);
  assert.ok(markup.includes('850'),markup);assert.ok(/left/.test(markup),markup);assert.ok(markup.includes('25%')&&markup.includes('aria-valuenow="25"'));
 });
 test('an organization reading its history shows a bar, file, speed and time left',()=>{
- const job:Job={id:'o',source:{id:'library:/V/A',name:'Org',path:'/V/A',transport:'folder'},organization:true,phase:'verifying',startedAt:new Date(0).toISOString(),errors:[],backup:false,progress:{phase:'verifying',step:'history',completed:500,total:2000,bytes:0,totalBytes:0,speed:0,fileRate:300,eta:90,file:'event-0001.json'}};
+ const job:Job={id:'o',source:{id:'library:/V/A',name:'Org',path:'/V/A',transport:'folder'},organization:true,phase:'verifying',startedAt:new Date(0).toISOString(),errors:[],backup:false,fraction:.25,progress:{phase:'verifying',step:'history',completed:500,total:2000,bytes:0,totalBytes:0,speed:0,fileRate:300,eta:90,file:'event-0001.json'}};
  const markup=render(createElement(OrganizationCard,{job,act:()=>{}}));
  assert.ok(markup.includes('Reading organization history: 500 of 2,000 files'),markup);
  assert.ok(markup.includes('Reading history'));assert.ok(markup.includes('25%'));assert.ok(markup.includes('event-0001.json'));assert.ok(markup.includes('300'));
  assert.ok(!markup.includes('progress-discovering'));
 });
-test('a listing with an estimate is a determinate bar with a file and speed',()=>{
+test('a job that is listing shows its file and speed, and no share of the job until one is measured',()=>{
  const job:Job={id:'o',source:{id:'library:/V/A',name:'Org',path:'/V/A',transport:'folder'},organization:true,phase:'verifying',errors:[],backup:false,progress:{phase:'planning',step:'listing',completed:400,total:1000,bytes:1e9,totalBytes:0,share:.4,speed:0,fileRate:200,file:'2026/IMG_1.NEF'}};
  const markup=render(createElement(OrganizationCard,{job,act:()=>{}}));
- assert.ok(markup.includes('40%'),markup);assert.ok(!markup.includes('progress-discovering'));assert.ok(markup.includes('2026/IMG_1.NEF'));
+ // The listing's estimated total says nothing of the job's share done; a bar that then fell back at the next step would mislead.
+ assert.ok(!markup.includes('40%'),markup);assert.ok(markup.includes('progress-discovering'));assert.ok(markup.includes('2026/IMG_1.NEF'));assert.ok(markup.includes('200'));
 });

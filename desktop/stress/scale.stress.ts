@@ -40,7 +40,7 @@ test('scan, plan and backup-folder check of tens of thousands of small files',as
  started=performance.now();const {plans:[transfer]}=await core.plan(source,[drive],options,metadata);await record('plan into empty destination',started,{entries:transfer!.entries.length});
  assert.equal(transfer!.entries.length,files);
  assert.equal(new Set(transfer!.entries.map(entry=>entry.destination.toLowerCase())).size,files);
- started=performance.now();const reused=await core.plan(source,[drive],{...options,reuse:scan},metadata);await record('plan reusing the scan',started);
+ started=performance.now();const reused=await core.plan(source,[drive],{...options,reuse:scan.listing},metadata);await record('plan reusing the scan',started);
  assert.equal(reused.plans[0]!.entries.length,files);
  // The whole card treated as a misplaced library: a read-only check reads names, sizes and metadata only.
  started=performance.now();const misplaced=await core.findMisplaced(source,source,options,metadata);await record('misplaced check',started,{misplaced:misplaced.count});

@@ -21,19 +21,12 @@ export interface StateUpdate {
 export function createStateChannel(send:(update:StateUpdate)=>void){
  let revision=0,nextDetail=0;
  const ids=new WeakMap<object,{id:string;version:number}>();
- /** Inventory.listing is for main's reuse only; the stripped copy is built once per inventory. */
- const stripped=new WeakMap<Inventory,Inventory>();
- function outbound(value:object){
-  if(!('listing' in value))return value;
-  let copy=stripped.get(value as Inventory);if(!copy){const {listing:_listing,...rest}=value as Inventory;copy=rest;stripped.set(value as Inventory,copy);}
-  return copy;
- }
  let retained=new Set<string>(),previousReview:Review|undefined;
  function update(state:AppState,reset=false):StateUpdate{
   const details:Record<string,unknown>={},current=new Set<string>();
   function reference(value:object,version=0):string{
    let known=ids.get(value);if(!known||known.version!==version){known={id:String(++nextDetail),version};ids.set(value,known);}
-   current.add(known.id);if(reset||!retained.has(known.id))details[known.id]=outbound(value);return known.id;
+   current.add(known.id);if(reset||!retained.has(known.id))details[known.id]=value;return known.id;
   }
   const {jobs,sourceInventories,review,errorLog,history,duplicates,...rest}=state;
   const {earlier,...duplicateFields}=duplicates??{} as NonNullable<AppState['duplicates']>;

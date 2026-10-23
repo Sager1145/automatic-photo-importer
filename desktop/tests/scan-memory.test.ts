@@ -21,12 +21,13 @@ test('a card remembered under its UUID is reused at a new mount path after a res
  const f=await fixture(t);
  const scan=await inventory(f.mount,{});
  const routing=[await routingFor(path.join(f.folder,'DSC0.NEF'),'NIKON Z f')];
- await saveScanMemory(f.store,'CARD-UUID',f.mount,scan,routing);
+ await saveScanMemory(f.store,'CARD-UUID',f.mount,scan.listing!,routing);
  // Remounted under another name, as a second card with the same label would be.
  const moved=path.join(f.base,'NIKON Z F 1');await fs.rename(f.mount,moved);
  const memory=await loadScanMemory(f.store,'CARD-UUID',moved);
  assert.ok(memory);
- const again=await inventory(moved,{reuse:memory.inventory});
+ assert.ok(memory.listing.folders.every(folder=>folder.key===undefined),'a folder identity is never carried across a mount');
+ const again=await inventory(moved,{reuse:memory.listing});
  assert.deepEqual(again.files.map(file=>file.relative),scan.files.map(file=>file.relative));
  assert.ok(again.files.every(file=>file.path.startsWith(moved+path.sep)));
  const [key,value]=memory.routing[0]!;
@@ -35,7 +36,7 @@ test('a card remembered under its UUID is reused at a new mount path after a res
 
 test('remembered EXIF results are offered only for files that are unchanged',async t=>{
  const f=await fixture(t),file=path.join(f.folder,'DSC1.NEF');
- await saveScanMemory(f.store,'CARD-UUID',f.mount,await inventory(f.mount,{}),[await routingFor(file,'NIKON Z f')]);
+ await saveScanMemory(f.store,'CARD-UUID',f.mount,(await inventory(f.mount,{})).listing!,[await routingFor(file,'NIKON Z f')]);
  await fs.writeFile(file,'rewritten raw with another size');
  const memory=await loadScanMemory(f.store,'CARD-UUID',f.mount);
  const current=await routingFor(file,'x');
@@ -45,7 +46,7 @@ test('remembered EXIF results are offered only for files that are unchanged',asy
 test('a corrupt, foreign or missing memory is ignored',async t=>{
  const f=await fixture(t);
  assert.equal(await loadScanMemory(f.store,'NO-SUCH-UUID',f.mount),undefined);
- await saveScanMemory(f.store,'CARD-UUID',f.mount,await inventory(f.mount,{}),[]);
+ await saveScanMemory(f.store,'CARD-UUID',f.mount,(await inventory(f.mount,{})).listing!,[]);
  const [name]=await fs.readdir(path.join(f.store,'scan-memory'));
  const file=path.join(f.store,'scan-memory',name!);
  const stored=JSON.parse(await fs.readFile(file,'utf8'));
@@ -67,7 +68,7 @@ test('checksums of imported card files are remembered per card and offered only 
 
 test('a scan remembered before the current DJI camera names is not reused',async t=>{
  const f=await fixture(t);
- await saveScanMemory(f.store,'CARD-UUID',f.mount,await inventory(f.mount,{}),[await routingFor(path.join(f.folder,'DSC0.NEF'),'NIKON Z f')]);
+ await saveScanMemory(f.store,'CARD-UUID',f.mount,(await inventory(f.mount,{})).listing!,[await routingFor(path.join(f.folder,'DSC0.NEF'),'NIKON Z f')]);
  const dir=path.join(f.store,'scan-memory'),[name]=(await fs.readdir(dir)).filter(file=>!file.includes('.imported.'));
  // The same scan in the shape of an earlier format (version 2, before records v5): not reused.
  const {v:_v,kind:_kind,...stored}=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:2}));

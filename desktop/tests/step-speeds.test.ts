@@ -84,7 +84,7 @@ test('the dashboard sums the byte speeds of every active job',()=>{
 
 test('a rename organization says moving, counts files moved and advances by files',()=>{
  const progress:Progress={phase:'copying',step:'moving',completed:1522,total:29145,bytes:0,totalBytes:539.1e9,speed:0,fileRate:310,file:'A.NEF',renames:true};
- const job:Job={id:'o',source:{id:'library:/Volumes/A006',name:'Backup organization',path:'/Volumes/A006',transport:'folder'},organization:true,phase:'copying',errors:[],backup:false,progress};
+ const job:Job={id:'o',source:{id:'library:/Volumes/A006',name:'Backup organization',path:'/Volumes/A006',transport:'folder'},organization:true,phase:'copying',errors:[],backup:false,fraction:1522/29145,progress};
  const labels=[['Moving files','1,522 of 29,145 files moved'],['正在移动文件','已移动 1,522/29,145 个文件'],['正在移動檔案','已移動 1,522/29,145 個檔案'],['ファイルを移動中','29,145 件中 1,522 件を移動済み']];
  for(const [index,language] of languages.entries()){
   const html=render(createElement(OrganizationCard,{job,act:()=>{}}),language);

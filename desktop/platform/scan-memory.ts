@@ -1,8 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { Inventory, Metadata } from '../shared';
-import { mediaKindForPath } from '../media-formats';
+import type { Listing, Metadata } from '../shared';
 import { cacheRecord, readCache } from './user-caches';
 
 /** What a scan learned about one card, kept across app restarts under its volume UUID.
@@ -20,13 +19,13 @@ const MAX_BYTES=64*1024*1024;
 const memoryFile=(store:string,volume:string)=>path.join(store,'scan-memory',createHash('sha256').update(volume).digest('hex').slice(0,32)+'.json');
 const safeRelative=(relative:unknown):relative is string=>typeof relative==='string' && !path.isAbsolute(relative) && !relative.split(/[\\/]/).includes('..');
 
-export async function saveScanMemory(store:string,volume:string,mount:string,scan:Inventory,routing:[string,Metadata][]):Promise<void> {
-  if(!scan.listing) return;
+/** `routing`: the routing results for files under `mount` (routingEntriesUnder). */
+export async function saveScanMemory(store:string,volume:string,mount:string,listing:Listing,routing:[string,Metadata][]):Promise<void> {
   const prefix=mount+path.sep,stored:Stored={
-    version:5,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
-    // A folder without remembered names cannot be checked after a remount; it is listed again.
-    folders:scan.listing.folders.filter((folder):folder is [string,string,string[]]=>Array.isArray(folder[2])).map(([relative,,names])=>[relative,names]),
-    files:scan.files.map(file=>[file.relative,file.size]),
+    version:5,volume,saved:new Date().toISOString(),backup:listing.backup,
+    // A folder's identity holds the mount's device number: after a remount it is checked by its names.
+    folders:listing.folders.map(({relative,names})=>[relative,names]),
+    files:listing.files.map(file=>[file.relative,file.size]),
     routing:routing.filter(([key])=>key.startsWith(prefix)).flatMap(([key,metadata])=>{
       const [file,stat]=key.split('\0'),parts=stat?.split(':');
       return file&&parts?.length===5?[[path.relative(mount,file),parts.slice(1).join(':'),metadata] as [string,string,Metadata]]:[];
@@ -38,26 +37,23 @@ export async function saveScanMemory(store:string,volume:string,mount:string,sca
   catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
 }
 
-/** The remembered listing (as a reusable inventory) and EXIF results rebased onto the
- * card's current mount, or undefined when nothing usable is remembered. */
-export async function loadScanMemory(store:string,volume:string,mount:string):Promise<{inventory:Inventory;routing:[string,Metadata][]}|undefined> {
+/** The remembered listing (its folders without an identity, so each is checked by its names) and EXIF results rebased
+ * onto the card's current mount, or undefined when nothing usable is remembered. */
+export async function loadScanMemory(store:string,volume:string,mount:string):Promise<{listing:Listing;routing:[string,Metadata][]}|undefined> {
   try {
     const file=memoryFile(store,volume);
     if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
     const stored=readCache<Stored>(JSON.parse(await fs.readFile(file,'utf8')),'scan',5);
     if(!stored || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
     const dev=(await fs.lstat(mount,{bigint:true})).dev;
-    const folders=stored.folders.filter(([relative,names])=>safeRelative(relative)&&Array.isArray(names)&&names.every(name=>typeof name==='string'));
-    const files=stored.files.filter(([relative,size])=>safeRelative(relative)&&relative!==''&&Number.isSafeInteger(size)&&size>=0);
-    const inventory:Inventory={
-      files:files.map(([relative,size])=>({path:path.join(mount,relative),relative,size,kind:mediaKindForPath(relative),included:false})),
-      media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0,
-      // An empty identity never matches, so every folder is checked by its names.
-      listing:{backup:!!stored.backup,folders:folders.map(([relative,names])=>[relative,'',names])},
+    const listing:Listing={
+      backup:!!stored.backup,
+      folders:stored.folders.filter(([relative,names])=>safeRelative(relative)&&Array.isArray(names)&&names.every(name=>typeof name==='string')).map(([relative,names])=>({relative,names})),
+      files:stored.files.filter(([relative,size])=>safeRelative(relative)&&relative!==''&&Number.isSafeInteger(size)&&size>=0).map(([relative,size])=>({relative,size})),
     };
     const routing=stored.routing.filter(([relative,stat,metadata])=>safeRelative(relative)&&typeof stat==='string'&&/^\d+:\d+:\d+:\d+$/.test(stat)&&metadata&&typeof metadata==='object')
       .map(([relative,stat,metadata])=>[`${path.join(mount,relative)}\0${dev}:${stat}`,metadata] as [string,Metadata]);
-    return {inventory,routing};
+    return {listing,routing};
   } catch { return undefined; }
 }
 

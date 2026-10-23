@@ -37,16 +37,15 @@ test('job fraction is the cost of the work done over the cost of all the work',(
 });
 
 test('the card bar and the overview use the same number',async()=>{
- const {cardFraction,importFraction,overviewFraction}=await import('../renderer/RootApp');
+ const {cardFraction,overviewFraction}=await import('../renderer/RootApp');
  const verifying=job({phase:'verifying',fraction:0.35,cost:{done:35,total:100},progress:{phase:'verifying',completed:34863,total:43539,bytes:0,totalBytes:167e9,speed:0,file:''}});
  assert.equal(cardFraction(verifying),0.35,'not the 98% the old weighting gave');
- assert.equal(importFraction(verifying),0.35);
  assert.equal(overviewFraction([verifying]),cardFraction(verifying));
 });
 
 test('the overview adds model seconds; a finished job keeps its final cost',async()=>{
  const {overviewFraction}=await import('../renderer/RootApp');
- const running=job({fraction:0.5,cost:{done:500,total:1000}}),finished=job({id:'k',phase:'complete',cost:{done:3000,total:3000}});
+ const running=job({fraction:0.5,cost:{done:500,total:1000},progress:{phase:'copying',completed:1,total:2,bytes:1,totalBytes:2,speed:0,file:''}}),finished=job({id:'k',phase:'complete',cost:{done:3000,total:3000}});
  assert.equal(overviewFraction([running,finished]),(500+3000)/(1000+3000));
  assert.equal(overviewFraction([finished]),1);
  const bigger=job({id:'m',cost:{done:10,total:9000},fraction:0.001});

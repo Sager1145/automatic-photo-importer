@@ -13,6 +13,10 @@ const defaults:Record<string,StepDefault>={
  copying:{a:0.02,b:16.7},'verifying:link':{a:0.05,b:10},'verifying:copy':{a:0.1,b:40},'publish:link':{a:0.05,b:0},'publish:copy':{a:0.1,b:30},
  history:{a:0.005,b:0},earlier:{a:0.005,b:0},confirming:{a:0.01,b:0},'verifying:checking':{a:0.01,b:0},moving:{a:0.02,b:16.7,bytesUnknown:true},stashing:{a:0.02,b:16.7},tidying:{a:0.01,b:0},
  releasing:{a:0.02,b:0},restoring:{a:0.02,b:0},deleting:{a:0.005,b:0},'originals:deleting':{a:0.02,b:10},
+ // Listings and look-throughs stat entries without reading them.
+ listing:{a:0.002,b:0},scanning:{a:0.002,b:0},measuring:{a:0.002,b:0},
+ // Loading the destination index counts bytes read, in its file counts too: bytes only.
+ index:{a:0,b:10},
 };
 /** backups: how many backup copies a Delete originals run re-reads besides the source. */
 export function stepDefault(step:string,backups=1):StepDefault{
@@ -38,6 +42,8 @@ const REGULARIZATION=10;
 const MINIMUM=0.05;
 const WINDOW=5;
 const SLEEP=60;
+/** Seconds without any progress after which the time left grows with the stall (counted as time spent on no work). */
+const STALL=15;
 
 /** One step's fit. observe() takes cumulative files and bytes; a window of at least 5 s with progress becomes one observation. */
 export class StepFit {
@@ -76,26 +82,35 @@ export class StepFit {
   this.szz=[this.szz[0]*ks+z1*z1,this.szz[1]*ks+z1*z2,this.szz[2]*ks+z2*z2];
   this.szy=[this.szy[0]*ks+z1*y,this.szy[1]*ks+z2*y];
  }
- /** Seconds per file and per GB: the prior, corrected by what was seen (ridge fit on multipliers, then a shift along the observed mix). */
- theta():Coef{
-  const {a:a0,b:b0}=this.prior,K=REGULARIZATION;
+ /** Seconds of the open window without any progress, once that is a stall (STALL or more); else 0. */
+ private stalled():number{
+  const window=this.window,last=this.last;
+  if(!window||!last||this.closed===0||window.files>0||window.gb>0)return 0;
+  const age=(last.at-window.start)/1000;
+  return age>=STALL?age:0;
+ }
+ /** Seconds per file and per GB: the prior, corrected by what was seen (ridge fit on multipliers, then a shift along the observed mix).
+  * `idle`: seconds spent on no work, counted with the level as if a window had closed without progress. */
+ theta(idle=0):Coef{
+  const {a:a0,b:b0}=this.prior,K=REGULARIZATION,level={...this.level,T:this.level.T+idle},seen=this.seen+idle;
   const [p,q,r]=[this.szz[0]+K,this.szz[1],this.szz[2]+K],[u,v]=[this.szy[0]+K,this.szy[1]+K],det=p*r-q*q;
   let m1=(r*u-q*v)/det,m2=(p*v-q*u)/det;
   if(!Number.isFinite(m1)||!Number.isFinite(m2)){m1=m2=1;}
   m1=Math.max(MINIMUM,m1);m2=Math.max(MINIMUM,m2);
-  const c1=a0*this.level.F,c2=b0*this.level.G,cc=c1*c1+c2*c2;
-  if(cc>0&&this.level.T>0){
-   const s=this.seen/(this.seen+this.T0),d=s*(this.level.T-(c1*m1+c2*m2))/cc;
+  const c1=a0*level.F,c2=b0*level.G,cc=c1*c1+c2*c2;
+  if(cc>0&&level.T>0){
+   const s=seen/(seen+this.T0),d=s*(level.T-(c1*m1+c2*m2))/cc;
    m1+=d*c1;m2+=d*c2;
-   if(m1<MINIMUM){m1=MINIMUM;if(c2>0)m2=Math.max(MINIMUM,m2+s*(this.level.T-(c1*m1+c2*m2))/c2);}
-   if(m2<MINIMUM){m2=MINIMUM;if(c1>0)m1=Math.max(MINIMUM,m1+s*(this.level.T-(c1*m1+c2*m2))/c1);}
+   if(m1<MINIMUM){m1=MINIMUM;if(c2>0)m2=Math.max(MINIMUM,m2+s*(level.T-(c1*m1+c2*m2))/c2);}
+   if(m2<MINIMUM){m2=MINIMUM;if(c1>0)m1=Math.max(MINIMUM,m1+s*(level.T-(c1*m1+c2*m2))/c1);}
   }
   return {a:a0*m1,b:b0*m2};
  }
- /** Seconds still to go for rf files and rbytes bytes. Without a byte total, bytes follow the mix seen so far (once 20 files were seen). */
+ /** Seconds still to go for rf files and rbytes bytes. Without a byte total, bytes follow the mix seen so far (once 20 files were seen).
+  * A stall (no progress for STALL seconds or more) slows the fitted rate for as long as it lasts. */
  remaining(rf:number,rbytes?:number):number{
   rf=finite(rf);
-  const {a,b}=this.theta();
+  const {a,b}=this.theta(this.stalled());
   const rg=rbytes===undefined?(this.total.F>=20?rf*this.total.G/this.total.F:0):finite(rbytes)/GB;
   this.split=[a*rf,b*rg];
   this.R=this.split[0]+this.split[1];
@@ -122,10 +137,12 @@ export interface JobModelOptions {kind:JobKind;book:PriorBook;totals?:Record<str
 export interface JobSnapshot {step?:number;job?:number;low?:number;high?:number;uncertainty:number;/** Model-seconds of work done / in all, and their ratio. */cost:{done:number;total:number};fraction:number;stepFraction:number;/** For each step in order, the share of the whole job done once it and every step before it are counted (cumulative, 0 to 1). */shares?:{step:string;share:number}[];}
 export interface StepSummary extends Coef {step:string;T:number;F:number;G:number;observed:number;windows:number;}
 
-interface StepState {total?:StepTotal;done:{files:number;bytes:number};fit?:StepFit;choice?:PriorChoice;status:'ahead'|'active'|'done'|'skipped';coef?:Coef;/** The current step's coefficients when it began: the work done is counted with these, so it never goes backwards as the fit moves. */start?:Coef;}
+interface StepState {/** Met outside the kind's step order (see stepOrder). */unplanned?:boolean;total?:StepTotal;done:{files:number;bytes:number};fit?:StepFit;choice?:PriorChoice;status:'ahead'|'active'|'done'|'skipped';coef?:Coef;/** The current step's coefficients when it began: the work done is counted with these, so it never goes backwards as the fit moves. */start?:Coef;}
 const empty:JobSnapshot={uncertainty:1,cost:{done:0,total:0},fraction:0,stepFraction:0};
 
-/** The steps of a job in order. 'verifying' stands for the import's last step, named by whether it verifies and how it publishes. */
+/** The steps of a job in order. 'verifying' stands for the import's last step, named by whether it verifies and how it publishes.
+ * A step met that is not listed here (a listing, a download, a look-through) joins the order where it is met: it counts for the time
+ * left, not for the job's share of work done, which is measured on the kind's own steps. */
 export function stepOrder(options:Pick<JobModelOptions,'kind'|'verify'|'publish'>):string[]{
  switch(options.kind){
   case 'import':return ['checking','candidates','comparing','existing','removing','copying',`${options.verify===false?'publish':'verifying'}:${options.publish??'link'}`];
@@ -166,8 +183,6 @@ export class JobModel {
   if(this.current===before)this.current=after;
   this.order=this.order.map(step=>step===before?after:step);
  }
-/** Whether this model has the step (otherwise the caller estimates it some other way). */
- covers(step:string){return this.order.includes(this.resolve(step));}
  /** End the current step (the job ended or stopped): its fit joins the steps to save. */
  finish(){
   if(this.current===undefined)return;
@@ -189,9 +204,9 @@ export class JobModel {
   state.status='done';
  }
  /** Feed the current step's cumulative progress; total is the step's own total when it reports one. */
- update(now:number,step:string,done:{files:number;bytes:number},total?:{files:number;bytes:number;bytesKnown?:boolean}):JobSnapshot{
-  const key=this.resolve(step),index=this.order.indexOf(key);
-  if(index<0)return this.snapshot();
+ update(now:number,step:string,done:{files:number;bytes:number},total?:StepTotal):JobSnapshot{
+  const key=this.resolve(step);let index=this.order.indexOf(key);
+  if(index<0){index=this.current===undefined?0:this.order.indexOf(this.current)+1;this.order.splice(index,0,key);this.state(key).unplanned=true;}
   if(this.current!==key){
    if(this.current!==undefined){const before=this.states.get(this.current);if(before&&before.status==='active')this.finish_(this.current,before);}
    for(const [position,other] of this.order.entries()){
@@ -229,15 +244,18 @@ export class JobModel {
    const counted=state.start??coef;
    const costOf=(c:Coef)=>(files:number,bytes:number)=>c.a*files+c.b*(total?.bytesKnown===false?0:bytes)/GB;
    const cost=costOf(coef),counting=costOf(counted);
-   if(state.status==='done'){const final=total?counting(total.files,total.bytes):counting(state.done.files,state.done.bytes);done+=final;all+=final;continue;}
+   // A step outside the kind's plan counts for the time left only.
+   const costs=!state.unplanned;
+   if(state.status==='done'){if(costs){const final=total?counting(total.files,total.bytes):counting(state.done.files,state.done.bytes);done+=final;all+=final;}continue;}
    if(!known){if(isCurrent)missing=true;continue;}
-   all+=counting(total!.files,total!.bytes);done+=counting(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
+   if(costs){all+=counting(total!.files,total!.bytes);done+=counting(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));}
    const rf=Math.max(0,total!.files-state.done.files),rb=total!.bytesKnown===false?undefined:Math.max(0,total!.bytes-state.done.bytes);
    let remaining:number,u:number;
    if(isCurrent&&state.fit){
     remaining=state.fit.remaining(rf,rb);u=state.fit.uncertainty(choice.level,choice.runs);
     stepAll=counting(total!.files,total!.bytes);stepDone=counting(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
-    if(state.fit.windows>0)stepSeconds=remaining>0?Math.max(1,remaining):0;
+    // Measured once a window closed; a step with nothing left is done whether or not it was measured.
+    if(state.fit.windows>0||remaining===0)stepSeconds=remaining>0?Math.max(1,remaining):0;
    }else{
     remaining=coef.a*rf+(rb===undefined?0:coef.b*rb/GB);u=stepUncertainty({observed:0,level:choice.level,runs:choice.runs});
    }

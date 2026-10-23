@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DestinationStatus, DriveActivity, Source } from '../shared';
-import { RateMeter } from '../eta';
+import { RateMeter } from '../rate-meter';
 import { volumeOf, type MountedVolume } from './volumes';
 
 const exec = promisify(execFile);
