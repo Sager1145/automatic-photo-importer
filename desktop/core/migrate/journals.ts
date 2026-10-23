@@ -28,6 +28,8 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
  return journalConversion.locked(root,id,async()=>{
   const report=(step:'converting'|'originals'|'removing',completed:number,total:number,file:string)=>context.onProgress?.({step,completed,total,file});
   const problem=(text:string)=>{context.problems.push(text);return false;};
+  // A job starting stops the conversion between steps; each step finishes from what is on disk on the next run.
+  const stop=()=>context.signal?.throwIfAborted?.();
   // Converted and complete already (a run stopped while removing the earlier version's files): only N8 and N9 are left.
   const folder=path.join(root,RECOVERY_FOLDER,id);
   try{
@@ -39,7 +41,7 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
   }catch(error){if(passThrough(error))throw error;/* Read in full below, which reports what is wrong. */}
   // N1
   let legacy:LegacyJournal;
-  try{legacy=await journalConversion.read(root,id,(read,total,name)=>report('converting',read,total,name??id));}
+  try{legacy=await journalConversion.read(root,id,(read,total,name)=>report('converting',read,total,name??id),context.signal);}
   catch(error){if(passThrough(error))throw error;return problem(`Organization ${id} in ${root} could not be read, so it was left as it is: ${message(error)}`);}
   await hit(context,'N1');
   // Each step below counts what it does, so a slow drive never shows a frozen counter.
@@ -48,7 +50,7 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
   // N2
   let target:ConversionTarget;
   try{
-   const holders=await journalConversion.holders(root,id);
+   stop();const holders=await journalConversion.holders(root,id);
    if(holders.length>1)return problem(`Organization ${id} in ${root} has records in more than one place; nothing was changed. Use First Aid.`);
    // Committed by an earlier run: finished where it is (the store its library writes to may have changed since).
    target=holders[0]??await journalConversion.target(root,id);
@@ -60,17 +62,20 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
     await syncDirectory(target.folder);
     await hit(context,'N2');
     // N3
+    stop();
     let text:string;try{text=journalConversion.text(legacy);}catch(error){return problem(message(error));}
     const temporary=path.join(target.folder,`journal-${randomUUID()}.tmp`);
     step(records,path.basename(temporary));await writeNewFile(temporary,text);
     await hit(context,'N3');
     // N4
+    stop();
     let replayed;
-    try{replayed=await journalConversion.replay(target,temporary,root,id,(read,total)=>report('converting',read,total,path.basename(temporary)));}
+    try{replayed=await journalConversion.replay(target,temporary,root,id,(read,total)=>report('converting',read,total,path.basename(temporary)),context.signal);}
     catch(error){if(passThrough(error))throw error;await fs.unlink(temporary).then(()=>deleted(temporary,'converted journal that could not be read back','written by this run'),()=>{});return problem(`Organization ${id} in ${root} could not be converted: ${message(error)}`);}
     if(!journalConversion.same(replayed.state,legacy.state)){await fs.unlink(temporary).then(()=>deleted(temporary,'converted journal that reads differently','written by this run'),()=>{});return problem(`Organization ${id} in ${root} reads differently once converted, so it was left as it is.`);}
     await hit(context,'N4');
     // N5
+    stop();
     step(records,JOURNAL);if(await renameChecked(temporary,target.journal)!=='done')return problem(`Organization ${id} in ${root}: the converted journal could not be put in place.`);
     await hit(context,'N5');
    }else{
@@ -84,8 +89,9 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
    }
   }catch(error){if(passThrough(error))throw error;return problem(`Organization ${id} in ${root} could not be converted: ${message(error)}`);}
   // N6
+  stop();
   try{
-   const {manifest:converted,state}=await journalConversion.replay(target,target.journal,root,id,(read,total)=>report('converting',read,total,JOURNAL));
+   const {manifest:converted,state}=await journalConversion.replay(target,target.journal,root,id,(read,total)=>report('converting',read,total,JOURNAL),context.signal);
    if(!journalConversion.same(state,legacy.state))return problem(`Organization ${id} in ${root} differs from its converted copy; nothing more was changed. Use First Aid.`);
    if(!state.migrationComplete){
     const slots=[...legacy.state.slots].flatMap(([index,list])=>list.map(slot=>({index,slot}))).filter(({index,slot})=>!state.migrationMoved.has(`${index}/${slot}`));

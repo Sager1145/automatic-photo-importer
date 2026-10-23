@@ -1652,9 +1652,10 @@ export const journalConversion={
  /** The journal's lock, the one resume, undo, finalize and delete take. */
  locked:<T>(root:string,id:string,work:()=>Promise<T>)=>locked(lockKey(root,id),work),
  legacyIds:legacyJournalIds,
- /** N1: the manifest and every authenticated record, in the order the earlier version applied them. */
- async read(root:string,id:string,onRead?:(read:number,total:number,name?:string)=>void):Promise<LegacyJournal>{
-  const m=await readLegacyManifest(root,id),{state,records}=await readLegacyEvents(m,onRead);
+ /** N1: the manifest and every authenticated record, in the order the earlier version applied them. Stopped by
+  * `signal` (a job needs the drive): what it read is kept, and the next read takes only the rest. */
+ async read(root:string,id:string,onRead?:(read:number,total:number,name?:string)=>void,signal?:AbortSignal):Promise<LegacyJournal>{
+  checkAbort(signal);const m=await readLegacyManifest(root,id),{state,records}=await readLegacyEvents(m,onRead,signal);
   return {root,id,folder:jobFolder(m),manifest:m,state,records};
  },
  convertedFrom:(legacy:LegacyJournal):ConvertedFrom=>({path:legacy.folder,records:legacy.records.length,sha256:createHash('sha256').update(legacy.records.join('\n')).digest('hex')}),
@@ -1682,12 +1683,12 @@ export const journalConversion={
  /** The header's record of where a journal came from. */
  async convertedFromOf(target:ConversionTarget):Promise<ConvertedFrom|undefined>{return validConvertedFrom((await readJournalHead(target.journal,target.store.path,false)).header.convertedFrom);},
  /** N4: read a journal file (the temporary one, or the committed one) with the v5 reader, without its successor. */
- async replay(target:ConversionTarget,file:string,root:string,id:string,onRead?:(read:number,total:number,name?:string)=>void):Promise<{manifest:Manifest;state:JournalState}>{
+ async replay(target:ConversionTarget,file:string,root:string,id:string,onRead?:(read:number,total:number,name?:string)=>void,signal?:AbortSignal):Promise<{manifest:Manifest;state:JournalState}>{
   // A library renamed only by case keeps the name the journal recorded.
   const recorded=(await readJournalHead(file,target.store.path,false)).header.root;
   const claimed=typeof recorded==='string'&&recorded!==root&&pathKey(recorded)===pathKey(root)?recorded:root;
   const m=await openJournal({store:target.store,folder:target.folder,journal:file},claimed,id,true,claimed!==root);
-  try{return {manifest:m,state:await readEvents(m,undefined,onRead,false)};}
+  try{return {manifest:m,state:await readEvents(m,undefined,onRead,false,signal)};}
   finally{for(const key of [...finishedJournals.keys()])if(key.startsWith(file+'\0'))finishedJournals.delete(key);}
  },
  same:(a:JournalState,b:JournalState)=>comparable(a)===comparable(b),
