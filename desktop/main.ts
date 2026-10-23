@@ -18,7 +18,7 @@ import {within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {routingChanged,rememberRouting} from './platform/routing-memory';
-import {allocateDestinations,destinationEntries,olderRulesPaths,placedEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
+import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,placedEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
@@ -659,7 +659,10 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
-  const {inventory,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:()=>availableFor(owner,infos)[0]!}:{}),...listing},p=>metadata(p,{details:false}),signal,onProgress);
+  const {inventory,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
+   // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.
+   const {kept,bytes}=fillFirst(first,availableFor(owner,infos)[0]!);reservations.set(owner,[{volume:infos[0]!.volumeId??infos[0]!.path,bytes}]);return kept;
+  }}:{}),...listing},p=>metadata(p,{details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
   // A same-drive organization moves files; it never needs room for a second library.
@@ -671,7 +674,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   if(!reorganize&&!stage&&!backup)rememberScan(source,inventory);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
   return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
- }catch(error){await stage?.cleanup().catch(()=>{});throw error;}
+ }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}
 }
 /** Hands a planned job over to the review screen, so unknown files are confirmed before anything runs. The job itself is dropped; Continue starts a new one from this plan. */
 function parkForConfirmation(job:Job,prepared:Prepared){
@@ -1077,7 +1080,7 @@ async function action(input:Action):Promise<void>{
   case 'preferences':{
    const patch=input.patch;
    // A folder name that saves can be planned.
-   if(['basePath','videoBasePath','editedFolder','noMetadataFolder'].some(key=>Object.hasOwn(patch,key)))checkFolderSettings({...state.preferences,...patch});
+   if(['basePath','mediaLayout','videoBasePath','editedFolder','noMetadataFolder'].some(key=>Object.hasOwn(patch,key)))checkFolderSettings({...state.preferences,...patch});
    // Display and queue settings apply at once. Settings a job reads are ignored without an error (the UI greys them out),
    // while any job runs, waits in the queue or is paused, or a review is open: stop it completely first.
    const before=state.preferences;

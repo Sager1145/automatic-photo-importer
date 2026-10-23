@@ -33,9 +33,10 @@ export function validFolderPath(folder:unknown):folder is string {
 }
 /** Throws for the first folder name the planner would refuse, so a name that saves can be planned. An empty backup
  * folder is the destination itself. */
-export function checkFolderSettings(prefs:Pick<Preferences,'basePath'|'videoBasePath'|'editedFolder'|'noMetadataFolder'>):void {
+export function checkFolderSettings(prefs:Pick<Preferences,'basePath'|'mediaLayout'|'videoBasePath'|'editedFolder'|'noMetadataFolder'>):void {
  if(prefs.basePath!==''&&!validFolderPath(prefs.basePath))throw new MessageError('error.backupFolderPath');
- if(!validFolderPath(prefs.videoBasePath))throw new MessageError('error.videoFolderPath');
+ // The video folder is only used, and only shown, in the video-root layout.
+ if(prefs.mediaLayout==='video-root'&&!validFolderPath(prefs.videoBasePath))throw new MessageError('error.videoFolderPath');
  if(prefs.editedFolder!==undefined&&!validFolderName(prefs.editedFolder))throw new MessageError('error.editedFolderName');
  if(prefs.noMetadataFolder!==undefined&&!validNoMetadataFolder(prefs.noMetadataFolder,[prefs.editedFolder??'',prefs.basePath,prefs.videoBasePath??'']))throw new MessageError('error.noMetadataFolderName');
 }

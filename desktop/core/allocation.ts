@@ -38,8 +38,9 @@ export function destinationSpace(plan:TransferPlan,free:number,sameDrive=false):
 /** Fill-first copy mode: the sources the first disk takes, family by family in plan order, while the
  * pending bytes plus the largest family still fit `available`; from the first family that does not,
  * every later family goes to the second disk. Paths on the second disk are planned afterwards, for
- * those families only, so no name there depends on a file that stayed on the first. */
-export function fillFirst(first:TransferPlan,available:number):Set<string>{
+ * those families only, so no name there depends on a file that stayed on the first. `bytes`: the space
+ * the first disk then needs (`requiredTransferSpace` of what it keeps). */
+export function fillFirst(first:TransferPlan,available:number):{kept:Set<string>;bytes:number}{
  const families=new Map<string,PlanEntry[]>();
  for(const entry of destinationEntries(first)){const family=families.get(entry.family)??[];family.push(entry);families.set(entry.family,family);}
  const kept=new Set<string>();let assigned=0,largest=0;
@@ -48,7 +49,7 @@ export function fillFirst(first:TransferPlan,available:number):Set<string>{
   if(assigned+bytes+Math.max(largest,bytes)>available)break;
   assigned+=bytes;largest=Math.max(largest,bytes);for(const entry of family)kept.add(entry.source);
  }
- return kept;
+ return {kept,bytes:assigned+largest};
 }
 
 /** The space each destination's plan needs, checked against its free space after other jobs'

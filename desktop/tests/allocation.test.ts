@@ -8,7 +8,7 @@ function plan(entries:PlanEntry[],root='/backup'):TransferPlan{return {source:'/
 function mirrored(entries:PlanEntry[]):TransferPlan[]{return [plan(entries.map(entry=>({...entry}))),plan(entries.map(entry=>({...entry})),'/second')];}
 /** What plan() does in fill-first mode: the first disk keeps `fillFirst`'s sources, the second plans the rest. */
 function split(plans:TransferPlan[],available:number):string[][]{
- const kept=fillFirst(plans[0]!,available),parts=(item:TransferPlan)=>[item,...(item.videos?[item.videos]:[])];
+ const {kept}=fillFirst(plans[0]!,available),parts=(item:TransferPlan)=>[item,...(item.videos?[item.videos]:[])];
  for(const part of parts(plans[0]!))part.entries=part.entries.filter(entry=>kept.has(entry.source));
  for(const part of parts(plans[1]!))part.entries=part.entries.filter(entry=>!kept.has(entry.source));
  return plans.map(item=>parts(item).flatMap(part=>part.entries.map(entry=>entry.source)));
@@ -29,6 +29,7 @@ test('mirror reserves independently for differing verified skips and keeps both 
 
 test('fill-first respects exact first-disk fit and never returns after spilling',()=>{
  const plans=mirrored([entry('A',6),entry('B',4),entry('C',8),entry('D',1)]),capacity=[16,17];
+ assert.equal(fillFirst(plans[0]!,capacity[0]).bytes,16,'what the first disk keeps plus its largest family');
  assert.deepEqual(split(plans,capacity[0]),[['A','B'],['C','D']]);
  assert.deepEqual(allocateDestinations(plans,capacity,'sequential'),[16,17]);assert.deepEqual(capacity,[16,17]);
  assert.deepEqual(split(mirrored([entry('A',6),entry('B',8),entry('C',1)]),12),[['A'],['B','C']]);

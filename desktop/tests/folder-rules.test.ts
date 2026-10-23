@@ -68,7 +68,7 @@ test('library roots: one per backup folder, the video one only in the video-root
 
 test('one folder name rule: unknown-files folder and edited folder share it',()=>{
   for(const bad of ['','CON','a/b','..','x.','{camera}',' x','a:b','nul.txt'])assert.equal(validFolderName(bad),false,bad);
-  for(const good of ['Finished','editied','Unknown files','Résumé'])assert.equal(validFolderName(good),true,good);
+  for(const good of ['Finished','editied','Unknown files','Résumé','Re\u0301sume\u0301'])assert.equal(validFolderName(good),true,good);
   assert.equal(validNoMetadataFolder('CON'),false);assert.equal(validNoMetadataFolder('Unsorted'),true);
 });
 
@@ -77,7 +77,8 @@ test('folder names are checked when saved: what saves can be planned',()=>{
   assert.equal(error({}),undefined);
   assert.equal(error({basePath:''}),undefined);assert.equal(error({basePath:'backups/photos'}),undefined);
   assert.equal(error({basePath:'../out'}),'error.backupFolderPath');assert.equal(error({basePath:'CON'}),'error.backupFolderPath');assert.equal(error({basePath:'Photo Importer Data'}),'error.backupFolderPath');
-  assert.equal(error({videoBasePath:'a//b'}),'error.videoFolderPath');
+  assert.equal(error({mediaLayout:'video-root',videoBasePath:'a//b'}),'error.videoFolderPath');
+  assert.equal(error({mediaLayout:'format',videoBasePath:''}),undefined,'a video folder the layout does not use');
   assert.equal(error({editedFolder:'CON'}),'error.editedFolderName');assert.equal(error({editedFolder:'a/b'}),'error.editedFolderName');
   assert.equal(error({noMetadataFolder:'2024'}),'error.noMetadataFolderName');
   assert.equal(error({noMetadataFolder:'Finished',editedFolder:'Finished'}),'error.noMetadataFolderName');

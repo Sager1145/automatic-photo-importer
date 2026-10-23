@@ -34,9 +34,9 @@ export function safeComponent(value: string): string {
   if (DEVICE_NAME.test(result)) result = '_' + result;
   return result;
 }
-/** One folder name a user may choose (edited exports, unknown files): `safeComponent` leaves it unchanged, and it has no
- * braces, which a template would read as a token. */
-export const validFolderName = (name: unknown): name is string => typeof name === 'string' && name === safeComponent(name) && !/[{}]/.test(name);
+/** One folder name a user may choose (edited exports, unknown files): `safeComponent` leaves it unchanged (apart from the
+ * Unicode form, which macOS file names do not distinguish), and it has no braces, which a template would read as a token. */
+export const validFolderName = (name: unknown): name is string => typeof name === 'string' && name.normalize('NFC') === safeComponent(name) && !/[{}]/.test(name);
 /** Where edited exports go: the month, the edited folder, then the camera. */
 export const editedTemplate = (editedFolder: string) => `{year}/{yyyymm}/${editedFolder}/{camera}`;
 
