@@ -46,6 +46,41 @@ export async function syncDirectory(folder:string):Promise<void> {
 // A sync in progress is shared: a caller that would skip the folder waits for it instead, and
 // gets its failure, so nobody returns before the folder is on disk.
 const changedFolders=new Set<string>(),durableFolders=new Set<string>(),syncing=new Map<string,Promise<void>>();
+// Folder flushes of a copy run are grouped. commitFolder joins a flush of the folder that has been queued but not started
+// (it will start after this request, so it covers every change made before it) and otherwise queues one behind the flush
+// running now: a request never joins a flush that has already started, which may have missed its change. A flush that
+// fails fails every request waiting on it and is not retried. dirtyFolder marks a change nobody waits on (a receipt
+// removed after its file was made durable): the next commit of that folder, a 250 ms timer or flushFolders covers it.
+const queuedCommits=new Map<string,Promise<void>>(),runningCommits=new Map<string,Promise<void>>(),lazyFolders=new Set<string>();
+let lazyTimer:ReturnType<typeof setTimeout>|undefined;
+export function commitFolder(folder:string):Promise<void> {
+  const queued=queuedCommits.get(folder);
+  if(queued) return queued;
+  const previous=runningCommits.get(folder);
+  let start!:()=>void;
+  const turn=new Promise<void>(resolve=>{start=resolve;});
+  const commit=turn.then(async()=>{
+    // From here on this flush has started: later requests queue another, and what was marked lazily is covered.
+    queuedCommits.delete(folder);lazyFolders.delete(folder);
+    const flush=syncDirectory(folder);runningCommits.set(folder,flush);
+    try { await flush; } finally { if(runningCommits.get(folder)===flush) runningCommits.delete(folder); }
+  });
+  queuedCommits.set(folder,commit);
+  // Requests of the same tick still join; it starts once the flush running now (if any) has ended, whatever its outcome.
+  if(previous) void previous.then(start,start); else queueMicrotask(start);
+  return commit;
+}
+/** A folder entry changed that nothing waits on; see commitFolder. */
+export function dirtyFolder(folder:string):void {
+  lazyFolders.add(folder);
+  lazyTimer??=setTimeout(()=>{lazyTimer=undefined;void flushFolders();},250);
+  lazyTimer.unref?.();
+}
+/** Flushes every folder marked by dirtyFolder. A failure leaves only advisory changes (removed receipts) undone, so it is not raised. */
+export async function flushFolders():Promise<void> {
+  if(lazyTimer){clearTimeout(lazyTimer);lazyTimer=undefined;}
+  await Promise.all([...lazyFolders].map(folder=>commitFolder(folder).catch(()=>{})));
+}
 /** A folder whose entries changed outside a publication (a file removed from it): the next synchronization that passes through it as an ancestor covers it. */
 export function markFolderChanged(folder:string):void {changedFolders.add(folder);}
 export async function syncParents(file:string,root:string):Promise<void> {
@@ -54,7 +89,7 @@ export async function syncParents(file:string,root:string):Promise<void> {
     if(own||changedFolders.has(folder)||(!durableFolders.has(folder)&&!syncing.has(folder))){
       // Cleared first, so a subfolder created during this sync marks the folder again.
       changedFolders.delete(folder);
-      const sync=syncDirectory(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
+      const sync=commitFolder(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
       syncing.set(folder,sync);
       try{await sync;}finally{if(syncing.get(folder)===sync)syncing.delete(folder);}
     } else await syncing.get(folder);

@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
 import {MessageError} from '../messages';
-import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,syncDirectory,syncParents} from './paths';
+import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,commitFolder,dirtyFolder,syncParents} from './paths';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
@@ -183,7 +183,7 @@ export async function openPartial(partial:OwnedPartial,root:string){
 /** Once a destination is complete and verified, every authenticated publication receipt for it is
  * moot: the one written before its name was created, and an older one a kill left behind between
  * writing a newer receipt and removing it. */
-export async function releaseCreations(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<void>{
+export async function releaseCreations(entry:PlanEntry,root:string,index:RecoveryIndex,sync:boolean|'lazy'=true):Promise<void>{
  const folder=path.dirname(entry.destination),names=publicationNames(await receiptNames(folder,root,index),entry);
  if(!names.size)return;
  for(const name of [...names.keys()]){
@@ -191,13 +191,14 @@ export async function releaseCreations(entry:PlanEntry,root:string,index:Recover
   try {
    const {record,journalStat}=await readRecord(journal,root);
    if(record.kind!=='publication'||record.destination!==entry.destination||record.file!==entry.destination||record.root!==root)continue;
-   await clearPartialRecord({journal,journalStat,record},root,index);
+   await clearPartialRecord({journal,journalStat,record},root,index,sync);
   }catch{/* Unreadable or already gone: nothing to release. */}
  }
 }
-/** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. */
-export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync=true):Promise<void>{
+/** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. `'lazy'` marks the folder to be flushed soon
+ * (see dirtyFolder): for a receipt beside a file that is already durable, whose leftover would only be released again later. */
+export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync:boolean|'lazy'=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
- await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
+ await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));const folder=path.dirname(partial.journal);if(sync==='lazy')dirtyFolder(folder);else if(sync)await commitFolder(folder);
 }

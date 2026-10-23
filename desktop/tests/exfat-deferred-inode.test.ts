@@ -58,7 +58,7 @@ async function assertOnlyEmptyOrphans(root:string,crashed:boolean) {
       // A kill between writing a new receipt and removing the older one for the same file leaves the
       // older receipt behind, pointing at a file the next import has already released.
       // A receipt cut short by the kill grants no ownership and names nothing.
-      const named=await fs.readFile(file,'utf8').then(text=>JSON.parse(text).file as string,()=>undefined);
+      const named=await fs.readFile(file,'utf8').then(text=>{try{return JSON.parse(text).file as string;}catch{return undefined;}},()=>undefined);
       if(named===undefined) continue;
       assert.equal(await fs.lstat(named).then(()=>true,()=>false),false,`receipt for a file still there: ${file} ${await fs.readFile(file,'utf8')}`);
     } else assert.equal((await fs.stat(file)).size,0,`non-empty staging file left behind: ${file}`);

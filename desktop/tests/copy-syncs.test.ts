@@ -28,20 +28,20 @@ async function fixture(t:test.TestContext) {
   return {card,root};
 }
 
-test('a staged copy that is linked into place flushes at most 10 times per file',async t=>{
+test('a staged copy that is linked into place flushes at most 9 times per file',async t=>{
   const f=await fixture(t),reviewed=(await plan(f.card,[f.root],options,metadata)).plans[0]!;
   let result;
   const count=await syncs(async()=>{result=await execute(reviewed);});
   assert.deepEqual(result,{copied:FILES,skipped:0,errors:[]});
   console.log('link path syncs/file',count/FILES);
-  assert.ok(count<=10*FILES,`${count/FILES} flushes per file`);
+  assert.ok(count<=9*FILES,`${count/FILES} flushes per file`);
 });
 
-test('a staged copy published by copying flushes at most 21 times per file',async t=>{
+test('a staged copy published by copying flushes at most 17 times per file',async t=>{
   const f=await fixture(t),reviewed=(await plan(f.card,[f.root],options,metadata)).plans[0]!;
   let result;
   const count=await syncs(async()=>{result=await execute(reviewed,undefined,undefined,{exclusiveCopy:true});});
   assert.deepEqual(result,{copied:FILES,skipped:0,errors:[]});
   console.log('copy path syncs/file',count/FILES);
-  assert.ok(count<=21*FILES,`${count/FILES} flushes per file`);
+  assert.ok(count<=17*FILES,`${count/FILES} flushes per file`);
 });

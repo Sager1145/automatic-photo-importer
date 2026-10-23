@@ -137,7 +137,7 @@ test('a direct copy writes no staging file, reads each backup file once, and flu
   assert.equal(opened.filter(file=>file.endsWith('.partial')).length,0,'no staging file was opened');
   for(const entry of reviewed.entries) assert.equal(reads.get(entry.destination),entry.size,`${path.basename(entry.destination)} is read once`);
   assert.ok(helpers<=FILES,`${helpers} helper starts for ${FILES} files`);
-  assert.ok(syncs<=9*FILES,`${syncs/FILES} flushes per file`);
+  assert.ok(syncs<=7*FILES,`${syncs/FILES} flushes per file`);
   assert.deepEqual(await leftovers(env.root),[]);
 });
 
@@ -243,6 +243,31 @@ test('a Stop during a direct copy leaves the partial files, and the next import 
   assert.ok(partial.length>0,'the stopped copy left its files in place');
   const result=await reimport(env.card,env.root);
   assert.equal(result.errors.length,0);
+});
+
+test('a failed folder flush fails the files that waited for it, leaves their receipts, and a retry finishes them',async t=>{
+  const env=await ready(t);if(!env) return;
+  const proto=await (async()=>{const probe=await fs.open(env.root,'r');await probe.close();return Object.getPrototypeOf(probe) as {sync:()=>Promise<void>};})();
+  const open=fsPatchable.open.bind(fsPatchable),sync=proto.sync,folders=new WeakSet<object>();let armed=false,failed=0;
+  t.mock.method(fsPatchable,'open',async(...args:Parameters<typeof fsPatchable.open>)=>{
+    const handle=await open(...args);
+    if((await handle.stat()).isDirectory()) folders.add(handle);
+    return handle;
+  });
+  syncBuiltinESMExports();
+  proto.sync=function(this:object){
+    // The first flush of a folder once files are being written fails, as a failing drive would.
+    if(folders.has(this)&&armed&&failed===0){failed++;return Promise.reject(Object.assign(new Error('EIO'),{code:'EIO'}));}
+    return sync.call(this);
+  };
+  const reviewed=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
+  const timer=setInterval(()=>{media(env.root).then(files=>{if(files.length>0)armed=true;}).catch(()=>{});},2);
+  let result;
+  try { result=await execute(reviewed); } finally { clearInterval(timer);proto.sync=sync;t.mock.restoreAll();syncBuiltinESMExports(); }
+  assert.equal(failed,1,'one flush failed');
+  assert.ok(result.errors.length>=1,'the files that waited for it failed');
+  assert.ok(result.copied<FILES,'they were not reported done');
+  await reimport(env.card,env.root);
 });
 
 test('a family whose files were left finished by a kill gets its dates from the next import',async t=>{

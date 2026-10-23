@@ -10,7 +10,7 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
-import { beneath, directCapable, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
@@ -644,7 +644,7 @@ async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.op
   // Settling already synced when it read the real inode; sync only when it did not.
   if(!synced) await output.sync();
   const next=await recordPartial(owned.record.kind,owned.file,synced?now:await output.stat({bigint:true}),entry,transfer,recovery,direct);
-  await clearPartialRecord(owned,transfer.root,recovery);
+  await clearPartialRecord(owned,transfer.root,recovery,'lazy');
   return next;
 }
 async function abandonStage(open:OpenStage,error:unknown):Promise<void> {
@@ -719,7 +719,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
 const toError=(error:unknown)=>error instanceof Error?error:new Error(String(error));
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 /** `sync:false`: the caller synchronizes the folder once after removing many stages. */
-export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string,issue?:ExecutionIssue)=>void=text=>console.warn(text)):Promise<void> {
+export async function cleanStage(staged:Staged,root:string,sync:boolean|'lazy'=true,note:(text:string,issue?:ExecutionIssue)=>void=text=>console.warn(text)):Promise<void> {
   claimedStages.delete(staged.file);
   try {
     await contained(staged.file,root);
@@ -728,7 +728,7 @@ export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:
     const exact=current.dev===staged.dev&&current.ino===staged.ino&&sameBirth(staged.birthtime,current.birthtimeNs);
     // A temporary (negative) inode is replaced by the real one on exFAT; device and birth time still name the file.
     const temporary=staged.ino<0n&&current.dev===staged.dev&&sameBirth(staged.birthtime,current.birthtimeNs)&&current.nlink===1n;
-    if(exact||temporary) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
+    if(exact||temporary) {await fs.unlink(staged.file);if(sync==='lazy')dirtyFolder(path.dirname(staged.file));if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
     else{
       const detail=`expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`;
       note(`Staging file left in place, identity differs: ${staged.file} ${detail}`,{code:'staging-left',severity:'warning',path:staged.file,detail});
@@ -811,7 +811,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
       if(!owned||creating){
         owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);
         // The creation receipt only covers receipt -> wx -> this receipt; its name-only binding ends here.
-        if(creating) await clearPartialRecord(creating,transfer.root,recovery);
+        if(creating) await clearPartialRecord(creating,transfer.root,recovery,'lazy');
       }
       await streams.run([staged.file,destination],async chunk=>{
       const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(chunk);let position=Number((await output.stat({bigint:true})).size);
@@ -834,8 +834,8 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   }
   await syncParents(destination,transfer.root);
   // One step: every publication receipt for this destination goes, so a crash cannot leave one beside the finished file.
-  await releaseCreations(publicationEntry,transfer.root,recovery);
-  if(owned)await clearPartialRecord(owned,transfer.root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+  await releaseCreations(publicationEntry,transfer.root,recovery,'lazy');
+  if(owned)await clearPartialRecord(owned,transfer.root,recovery,'lazy').catch(error=>{if(code(error)!=='ENOENT')throw error;});
   return bound;
 }
 // ---- Direct copies: no staging file. On exFAT and FAT no name can be published atomically (rename replaces,
@@ -864,7 +864,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   };
   const release=async(entry:PlanEntry,destination:string,owned?:OwnedPartial)=>{
     // A leftover receipt beside a complete file is silent and released by the next import, so a failed removal is not a failed copy.
-    try { if(owned) await clearPartialRecord(owned,root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;}); await releaseCreations({...entry,destination},root,recovery); }
+    try { if(owned) await clearPartialRecord(owned,root,recovery,'lazy').catch(error=>{if(code(error)!=='ENOENT')throw error;}); await releaseCreations({...entry,destination},root,recovery,'lazy'); }
     catch(error) { if(isAbort(error)) throw error; }
   };
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
@@ -921,7 +921,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
         throw NOT_DIRECT;
       }
       const owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
-      await clearPartialRecord(creating,root,recovery);
+      await clearPartialRecord(creating,root,recovery,'lazy');
       return {entry,destination,output,owned,initial:0,synthetic:syntheticIno(stat),fields,claim,closed:false};
     } catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
   };
@@ -1178,7 +1178,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           run.completed+=family.length;
         }catch(error){if(isAbort(error))throw error;run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);}
         await exclusive(async()=>{
-          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,true,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});
+          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,'lazy',(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
@@ -1205,6 +1205,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);
     }
     for(const run of runs) if(run.index) await flushIndex(run.index);
+    // Receipt removals marked lazily are flushed before the job reports back.
+    await flushFolders();
     runs.forEach((_run,position)=>{if(!settled.has(position))onSettled?.(position);});
   }
   checkAbort(signal);
