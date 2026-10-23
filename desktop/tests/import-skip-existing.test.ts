@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery,RECOVERY_FOLDER,type PlanProgress} from '../core';
 import {placedEntries} from '../core/allocation';
+import {dropDestinationIndexes} from '../core/destination-index';
 import {recordPartial} from '../core/import-recovery';
 import type {Metadata,PlanEntry,TransferPlan} from '../shared';
 
@@ -59,6 +60,7 @@ test('a Live MOV whose copy is in the video root is moved into the video plan an
  const first=await plan(f.source,[f.root],video,live);
  const photo=first.plans[0]!.entries.find(entry=>entry.source.endsWith('.HEIC'))!;
  await f.put(photo.destination,heic);const existing=await f.put(path.join(videos,'old/IMG_1.MOV'),mov);
+ dropDestinationIndexes();
  const {plans}=await plan(f.source,[f.root],video,live);
  const moved=plans[0]!.videos!.entries.find(entry=>entry.source.endsWith('.MOV'))!;
  assert.ok(moved,'moved into the video plan');

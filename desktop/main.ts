@@ -12,6 +12,7 @@ import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
+import {routingChanged,rememberRouting,routingScope} from './platform/routing-memory';
 import {destinationEntries,placedEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
@@ -379,6 +380,12 @@ function placementOf(prefs:Preferences,index:number){
 // Files an import or organization placed are remembered as in place, so the next folder check does not read them
 // again. This runs after the job is done, never holds it up, and the next check waits for it.
 let placementWork:Promise<void>=Promise.resolve();
+/** The folder rules an import or organization files under; a library filled under other rules may hold files elsewhere. */
+const routingOf=(prefs:Preferences)=>routingScope({template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,editedFolder:prefs.editedFolder});
+function rememberRouted(plans:TransferPlan[],prefs:Preferences){
+ if(qa||plans.some(plan=>plan.drive))return;
+ void rememberRouting(app.getPath('userData'),plans.flatMap(plan=>destinationParts(plan).map(part=>part.rootIdentity)),routingOf(prefs)).catch(()=>{/* Only a cache: the next import looks. */});
+}
 function rememberPlaced(plans:TransferPlan[],prefs:Preferences){
  if(qa)return;
  inspecting++;
@@ -523,7 +530,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
-  const {inventory,plans,failures,problems,duplicates,elsewhere}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
+  const {inventory,plans,failures,problems,duplicates,elsewhere}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
   // A same-drive organization moves files; it never needs room for a second library.
@@ -587,6 +594,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];recordIssues(job,sidecarIssues);
   await recordDuplicates(plans,prepared.duplicates,reorganize);
   rememberPlaced(plans,prefs);
+  if(errors.length===0)rememberRouted(plans,prefs);
   const olderRules=new Set(plans.flatMap(item=>destinationEntries(item)).filter(entry=>entry.routed!==undefined).map(entry=>entry.source)).size;
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,...(prepared.elsewhere?{olderRules:{files:olderRules,partialFamilies:prepared.elsewhere.partialFamilies}}:{}),skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);

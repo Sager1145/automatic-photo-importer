@@ -37,6 +37,8 @@ export class DestinationIndex implements Digests {
   private files=new Map<string,Recorded>();
   private hints=new Map<string,{stat:string;sha256:string}>();
   private dirty=false;
+  /** This session's listing of the library (path and size of each file), for the lookup of files filed elsewhere. Dropped with the index, and when the library is reorganized. */
+  listing?:Promise<{path:string;size:number}[]>;
   private writing:Promise<void>=Promise.resolve();
   constructor(readonly root:string,readonly rootIdentity:string) {}
   static async load(root:string,rootIdentity:string):Promise<DestinationIndex> {
@@ -87,7 +89,7 @@ export class DestinationIndex implements Digests {
     this.files.set(this.key(file),{...fingerprint(stat),sha256});this.dirty=true;
   }
   forget(file:string):void {this.hints.delete(file);if(this.files.delete(this.key(file)))this.dirty=true;}
-  clear():void {this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}
+  clear():void {this.listing=undefined;this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}
   /** Atomic replace: write a sibling, fsync, rename, fsync the folder. */
   flush():Promise<void> {
     const write=this.writing.then(async()=>{

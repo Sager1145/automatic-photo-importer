@@ -40,7 +40,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;}
+interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -555,31 +555,25 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Only imports look: never a backup or drive copy, an organization or its read-only check.
   const lookup=!options.backup&&!options.drive&&!options.reorganize&&!options.misplacedOnly;
   const APP_NAMES=[...APP_FOLDERS,'Photo Importer Data'];
-  const listings=new Map<Root,Promise<Map<number,string[]>>>();
   async function sizesOf(destination:Root&{videos?:Root}):Promise<Map<number,string[]>> {
-    let found=listings.get(destination);
-    if(!found) {
-      found=(async()=>{
-        const sizes=new Map<number,string[]>();
-        for(const part of [destination,...(destination.videos?[destination.videos]:[])]) {
-          const listed=await inventory(part.root,{backup:true,excludeNames:APP_NAMES},signal);
-          for(const file of listed.files) {
-            const name=path.basename(file.path);
-            if(file.size===0||name.startsWith('._')||name.startsWith('photo-importer-')||name.startsWith('.photo-importer-')) continue;
-            sizes.set(file.size,[...(sizes.get(file.size)??[]),file.path]);
-          }
-        }
-        return sizes;
+    const sizes=new Map<number,string[]>();
+    for(const part of [destination,...(destination.videos?[destination.videos]:[])]) {
+      const index=await destinationIndex(part.root,part.identity);
+      index.listing??=(async()=>{
+        const listed=await inventory(part.root,{backup:true,excludeNames:APP_NAMES},signal);
+        return listed.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-');}).map(file=>({path:file.path,size:file.size}));
       })();
-      listings.set(destination,found);found.catch(()=>listings.delete(destination));
+      index.listing.catch(()=>{index.listing=undefined;});
+      for(const file of await index.listing) {const bucket=sizes.get(file.size);if(bucket)bucket.push(file.path);else sizes.set(file.size,[file.path]);}
     }
-    return found;
+    return sizes;
   }
   /** Files to copy whose SHA-256 matches a file elsewhere in this destination move into the plan holding it, skipped there. A family moves only when every member is already there. */
   async function findElsewhere(destination:Root&{videos?:Root},transfer:TransferPlan):Promise<number> {
     const parts=[transfer,...(transfer.videos?[transfer.videos]:[])];
     const pending=parts.flatMap(part=>part.entries.filter(entry=>!entry.skip&&entry.size>0));
     if(!pending.length) return 0;
+    if(options.lookElsewhere&&!await options.lookElsewhere(parts.map(part=>part.rootIdentity))) return 0;
     let looked=0;lookingUp=true;
     const locating=(file:string)=>onProgress?.(looked,file,{step:'locating',total:pending.length,bytes:readToLocate,totalBytes:0});
     const found=new Map<string,{path:string;part:TransferPlan;digest:string}>();
@@ -1093,6 +1087,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       // Keyed by folder: unlinking a stage still linked to its published file changes that file.
       },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);
     }
+    // Files were published: the session's listing of the library is out of date.
+    for(const run of runs) if(run.index) run.index.listing=undefined;
     for(const run of runs) if(run.index) await flushIndex(run.index);
     runs.forEach((_run,position)=>{if(!settled.has(position))onSettled?.(position);});
   }
