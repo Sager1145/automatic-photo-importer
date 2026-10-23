@@ -49,9 +49,9 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    assert.equal(await js<boolean>("document.querySelector('[aria-label=\"Import dashboard\"]')!==null"),true);
    assert.equal(await js<boolean>("document.querySelector('[data-testid=show-progress]')===null"),true,'Total progress button has been removed');
    assert.equal(await js<boolean>("document.querySelector('.sidebar').getBoundingClientRect().top===0&&Math.abs(document.querySelector('.window-titlebar').getBoundingClientRect().left-document.querySelector('.sidebar').getBoundingClientRect().right)<1"),true,'Sidebar reaches the top beside the titlebar');
-   for(const page of ['Organization','History','Settings','Import desk']){await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click()`);// Each page has its own title-bar buttons; All errors is on every page.
-    const expected:Record<string,string[]>={'Organization':['show-errors','titlebar-review-organization','titlebar-organize'],'History':['show-errors'],'Settings':['show-errors'],'Import desk':['show-errors','global-start','global-stop','global-automatic']};
-    await wait(async()=>{const ids=await js<string[]>("Array.from(document.querySelectorAll('.window-titlebar [data-testid]')).map(e=>e.dataset.testid)");return expected[page]!.every(id=>ids.includes(id))&&(page==='Import desk'||!ids.includes('global-start'));},`title-bar buttons on ${page}`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(page==='History'?'Import history':page)}`),'page transition');assert.equal(await js<boolean>("document.querySelector('.command-bar')===null"),true);}
+   for(const page of ['Organization','Duplicates','History','Settings','Import desk']){await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click()`);// Each page has its own title-bar buttons; All errors is on every page.
+    const expected:Record<string,string[]>={'Organization':['show-errors','titlebar-review-organization','titlebar-organize'],'Duplicates':['show-errors','titlebar-duplicates-scan','titlebar-duplicates-stop'],'History':['show-errors'],'Settings':['show-errors'],'Import desk':['show-errors','global-start','global-stop','global-automatic']};
+    await wait(async()=>{const ids=await js<string[]>("Array.from(document.querySelectorAll('.window-titlebar [data-testid]')).map(e=>e.dataset.testid)");return expected[page]!.every(id=>ids.includes(id))&&(page==='Import desk'||!ids.includes('global-start'));},`title-bar buttons on ${page}`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(page==='History'?'Import history':page==='Duplicates'?'Remove duplicates':page)}`),'page transition');assert.equal(await js<boolean>("document.querySelector('.command-bar')===null"),true);}
    assert.equal(await js<boolean>("document.querySelector('button[aria-label=\"Preview photo and metadata\"]')===null"),true);
    await js("document.querySelector('[data-testid=global-automatic]').click()");await wait(async()=>(await state()).preferences.automatic,'automatic button on');
    await wait(()=>js<boolean>("document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='true'"),'automatic button pressed');
@@ -342,13 +342,13 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
       if(clipX&&(r.left<left-1||r.right>right+1)||clipY&&(r.top<top-1||r.bottom>bottom+1)){out.push({kind:'clipped by ancestor',control:name(e),by:name(a).replace(/^.*</,'<'),control_box:[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)],clip_box:[Math.round(left),Math.round(top),Math.round(right),Math.round(bottom)]});break;}
      }
     }return out;})()`;
-   const pages=['Import desk','Drives','Organization','History','Settings'];
+   const pages=['Import desk','Drives','Organization','Duplicates','History','Settings'];
    const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();
    const wide:Record<string,unknown>[]=[];
    try{
     for(const [w,h] of [[1000,720],[1440,940],[1920,1200]]){window.setContentSize(w,h);
      for(const scale of [1,1.25,1.5,1.75,2]){await action({type:'preferences',patch:{textScale:scale}});await wait(()=>js<boolean>(`getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()===${JSON.stringify(String(scale))}`),`text scale ${scale}`);
-      for(const page of pages){await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click()`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(page==='History'?'Import history':page)}`),`page ${page}`);await new Promise(r=>setTimeout(r,250));
+      for(const page of pages){await js(`Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click()`);await wait(()=>js<boolean>(`document.querySelector('.window-titlebar h1').textContent===${JSON.stringify(page==='History'?'Import history':page==='Duplicates'?'Remove duplicates':page)}`),`page ${page}`);await new Promise(r=>setTimeout(r,250));
        const tabs=page==='Settings'?await js<string[]>("Array.from(document.querySelectorAll('[id^=settings-tab-]')).map(t=>t.id.slice('settings-tab-'.length))"):[''];
        if(scale===2)await shot(`scale-200-${w}x${h}-${page.replace(/\s+/g,'-').toLowerCase()}`);
        for(const tab of tabs){if(tab){await settingsTab(tab);await new Promise(r=>setTimeout(r,150));}
@@ -364,6 +364,27 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    await fs.writeFile(path.join(report,'clipped-controls.json'),JSON.stringify(clipped,null,2));
    if(clipped.length)console.log(`CLIPPED CONTROLS ${clipped.length} ${JSON.stringify(clipped.slice(0,40))}`);
    assert.deepEqual(clipped,[],'Controls clipped or overflowing');
+  });
+  await check('Remove duplicates opens on the destination, scans a copied fixture photo and shows its group with previews',async()=>{
+   const folder=path.join(root,'destination','photobackup','qa-duplicates');await fs.mkdir(folder,{recursive:true});
+   await fs.copyFile(path.join(root,'source-1','photo.png'),path.join(folder,'photo.png'));await fs.copyFile(path.join(root,'source-1','photo.png'),path.join(folder,'photo copy.png'));
+   try{
+    await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Duplicates').click();true");
+    await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Remove duplicates'&&document.querySelector('[data-testid=duplicates-scope-select]')!==null"),'duplicates page');
+    const scopes=(await state()).duplicates!.scopes;const scope=scopes.find(item=>item.root===path.join(root,'destination','photobackup'))??scopes[0];assert.ok(scope,'A destination library is offered');
+    await action({type:'duplicatesScope',root:scope.root});
+    await wait(()=>js<boolean>(`document.querySelector('[data-testid=duplicates-scope-select]').value===${JSON.stringify(scope.root)}`),'scope selected');
+    for(const level of [1,2,3]){await js(`document.querySelector('[data-testid=duplicate-level-${level}]').click();true`);await wait(()=>js<boolean>(`document.querySelector('[data-testid=duplicate-level-${level}]').getAttribute('aria-checked')==='true'`),`level ${level}`);}
+    await js("document.querySelector('[data-testid=duplicate-level-2]').click();true");
+    await js("document.querySelector('[data-testid=duplicates-scan]').click();true");
+    await wait(async()=>(await state()).duplicates?.status==='ready','duplicate scan');
+    await wait(()=>js<boolean>("document.querySelector('[data-testid=duplicate-group]')!==null"),'a duplicate group');
+    assert.equal(await js<boolean>("document.querySelectorAll('[data-testid=duplicate-group] [data-testid=keep-file]').length>=2&&document.querySelector('[data-testid=keep-all]')!==null&&document.querySelector('[data-badge=sha]')!==null"),true,'Group shows keep radios and a SHA badge');
+    await wait(()=>js<boolean>("document.querySelector('[data-testid=duplicate-group] img[src^=\"data:image\"]')!==null"),'a preview');
+    assert.equal(await js<boolean>("document.querySelector('[data-testid=duplicates-summary]')!==null"),true);
+    await shot('remove-duplicates');
+    await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click();true");
+   }finally{await fs.rm(folder,{recursive:true,force:true});await fs.rm(path.join(root,'destination','photobackup','photo-importer-duplicates.json'),{force:true});}
   });
   if(!uiOnly){
   await check('Five sources run and the sixth queues; Stop settles every job',async()=>{
