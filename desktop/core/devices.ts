@@ -17,10 +17,15 @@ type Classify=(file:string)=>Promise<DeviceKind>;
 const run=(command:string,args:string[])=>new Promise<string>((resolve,reject)=>execFile(command,args,{timeout:10000,maxBuffer:1024*1024},(error,stdout)=>error?reject(error):resolve(stdout)));
 /** The mount point of `file`'s volume, as df reports it (firmlinked folders such as /Users are
  * not mount points themselves). */
-async function mountOf(file:string):Promise<string> {
+export async function mountOf(file:string):Promise<string> {
   const mount=(await run('/bin/df',['-P',file])).trim().split('\n')[1]?.match(/\d+%\s+(\/.*)$/)?.[1];
   if(!mount) throw new Error('No mount point');
   return mount;
+}
+/** The file system type of the volume mounted at `mount` (macOS `mount` lists it first in the parentheses), or undefined. */
+export async function filesystemOf(mount:string):Promise<string|undefined> {
+  const line=(await run('/sbin/mount',[])).split('\n').find(item=>item.includes(` on ${mount} (`));
+  return line?.slice(line.lastIndexOf(` on ${mount} (`)+` on ${mount} (`.length).match(/^[^,)]+/)?.[0];
 }
 /** macOS: diskutil names the bus and medium. Linux: sysfs. Anything else stays unknown. */
 async function classify(file:string,dev:bigint):Promise<DeviceKind> {

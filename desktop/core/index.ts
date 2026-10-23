@@ -10,7 +10,7 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
-import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, directCapable, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
@@ -21,7 +21,8 @@ import { buildGroups } from '../duplicate-rules';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
-import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,openPartial,clearPartialRecord,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {constants} from 'node:fs';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
@@ -637,12 +638,12 @@ async function rebindStage(open:OpenStage):Promise<void> {
 /** A receipt names its file by inode. The temporary inode exFAT gives an empty file (see above)
  * is gone after the first write, and APFS may lower birthtime when an older date is applied, so
  * the receipt is rewritten for the file as it now is: a later run can then resume or release it. */
-async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.open>>,entry:PlanEntry,transfer:TransferPlan,recovery:RecoveryIndex):Promise<OwnedPartial> {
+async function rebound(owned:OwnedPartial,output:Awaited<ReturnType<typeof fs.open>>,entry:PlanEntry,transfer:TransferPlan,recovery:RecoveryIndex,direct?:DirectFields):Promise<OwnedPartial> {
   const {stat:now,synced}=await settle(output);
   if(now.dev===owned.stat.dev&&now.ino===owned.stat.ino&&now.birthtimeNs===owned.stat.birthtimeNs) return owned;
   // Settling already synced when it read the real inode; sync only when it did not.
   if(!synced) await output.sync();
-  const next=await recordPartial(owned.record.kind,owned.file,synced?now:await output.stat({bigint:true}),entry,transfer,recovery);
+  const next=await recordPartial(owned.record.kind,owned.file,synced?now:await output.stat({bigint:true}),entry,transfer,recovery,direct);
   await clearPartialRecord(owned,transfer.root,recovery);
   return next;
 }
@@ -743,7 +744,8 @@ async function releaseStaleStage(entry:PlanEntry,root:string,recovery:RecoveryIn
   // Reserved while it is checked, so a copy starting meanwhile cannot resume into it.
   claimedStages.add(stale.file);
   try {
-    if(stale.stat.size!==BigInt(entry.size)||await digest(stale.file,signal)!==entry.digest) return;
+    // findPartial has already shown a shorter stage to be a byte prefix of the source; a whole one must also hash to the published checksum.
+    if(stale.stat.size>BigInt(entry.size)||stale.stat.size===BigInt(entry.size)&&await digest(stale.file,signal)!==entry.digest) return;
     if(!sameStat(stale.stat,await fs.lstat(stale.file,{bigint:true}))) return;
     await fs.unlink(stale.file);
     await clearPartialRecord(stale,root,recovery);
@@ -752,6 +754,8 @@ async function releaseStaleStage(entry:PlanEntry,root:string,recovery:RecoveryIn
 export interface ExecutionOptions {
   /** Use journaled exclusive copies for a filesystem known not to support hard links. */
   exclusiveCopy?:boolean;
+  /** `false` keeps the staged path on volumes where files would otherwise be written straight to their final names (exFAT and FAT). */
+  direct?:boolean;
   /** Re-read each copy and compare its SHA-256 before it is published (default true). When off,
    * the SHA-256 of the streamed source bytes and the source-unchanged checks still apply. */
   verify?:boolean;
@@ -834,6 +838,184 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   if(owned)await clearPartialRecord(owned,transfer.root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;});
   return bound;
 }
+// ---- Direct copies: no staging file. On exFAT and FAT no name can be published atomically (rename replaces,
+// link and RENAME_EXCL are refused), so the only no-overwrite step is creating the final name with O_EXCL.
+// Per file: receipt R1 (names the file about to be created), O_EXCL create, receipt R2 (binds the empty file's
+// own identity), stream + hash, read back and compare, dates, one flush (M), folder flush (P), receipts removed.
+// A file is reported done only after P. Recovery never truncates or deletes: an unfinished file that binds its
+// receipt exactly is continued after a byte-prefix check; one that binds only tolerantly (its dates were applied) is
+// finished only if its bytes already equal the source's; anything else is left alone and the copy goes to Conflicts/.
+// Lock order: the publication lock first, then stream slots; a slot is never held while waiting for the lock or for digest().
+const claimedDirect=new Set<string>();
+const NOT_DIRECT=Symbol('not-direct');
+const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=2n**63n;
+interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;}
+async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,signal:AbortSignal|undefined,hooks:{bytes:(count:number)=>void;done:(entry:PlanEntry)=>void}):Promise<'done'|'staged'> {
+  const {transfer,recovery,result}=run,index=run.index!,root=transfer.root,sums=new Map<string,string>(),members:DirectMember[]=[];
+  const resolve:Resolve=async entry=>{
+    if(entry.digest) return entry.digest;
+    let value=sums.get(entry.id);
+    if(value===undefined) {
+      value=await digest(entry.source,signal);
+      if(entry.sourceIdentity!==undefined&&statKey(await fs.lstat(entry.source,{bigint:true}))!==entry.sourceIdentity) throw sourceChanged(entry);
+      sums.set(entry.id,value);
+    }
+    return value;
+  };
+  const release=async(entry:PlanEntry,destination:string,owned?:OwnedPartial)=>{
+    // A leftover receipt beside a complete file is silent and released by the next import, so a failed removal is not a failed copy.
+    try { if(owned) await clearPartialRecord(owned,root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;}); await releaseCreations({...entry,destination},root,recovery); }
+    catch(error) { if(isAbort(error)) throw error; }
+  };
+  /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
+  const present=async(entry:PlanEntry,destination:string)=>{
+    const sha=await resolve(entry),found=await findPublication({...entry,destination},root,recovery,signal);
+    if(found) {
+      const output=await fs.open(destination,constants.O_RDWR|(constants.O_NOFOLLOW??0));
+      try {
+        const stat=await output.stat({bigint:true});
+        if(!sameStat(found.stat,stat)||!sameStat(stat,await fs.lstat(destination,{bigint:true}))||stat.nlink!==1n) throw new Error('Incomplete copy changed before finishing');
+        const source=await fs.lstat(entry.source,{bigint:true});
+        if(entry.sourceIdentity!==undefined&&statKey(source)!==entry.sourceIdentity) throw sourceChanged(entry);
+        await applyFileTimestamps(output,source,entry.captureTimeMs);
+        await output.sync();
+        if(!sameStat(await output.stat({bigint:true}),await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while finishing');
+      } finally { await output.close(); }
+      await syncParents(destination,root);
+      if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
+      await release(entry,destination,found);
+      result.copied++;
+    } else {
+      await syncFile(destination);await syncParents(destination,root);
+      if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
+      const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
+      await releaseCreations({...entry,destination},root,recovery);await releaseStaleStage({...entry,destination},root,recovery,signal);
+      result.skipped++;
+    }
+    hooks.done(entry);
+  };
+  /** Create the name (or take up the unfinished file already there) and bind it to a receipt. Throws NOT_DIRECT after undoing its own creation when the volume reports no birth time. */
+  const begin=async(entry:PlanEntry,destination:string):Promise<DirectMember> => {
+    const publicationEntry={...entry,destination},claim=pathKey(destination);
+    await makeParent(destination,root,transfer.rootIdentity);
+    const source=await fs.lstat(entry.source,{bigint:true});
+    const fields:DirectFields={size:entry.size,finalBirth:[...(entry.captureTimeMs!==undefined&&Number.isFinite(entry.captureTimeMs)?[BigInt(Math.round(entry.captureTimeMs))*1_000_000n]:[]),source.birthtimeNs]};
+    const prior=await findPartial('publication',publicationEntry,root,recovery,signal);
+    if(prior&&!prior.absent) {
+      const output=await openPartial(prior,root);claimedDirect.add(claim);
+      try { const stat=await output.stat({bigint:true}); return {entry,destination,output,owned:prior,initial:Number(stat.size),synthetic:syntheticIno(prior.stat),fields,claim,closed:false}; }
+      catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
+    }
+    const creating=prior?.absent?prior:await recordCreation(destination,publicationEntry,transfer,recovery,fields);
+    let output;
+    try { output=await fs.open(destination,'wx',0o600); }
+    catch(error) { await clearPartialRecord(creating,root,recovery).catch(()=>{}); throw error; }
+    claimedDirect.add(claim);
+    try {
+      const stat=await output.stat({bigint:true});
+      if(stat.birthtimeNs<=0n) {
+        // No birth time to bind by: take back what was just made (this descriptor and this process created it) and use staging.
+        const named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
+        if(named&&sameStat(stat,named)&&stat.nlink===1n) await fs.unlink(destination);
+        await clearPartialRecord(creating,root,recovery).catch(()=>{});
+        throw NOT_DIRECT;
+      }
+      const owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
+      await clearPartialRecord(creating,root,recovery);
+      return {entry,destination,output,owned,initial:0,synthetic:syntheticIno(stat),fields,claim,closed:false};
+    } catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
+  };
+  const exact=await familyPaths(family);
+  const decide=(keys:string[])=>exclusive(async()=>{
+    checkAbort(signal);await rootUnchanged(transfer.root,transfer.rootIdentity);
+    const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
+    const checks=index.section();
+    let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);
+    if(outside(allocated)) throw WIDEN;
+    for(let i=0;i<allocated.length;) {
+      checkAbort(signal);const item=allocated[i]!,entry=item.entry;
+      await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
+      if(claimedDirect.has(pathKey(item.destination))) throw new Error(`Another copy is writing ${item.destination}`);
+      if(await existingMatches(item.destination,entry.size,()=>resolve(entry),root,checks,signal)===true) {await present(entry,item.destination);i++;continue;}
+      if(run.appleDouble) await run.appleDouble.noteExisting(item.destination);
+      try { members.push(await begin(entry,item.destination));i++; }
+      catch(error) {
+        if(error===NOT_DIRECT&&i!==0) throw new Error(`No creation date to bind a copy by: ${item.destination}`);
+        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);if(outside(allocated))throw WIDEN;continue;}
+        throw error;
+      }
+    }
+  },keys,signal);
+  const copy=async(member:DirectMember)=>{
+    const {entry,destination,output}=member,publicationEntry={...entry,destination};
+    let streamed='',sourceStat!:import('node:fs').BigIntStats;
+    // Phase 2: only stream slots. Nothing here takes the publication lock or calls digest().
+    await streams.run([entry.source,destination],async chunk=>{
+      const input=await regularHandle(entry.source),hash=hasher(),buffer=Buffer.allocUnsafe(chunk);let position=0;
+      try {
+        const before=await input.stat({bigint:true});
+        if(before.size!==BigInt(entry.size)||(entry.sourceIdentity!==undefined&&statKey(before)!==entry.sourceIdentity)) throw sourceChanged(entry);
+        for(;;) {
+          checkAbort(signal);
+          const {bytesRead}=await input.read(buffer,0,buffer.length,null);
+          if(!bytesRead) break;
+          await hash.update(buffer.subarray(0,bytesRead));
+          // A resumed partial already holds a verified prefix of these bytes.
+          let offset=Math.max(0,Math.min(bytesRead,member.initial-position));
+          while(offset<bytesRead) {const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten) throw new Error('Unable to write the copy');offset+=bytesWritten;}
+          // A receipt that names a real inode is rewritten if the first write changed it; a synthetic one binds by birth time and never needs it.
+          if(!position&&!member.synthetic) member.owned=await rebound(member.owned,output,publicationEntry,transfer,recovery,member.fields);
+          hooks.bytes(bytesRead);position+=bytesRead;
+        }
+        streamed=await hash.digest();
+        const after=await input.stat({bigint:true}),pathname=await fs.lstat(entry.source,{bigint:true});
+        if(position!==entry.size||!sameStat(before,after)||!sameStat(after,pathname)) throw sourceChanged(entry);
+        sourceStat=after;
+      } finally { hash.drop();await input.close(); }
+    },signal);
+    if(entry.digest!==undefined&&streamed!==entry.digest) throw sourceChanged(entry);
+    // Phase 3: read back with no slot held (digest takes its own).
+    if(options.verify!==false) {
+      const check=await digest(destination,signal);
+      if(check!==streamed) {
+        // This process created the file and still holds it: only that identity is ever removed.
+        const held=await output.stat({bigint:true}),named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
+        if(named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);await release({...entry,digest:streamed},destination,member.owned);}
+        throw new Error(`Destination verification failed: ${destination}`);
+      }
+    }
+    // Phase 4: dates, one flush of data and dates (M), then the folder entry (P).
+    await applyFileTimestamps(output,sourceStat,entry.captureTimeMs);
+    await output.sync();
+    const placed=await output.stat({bigint:true});
+    if(!sameStat(placed,await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while publishing');
+    await output.close();member.closed=true;
+    await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(destination,root);
+    await syncParents(destination,root);
+    // Phase 5: done only now.
+    if(options.verify!==false) {
+      if(entry.sourceIdentity) options.onVerified?.(entry.source,streamed,entry.sourceIdentity);
+      const now=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
+      if(now?.isFile()&&sameStat(now,placed)) index.remember(destination,streamed,now);
+    }
+    if(run.appleDouble) await exclusive(()=>run.appleDouble!.besideFile(destination,root,now=>samePlaced(now,placed)),[destination]);
+    result.copied++;hooks.done(entry);
+    await release({...entry,digest:streamed},destination,member.owned);
+    // A complete staged copy of this file left by an interrupted older run is released now that the file is published and checked.
+    try { await releaseStaleStage({...publicationEntry,digest:streamed},root,recovery,signal); } catch(error) { if(isAbort(error)) throw error; }
+  };
+  try {
+    try { await decide(exact??familyFolders(family)); }
+    catch(error) { if(error!==WIDEN) throw error; await decide(familyFolders(family)); }
+    for(const member of members) await copy(member);
+    return 'done';
+  } catch(error) {
+    if(error===NOT_DIRECT) return 'staged';
+    throw error;
+  } finally {
+    for(const member of members) {claimedDirect.delete(member.claim);if(!member.closed)await member.output.close().catch(()=>{});}
+  }
+}
 export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];appleDouble?:AppleDoubleReport;}
 export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:ExecutionOptions={}):Promise<ExecutionResult> {
   const [result]=await executeMany([transfer],signal,onProgress&&((_index,value)=>onProgress(value)),options);
@@ -842,7 +1024,8 @@ export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgre
 }
 interface Run {
   transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;appleDouble?:AppleDoubleCleaner;
-  batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[]}[];pending:Set<string>;
+  /** Files are written straight to their final names (exFAT and FAT volumes; see directCapable). */direct?:boolean;
+  batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[];/** `direct`: written in place by directFamily; a family that cannot be falls back to `staged`. */mode:'direct'|'staged'}[];pending:Set<string>;
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
   /** Bytes of the files staged for this run, of those published so far, and whether any was published by copying instead of linking. */
   stagedBytes:number;verifiedBytes:number;publishCopy:boolean;
@@ -852,7 +1035,7 @@ interface Run {
  * A destination that cannot start returns an Error in its slot; Stop throws. */
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,
+  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[],mode:'staged' as 'direct'|'staged'})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,
     // A drive backup mirrors a drive as it is: nothing in it is removed.
     ...(options.removeAppleDouble&&!transfer.drive?{appleDouble:appleDoubleCleaner()}:{})}));
   for(const run of runs)if(run.appleDouble)run.result.appleDouble=run.appleDouble.report;
@@ -877,6 +1060,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       const removals=mirrorReviews.get(transfer);
       if(transfer.removals&&(!removals||!transfer.drive))throw new Error('Mirror changes require the reviewed backup plan.');
       run.index=await destinationIndex(transfer.root,transfer.rootIdentity);
+      // Receipts must be authenticable for a file written at its final name to be resumed or finished later.
+      if(options.direct!==false&&importRecoveryAvailable()&&await directCapable(transfer.root,transfer.rootIdentity,options.exclusiveCopy)){run.direct=true;for(const batch of run.batches)batch.mode='direct';}
       if(transfer.drive){const drive=transfer.drive;await exclusive(()=>claimDriveFolder(transfer.root,drive,transfer.rootIdentity));}
       if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal,transfer.rootIdentity,(completed,bytes,file)=>onProgress?.(position,{phase:'copying',step:'removing',completed,total:removals.length,bytes,totalBytes:removals.reduce((sum,item)=>sum+item.size,0),speed:0,file,renames:true}))):0;for(const removal of removals)run.index.forget(removal.path);}
       for(const batch of run.batches) try {
@@ -892,6 +1077,17 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       // Files already verified at their destination need no copy and count as done.
       for(const batch of run.batches)if(!batch.failed)for(const entry of batch.family)if(!run.pending.has(entry.id)){run.counted.add(entry.id);run.completed++;}
     } catch(error) { if(isAbort(error))throw error; run.error=toError(error); }
+    // Direct destinations: each family is written to its final names, checked and finished in place.
+    for(const [position,run] of runs.entries()) {
+      if(run.error||!run.direct) continue;
+      await pool(run.batches.filter(batch=>batch.mode==='direct'&&!batch.failed),STREAM_CONCURRENCY,async batch=>{
+        checkAbort(signal);
+        const hooks={bytes:(count:number)=>{run.bytes+=count;progress(position,path.basename(batch.family[0]!.source));},done:(entry:PlanEntry)=>{if(!run.counted.has(entry.id)){run.counted.add(entry.id);run.completed++;}progress(position,path.basename(entry.source));}};
+        try { if(await directFamily(run,batch.family,options,signal,hooks)==='staged') batch.mode='staged'; }
+        catch(error) { if(isAbort(error)) throw error; fail(run,batch,error); }
+      });
+      report(run);
+    }
     // One read per source file, written to every destination still waiting for it.
     const order:string[]=[],seen=new Set<string>(),owners=runs.map(()=>new Map<string,{batch:Run['batches'][number];entry:PlanEntry}>());
     runs.forEach((run,position)=>{for(const batch of run.batches)for(const entry of batch.family){owners[position]!.set(entry.id,{batch,entry});if(!seen.has(entry.id)){seen.add(entry.id);order.push(entry.id);}}});
@@ -900,7 +1096,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     await pool(order,STREAM_CONCURRENCY,async id=>{
       checkAbort(signal);
       const targets:{run:Run;position:number;batch:Run['batches'][number];entry:PlanEntry}[]=[];
-      runs.forEach((run,position)=>{if(run.error||!run.pending.has(id))return;const {batch,entry}=owners[position]!.get(id)!;if(!batch.failed)targets.push({run,position,batch,entry});});
+      runs.forEach((run,position)=>{if(run.error||!run.pending.has(id))return;const {batch,entry}=owners[position]!.get(id)!;if(!batch.failed&&batch.mode==='staged')targets.push({run,position,batch,entry});});
       if(!targets.length) return;
       const results=await stageMany(targets.map(({run,position,entry})=>({entry,transfer:run.transfer,recovery:run.recovery,onBytes:count=>{run.bytes+=count;progress(position,path.basename(entry.source));}})),signal);
       results.forEach((value,slot)=>{const {run,position,batch,entry}=targets[slot]!;if(value instanceof Error)fail(run,batch,value);else{batch.staged.set(entry.id,value);if(!batch.failed){run.counted.add(entry.id);run.completed++;}run.stagedBytes+=entry.size;progress(position,path.basename(entry.source));}});
@@ -911,7 +1107,11 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     for(const [position,run] of runs.entries()) {
       if(run.error){settled.add(position);onSettled?.(position);continue;}
       const {transfer,recovery,index,result}=run;
-      run.phase='verifying';run.completed=0;run.counted.clear();progress(position,'');
+      // A direct destination with nothing staged is already finished.
+      if(run.direct&&!run.batches.some(batch=>batch.mode==='staged')){report(run);await flushIndex(run.index!);settled.add(position);onSettled?.(position);continue;}
+      run.phase='verifying';run.completed=0;run.counted.clear();
+      for(const batch of run.batches)if(batch.mode==='direct'&&!batch.failed)for(const entry of batch.family){run.counted.add(entry.id);run.completed++;}
+      progress(position,'');
       // Check all members of a family before publishing it. Publication then checks
       // inode/stat identity, avoiding another full staging hash.
       const check=async({family,staged}:Run['batches'][number])=>{
@@ -942,6 +1142,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       // Several families are checked and published at once; each holds the lock only for the
       // paths it decides about, so families filed apart publish side by side.
       await pool(run.batches,STREAM_CONCURRENCY,async batch=>{
+        if(batch.mode==='direct') return;
         const {family,staged,failed}=batch;
         checkAbort(signal);
         const published:{file:string;sha256:string;stat:import('node:fs').BigIntStats}[]=[],placed:{file:string;stat:import('node:fs').BigIntStats}[]=[];

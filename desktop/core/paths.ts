@@ -2,7 +2,8 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { hasher } from './hasher';
-import { streams } from './devices';
+import { streams, mountOf, filesystemOf } from './devices';
+import { execFile } from 'node:child_process';
 
 export function checkAbort(signal?:AbortSignal):void {
   if(signal?.aborted) throw new DOMException('Import stopped','AbortError');
@@ -185,3 +186,26 @@ export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:num
   },signal);
 }
 export function pathKey(file:string):string { return file.normalize('NFC').toLowerCase(); }
+
+const directRoots=new Map<string,Promise<boolean>>();
+/** Whether files may be written straight to their final names under `root`: only on macOS exFAT and FAT volumes, which cannot
+ * hard-link (LINK_MAX 1, or the caller says so) and where no name can be published atomically anyway, so a staging file buys
+ * nothing. Every other volume (APFS, network and FUSE volumes, whose birth times are unproven) keeps the staged path. Answered once per volume. */
+export function directCapable(root:string,rootIdentity:string,exclusiveCopy=false):Promise<boolean> {
+  if(process.platform!=='darwin') return Promise.resolve(false);
+  const key=`${root}\0${rootIdentity}\0${exclusiveCopy}`;
+  let found=directRoots.get(key);
+  if(!found) {
+    found=(async()=>{
+      try {
+        const type=await filesystemOf(await mountOf(root));
+        if(type!=='exfat'&&type!=='msdos') return false;
+        if(exclusiveCopy) return true;
+        const links=await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:10000},(error,stdout)=>error?reject(error):resolve(stdout.trim())));
+        return links==='1';
+      } catch { return false; }
+    })();
+    directRoots.set(key,found);
+  }
+  return found;
+}
