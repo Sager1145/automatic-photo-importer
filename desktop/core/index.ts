@@ -10,6 +10,7 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
+import { editedTemplate, expandTemplate, templateValues } from '../folder-template';
 import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
@@ -50,7 +51,6 @@ const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>
 // Mirror moves are likewise limited to removals found by plan() for that plan.
 const mirrorReviews=new WeakMap<TransferPlan,ReviewedRemoval[]>();
 const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[]}>();
-const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 /** The media a file is filed as: its own, or for a companion its original's. Absent for a file
  * with neither, which stays directly in the camera folder. */
 interface Media {video:boolean;format:string;}
@@ -65,17 +65,14 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   // Without a capture date, the file's modified time is read on this Mac's calendar, as
   // the camera's clock would have shown it, not in UTC.
   const capture=validCalendar?candidate!:new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
-  const year=String(capture.getUTCFullYear()).padStart(4,'0'), month=String(capture.getUTCMonth()+1).padStart(2,'0'), day=String(capture.getUTCDate()).padStart(2,'0');
-  // Month names are English whatever the app language; the number first keeps calendar order.
-  const monthName=`${month} ${MONTHS[capture.getUTCMonth()]}`;
-  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||info.origin||'Unknown Camera')};
+  const values=templateValues(capture,safeComponent(info.camera?.trim()||info.origin||'Unknown Camera'));
   const editedFolder=options.editedFolder??'editied';
   if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
   const video=options.layout==='video-root'&&!!media?.video;
-  const template=info.edited?`{year}/{yyyymm}/${editedFolder}/{camera}`:video&&options.videoTemplate?options.videoTemplate:options.template;
+  const template=info.edited?editedTemplate(editedFolder):video&&options.videoTemplate?options.videoTemplate:options.template;
   // The template is checked, not the result: a camera name may itself contain braces.
   if(/[{}]/u.test(template.replace(/\{([^{}]+)\}/g,(token,key:string)=>Object.hasOwn(values,key)?'':token))) throw new MessageError('error.invalidTemplate',{template});
-  const result=template.replace(/\{([^{}]+)\}/g,(_token,key:string)=>values[key]!);
+  const result=expandTemplate(template,values);
   validateRelative(result);
   // Edited exports stay directly in their edited camera folder.
   return {root:video?'videos':'photos',camera:result,sub:media&&!info.edited?path.join(...layoutFolders(options.layout,media.video,media.format)):''};
