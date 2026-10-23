@@ -484,11 +484,16 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     for(const {entry} of prepared) entry.digest=hashes.get(entry.source)!;
   }
   const resolved=new Map<string,string>();let readToCompare=0,readToLocate=0;
+  // Sources with a same-size file at some destination, counted once however many destinations hold one; each counts as read
+  // in full once its digest is known, whether it was streamed or already hashed.
+  const sizedSources=new Set<string>(),credited=new Set<string>();
+  const credit=(entry:{source:string;size:number})=>{if(!lookingUp&&sizedSources.has(entry.source)&&!credited.has(entry.source)){credited.add(entry.source);readToCompare+=entry.size;}};
   const resolve:Resolve=async (entry,readSignal=signal)=>{
-    if(entry.digest) return entry.digest;
+    if(entry.digest){credit(entry);return entry.digest;}
     let value=resolved.get(entry.source)??early.get(entry.source)??options.sourceDigest?.(entry.source,statKey(sourceStats.get(entry.source)!));
-    if(value!==undefined) resolved.set(entry.source,value);
+    if(value!==undefined){resolved.set(entry.source,value);credit(entry);}
     else {
+      if(!lookingUp) credited.add(entry.source);
       // A same-size file at the destination: the source is read to compare; the bytes count as they stream.
       await contained(entry.source,sourceRoot);value=await digest(entry.source,readSignal,bytes=>{if(lookingUp)readToLocate+=bytes;else readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
       if(!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
@@ -504,7 +509,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   let lastCompared=files.at(-1)?.relative??'';
   // While files are looked for elsewhere, the reads that settle them count under that step instead.
   let lookingUp=false;
-  const comparing=(file:string)=>{if(lookingUp)return;if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:readToCompare,totalBytes:compareBytes,matched,matchedBytes});}
+  const comparing=(file:string)=>{if(lookingUp)return;if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:Math.min(readToCompare,compareBytes||readToCompare),totalBytes:compareBytes,matched,matchedBytes});}
   async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity,(read,total)=>onProgress?.(read,path.basename(destinationRoot),{step:'index',total,bytes:read,totalBytes:total}));
     const mine=prepared.reduce((count,item)=>count+(item.root===kind?1:0),0);let made=0;
@@ -529,7 +534,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       checkAbort(signal);
       if(mirror?.known.has(pathKey(entry.destination))) return;
       const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
-      if(existing?.isFile()&&existing.size===BigInt(entry.size)) compareBytes+=entry.size;
+      if(existing?.isFile()&&existing.size===BigInt(entry.size)&&!sizedSources.has(entry.source)){sizedSources.add(entry.source);compareBytes+=entry.size;}
     });
     comparing('');
     await pool(pending,STREAM_CONCURRENCY,async entry=>{
