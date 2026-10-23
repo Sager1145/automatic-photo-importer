@@ -112,7 +112,7 @@ test('on exFAT releasing kept originals reads each file once, right before relea
 });
 test('on exFAT a copy that changed is found before its original is released, and that original is kept',async t=>{
  const f=await organized(t,'verify-once-exfat-release-changed-');
- const stashed=(await fs.readdir(path.join(f.root,'Photo Importer Recovery'),{recursive:true})).map(name=>path.join(f.root,'Photo Importer Recovery',String(name))).filter(file=>file.endsWith('A.JPG'));
+ const stashed=(await fs.readdir(f.root,{recursive:true})).map(name=>path.join(f.root,String(name))).filter(file=>recovery(file)&&file.endsWith('A.JPG'));
  assert.equal(stashed.length,1);
  // Same size, same dates, different bytes: only a read can tell.
  const {mtime}=await fs.stat(f.destination);await fs.writeFile(f.destination,Buffer.alloc(SIZE,9));await fs.utimes(f.destination,mtime,mtime);
