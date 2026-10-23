@@ -704,6 +704,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
  const real=await fs.realpath(root);
  await rememberLibrary(scope);
  const job:Job={id:randomUUID(),source:{id:'duplicates:'+root,name:scope.name,path:root,transport:'folder'},organization:true,phase:'verifying',detail:message('job.removingDuplicates'),errors:[],backup:false};
+ etaTracker.plan(job.id,{kind:'duplicates',destinations:[etaDrive(await mountedVolumes(),real,'storage')]});
  state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);dup.status='removing';emit();
  void settle((async()=>{
   const reports=path.join(app.getPath('userData'),'operation-reports',job.id);
