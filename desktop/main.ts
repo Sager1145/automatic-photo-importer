@@ -20,7 +20,7 @@ import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
-import {listingEstimate,type ListingHint} from './listing-estimate';
+import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse} from './platform/metadata';
 import {findResidue,cleanResidue} from './core/residue';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
@@ -446,9 +446,10 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const volume=reorganize||stage?undefined:memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,source.path):undefined;
   const skipErrors=request.skipErrors===true||prefs.skipFileErrors!==false;
   // An earlier listing of this scope sizes the estimate; failing that a card's or drive's used space, or the files of its last scan.
-  const previous=reorganize||sourceFolders?undefined:reusableScan(source),previousBytes=previous?.files.reduce((sum,file)=>sum+file.size,0)??0;
-  const used=!reorganize&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
-  const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previous?.files.length?{files:previous.files.length,bytes:previousBytes}:used>0?{bytes:used}:undefined);
+  // Selected folders are sized from the files an earlier scan found inside them; the whole drive's used space would overestimate them.
+  const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
+  const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
+  const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
   const {inventory,plans,failures,problems}=await plan(sourcePath,roots,{backup,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
@@ -535,17 +536,17 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;void releaseIfIdle();});emit();
 }
-async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
+async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;state.reviewSourceId=undefined;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean){
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);if(reorganize&&collectProblemFiles!==undefined){prefs.collectProblemFiles=collectProblemFiles;if(state.review?.options)state.organizeOptions={...state.review.options};}
  const request:RunRequest={prefs,reorganize,...(reorganize?{options:takeOrganizeOptions()}:{}),sourceFolders:reorganize?state.organizationFolders?.[source.path]?.slice():undefined};
- cancelAutomaticChecks();misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;emit();
+ cancelAutomaticChecks();misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;state.reviewSourceId=source.id;emit();
  try{
   reviewed=await prepare(randomUUID(),source,backup,request,control.signal,(done,total)=>{state.reviewProgress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();});
   state.review=reviewed.review;if(reorganize)state.review.destinationIndex=organizationDestination;(state.sourceInventories??={})[source.id]=reviewed.inventory;
  }catch(error){if(!control.signal.aborted)throw error;}
- finally{if(reviewControl===control){state.busyReview=false;state.reviewProgress=undefined;reviewControl=undefined;}emit();void releaseIfIdle();}
+ finally{if(reviewControl===control){state.busyReview=false;state.reviewSourceId=undefined;state.reviewProgress=undefined;reviewControl=undefined;}emit();void releaseIfIdle();}
 }
 async function applyReview(){
  if(!reviewed||busy()||state.busyReview)return;const prepared=reviewed;reviewed=undefined;state.review=undefined;

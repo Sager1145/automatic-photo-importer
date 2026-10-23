@@ -345,6 +345,7 @@ No metadata fields match your search.|没有匹配的元数据字段。|沒有�
 No metadata fields were returned for this file.|此文件没有返回元数据字段。|此檔案未傳回中繼資料欄位。|このファイルにはメタデータ項目がありません。
 Preview reads your file without changing it.|预览只读取文件，不会更改文件。|預覽僅讀取檔案，不會變更檔案。|プレビューでは読み取りのみ行い、ファイルは変更しません。
 Done|完成|完成|完了
+Building review…|正在生成审核…|正在產生審核…|確認を準備中…
 Building your file review…|正在生成文件审核…|正在產生檔案審核…|ファイル確認を準備中…
 Reading metadata and checking destinations. No files are being copied or moved.|正在读取元数据并检查目标，尚未复制或移动文件。|正在讀取中繼資料並檢查目的地，尚未複製或移動檔案。|メタデータと保存先を確認しています。コピーや移動は行っていません。
 Cancel review|取消审核|取消審核|確認をキャンセル
