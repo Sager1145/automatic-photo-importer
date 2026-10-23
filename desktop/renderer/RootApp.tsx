@@ -24,10 +24,23 @@ import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 import { listingShare } from '../listing-estimate';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
+import { BrandLogo } from './BrandLogo';
+import { markAppReady } from './Boot';
 
 type Page = 'desk' | 'drives' | 'organization' | 'duplicates' | 'history' | 'settings';
 const pageOrder: Page[] = ['desk', 'drives', 'organization', 'duplicates', 'history', 'settings'];
 type Dispatch = (action: Action) => void;
+/** Destinations are checked in the background after launch: one with no status yet is still being checked, and only a finished check that reports it unavailable makes it offline. */
+export function destinationReadiness(state: Pick<AppState, 'preferences' | 'destinationStatus'>) {
+  const required = state.preferences.copyMode === 'single' ? 1 : 2;
+  const chosen = state.preferences.destinations.slice(0, required);
+  const statusOf = (path: string) => state.destinationStatus?.find(disk => disk.path === path);
+  return {
+    ready: (state.destinationStatus ?? []).filter(disk => disk.available && chosen.includes(disk.path)),
+    checking: chosen.some(path => !statusOf(path)),
+    offline: chosen.some(path => statusOf(path)?.available === false),
+  };
+}
 type Preview = { path: string; metadata?: Metadata; loading: boolean; error?: string };
 export const activePhases = ['discovering', 'verifying', 'copying'];
 
@@ -351,6 +364,9 @@ export default function RootApp() {
   // Hooks stay above the early return below, so every render calls the same hooks.
   const sidebarRef = useRef<HTMLElement>(null);
   useSidebarFit(sidebarRef);
+  // The start-up splash finishes once the first state has been rendered (a layout effect, so the sidebar logo can be measured).
+  const hasState = !!state;
+  useLayoutEffect(() => { if (hasState) markAppReady(); }, [hasState]);
   if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
@@ -367,7 +383,7 @@ export default function RootApp() {
   return <I18nProvider language={language}><div className="app-shell">
     <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
-      <div className="brand"><img src="./icon.png" alt="" /><strong>{t("Photo Importer")}</strong></div>
+      <div className="brand"><BrandLogo className="brand-logo" /><strong>{t("Photo Importer")}</strong></div>
       <nav aria-label={t("Main navigation")}>
         {([{ id: 'desk', label: t("Import desk"), icon: ArrowDownToLine }, { id: 'drives', label: t("Drives"), icon: Usb }, { id: 'organization', label: t("Organization"), icon: FolderCog }, { id: 'duplicates', label: t("Duplicates"), icon: CopyCheck }, { id: 'history', label: t("History"), icon: History }, { id: 'settings', label: t("Settings"), icon: Settings2 }] as const).map(item =>
           <button key={item.id} type="button" className={`nav-item ${page === item.id ? 'selected' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon icon={item.icon} /><span>{item.label}</span>{page === item.id && <span className="nav-indicator" aria-hidden="true" />}</button>)}
@@ -718,7 +734,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta ?? Math.max(...active.map(job => job.eta!)) : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
-  const readyDestinations = (state.destinationStatus ?? []).filter(disk => disk.available && state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
+  const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
   // Drives in use: those of running jobs and the destinations they write to; with nothing running, every connected drive.
   const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, requiredDestinations)] : Object.keys(state.driveActivity ?? {}));
   const organizationJobs = jobs.filter(job => job.organization), runningOrganization = organizationJobs.find(job => activePhases.includes(job.phase));
@@ -736,7 +752,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
         <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
         <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+doneFiles(job),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
-        <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
+        <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : checkingDestinations ? t("Checking destinations…") : t("Choose a backup destination")}</small></div>
         {driveTotal && <div><dt><Icon icon={Activity} size={16}/>{t("Drive activity")}</dt><dd data-metric="drive-activity">{Math.round(driveTotal.utilization)}%</dd><small className="metric-optional">{t("Read {read} · Write {write}", { read: formatSpeed(driveTotal.readBps, language), write: formatSpeed(driveTotal.writeBps, language) })}</small></div>}
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
@@ -746,7 +762,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
         step={stepKind(lead?.progress)} />
-      {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
+      {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
     </section>);
 }

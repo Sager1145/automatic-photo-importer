@@ -222,7 +222,6 @@ input[type=range]:focus-visible{outline:2.5px solid var(--accent-fill);outline-o
 .sidebar{position:fixed;inset:0 auto 0 0;z-index:30;width:var(--sidebar-width);display:flex;flex-direction:column;gap:1.1rem;padding:calc(var(--titlebar-height) + .25rem) .75rem 1rem;overflow-y:auto;background:var(--sidebar);box-shadow:inset -1px 0 0 var(--separator);-webkit-app-region:drag;user-select:none}
 .sidebar :is(button,a,nav){-webkit-app-region:no-drag}
 .brand{display:flex;align-items:center;gap:.6rem;padding:0 .5rem}
-.brand img{width:2.2rem;height:2.2rem;flex:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.18))}
 .brand strong{font-size:var(--text-headline);font-weight:700;letter-spacing:var(--tracking-snug);line-height:1.2}
 /* Sidebar source and destination lists (Finder-style locations) */
 .sidebar-section{display:grid;grid-template-columns:minmax(0,1fr);gap:.25rem;min-width:0}
@@ -1359,3 +1358,39 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .error-group-item .error-path{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere;font-size:.8rem}
 .error-more{color:var(--label-secondary);font-size:.8rem}
 .job-skipped-note summary{cursor:pointer;color:var(--label-secondary)}
+
+/* ---------- Boot splash (see Boot.tsx; timings mirror boot-controller.ts) ---------- */
+/* The splash sits in the normal stacking order, so error toasts and sheets (top layer, [data-error-layer]) always stay above it. */
+.boot{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;cursor:default;-webkit-app-region:no-drag;--boot-size:clamp(7rem,24vmin,14rem);--rise:36;--boot-spring:linear(0,.08 4%,.32 10%,.66 18%,.92 27%,1.05 36%,1.08 42%,1.05 50%,1.01 62%,.995 74%,1);--boot-ease:linear(0,.006,.025 2.8%,.101 6.1%,.539 18.9%,.721 25.3%,.849 31.5%,.937 38.1%,.968 41.8%,.991 45.7%,1.006 50.1%,1.015 55%,1.017 63.9%,1.001 85.9%,1)}
+.boot::before{content:"";position:absolute;inset:0;background:var(--window)}
+.boot-logo{position:relative;width:var(--boot-size);height:var(--boot-size);transform-origin:0 0;filter:drop-shadow(0 10px 24px rgba(0,0,0,.22))}
+.boot-logo svg{display:block;width:100%;height:100%;overflow:visible}
+.boot :is(.logo-tile,.logo-card,.logo-contact,.logo-arrow,.logo-tray){transform-box:fill-box;transform-origin:center}
+.boot[data-mode=full] .logo-tile{animation:boot-tile 250ms var(--boot-ease) both}
+.boot[data-mode=full] .logo-card{animation:boot-card 380ms var(--boot-ease) 80ms both}
+.boot[data-mode=full] .logo-contact{animation:boot-contact 240ms var(--ease-out) calc(280ms + var(--i) * 40ms) both}
+.boot[data-mode=full] .logo-arrow{animation:boot-arrow 380ms var(--boot-spring) 520ms both}
+.boot[data-mode=full] .logo-tray{animation:boot-tray 200ms var(--ease-out) 760ms both}
+@keyframes boot-tile{from{opacity:0;transform:scale(.92)}}
+@keyframes boot-card{from{opacity:0;transform:translateY(calc(var(--rise) * 1px))}}
+@keyframes boot-contact{from{opacity:.25;stroke:#ead6b4}}
+@keyframes boot-arrow{from{opacity:0;transform:translateY(-70px)}25%{opacity:1}}
+@keyframes boot-tray{40%{transform:scaleX(1.1) scaleY(1.25)}}
+/* Glide: the backdrop clears while the logo travels (Boot.tsx animates the logo itself onto the sidebar logo). */
+.boot[data-phase=fly]{pointer-events:none}
+.boot[data-phase=fly]::before{animation:boot-clear 300ms var(--ease-out) both}
+.boot[data-phase=fade]{pointer-events:none;animation:boot-clear 150ms linear both}
+@keyframes boot-clear{to{opacity:0}}
+/* The sidebar logo stays hidden while the splash logo is on its way to it, so there is only ever one logo on screen. */
+html[data-boot=running] .brand-logo,html[data-boot=reveal] .brand-logo{visibility:hidden}
+html[data-boot=reveal] .app-shell{animation:boot-content 300ms var(--ease-out) both}
+html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) both}
+@keyframes boot-content{from{opacity:0}}
+@keyframes boot-rise{from{transform:translateY(6px)}}
+.brand-logo{display:block;width:2.2rem;height:2.2rem;flex:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.18))}
+@media (prefers-reduced-motion:reduce){
+  /* Reduced motion: a plain 150 ms crossfade. The blanket rule above zeroes animation durations, so this one restates its own. */
+  html .boot[data-phase=fade]{animation-duration:150ms!important}
+  html[data-boot=reveal] .brand-logo{visibility:visible}
+  html[data-boot=reveal] .app-shell,html[data-boot=reveal] .main-content{animation:none!important}
+}

@@ -36,7 +36,40 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const previousTheme=nativeTheme.themeSource;
  let failure:unknown;
  try{
+  // The start-up splash covers the app; every check (and screenshot) starts once it has been removed.
+  await wait(()=>js<boolean>("document.documentElement.dataset.boot==='done'"),'boot splash removed');
   await check('The main process runs with a libuv thread pool sized by the CPU thread limit (twice it, 4 to 16; 16 without a saved limit) so file reads and lstat do not queue behind fsync',async()=>{const size=Number(process.env.UV_THREADPOOL_SIZE);assert.ok(size>=4&&size<=16,'UV_THREADPOOL_SIZE is '+process.env.UV_THREADPOOL_SIZE);if(process.platform!=='win32')assert.equal(await threadpoolExceeds(size-1),true);});
+  await check('The sidebar logo sits left of its title with a gap and overlaps neither the title nor any navigation item, at every text size',async()=>{
+   const probe=`(()=>{const r=e=>{const b=e.getBoundingClientRect();return{l:b.left,t:b.top,r:b.right,b:b.bottom}};const logo=document.querySelector('.brand-logo'),title=document.createRange();title.selectNodeContents(document.querySelector('.brand strong'));const l=r(logo),t=title.getBoundingClientRect(),hit=(a,b)=>a.l<b.right&&a.r>b.left&&a.t<b.bottom&&a.b>b.top;return{visible:getComputedStyle(logo).visibility==='visible',gap:t.left-l.r,width:l.r-l.l,height:l.b-l.t,title:hit(l,t),nav:[...document.querySelectorAll('.sidebar .nav-item')].some(n=>hit(l,n.getBoundingClientRect()))}})()`;
+   try{for(const scale of [1,1.25,1.6,2]){await js(`document.documentElement.style.setProperty('--text-scale','${scale}');true`);await new Promise(r=>setTimeout(r,150));const p=await js<{visible:boolean;gap:number;width:number;height:number;title:boolean;nav:boolean}>(probe);assert.ok(p.visible,`logo visible at ${scale}`);assert.ok(!p.title&&!p.nav,`logo overlaps the title or a nav item at ${scale}`);assert.ok(p.gap>=4,`gap ${p.gap} at ${scale}`);assert.ok(Math.abs(p.width-p.height)<1&&p.width>20,`logo size ${p.width}x${p.height} at ${scale}`);}}
+   finally{await js("document.documentElement.style.removeProperty('--text-scale');true");}
+  });
+  await check('After boot nothing of the splash lingers: no node, animation, z-index or transform layer, and the sidebar logo, nav items and a popover are hit first',async()=>{
+   const result=await js<{boot:number;animations:number;stacked:string[];logo:boolean;nav:boolean[];popover:boolean}>(`(()=>{
+    const inside=(point,element)=>!!point&&!!element&&element.contains(point);
+    const centre=element=>{const r=element.getBoundingClientRect();return[r.left+r.width/2,r.top+r.height/2]};
+    const hitAt=element=>document.elementFromPoint(...centre(element));
+    const leftovers=[...document.querySelectorAll('.app-shell,.main-content,.sidebar,.brand,.brand-logo,.nav-item')].filter(element=>{const s=getComputedStyle(element);return /boot-/.test(s.animationName)||(s.transform!=='none'&&element.matches('.app-shell,.brand-logo'))||(!!element.style.transform)}).map(element=>element.className||element.tagName);
+    const logo=document.querySelector('.brand-logo');
+    const navItems=[...document.querySelectorAll('.sidebar .nav-item')];
+    // A popover in the top layer over a nav item must still win the hit test.
+    const pop=document.createElement('div');pop.popover='manual';pop.setAttribute('data-error-layer','');pop.style.cssText='position:fixed;margin:0;inset:auto;left:'+(navItems[1].getBoundingClientRect().left+4)+'px;top:'+(navItems[1].getBoundingClientRect().top+4)+'px;width:60px;height:20px';document.body.append(pop);pop.showPopover();
+    const popover=document.elementFromPoint(...centre(pop))===pop;pop.remove();
+    return{boot:document.querySelectorAll('.boot,[data-boot-splash]').length,animations:document.getAnimations().filter(a=>String(a.animationName??'').startsWith('boot-')).length,stacked:leftovers,logo:inside(hitAt(logo),logo),nav:navItems.map(item=>inside(hitAt(item),item)),popover}})()`);
+   assert.equal(result.boot,0,'splash node still in the document');
+   assert.equal(result.animations,0,'a boot animation is still running');
+   assert.deepEqual(result.stacked,[],'boot left an animation or transform on the app');
+   assert.ok(result.logo,'the sidebar logo is not the topmost element at its centre');
+   assert.ok(result.nav.length===5&&result.nav.every(Boolean),'a nav item is covered by another element');
+   assert.ok(result.popover,'a popover is not above the sidebar');
+  });
+  await check('At startup the overview never calls a destination offline before its first check has finished',async()=>{
+   // Sampled from the first paint: while a destination has no status yet the page must not show the offline error.
+   const s=await state();const unchecked=s.preferences.destinations.some(d=>!s.destinationStatus?.some(x=>x.path===d));
+   const banner=await js<string>("document.querySelector('.dashboard-next-step')?.textContent??''");
+   if(unchecked)assert.ok(!banner.includes('offline'),`offline banner while checking: ${banner}`);
+   else assert.ok(!banner.includes('offline')||s.destinationStatus!.some(x=>x.available===false),`offline banner although every destination is available: ${banner}`);
+  });
   await check('Fresh launch follows System, Automatic is off, and only fixture sources are present',async()=>{const s=await state();assert.equal(s.preferences.appearance,'system');assert.equal(s.preferences.automatic,false);assert.equal(s.sources.length,6);assert.ok(s.sources.every(s=>s.id.startsWith('fixture:')&&s.path.startsWith(root+path.sep)));});
   await check('macOS uses native window controls instead of HTML replicas',async()=>{if(process.platform==='darwin'){assert.deepEqual(window.getWindowButtonPosition(),{x:18,y:15});assert.equal(window.isFullScreenable(),true);assert.equal(await js<boolean>("document.querySelector('.window-controls')!==null"),false);}});
   await check('System appearance responds live to OS light and dark changes',async()=>{nativeTheme.themeSource='dark';await theme('dark');nativeTheme.themeSource='light';await theme('light');await shot('system');});
