@@ -7,6 +7,7 @@ import {I18nProvider,translationCatalogs,languages} from '../renderer/i18n';
 import {categories} from '../renderer/exif-categories';
 import {LevelSelector,ScanUnread,GroupView,DuplicatesConfirm,RemovedDuplicates,removalPlan,fileBadges,GROUPS_PER_PAGE,Pagination} from '../renderer/DuplicatesPage';
 import {nextConfirmStep} from '../renderer/RootApp';
+import type {FileDetails} from '../renderer/duplicate-details';
 import type {DuplicateFile,DuplicateGroup,Language,Metadata,Thumbnail,OrganizationRecovery} from '../shared';
 
 const render=(child:ReturnType<typeof createElement>,language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
@@ -18,7 +19,8 @@ const sha:DuplicateGroup={id:'g1',strength:'sha',files:[stray,organized]};
 const sized:DuplicateGroup={id:'g2',strength:'exif-size',files:[file('a/x.NEF',{sha256:'b'.repeat(64)}),file('b/x.NEF',{size:2000,sha256:'c'.repeat(64)})]};
 const item=(group:DuplicateGroup,level:1|2|3=1,decisions:Record<string,string>={})=>removalPlan([group],level,decisions).resolved[0]!;
 const view=(group:DuplicateGroup,options:{thumbs?:Record<string,Thumbnail>;exifs?:Record<string,Metadata>;level?:1|2|3;decisions?:Record<string,string>}={},language:Language='en')=>
- render(createElement(GroupView,{item:item(group,options.level,options.decisions),number:1,thumbs:options.thumbs??{},exifs:options.exifs??{},onDecide:()=>{}}),language);
+ render(createElement(GroupView,{item:item(group,options.level,options.decisions),number:1,details:details(options.thumbs??{},options.exifs??{}),onRetry:()=>{},onDecide:()=>{}}),language);
+const details=(thumbs:Record<string,Thumbnail>,exifs:Record<string,Metadata>):Record<string,FileDetails>=>Object.fromEntries([...new Set([...Object.keys(thumbs),...Object.keys(exifs)])].map(path=>[path,{...(thumbs[path]&&{thumbnail:{value:thumbs[path]}}),...(exifs[path]&&{exif:{value:exifs[path]}})}]));
 
 test('the level selector explains three levels in plain words and marks the chosen one',()=>{
  const html=render(createElement(LevelSelector,{level:2,onChange:()=>{}}));
@@ -60,6 +62,14 @@ test('a RAW the system cannot decode shows the macOS update / DNG Converter mess
  assert.equal((html.match(/data-testid="raw-unsupported"/g)??[]).length,1);
  assert.match(html,/Updating macOS or converting the files with Adobe DNG Converter/);
  assert.match(html,/<img src="data:image\/jpeg;base64,AAAA"/);
+});
+
+test('a file whose details could not be read says so and offers Retry; one still loading does not',()=>{
+ const html=render(createElement(GroupView,{item:item(sha),number:1,details:{[organized.path]:{thumbnail:{error:'busy'},exif:{error:'busy'}}},onRetry:()=>{},onDecide:()=>{}}));
+ assert.match(html,/This file&#x27;s preview could not be read\./);assert.match(html,/This file&#x27;s EXIF could not be read\./);
+ assert.equal((html.match(/data-testid="details-retry"/g)??[]).length,1);
+ assert.match(html,/Loading preview…/,'the other file is still loading');
+ assert.match(render(createElement(GroupView,{item:item(sha),number:1,details:{[organized.path]:{thumbnail:{error:'busy'},exif:{error:'busy'}}},onRetry:()=>{},onDecide:()=>{}}),'ja'),/再試行/);
 });
 
 test('the summary counts groups, files and bytes from the level and the choices',()=>{
