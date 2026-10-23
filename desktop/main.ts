@@ -129,11 +129,15 @@ function loadRememberedScans(){
 /** Remember that a device finished a scan (with the cameras it read) or a verified import, for the reconnection notice and Drives. */
 function noteDevice(source:Source,event:'scan'|'import',cameras?:SourceCameraInfo){if(qa)return;const now=new Date().toISOString();recordDeviceHistory(state.preferences.deviceHistory??={},source,event,now,driveCameraRecord(cameras,now));void save().catch(()=>{});}
 /** A chosen folder shows the capacity of the volume it lives on. */
+/** A chosen folder shows the capacity of the volume it lives on: re-read it for that folder, every other folder on the
+ * same drive and the jobs reading them (a finished job's card shows its own copy of the source). */
 async function updateFolderCapacity(source:Source){
  if(source.transport!=='folder')return;
- const capacity=await folderCapacity(source.path),entry=folders.get(source.id);
- if(entry)entry.source={...entry.source,...capacity};
- state.sources=state.sources.map(item=>item.id===source.id?{...item,...capacity}:item);
+ const capacity=await folderCapacity(source.path);if(capacity.total===undefined)return;
+ const same=(item:Source)=>item.id===source.id||(item.transport==='folder'&&!!source.drive&&item.drive?.volumeId===source.drive.volumeId);
+ for(const [id,entry] of folders)if(same(entry.source))folders.set(id,{...entry,source:{...entry.source,...capacity}});
+ state.sources=state.sources.map(item=>same(item)?{...item,...capacity}:item);
+ for(const job of state.jobs)if(same(job.source))job.source={...job.source,...capacity};
 }
 function publishDevices(){state.newDevices=[...selection.newDevices];state.reconnectedDevices=[...selection.reconnectedDevices];}
 const reusableScan=(source:Source)=>source.transport==='camera'?undefined:state.sourceInventories?.[source.id]??rememberedScans.get(source.id);
@@ -223,6 +227,8 @@ async function refresh(){
   const required=state.preferences.copyMode==='single'?1:2,ready=destinations.length>=required&&destinations.slice(0,required).every(info=>info.available);
   // Automatic import only takes drives the user selected (now or on a previous connection).
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
+  // Folders' free space is re-read like a card's, so a capacity bar follows copies and deletions.
+  for(const source of state.sources)if(source.transport==='folder')await updateFolderCapacity(source);
   driveSampler.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
   emit();pump();scheduleMisplacedCheck();scheduleResidueCheck();
   const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
@@ -851,7 +857,9 @@ async function removeOriginals(jobId:string){
  emit();
  const control=new AbortController();originalsControls.set(job.id,control);
  try{
-  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}}));
+  // The drive's capacity bar follows the files as they go, re-read about once a second.
+  let capacityRead=0;
+  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};const now=Date.now();if(now-capacityRead>=1000){capacityRead=now;void updateFolderCapacity(job.source).then(progressEmit,()=>{});}progressEmit();}}));
   const gone=new Set(result.deleted.map(item=>item.source));
   kept.files=kept.files.filter(file=>!gone.has(file.source));
   job.verifiedOriginals=kept.files.length||undefined;if(!kept.files.length)importedOriginals.delete(jobId);
@@ -860,7 +868,7 @@ async function removeOriginals(jobId:string){
   addHistory(text(job.source.name),message('job.originalsDeleted',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length}));
   if(result.errors.length)state.error=message('error.originalsDelete',{count:result.errors.length,error:result.errors[0]!});
  }catch(error){if(!control.signal.aborted)state.error=toMessage(error);}
- finally{originalsControls.delete(job.id);delete job.deletingOriginals;emit();void releaseIfIdle();}
+ finally{originalsControls.delete(job.id);delete job.deletingOriginals;await updateFolderCapacity(job.source).catch(()=>{});emit();void releaseIfIdle();}
 }
 const scalar=(value:unknown)=>value===null||['string','number','boolean'].includes(typeof value);
 /** Settings changes at normal: each key with its old and new value (structured values only by name), and keys the running jobs refused. */
