@@ -357,7 +357,7 @@ export default function RootApp() {
   const inspect = useCallback((path: string) => {
     const request = ++previewSequence.current;
     setPreview({ path, loading: true });
-    window.importer.inspect(path).then(metadata => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); if (request === previewSequence.current) setPreview({ path, metadata, loading: false }); })
+    window.importer.exif(path).then(metadata => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); if (request === previewSequence.current) setPreview({ path, metadata, loading: false }); })
       .catch(error => { const detail=`${path}: ${String(error)}`; setInspectionErrors(errors => errors.includes(detail) ? errors : [...errors,detail]); if (request === previewSequence.current) setPreview({ path, loading: false, error: String(error) }); });
   }, []);
   function closePreview() { ++previewSequence.current; setPreview(null); }

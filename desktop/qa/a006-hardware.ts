@@ -408,7 +408,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 				layout: prefs.mediaLayout, videoTemplate: prefs.videoTemplate,
 				editedFolder: prefs.editedFolder,
 				unknownRules: {}
-			}, (file) => metadata(file, { preview: false, details: false }), control.signal), hour, `verification plan for ${original.source.name}`, () => control.abort());
+			}, (file) => metadata(file, {details:false}), control.signal), hour, `verification plan for ${original.source.name}`, () => control.abort());
 			const hashes = new Map(original.files.map((file) => [file.path, file.sha256]));
 			let checked = 0, missing = 0;
 			for (const entry of result.plans[0].entries) {
@@ -525,27 +525,23 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 			for (const job of passJobs(ids)) {const detail=formatMessage(job!.detail!,'en');assert.match(detail, /^0 copied · [\d,]+ verified · 0 errors$/u, detail);}
 		});
 		await check("Independent destination hashes and capture timestamps match every imported file", () => verifyDestinations("destination-verification.json"));
-		await check("One real photograph exposes metadata and preview status", async () => {
+		await check("One real photograph exposes its metadata", async () => {
 			const photo = sources.flatMap((source) => getState().sourceInventories?.[source.id]?.files ?? []).find((file) => [
 				"RAW",
 				"JPEG",
 				"HEIF",
 				"Images"
 			].includes(file.kind));
-			assert.ok(photo, "A real photo is required for metadata/preview coverage");
-			const result = await bounded(metadata(photo.path), 12e4, "real photo metadata and preview");
+			assert.ok(photo, "A real photo is required for metadata coverage");
+			const result = await bounded(metadata(photo.path), 12e4, "real photo metadata");
 			assert.ok(Object.keys(result.fields).length > 0, "Photo metadata must expose fields");
 			assert.ok(result.shutterCount || result.shutterNote, "Shutter-count availability must be explained");
-			assert.ok(result.preview || result.fields.PreviewStatus, "Preview availability must be reported");
 			await json("photo-metadata.json", {
 				path: photo.path,
 				camera: result.camera,
 				date: result.date,
 				shutterCount: result.shutterCount,
 				shutterNote: result.shutterNote,
-				previewAvailable: !!result.preview,
-				previewCharacters: result.preview?.length ?? 0,
-				previewStatus: result.fields.PreviewStatus,
 				metadataFieldCount: Object.keys(result.fields).length
 			});
 		});

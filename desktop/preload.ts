@@ -12,7 +12,6 @@ contextBridge.exposeInMainWorld('importer',{
   ipcRenderer.on('importer:updated',callback);
   return()=>ipcRenderer.removeListener('importer:updated',callback);
  },
- inspect:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:inspect',path),
  thumbnail:(path:string):Promise<Thumbnail>=>ipcRenderer.invoke('importer:thumbnail',path),
  exif:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:exif',path),
  duplicateGroups:():Promise<DuplicateGroup[]>=>ipcRenderer.invoke('importer:duplicates'),

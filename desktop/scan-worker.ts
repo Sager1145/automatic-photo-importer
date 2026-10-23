@@ -23,7 +23,7 @@ async function scan(reuse:Inventory|undefined,routing:[string,Metadata][]){
   primeRouting(routing);
   const result=await inventory(source.path,{...options,reuse,onProgress:(files,bytes,top,file)=>process.parentPort.postMessage({type:'progress',files,bytes,file,top})},signal.signal);
   process.parentPort.postMessage({type:'inventory',inventory:result});
-  await analyzeSourceCameras(source,result,file=>metadata(file,{preview:false,details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
+  await analyzeSourceCameras(source,result,file=>metadata(file,{details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
   clearInterval(timer);flush();
   await closeMetadata();process.parentPort.postMessage({type:'done'});
  }catch(error){clearInterval(timer);flush();await closeMetadata().catch(()=>{});process.parentPort.postMessage({type:'error',error:error instanceof Error?error.message:String(error)});}

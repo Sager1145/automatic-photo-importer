@@ -8,7 +8,7 @@ import {metadata,closeMetadata,routingEntries,setRoutingLimit,carryRouting} from
 import type {Metadata} from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const routing=(file:string)=>metadata(file,{preview:false,details:false});
+const routing=(file:string)=>metadata(file,{details:false});
 const keys=()=>routingEntries().map(([key])=>key.split('\0')[0]!);
 const identity=(stat:import('node:fs').BigIntStats)=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 

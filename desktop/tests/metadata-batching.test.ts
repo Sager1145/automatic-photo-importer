@@ -36,7 +36,7 @@ test('batched routing reads give exactly the results of reading each file alone'
   for(const name of names)await fs.mkdir(path.join(root,'batched'),{recursive:true}).then(()=>fs.copyFile(path.join(root,'alone',name),path.join(root,'batched',name)));
   await fs.writeFile(path.join(root,'alone','BROKEN.JPG'),'not an image at all');await fs.copyFile(path.join(root,'alone','BROKEN.JPG'),path.join(root,'batched','BROKEN.JPG'));
   const all=[...names,'BROKEN.JPG'];
-  const read=(folder:string)=>Promise.all(all.map(name=>metadata(path.join(root,folder,name),{preview:false,details:false})));
+  const read=(folder:string)=>Promise.all(all.map(name=>metadata(path.join(root,folder,name),{details:false})));
 
   setRoutingBatch(1);
   const alone=await read('alone');
@@ -60,8 +60,8 @@ test('routing reads of one file at the same time share one request and the cache
   const original=ExifTool.prototype.readRaw as (...args:unknown[])=>Promise<unknown>;
   t.mock.method(ExifTool.prototype,'readRaw',function(this:ExifTool,...args:unknown[]){calls++;return original.apply(this,args);});
   const file=path.join(root,'one.JPG');
-  const results=await Promise.all([1,2,3].map(()=>metadata(file,{preview:false,details:false})));
-  await metadata(file,{preview:false,details:false});
+  const results=await Promise.all([1,2,3].map(()=>metadata(file,{details:false})));
+  await metadata(file,{details:false});
   assert.equal(calls,1);
   assert.deepEqual(results[0],results[2]);
 });

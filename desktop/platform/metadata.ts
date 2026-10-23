@@ -263,29 +263,6 @@ const previewLimit=20*1024*1024;
 const previewFolders=new Set<string>();
 /** Preview folders being read now, which the leftover cleanup must not remove. */
 export function previewFoldersInUse():string[] {return [...previewFolders];}
-async function preview(filename:string):Promise<string|undefined> {
-  const extension=path.extname(filename).toLowerCase();
-  if(['.mov','.mp4','.m4v','.avi','.mts','.m2ts','.mxf','.3gp','.webm'].includes(extension))return undefined;
-  const info=await stat(filename);
-  if(['.jpg','.jpeg','.png','.webp'].includes(extension)&&info.size<=previewLimit) {
-    const mime=extension==='.png'?'image/png':extension==='.webp'?'image/webp':'image/jpeg';
-    return `data:${mime};base64,${(await readFile(filename)).toString('base64')}`;
-  }
-  // HEIF and camera RAW files can expose JPEG previews. Only our private temporary directory is written.
-  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));previewFolders.add(scratch);
-  try {
-    for(const tag of ['PreviewImage','JpgFromRaw','ThumbnailImage'] as const) {
-      const output=path.join(scratch,`${tag}.jpg`);
-      try {
-        await exiftool().extractBinaryTag(tag,filename,output);
-        const size=(await stat(output)).size;if(size===0||size>previewLimit)continue;
-        const buffer=await readFile(output);
-        if(buffer[0]===0xff && buffer[1]===0xd8)return `data:image/jpeg;base64,${buffer.toString('base64')}`;
-      }catch{/* Missing embedded previews are normal for some formats. */}
-    }
-  }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
-  return undefined;
-}
 /** The JPEG a camera embeds in a RAW (or HEIF) file, for when the system cannot decode the file itself. */
 export async function embeddedPreview(filename:string):Promise<Buffer|undefined> {
   const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));previewFolders.add(scratch);
@@ -425,9 +402,10 @@ async function readRouting(file:string,dev:bigint,key:string):Promise<RawTags> {
   inFlight.set(key,read);
   return read.finally(()=>inFlight.delete(key));
 }
-export async function metadata(filename:string, options:{preview?:boolean;details?:boolean}={}):Promise<Metadata> {
+/** details:false reads only the routing fields (camera, date, edited) and caches them by stat; otherwise every tag. */
+export async function metadata(filename:string, options:{details?:boolean}={}):Promise<Metadata> {
   const absolute=path.resolve(filename),before=await stat(absolute,{bigint:true});if(!before.isFile())throw new Error('Choose a media file to inspect.');
-  const routing=options.details===false&&options.preview===false,key=statKey(absolute,before);
+  const routing=options.details===false,key=statKey(absolute,before);
   if(routing){const cached=recall(key);if(cached)return structuredClone(cached);}
   // Routing skips RequestAll's per-file macOS stat/mdls/xattr subprocesses and
   // trailer scans (-fast keeps maker notes). Full inspection keeps everything.
@@ -436,7 +414,5 @@ export async function metadata(filename:string, options:{preview?:boolean;detail
   const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
   if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key)remember(key,structuredClone(result));
-  if(options.preview!==false)result.preview=await preview(absolute);
-  if(options.preview!==false && !result.preview)result.fields.PreviewStatus='No supported embedded image preview is available for this file.';
   return result;
 }

@@ -315,8 +315,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    // its existing bridge, without opening native dialogs or accessing user files.
    const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:'123',shutterNote:'Fixture shutter note',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
    let selected={path:path.join(root,'source-1','photo.png'),metadata:photo};
-   ipcMain.removeHandler('importer:inspect');
-   ipcMain.handle('importer:inspect',()=>selected.metadata);
+   ipcMain.removeHandler('importer:exif');
+   ipcMain.handle('importer:exif',()=>selected.metadata);
    await action({type:'preview',sourceId:'fixture:1'});await wait(()=>js<boolean>("document.querySelector('.review-source-button')!==null"),'per-file review preview');
    const open=async()=>{await js("Array.from(document.querySelectorAll('.review-source-button')).find(button=>button.textContent.includes('photo.png')).click()");await wait(()=>js<boolean>("document.querySelector('.metadata-dialog')?.open===true"),'metadata dialog');};
    const close=async()=>{await js("document.querySelector('[data-testid=metadata-close]').click()");await wait(()=>js<boolean>("document.querySelector('.metadata-dialog')===null"),'animated metadata close');await wait(()=>js<boolean>("document.querySelector('.metadata-dialog')===null"),'close metadata dialog');};
@@ -345,7 +345,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
      assert.equal(await js<string>("document.querySelector('[data-testid=metadata-timezone]').textContent"),'UTC+08:00');
      await shot('video-metadata-'+language);await close();
     }
-   }finally{ipcMain.removeHandler('importer:inspect');await action({type:'discardReview'});await action({type:'preferences',patch:{language:'en'}});}
+   }finally{ipcMain.removeHandler('importer:exif');await action({type:'discardReview'});await action({type:'preferences',patch:{language:'en'}});}
   });
   await check('Changing an unknown-file rule invalidates a ready import review',async()=>{
    const ready=await action({type:'preview',sourceId:'fixture:1'});assert.ok(ready.review);const before=ready.jobs.length;const changed=await action({type:'unknownRule',extension:'dat',folder:null,remember:false});assert.equal(changed.review,undefined);assert.equal(changed.jobs.length,before);
