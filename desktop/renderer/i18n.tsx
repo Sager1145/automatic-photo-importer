@@ -564,6 +564,12 @@ Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン
 Copying|复制|複製|コピー
 Verifying|校验|驗證|検証
+Reading|读取|讀取|読み込み
+Comparing|比较|比較|比較
+Tidying|整理|整理|整頓
+Deleting|删除|刪除|削除
+Checking folder|检查文件夹|檢查資料夾|フォルダを確認
+{stage}, {percent}%|{stage}，{percent}%|{stage}，{percent}%|{stage}、{percent}%
 Already imported|已导入|已匯入|読み込み済み
 All {count} files are in the backup and verified|全部 {count} 个文件已在备份中并通过校验|全部 {count} 個檔案已在備份中並通過驗證|{count} 件すべてがバックアップ済みで検証済みです
 All files are in the backup and verified|所有文件已在备份中并通过校验|所有檔案已在備份中並通過驗證|すべてのファイルがバックアップ済みで検証済みです

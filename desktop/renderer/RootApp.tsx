@@ -109,6 +109,10 @@ export interface ProgressDisplayProps {
   label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: SpeedInput;
   startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
   heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean; step?: StepKind;
+  /** The bar's layers, first stage first: each fills its own color from the left over the stages before it. Without it, `step` draws one layer. */
+  stages?: StageLayer[];
+  /** Paused or pausing: every layer shows the paused color; the widths stay. */
+  paused?: boolean;
   /** Nothing is planned: an empty bar and no percentage. */
   empty?: boolean;
 }
@@ -116,9 +120,12 @@ export function ProgressDisplay(props: ProgressDisplayProps) {
   const { t, formatNumber } = useTranslation();
   const known = props.fraction !== undefined;
   const shown = known ? (props.finished ? 1 : Math.min(.99, Math.max(0, props.fraction!))) : 0;
-  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.step ? { 'data-step': props.step } : {})} {...(props.testId ? { 'data-testid': props.testId } : {})}>
+  const staged: StageLayer[] = props.stages?.length ? props.stages : props.step ? [{ kind: props.step, fraction: shown }] : !known && !props.empty ? [{ kind: 'scan', fraction: shown }] : [];
+  // A finished bar is full in every layer; a running one never shows its last layer full.
+  const layers = staged.map((layer, index) => ({ kind: layer.kind, fraction: props.finished ? 1 : Math.min(index === staged.length - 1 ? .99 : 1, Math.max(0, layer.fraction)) }));
+  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.step ? { 'data-step': props.step } : {})} {...(props.paused ? { 'data-paused': '' } : {})} {...(props.testId ? { 'data-testid': props.testId } : {})}>
     {props.heading}
-    <ProgressBar value={shown} indeterminate={!known && !props.empty} label={props.label} />
+    <ProgressBar value={shown} indeterminate={!known && !props.empty} label={props.label} layers={layers} />
     <div className="progress-display-line">
       <span className="progress-count" data-testid="progress-count">{props.count ?? t("Starting…")}</span>
       {known && !props.empty && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
@@ -237,9 +244,17 @@ export function totalDriveActivity(state: AppState, keys: string[]): { utilizati
   return { utilization: Math.max(...found.map(item => item.utilization)), readBps: found.reduce((sum, item) => sum + item.readBps, 0), writeBps: found.reduce((sum, item) => sum + item.writeBps, 0), count: found.length };
 }
 
-function ProgressBar({ value, label, indeterminate = false }: { value: number; label: string; indeterminate?: boolean }) {
-  const { t, language } = useTranslation();
-  return <div className={`progress-track ${indeterminate ? 'progress-discovering' : ''}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} {...(!indeterminate ? { 'aria-valuenow': Math.round(Math.max(0, Math.min(1, value)) * 100) } : {})}><span style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, value))})` }} /></div>;
+/** What a stage is called, for the bar's spoken value. */
+function stageName(kind: StepKind | 'folder-check', t: ReturnType<typeof createTranslator>): string {
+  return { scan: t("Scanning"), read: t("Reading"), compare: t("Comparing"), copy: t("Copying"), move: t("Moving"), verify: t("Verifying"), tidy: t("Tidying"), delete: t("Deleting"), 'folder-check': t("Checking folder") }[kind];
+}
+/** One fill layer per stage, stacked in the track in order: a finished stage keeps its full-width color and the next one grows over it. */
+function ProgressBar({ value, label, indeterminate = false, layers = [] }: { value: number; label: string; indeterminate?: boolean; layers?: StageLayer[] }) {
+  const { t, formatNumber } = useTranslation();
+  const percent = Math.round(Math.max(0, Math.min(1, value)) * 100), top = layers.at(-1);
+  return <div className={`progress-track ${indeterminate ? 'progress-discovering' : ''}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} {...(!indeterminate ? { 'aria-valuenow': percent } : {})} {...(!indeterminate && top ? { 'aria-valuetext': t("{stage}, {percent}%", { stage: stageName(top.kind, t), percent: formatNumber(percent) }) } : {})}>{layers.length
+    ? layers.map((layer, index) => <span key={index} data-layer="" data-step={layer.kind} style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, layer.fraction))})` }} />)
+    : <span style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, value))})` }} />}</div>;
 }
 
 // Motion: one set of durations and curves, defined in styles.css (:root) and read here. See docs/motion-audit.md.
@@ -441,12 +456,12 @@ function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
   useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
 }
 
-function MiniSteps({ states, kinds }: { states: StepState[]; kinds: StepKind[]; }) {
+function MiniSteps({ states, kinds, paused = false }: { states: StepState[]; kinds: StepKind[]; paused?: boolean }) {
   const { t } = useTranslation();
   const names = [t("Scanning"), t(kinds[1] === 'move' ? "Moving" : "Copying"), t("Verifying")];
   const labels: Record<StepState, string> = { pending: t("Waiting"), active: t("In progress"), done: t("Complete"), error: t("Needs attention"), paused: t("Paused"), skipped: t("Skipped") };
   const icons: Record<StepState, LucideIcon | null> = { pending: null, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
-  return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state} data-step={kinds[index]}>{icons[state] ? <Icon icon={icons[state]!} size={9} /> : null}</i>)}</span>;
+  return <span className="mini-steps" {...(paused ? { 'data-paused': '' } : {})} role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state} data-step={kinds[index]}>{icons[state] ? <Icon icon={icons[state]!} size={9} /> : null}</i>)}</span>;
 }
 
 export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
@@ -463,7 +478,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
       const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff, !!state.busyReview && state.reviewSourceId === source.id), capacity = sourceCapacity(state, source);
       const drive = driveContext(source, state.sources, state.destinationStatus), sharedCapacity = !!drive && !drive.showsCapacity;
       return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
-        <SidebarCapacity total={sharedCapacity ? undefined : capacity.total ?? source.total} free={sharedCapacity ? undefined : capacity.free ?? source.free} unavailable={sharedCapacity ? t("Same drive as {name}", { name: drive!.leader.name }) : source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} kinds={sourceStepKinds(job)} />} activity={state.driveActivity?.[source.id]} /></li>;
+        <SidebarCapacity total={sharedCapacity ? undefined : capacity.total ?? source.total} free={sharedCapacity ? undefined : capacity.free ?? source.free} unavailable={sharedCapacity ? t("Same drive as {name}", { name: drive!.leader.name }) : source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} kinds={sourceStepKinds(job)} paused={!!job && jobPaused(job)} />} activity={state.driveActivity?.[source.id]} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
   </section>;
 }
@@ -772,7 +787,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
-        step={stepKind(lead?.progress)} />
+        step={stepKind(lead?.progress)} stages={totalStageLayers(latestJobs, verify)} paused={totalPaused(latestJobs)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
     </section>);
@@ -1168,6 +1183,50 @@ export function sourceStepKinds(job?: Job): [StepKind, StepKind, StepKind] {
   const lead = job?.progress && job.progress.phase !== 'copying' && job.progress.phase !== 'verifying' ? stepKind(job.progress) : undefined;
   return [lead ?? 'scan', job?.progress?.renames ? 'move' : 'copy', 'verify'];
 }
+/** One stage of a progress bar: its color kind and how far it is (0 to 1). */
+export interface StageLayer { kind: StepKind; fraction: number }
+/** The steps of an organization or other job that is not a plain import, in the order they run. */
+const organizationKinds: StepKind[] = ['scan', 'read', 'compare', 'move', 'copy', 'verify', 'tidy', 'delete'];
+/** Where a stage sits in a job's run, for comparing jobs of different kinds. */
+const stageRank: Record<StepKind, number> = { scan: 0, read: 1, compare: 2, copy: 3, move: 3, verify: 4, tidy: 5, delete: 6 };
+const jobPaused = (job: Job) => (job.phase === 'stopped' && !!job.paused) || job.stopping === 'pause';
+/** The whole queue is paused (or pausing): every job that is still to run or running is. Finished and failed jobs do not count. */
+function totalPaused(jobs: Job[]): boolean {
+  const open = jobs.filter(job => activePhases.includes(job.phase) || job.phase === 'queued' || jobPaused(job));
+  return open.length > 0 && open.every(jobPaused);
+}
+interface StagePlan { kinds: StepKind[]; index: number; fraction: number; finished: boolean }
+/** The stage a job is on, the stages it passes, and how far the current one is (the step progress the step list uses). */
+function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
+  const progress = job.progress, finished = job.phase === 'complete' || jobFinished(job);
+  if (!progress && !finished) return undefined;
+  if (job.organization || progress?.renames) {
+    const index = Math.max(0, organizationKinds.indexOf(stepKind(progress) ?? 'move'));
+    return { kinds: organizationKinds, index, fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
+  }
+  const kinds: StepKind[] = sourceStepKinds(job).filter((_, index) => verify || index < 2);
+  const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
+  return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
+}
+const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
+/** A job's bar: one layer per stage up to the one it is on; the passed stages are full, the current one is as far as it is. */
+export function jobStageLayers(job: Job, verify = true): StageLayer[] {
+  const plan = stagePlan(job, verify);
+  return plan ? layersOfPlan(plan) : [];
+}
+/** The total bar: the layers of the least advanced job, so the top color is the stage that still holds the whole back. Jobs already past that
+ * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color. */
+export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
+  const plans = jobs.flatMap(job => { const plan = stagePlan(job, verify); return plan ? [{ job, plan }] : []; });
+  if (!plans.length) return [];
+  const rank = (plan: StagePlan) => stageRank[plan.kinds[plan.index]!];
+  const open = plans.filter(item => !item.plan.finished);
+  if (!open.length) return layersOfPlan(plans.reduce((best, item) => rank(item.plan) > rank(best.plan) ? item : best).plan);
+  const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best), floor = rank(least.plan);
+  const weights = plans.map(({ job, plan }) => ({ fraction: rank(plan) > floor || plan.finished ? 1 : plan.fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }));
+  const top = weights.reduce((sum, item) => sum + item.fraction * item.weight, 0) / weights.reduce((sum, item) => sum + item.weight, 0);
+  return layersOfPlan(least.plan, top);
+}
 export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = false }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean; reviewing?: boolean }) {
   const { t, formatNumber } = useTranslation();
   const states = sourceStepStates(job, inventory, scanning, verifyOff, reviewing), kinds = sourceStepKinds(job);
@@ -1175,7 +1234,7 @@ export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = f
   const names = [t("Scanning"), t(job?.progress?.renames ? "Moving" : "Copying"), t("Verifying")];
   const fraction = job ? cardFraction(job) : undefined;
   // One style for every step: done is checked, the current one shows its percent, the rest wait.
-  return <ol className="source-steps" aria-label={t("Import steps")} data-testid="source-steps">{names.map((label, index) => {
+  return <ol className="source-steps" aria-label={t("Import steps")} data-testid="source-steps" {...(job && jobPaused(job) ? { 'data-paused': '' } : {})}>{names.map((label, index) => {
     const state = states[index]!;
     return <li key={index} data-state={state} data-step={kinds[index]} aria-current={state === 'active' ? 'step' : undefined} title={state === 'skipped' ? t("Verification after copy is off") : undefined}><span className="step-mark"><Icon icon={icons[state]} size={12} /></span><span>{label}</span>{state === 'active' && fraction !== undefined && <span className="step-percent">{`${formatNumber(shownPercent(fraction, false))}%`}</span>}</li>;
   })}</ol>;
@@ -1455,7 +1514,7 @@ export function OrganizationProgress({ job, act, showFile = true }: { job: Job; 
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
     <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={jobFinished(job)} count={count}
-      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} />
+      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job)} paused={jobPaused(job)} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
@@ -1528,7 +1587,7 @@ function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queu
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
     {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={!!job && jobFinished(job)}
       count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
-      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined} step={stepKind(progress)}
+      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined} step={stepKind(progress)} stages={job ? jobStageLayers(job, !verifyOff) : undefined} paused={!!job && jobPaused(job)}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
     {progress && !already && progressSkippedNote(progress, t, formatNumber) && <p className="source-quiet-note" data-testid="already-in-backup"><Icon icon={CheckCheck} size={13} />{progressSkippedNote(progress, t, formatNumber)}</p>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
