@@ -74,6 +74,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 整理范围 | `chooseOrganizationFolders` / `resetOrganizationFolders` | main 保存每个目的地的子目录列表，作为 `plan` 的 `sourceFolders` |
 | 备份目录错位检查 | 自动（`autoOrganizeBackup`：off/ask/auto） | `core.findMisplaced(source,root,…)` = `plan` 的只路由模式；main 的 `backupLibrary()` 给出范围：普通布局为备份目录本身，`video-root` 为目的地并以 `sourceFolders` 限定在照片/视频两个备份目录（视频目录尚不存在时跳过检查，首次导入会创建）；`auto` 时导入完成后排入 `queueOrganization`。整理日志的 `libraries` 记录同次整理的另一个备份目录，清理空目录时不会删除它 |
 | 整理恢复列表 / 重查继续 / 撤销 / 释放原件 | `refreshOrganization` / `resumeOrganization` / `undoOrganization` / `finalizeOrganization` | `core/recovery.ts`：`getOrganizationRecovery`（不重哈希）、`resumeOrganization`、`undoOrganization`、`finalizeOrganization`（全部目标重验后才释放）；main 用一个 `resumeOrganizationJob(kind)` 承载三者 |
+| 旧版本记录提示 / 确认 | `acknowledgeOldRecords` | `core/old-records.ts`：`findOldRecords`（只认本机密钥认证的旧日志、指针、回执，不读取事件、不改动、不删除）；确认后写入已封印的 `Photo Importer Data/reviewed-leftovers.json`；确认前 `refuseOldRecords` 拒绝整理与移除重复。转换器已删除，最后一个能转换的构建是标签 `records-migrator-v5` |
 | 清空的源目录清理 | 整理完成后 | `core/redundant-folders.removeRedundantFolders`（只删仅含系统服务文件的目录） |
 | 后台消息本地化 | 状态里的 `Job.detail` / `Job.errors` / `AppState.error` / `history` | **`messages.ts`**：唯一的 key → 四语言目录；`message()` / `joined()` / `text()`（原文）构造，`MessageError` 携带 key 并以英文作 `Error.message`（日志、报告），`toMessage` 把任意错误转成消息；renderer 的 `createTranslator` 直接接受消息。旧版 `settings.json` 中的字符串历史在读取时由 `savedMessage` 转为原文消息 |
 | 窗口按钮 / 在访达中显示 / 清除错误 | `window` / `reveal` / `clearError` | Electron 窗口 API（Windows/Linux 无原生框时使用）；`allowed()` 授权后 `shell.showItemInFolder` |

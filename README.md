@@ -79,6 +79,8 @@ In **Organization**, set the backup folder, template and layout, then choose **O
 
 **Organization recovery** lists past operations. **Resume & recheck** and **Recheck** confirm contents and continue. The first recheck in a session reads every file; later ones read only files whose size or dates changed. **Full recheck** reads everything again. Recovered originals are only removed when you explicitly release them.
 
+**Old records.** This version no longer converts records written by versions before v5 (the `Photo Importer Recovery` folders, per-file import receipts and index files). If a drive holds such records that this Mac wrote, the destination shows a notice with **Acknowledge old records**. The records are left untouched and never read, organized or deleted; organizing and Remove duplicates on that library wait until you acknowledge. Use the build tagged `records-migrator-v5`, the last one that converts them.
+
 Set **Edited exports folder** (default `editied`) to keep exports from your editor apart from the originals in each month. Normal imports never move or change anything on the camera card or source drive.
 
 ### Compatibility
