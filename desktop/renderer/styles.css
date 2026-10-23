@@ -47,7 +47,7 @@
   --success:#1f7a45;--success-soft:#e4f4ea;--warning:#a35a00;--warning-soft:#fff3df;--warning-border:#f3d5a4;
   --danger:#c4152a;--danger-soft:#fdeaec;--danger-border:#f4c1c7;
   /* One color per progress step; red and amber stay reserved for errors and warnings. */
-  --step-scan:#0a6893;--step-read:#4b4fd0;--step-compare:#8239b8;--step-copy:#086b60;--step-verify:#346c10;--step-move:#a82a7f;--step-tidy:#2458c9;--step-delete:#a0305f;
+  --step-scan:#0a6893;--step-read:#4b4fd0;--step-compare:#8239b8;--step-copy:#086b60;--step-verify:#346c10;--step-move:#a82a7f;--step-tidy:#2458c9;--step-delete:#a0305f;--step-folder-check:#00758a;
   --storage-used:#a1a1a6;
 
   /* Elevation */
@@ -78,7 +78,7 @@
   --accent-soft:#3c2725;--accent-border:#6d3f39;--accent-ring:rgba(255,123,107,.32);
   --success:#5fd38a;--success-soft:#1f3328;--warning:#ffb547;--warning-soft:#3a2f1c;--warning-border:#6a5229;
   --danger:#ff6b61;--danger-soft:#3e2326;--danger-border:#70383c;
-  --step-scan:#5cc2ee;--step-read:#a0a4ff;--step-compare:#c79bf2;--step-copy:#4fd8c4;--step-verify:#a6dd62;--step-move:#f08cd0;--step-tidy:#7fa8ff;--step-delete:#f08aa8;
+  --step-scan:#5cc2ee;--step-read:#a0a4ff;--step-compare:#c79bf2;--step-copy:#4fd8c4;--step-verify:#a6dd62;--step-move:#f08cd0;--step-tidy:#7fa8ff;--step-delete:#f08aa8;--step-folder-check:#5fd6ea;
   --storage-used:#6e6e73;
   --shadow-1:0 1px 2px rgba(0,0,0,.3);
   --shadow-2:0 2px 10px rgba(0,0,0,.32),0 1px 2px rgba(0,0,0,.3);
@@ -1130,6 +1130,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .backup-check>.segmented{justify-self:start;max-width:100%}
 .misplaced-files{display:flex;align-items:flex-start;gap:.45rem;margin:0;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}
 .misplaced-files.is-clean{color:var(--success)}
+/* Static on purpose: no z-index, transform, translate or animation, so it never leaves its card's layer or rises over popovers, menus and error toasts. */
+.folder-check-label{margin:0;font-size:var(--text-footnote);font-weight:600;color:var(--step)}
 .misplaced-files>svg,.destination-misplaced>svg{flex:none;margin-top:.15em}
 .destination-misplaced{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .5rem;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}
 .destination-misplaced>span{flex:1 1 8rem}
@@ -1310,7 +1312,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 
 /* Step colors: the same step has the same color in the card, the step list, the sidebar and the dashboard. */
 [data-step=scan]{--step:var(--step-scan)}[data-step=read]{--step:var(--step-read)}[data-step=compare]{--step:var(--step-compare)}[data-step=copy]{--step:var(--step-copy)}
-[data-step=verify]{--step:var(--step-verify)}[data-step=move]{--step:var(--step-move)}[data-step=tidy]{--step:var(--step-tidy)}[data-step=delete]{--step:var(--step-delete)}
+[data-step=verify]{--step:var(--step-verify)}[data-step=move]{--step:var(--step-move)}[data-step=tidy]{--step:var(--step-tidy)}[data-step=delete]{--step:var(--step-delete)}[data-step=folder-check]{--step:var(--step-folder-check)}
 .progress-display[data-step] .progress-track>span{background:var(--step)}
 .progress-display[data-step] .progress-count,.progress-display[data-step] .progress-percent,.progress-display[data-step] .progress-speed{color:var(--step)}
 .progress-display[data-step] .progress-count{font-weight:550}

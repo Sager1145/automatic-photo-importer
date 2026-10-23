@@ -127,6 +127,7 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
 Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
+Checking {drive} folder layout|正在检查 {drive} 的文件夹结构|正在檢查 {drive} 的資料夾結構|{drive} のフォルダー構成を確認中
 Organization history progress|整理记录读取进度|整理記錄讀取進度|整理履歴の読み込み状況
 Files checked|已检查的文件|已檢查的檔案|確認済みファイル
 Destinations ready|已就绪的目标|已就緒的目的地|準備済みの保存先
