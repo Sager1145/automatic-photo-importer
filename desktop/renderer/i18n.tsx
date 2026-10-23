@@ -591,6 +591,7 @@ No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到�
 Full recheck|完整重新检查|完整重新檢查|すべて再確認
 Reads every organized file again, not only those changed since the last recheck.|重新读取每个已整理的文件，而不只是自上次重新检查以来有变化的文件。|重新讀取每個已整理的檔案，而不只是自上次重新檢查以來有變化的檔案。|前回の再確認以降に変わったファイルだけでなく、整理したすべてのファイルを読み直します。
 Reading organization history…|正在读取整理记录…|正在讀取整理記錄…|整理の履歴を読み込み中…
+Reading organization history is paused while a job uses the drive. It continues afterwards.|有任务正在使用该磁盘，整理记录的读取已暂停，任务结束后会继续。|有工作正在使用該磁碟，整理記錄的讀取已暫停，工作結束後會繼續。|ジョブがドライブを使用中のため、整理履歴の読み込みを一時停止しています。終了後に再開します。
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
 Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細

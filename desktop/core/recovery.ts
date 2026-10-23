@@ -109,6 +109,9 @@ async function logMark(handle:fs.FileHandle,offset:number):Promise<LogMark>{
  return {ino:stat.ino,offset,size:stat.size,mtime:stat.mtimeNs,head,tail};
 }
 const finishedJournals=new Map<string,JournalCache>();
+/** Per-event files a read stopped part-way had already read, by the same key as `finishedJournals`; see readEvents. */
+const partialReads=new Map<string,{dev:bigint;ino:bigint;manifest:string;log:string;texts:Map<string,string>}>();
+const manifestKey=(m:Manifest)=>createHash('sha256').update(JSON.stringify(m)).digest('hex');
 const legacyEvent=/^event-[a-f0-9-]+\.json$/;
 function emptyState():JournalState{return {slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false,handedOff:new Map()};}
 /** Fully undone, superseded, or complete with every finalize finished and nothing undone. Only these
@@ -123,7 +126,8 @@ function copyState(state:JournalState):JournalState{
 /** `onRead`: records read so far out of the journal's files, for journals written one file per event.
  * `follow` false reads only this journal's own signed events, without checking its successor.
  * `folder`: where the journal's folder is now, when it differs from its recorded root only by case. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number,name?:string)=>void,follow=true,folder=m.root):Promise<JournalState> {
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number,name?:string)=>void,follow=true,folder=m.root,signal?:AbortSignal):Promise<JournalState> {
+ checkAbort(signal);
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const state:JournalState=emptyState();
  const apply=(record:Record<string,unknown>)=>{
@@ -197,6 +201,35 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   const file=path.join(job,eventLog);await contained(file,folder);const handle=await regularHandle(file);
   try{const now=await logMark(handle,mark.offset);return now.head.equals(mark.head)&&now.tail.equals(mark.tail);}finally{await handle.close();}
  };
+ // Per-event files an earlier read of this journal was stopped in (a listing that gave way to a job): kept
+ // only while the folder, the manifest and the log are exactly as that read found them. Each text is still
+ // authenticated when it is applied, like any other.
+ const logSignature=logStat?`${logStat.ino}:${logStat.size}:${logStat.mtimeNs}`:'',
+  partial=partialReads.get(cacheKey),resumed=partial&&partial.dev===own.dev&&partial.ino===own.ino&&partial.manifest===manifestKey(m)&&partial.log===logSignature?partial.texts:undefined;
+ if(partial&&!resumed)partialReads.delete(cacheKey);
+ /** Read these per-event files several at a time, in order; a stop keeps what was read for the next read. */
+ const readLegacyNames=async(list:string[],into:Map<string,string>,already:number,total:number):Promise<string[]>=>{
+  const found:string[]=new Array(list.length);let at=0,done=already,failure:unknown;
+  const worker=async()=>{while(at<list.length&&failure===undefined){
+   const position=at++,name=list[position]!;
+   try{checkAbort(signal);const text=resumed?.get(name)??await readLegacy(name);found[position]=text;into.set(name,text);onRead?.(++done,total,name);}
+   catch(error){failure??=error;}
+  }};
+  await Promise.all(Array.from({length:Math.min(await journalReaderCount(job),list.length)},worker));
+  if(failure!==undefined){
+   if(isAbort(failure)){const kept=new Map(resumed);for(const [name,text] of into)kept.set(name,text);partialReads.set(cacheKey,{dev:own.dev,ino:own.ino,manifest:manifestKey(m),log:logSignature,texts:kept});}
+   throw failure;
+  }
+  return found;
+ };
+ /** Records are applied in batches, so a journal of tens of thousands never holds the event loop. */
+ const applyAll=async(items:(string|string[]|undefined)[],total:number,name:string)=>{
+  let count=0;
+  for(const text of items){
+   if(Array.isArray(text)){for(const line of text)once(line);}else if(text!==undefined)once(text);
+   if(++count%500===0){checkAbort(signal);onRead?.(total,total,name);await new Promise<void>(resolve=>setImmediate(resolve));}
+  }
+ };
  const incremental=cached&&cached.dev===own.dev&&cached.ino===own.ino&&(!cached.log||await sameLog(cached.log));
  if(incremental){
   Object.assign(state,copyState(cached!.state));for(const record of cached!.seen)seen.add(record);for(const record of cached!.logTexts)logTexts.add(record);
@@ -204,14 +237,18 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   const grown=!!logStat&&(!cached!.log||logStat.size!==cached!.log.size||logStat.mtimeNs!==cached!.log.mtime);
   const legacy=new Map(cached!.legacy),log=grown?await readLog(cached!.log?.offset??0):cached!.log?{lines:[] as string[],mark:cached!.log}:undefined;
   for(const line of log?.lines??[])once(line);
-  for(const name of legacyNames.filter(name=>!legacy.has(name))){const text=await readLegacy(name);legacy.set(name,text);once(text);}
+  const fresh=legacyNames.filter(name=>!legacy.has(name)),added=new Map<string,string>();
+  const freshTexts=await readLegacyNames(fresh,added,0,fresh.length);
+  for(const [name,text] of added)legacy.set(name,text);
+  await applyAll(freshTexts,fresh.length,fresh.at(-1)??'');
   const gone=[...legacy].filter(([name])=>!legacyNames.includes(name));
   if(gone.every(([,text])=>!text||logTexts.has(text))){
    for(const [name] of gone)legacy.delete(name);
-   onRead?.(names.length,names.length);
+   partialReads.delete(cacheKey);
+   if(!fresh.length)onRead?.(names.length,names.length);
    if(finished(state))finishedJournals.set(cacheKey,{dev:own.dev,ino:own.ino,legacy,...(log?{log:log.mark}:{}),seen:new Set(seen),logTexts:new Set(logTexts),state:copyState(state)});
    else finishedJournals.delete(cacheKey);
-   return finishJournalRead(m,state,chain,follow);
+   return finishJournalRead(m,state,chain,follow,onRead,signal);
   }
   // A per-event file disappeared without its record reaching the log: start again from the disk.
   for(const key of Object.keys(state) as (keyof JournalState)[])delete state[key];
@@ -219,24 +256,23 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  }
  // Journals from before the event log hold one small file per event (tens of thousands on a large
  // organization); on a USB drive these are read several at a time, then applied in folder order.
- const texts:(string|string[]|undefined)[]=new Array(names.length),legacy=new Map<string,string>();let next=0,log:Awaited<ReturnType<typeof readLog>>|undefined;
- const readOne=async(position:number)=>{
-  const name=names[position]!;
-  if(name===eventLog){log=await readLog(0);texts[position]=log.lines;}
-  else if(legacyEvent.test(name)){const text=await readLegacy(name);legacy.set(name,text);texts[position]=text;}
-  onRead?.(++read,names.length,name);
- };
- await Promise.all(Array.from({length:Math.min(await journalReaderCount(job),names.length)},async()=>{while(next<names.length)await readOne(next++);}));
- for(const text of texts){
-  if(Array.isArray(text)){for(const line of text)once(line);}
-  else if(text!==undefined)once(text);
+ const texts:(string|string[]|undefined)[]=new Array(names.length),legacy=new Map<string,string>();let log:Awaited<ReturnType<typeof readLog>>|undefined;
+ {
+  const legacyList=names.filter(name=>legacyEvent.test(name)),logAt=names.indexOf(eventLog);
+  // The log is one file; every other name counts as read once looked at.
+  if(logAt>=0){checkAbort(signal);log=await readLog(0);texts[logAt]=log.lines;}
+  read=names.length-legacyList.length;if(read)onRead?.(read,names.length,eventLog);
+  const found=await readLegacyNames(legacyList,legacy,read,names.length);
+  let at=0;for(const [position,name] of names.entries())if(legacyEvent.test(name))texts[position]=found[at++];
  }
+ await applyAll(texts,names.length,m.id);
+ partialReads.delete(cacheKey);
  if(finished(state))finishedJournals.set(cacheKey,{dev:own.dev,ino:own.ino,legacy,...(log?{log:log.mark}:{}),seen:new Set(seen),logTexts:new Set(logTexts),state:copyState(state)});
  else finishedJournals.delete(cacheKey);
- return finishJournalRead(m,state,chain,follow);
+ return finishJournalRead(m,state,chain,follow,onRead,signal);
 }
 /** Checks that need the events of the whole journal, and its successor and hand-offs; never cached. */
-async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>,follow:boolean):Promise<JournalState> {
+async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>,follow:boolean,onRead?:(read:number,total:number,name?:string)=>void,signal?:AbortSignal):Promise<JournalState> {
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
  // Each hand-off names a signed journal that really moved this entry's file on from its destination.
@@ -251,7 +287,7 @@ async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>
   // must, like any successor, relocate one of its destinations; neither manifest need list the other.
   const destinations=new Set(m.entries.map(entry=>pathKey(entry.destination)));
   if(!successor.entries.some(next=>next.move&&next.source!==next.destination&&destinations.has(pathKey(next.source))))throw new Error('Organization successor does not relocate a prior destination');
-  await readEvents(successor,chain);
+  await readEvents(successor,chain,onRead,true,successor.root,signal);
  }
  return state;
 }
@@ -1007,23 +1043,25 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
 /** Listing skips media reads. A recheck reads file contents for every entry the first time in a session
  * and for a full recheck, and later only for entries changed since their last verified pass (on exFAT and
  * FAT "changed" means size or dates; finalize and undo always read contents). */
-export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string})=>void}={}):Promise<OrganizationRecovery[]> {
+export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string;/** While a journal's events are read: records read so far and in all. */read?:number;total?:number})=>void;/** Stops the listing between files; what was read is kept for the next listing. */signal?:AbortSignal}={}):Promise<OrganizationRecovery[]> {
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
  await adoptLegacyStorage(root);const folder=path.join(root,storage);await contained(folder,root);const stat=await maybeStat(folder);if(!stat)return[];if(!stat.isDirectory())throw new Error('Unsafe recovery storage');
  const jobs:OrganizationRecovery[]=[];
  const ids=(await fs.readdir(folder)).sort().filter(id=>uuid.test(id));let looked=0;
- const report=(position:number,within:number,file:string)=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file});
+ const report=(position:number,within:number,file:string,counts?:{read:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{})});
+ const {signal}=options;
  report(0,0,'');
  for(const [position,id] of ids.entries()) {
+  checkAbort(signal);
   const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id));if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id,{read,total}),true,m.root,signal);if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
-    looked++;if(index%50===0)report(position,.5+.5*index/Math.max(1,m.entries.length),id);
+    looked++;if(index%5===0){checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);}
     // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
     if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m))){
      // Any kept original of it stays, but is not among those a finalize would release.
@@ -1057,7 +1095,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
    }
    if(all&&state.complete)job.status='complete';
    job.finalizable=job.status==='complete'&&job.retainedFiles!>0&&!state.finalizing.size;
-  }catch(error){job.error=error instanceof Error?error.message:String(error);}
+  }catch(error){if(isAbort(error))throw error;job.error=error instanceof Error?error.message:String(error);}
   jobs.push(job);
  }
  return jobs;

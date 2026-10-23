@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {makeParent,syncParents,within} from './core/paths';
+import {makeParent,syncParents,within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {destinationEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
@@ -69,7 +69,10 @@ let refreshing=false;
 // The recovery listing waits while a review or a job is planning: its file calls would queue ahead of the planner's.
 // A file the organization moved keeps its routing metadata under its new path, so the check after the job does not read it again.
 setMoveObserver(carryRouting);
-const recoveryRefresh=deferredRefresh({planning:()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'),run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
+/** A job planning, copying or verifying (or a review being built) needs the drive's file calls: the organization listing gives way to it. */
+const drivesInUse=()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'||job.phase==='copying');
+let listingControl:AbortController|undefined;
+const recoveryRefresh=deferredRefresh({planning:drivesInUse,run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
 let recoveryScope='';
 const folders=new Map<string,{source:Source;backup:boolean}>();
 const active=new Map<string,AbortController>();
@@ -171,7 +174,7 @@ function etaTotals(plans:TransferPlan[]){
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
-const emit=()=>{activityLoop?.wake();state.resources=resourceUse();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const emit=()=>{yieldListing();activityLoop?.wake();state.resources=resourceUse();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 // Progress republishes at most 4 times a second while a job copies or verifies (the renderer is busy then), 10 otherwise. Phase changes and the final emit call emit() directly and are never dropped.
 const progressEmit=throttled(()=>emit(),()=>state.jobs.some(job=>job.phase==='copying'||job.phase==='verifying')?250:100);
 let saving:Promise<void>=Promise.resolve();
@@ -226,9 +229,22 @@ let organizationListing:Promise<void>|undefined,organizationListingAgain=false;
  * change made meanwhile (an undo or resume that just finished) is always shown. */
 function refreshOrganizations():Promise<void>{
  if(organizationListing){organizationListingAgain=true;return organizationListing;}
- return organizationListing=(async()=>{do{organizationListingAgain=false;await listOrganizations();}while(organizationListingAgain);})().finally(()=>{organizationListing=undefined;});
+ const control=listingControl=new AbortController();
+ return organizationListing=(async()=>{
+  try{do{organizationListingAgain=false;await listOrganizations(control.signal);}while(organizationListingAgain&&!control.signal.aborted);}
+  catch(error){
+   if(!isAbort(error))throw error;
+   // A job took the drive: what was read is kept, and the listing goes on once no job is using it.
+   organizationListingAgain=false;state.organizationRecoveryPaused=true;recoveryRefresh.defer();
+  }
+ })().finally(()=>{organizationListing=undefined;if(listingControl===control)listingControl=undefined;});
 }
-async function listOrganizations(){
+/** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
+function yieldListing(){
+ if(listingControl){if(!listingControl.signal.aborted&&drivesInUse())listingControl.abort();}
+ else if(!drivesInUse())recoveryRefresh.resume();
+}
+async function listOrganizations(signal:AbortSignal){
  const destinations=state.preferences.destinations;
  const locations=[...organizationLocations];
  const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
@@ -239,12 +255,13 @@ async function listOrganizations(){
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
  const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
- const listed=new Set<string>();state.organizationRecoveryLoading=true;emit();
+ const listed=new Set<string>();state.organizationRecoveryLoading=true;state.organizationRecoveryPaused=false;emit();
  // Small folders first, so they show at once; a folder holding a large journal from an earlier version
  // (one file per event, slow to read on a USB drive) comes last.
  // Only folders on a connected, unchanged destination are weighed, one at a time.
  const weights=new Map<string,number>();
  for(const location of locations){
+  signal.throwIfAborted();
   const status=location.folder?undefined:destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
   weights.set(location.root,status?.available&&status.volumeId===location.volumeId?await journalWeight(location.root):0);
  }
@@ -252,18 +269,18 @@ async function listOrganizations(){
  let looked=0;
  try{
   for(let position=0;position<locations.length;position++){
-   const location=locations[position]!;
+   signal.throwIfAborted();const location=locations[position]!;
    // A folder organized in place is listed while its own drive is present and unchanged.
    const status=location.folder?await volumeInfo(location.destination):destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
-    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,onProgress:update=>{state.organizationRecoveryProgress={phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share:Math.min(.99,(position+update.share)/locations.length),speed:0,file:update.file||path.basename(location.root)};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,signal,onProgress:update=>{state.organizationRecoveryProgress={phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share:Math.min(.99,(position+update.share)/locations.length),speed:0,file:update.file||path.basename(location.root)};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
     // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
     if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
     // The sibling backup folders those journals list are read too, on the same drive.
     for(const library of found.flatMap(job=>job.libraries??[]))if(!location.folder)add(library,location.destination,location.volumeId);
-   }catch(error){state.error=toMessage(error);}
+   }catch(error){if(isAbort(error))throw error;state.error=toMessage(error);}
    publish();
   }
   // Folders not listed this time (drive away, or no longer configured) leave the list.
