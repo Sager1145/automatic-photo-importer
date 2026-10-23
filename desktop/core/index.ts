@@ -40,7 +40,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;}
+interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -141,7 +141,7 @@ function contradicts(a:Metadata,b:Metadata):boolean {
   return (left[2]??'').slice(0,precision)!==(right[2]??'').slice(0,precision);
 }
 /** What an import found already in the backup outside the folders the rules now choose: files (skipped there), and families copied whole because only some members were found. */
-export interface Elsewhere {files:number;partialFamilies:number;}
+export interface Elsewhere {files:number;partialFamilies:number;/** Same-size groups not searched because they held too many candidates to read. */skipped:{size:number;candidates:number}[];}
 /** A source file left out of a plan because of `error`; nothing was written for it. */
 export interface PlanFailure {path:string;error:Error;}
 /** Live Photos: pairs each .mov with the same-stem still (HEIC/HEIF/JPG) whose ContentIdentifier agrees, or, when
@@ -555,55 +555,98 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Only imports look: never a backup or drive copy, an organization or its read-only check.
   const lookup=!options.backup&&!options.drive&&!options.reorganize&&!options.misplacedOnly;
   const APP_NAMES=[...APP_FOLDERS,'Photo Importer Data'];
-  async function sizesOf(destination:Root&{videos?:Root}):Promise<Map<number,string[]>> {
-    const sizes=new Map<number,string[]>();
+  /** The library's files by size (this session's listing is reused). `listed` counts files found while listing. */
+  async function sizesOf(destination:Root&{videos?:Root},listed:(found:number,file:string)=>void):Promise<Map<number,string[]>> {
+    const sizes=new Map<number,string[]>();let before=0;
     for(const part of [destination,...(destination.videos?[destination.videos]:[])]) {
-      const index=await destinationIndex(part.root,part.identity);
+      const index=await destinationIndex(part.root,part.identity),offset=before;
       index.listing??=(async()=>{
-        const listed=await inventory(part.root,{backup:true,excludeNames:APP_NAMES},signal);
-        return listed.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-');}).map(file=>({path:file.path,size:file.size}));
+        const found=await inventory(part.root,{backup:true,excludeNames:APP_NAMES,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
+        // Conflict copies are never proof that a file is filed: they hold what the folder rules could not place.
+        return found.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-')&&!file.relative.split(path.sep).includes('Conflicts');}).map(file=>({path:file.path,size:file.size}));
       })();
       index.listing.catch(()=>{index.listing=undefined;});
-      for(const file of await index.listing) {const bucket=sizes.get(file.size);if(bucket)bucket.push(file.path);else sizes.set(file.size,[file.path]);}
+      const files=await index.listing;before+=files.length;
+      for(const file of files) {const bucket=sizes.get(file.size);if(bucket)bucket.push(file.path);else sizes.set(file.size,[file.path]);}
     }
     return sizes;
   }
-  /** Files to copy whose SHA-256 matches a file elsewhere in this destination move into the plan holding it, skipped there. A family moves only when every member is already there. */
+  const PREFIX_BYTES=64*1024;
+  /** SHA-256 of a file's first 64 KB: only a filter in front of the full SHA-256, which stays the proof. */
+  async function prefixDigest(file:string,size:number):Promise<string> {
+    const handle=await regularHandle(file);
+    try {
+      const buffer=Buffer.alloc(Math.min(size,PREFIX_BYTES));let read=0;
+      while(read<buffer.length) {const {bytesRead}=await handle.read(buffer,read,buffer.length-read,read);if(!bytesRead)break;read+=bytesRead;}
+      return createHash('sha256').update(buffer.subarray(0,read)).digest('hex');
+    } finally { await handle.close(); }
+  }
+  /** Files to copy whose SHA-256 matches a file elsewhere in this destination move into the plan holding it, skipped there. A family moves only when every member is already there.
+   * Per size, each candidate is read at most once: its first 64 KB, then in full only if that matches a file to copy. */
   async function findElsewhere(destination:Root&{videos?:Root},transfer:TransferPlan):Promise<number> {
     const parts=[transfer,...(transfer.videos?[transfer.videos]:[])];
     const pending=parts.flatMap(part=>part.entries.filter(entry=>!entry.skip&&entry.size>0));
     if(!pending.length) return 0;
     if(options.lookElsewhere&&!await options.lookElsewhere(parts.map(part=>part.rootIdentity))) return 0;
-    let looked=0;lookingUp=true;
-    const locating=(file:string)=>onProgress?.(looked,file,{step:'locating',total:pending.length,bytes:readToLocate,totalBytes:0});
+    const limits={candidates:options.elsewhereLimits?.candidates??2000,bytes:options.elsewhereLimits?.bytes??20e9};
+    let looked=0;lookingUp=true;readToLocate=0;
+    const locating=(file:string,count=looked,total=pending.length)=>onProgress?.(count,file,{step:'locating',total,bytes:readToLocate,totalBytes:0});
     const found=new Map<string,{path:string;part:TransferPlan;digest:string}>();
     try {
-      locating('');
-      const sizes=await sizesOf(destination),indexes=new Map<TransferPlan,DestinationIndex>();
+      locating('',0,0);
+      const sizes=await sizesOf(destination,(count,file)=>locating(file,count,0)),indexes=new Map<TransferPlan,DestinationIndex>();
       for(const part of parts) indexes.set(part,await destinationIndex(part.root,part.rootIdentity));
-      await pool(pending,STREAM_CONCURRENCY,async entry=>{
+      locating('');
+      const prefixes=new Map<string,Promise<string|undefined>>(),fulls=new Map<string,Promise<string|undefined>>();
+      const quiet=async<T>(work:()=>Promise<T>):Promise<T|undefined>=>{try { return await work(); } catch(error) { if(isAbort(error)) throw error; return undefined; }};
+      // Each candidate's prefix and full digest are computed once and shared by every file of that size.
+      const prefixOf=(file:string,size:number)=>{let value=prefixes.get(file);if(!value){value=quiet(()=>prefixDigest(file,size));prefixes.set(file,value);}return value;};
+      const fullOf=(file:string,part:TransferPlan)=>{let value=fulls.get(file);if(!value){value=quiet(()=>indexes.get(part)!.hinted.digestOf(file,signal));fulls.set(file,value);}return value;};
+      const buckets=new Map<number,PlanEntry[]>();
+      for(const entry of pending) {const bucket=buckets.get(entry.size);if(bucket)bucket.push(entry);else buckets.set(entry.size,[entry]);}
+      for(const [size,entries] of buckets) {
         checkAbort(signal);
+        const candidates=sizes.get(size)?.filter(file=>!entries.some(entry=>pathKey(file)===pathKey(entry.source)))??[];
+        const done=(count:number)=>{if(!signal?.aborted){looked+=count;locating(path.relative(sourceRoot,entries[0]!.source));}};
+        if(!candidates.length) {done(entries.length);continue;}
+        if(candidates.length>limits.candidates||candidates.length*size>limits.bytes) {elsewhereSkipped.push({size,candidates:candidates.length});done(entries.length);continue;}
         try {
-          const wanted=pathKey(entry.destination),name=path.basename(entry.destination).toLowerCase();
-          const same=(sizes.get(entry.size)??[]).filter(file=>pathKey(file)!==wanted&&pathKey(file)!==pathKey(entry.source));
-          // The same name first, then every other file of that size.
-          const candidates=[...same.filter(file=>path.basename(file).toLowerCase()===name),...same.filter(file=>path.basename(file).toLowerCase()!==name)];
-          if(candidates.length) {
-            const sha256=await resolve(entry);
-            for(const candidate of candidates) {
-              try {
-                const part=parts.find(item=>beneath(candidate,item.root));
-                if(!part) continue;
-                await contained(candidate,part.root);
-                const stat=await fs.lstat(candidate,{bigint:true});
-                if(!stat.isFile()||stat.size!==BigInt(entry.size)) continue;
-                if(await indexes.get(part)!.hinted.digestOf(candidate,signal)===sha256) {found.set(entry.id,{path:candidate,part,digest:sha256});break;}
-              } catch(error) { if(isAbort(error)) throw error; /* A candidate that cannot be read proves nothing. */ }
-            }
-          }
-        } catch(error) { if(isAbort(error)) throw error; /* The copy checks this file again and reports it where it always has. */ }
-        finally { if(!signal?.aborted) {looked++;locating(path.relative(sourceRoot,entry.source));} }
-      });
+          const partOf=(file:string)=>parts.find(item=>beneath(file,item.root));
+          const candidatePrefix=new Map<string,string>();
+          await pool(candidates,STREAM_CONCURRENCY,async file=>{const value=await prefixOf(file,size);if(value!==undefined)candidatePrefix.set(file,value);});
+          const entryPrefix=new Map<string,string>();
+          await pool(entries,STREAM_CONCURRENCY,async entry=>{
+            await quiet(async()=>{await contained(entry.source,sourceRoot);entryPrefix.set(entry.id,await prefixDigest(entry.source,size));});
+          });
+          const wanted=new Set(entryPrefix.values()),matching=[...candidatePrefix].filter(([,value])=>wanted.has(value)).map(([file])=>file);
+          // Full digests of only those candidates whose first 64 KB matches a file to copy: digest -> paths.
+          const byDigest=new Map<string,string[]>();
+          await pool(matching,STREAM_CONCURRENCY,async file=>{
+            const part=partOf(file);if(!part)return;
+            const value=await fullOf(file,part);if(value===undefined)return;
+            const bucket=byDigest.get(value);if(bucket)bucket.push(file);else byDigest.set(value,[file]);
+          });
+          await pool(entries,STREAM_CONCURRENCY,async entry=>{
+            checkAbort(signal);
+            try {
+              const mine=entryPrefix.get(entry.id);
+              if(mine===undefined||!matching.some(file=>candidatePrefix.get(file)===mine)) return;
+              const sha256=await resolve(entry),name=path.basename(entry.destination).toLowerCase();
+              const paths=[...(byDigest.get(sha256)??[])].sort((x,y)=>Number(path.basename(y).toLowerCase()===name)-Number(path.basename(x).toLowerCase()===name));
+              for(const candidate of paths) {
+                try {
+                  const part=partOf(candidate);
+                  if(!part) continue;
+                  await contained(candidate,part.root);
+                  const stat=await fs.lstat(candidate,{bigint:true});
+                  if(!stat.isFile()||stat.size!==BigInt(entry.size)) continue;
+                  found.set(entry.id,{path:candidate,part,digest:sha256});break;
+                } catch(error) { if(isAbort(error)) throw error; }
+              }
+            } catch(error) { if(isAbort(error)) throw error; /* The copy checks this file again and reports it where it always has. */ }
+          });
+        } finally { done(entries.length); }
+      }
     } finally { lookingUp=false; }
     const families=new Map<string,{entry:PlanEntry;part:TransferPlan}[]>();
     for(const part of parts) for(const entry of part.entries) {const members=families.get(entry.family)??[];members.push({entry,part});families.set(entry.family,members);}
@@ -621,15 +664,17 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       }
     }
     for(const part of parts) part.entries=[...part.entries.filter(entry=>!moved.has(entry.id)),...(arrived.get(part)??[])];
+    // A file that stays keeps the checksum this lookup computed, so the plan never reads it twice.
+    for(const part of parts) for(const entry of part.entries) if(!entry.digest) {const known=resolved.get(entry.source);if(known)entry.digest=known;}
     elsewhereFiles+=moved.size;
     return partial;
   }
-  let elsewhereFiles=0,partialFamilies=0;
+  let elsewhereFiles=0,partialFamilies=0,elsewhereSkipped:{size:number;candidates:number}[]=[];
   let plans:TransferPlan[]=[];comparing('');
   // A family that fails on a later destination was already reserved on earlier ones, where it could
   // send another family to a conflict folder; those destinations are planned again without it.
   for(let known=-1;known!==failures.size;) {
-    known=failures.size;plans=[];elsewhereFiles=0;partialFamilies=0;
+    known=failures.size;plans=[];elsewhereFiles=0;partialFamilies=0;elsewhereSkipped=[];
     for(const destination of destinations){
       const transfer=await rootPlan(destination,'photos');
       if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
@@ -644,7 +689,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Problem files collected only if their move is in the plan; a family dropped by a failure stays in place.
   const planned=new Set(plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])]).flatMap(item=>item.entries.map(entry=>entry.source)));
   for(const item of problems) item.collected=item.collected&&planned.has(item.path);
-  return {inventory:scan,plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies}}:{})};
+  return {inventory:scan,plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies,skipped:elsewhereSkipped}}:{})};
 }
 
 // Destination checks, publication and staging-link cleanup share this lock:

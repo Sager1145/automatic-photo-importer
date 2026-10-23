@@ -134,7 +134,11 @@ test('the lookup reports a counter that moves to the number of files looked up',
  const events:{count:number;total:number}[]=[];
  const onProgress:PlanProgress=(count,_file,detail)=>{if(detail?.step==='locating')events.push({count,total:detail.total});};
  await plan(f.source,[f.root],options,metadata,undefined,onProgress);
- assert.ok(events.length>=3);assert.ok(events.every(event=>event.total===3));
- assert.deepEqual(events.map(event=>event.count),[...events.map(event=>event.count)].sort((a,b)=>a-b));
- assert.equal(events.at(-1)!.count,3);
+ // First the files found while listing the library (no total yet), then N of M.
+ const counted=events.filter(event=>event.total>0),listing=events.filter(event=>event.total===0);
+ assert.ok(listing.length>0&&events.indexOf(listing.at(-1)!)<events.indexOf(counted[0]!),'listing is reported before the count');
+ assert.ok(listing.some(event=>event.count>0),'the files found so far are reported');
+ assert.ok(counted.length>=2);assert.ok(counted.every(event=>event.total===3));
+ assert.deepEqual(counted.map(event=>event.count),[...counted.map(event=>event.count)].sort((a,b)=>a-b));
+ assert.equal(counted[0]!.count,0);assert.equal(counted.at(-1)!.count,3);
 });

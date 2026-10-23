@@ -263,3 +263,13 @@ test('the recovery listing reports its share as it reads',async t=>{
  assert.ok(updates.length>=2&&updates.every(update=>update.share>=0&&update.share<=1));
  assert.ok(updates.at(-1)!.looked>=1);
 });
+
+test('looking for files already in the backup first counts the files listed (no total), then files of the total',()=>{
+ const t=createTranslator('en'),format=(value:number)=>String(value);
+ const listing:Progress={...base,phase:'planning',step:'locating',completed:1200,total:0,totalBytes:0};
+ assert.match(progressCount(listing,t,format,false,value=>`${value} B`),/1200 files found/);
+ assert.equal(progressFraction(listing),0);
+ const counting:Progress={...listing,completed:300,total:1200};
+ assert.match(progressCount(counting,t,format,false,value=>`${value} B`),/Looking for files already in the backup: 300 of 1200/);
+ assert.equal(progressFraction(counting),.25);
+});
