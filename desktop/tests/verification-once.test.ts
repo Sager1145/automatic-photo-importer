@@ -60,8 +60,9 @@ test('an organization copy reads its source once and its destination not at all 
  assert.deepEqual(await fs.readFile(destination),data);
 });
 
-// Between the check and setting the original aside, a copy rewritten in place (same size, so only a read can tell)
-// is read again, found different, and the original stays where it is. Its first check was the linked stage's proof.
+// Between the check and setting the original aside, a copy rewritten in place with its size and modified time kept
+// (only the change time tells, and only a read proves it) is read again, found different, and the original stays where
+// it is. Its first check was the linked stage's proof.
 test('a destination changed after its check is read again and the original is kept',async t=>{
  const root=await folder(t,'verify-once-changed-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
  await photo(original,data);
@@ -69,7 +70,7 @@ test('a destination changed after its check is read again and the original is ke
  const destination=transfer!.entries[0]!.destination,mkdir=fs.mkdir.bind(fs);let changed=false;
  // The slot for the original is made after the check and before the original is set aside.
  t.mock.method(fs,'mkdir',async(...args:Parameters<typeof fs.mkdir>)=>{
-  if(!changed&&String(args[0]).includes(`${path.sep}originals${path.sep}0${path.sep}`)){changed=true;await fs.writeFile(destination,Buffer.alloc(SIZE,6));}
+  if(!changed&&String(args[0]).includes(`${path.sep}originals${path.sep}0${path.sep}`)){changed=true;const {atime,mtime}=await fs.lstat(destination);await fs.writeFile(destination,Buffer.alloc(SIZE,6));await fs.utimes(destination,atime,mtime);}
   return mkdir(...args);
  });syncBuiltinESMExports();
  const reads=countReads(t,file=>file===destination?'destination':undefined);
