@@ -6,7 +6,7 @@ import os from 'node:os';
 import {plan} from '../core/index';
 import type {Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 // A recording that starts before midnight on 31 January; its second chapter starts in February.
 const dates:Record<string,string>={'GX010042.MP4':'2024-01-31T23:50:00Z','GX020042.MP4':'2024-02-01T00:07:00Z','GX030042.MP4':'2024-02-01T00:24:00Z','GX010043.MP4':'2024-02-01T09:00:00Z'};
 const metadata=async(file:string):Promise<Metadata>=>({camera:'HERO12 Black',date:dates[path.basename(file)],fields:{}});

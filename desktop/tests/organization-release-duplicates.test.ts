@@ -7,7 +7,7 @@ import * as core from '../core/index';
 import {normalizePreferences} from '../preferences';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 
 // A library where a stray copy of an already organized file sits in an old folder,

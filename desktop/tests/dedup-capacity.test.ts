@@ -13,7 +13,7 @@ import {I18nProvider,languages,createTranslator,formatBytes} from '../renderer/i
 import type {Metadata,PlanEntry,TransferPlan} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 
 /** Three 100-byte photos on the source; A and B are already copied to the destination. */

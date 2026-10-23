@@ -54,7 +54,7 @@ test('metadata checking reports every file as it is read, with its name and the 
   for (const folder of ['2025', '2026', '2027']) { await fs.mkdir(path.join(drive, folder)); for (const name of ['A.JPG', 'B.JPG']) await fs.writeFile(path.join(drive, folder, name), 'bytes of ' + folder + name); }
   const read = async (): Promise<Metadata> => ({ camera: 'Sony A7', date: '2026-10-03T12:00:00', fields: {} });
   const events: { count: number; file: string; bytes: number; totalBytes: number; total: number }[] = [];
-  await core.plan(drive, [path.join(drive, 'photobackup')], { backup: false, template: '{year}', unknownRules: {}, layout: 'flat', reorganize: true }, read, undefined, (count, file, detail) => { if (detail?.step === 'checking') events.push({ count, file, bytes: detail.bytes, totalBytes: detail.totalBytes, total: detail.total }); });
+  await core.plan(drive, [path.join(drive, 'photobackup')], { backup: false, template: '{year}', layout: 'flat', reorganize: true }, read, undefined, (count, file, detail) => { if (detail?.step === 'checking') events.push({ count, file, bytes: detail.bytes, totalBytes: detail.totalBytes, total: detail.total }); });
   assert.deepEqual(events.map(event => event.count), [1, 2, 3, 4, 5, 6], 'one report per file, not per batch');
   assert.ok(events.every(event => event.file !== '' && event.total === 6));
   assert.ok(events.every((event, index) => index === 0 || event.bytes > events[index - 1]!.bytes));

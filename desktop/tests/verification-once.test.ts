@@ -43,7 +43,7 @@ function simulateExfat(t:test.TestContext,drive:string){
  t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
 }
 
-const organizing={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const organizing={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const sony=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 const recovery=(file:string)=>file.includes(`${path.sep}Photo Importer Data${path.sep}Organizations${path.sep}`);
 
@@ -205,7 +205,7 @@ test('a stopped import still remembers its checksums, and the next plan does not
  const {rememberImported,rememberingVerified,loadImported}=await import('../platform/scan-memory');
  const base=await folder(t,'verify-once-stopped-'),card=path.join(base,'card'),root=path.join(base,'backup'),store=path.join(base,'store');
  const first=path.join(card,'A.bin'),second=path.join(card,'B.bin');await photo(first,Buffer.alloc(SIZE,1));await photo(second,Buffer.alloc(SIZE,2));await fs.mkdir(root);
- const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const {plans:[transfer]}=await core.plan(card,[root],options,none);
  const control=new AbortController(),verified:Record<string,{sha256:string;identity:string}>={};
  const stopped=await rememberingVerified(verified,()=>rememberImported(store,'card-volume',card,verified),()=>core.execute(transfer!,control.signal,undefined,{onFileOutcome:outcome=>{verified[outcome.source]={sha256:outcome.sha256,identity:outcome.sourceIdentity!};control.abort();}})).then(()=>false,error=>{if(error?.name!=='AbortError')throw error;return true;});
@@ -226,7 +226,7 @@ test('on exFAT the destination is still read twice per job that skips it',async 
  simulateExfat(t,drive);
  // The app's own records (Photo Importer Data: receipts, index) are not the destination file.
  const reads=countReads(t,file=>file.startsWith(drive+path.sep)&&!file.endsWith('.partial')&&!file.includes(`${path.sep}Photo Importer Data${path.sep}`)?'destination':undefined);
- const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const job=async()=>{const before=reads.files().destination??0;const {plans:[transfer]}=await core.plan(card,[drive],options,none);return {result:await core.execute(transfer!,undefined,undefined,{exclusiveCopy:true}),reads:(reads.files().destination??0)-before};};
  assert.equal((await job()).result.copied,1);
  for(const later of [false,true]){
@@ -242,7 +242,7 @@ test('delete originals reads the source of a file the import found already in th
  const {deleteOriginals,verifiedOriginals}=await import('../core/originals');
  const base=await folder(t,'verify-once-skipped-'),card=path.join(base,'card'),root=path.join(base,'backup'),source=path.join(card,'A.JPG');
  await photo(source,Buffer.alloc(SIZE,7));await fs.mkdir(root);
- const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const job=async()=>{
   const {plans:[transfer]}=await core.plan(card,[root],options,none),outcomes=new Map<string,DestinationOutcome[]>();
   const result=await core.execute(transfer!,undefined,undefined,{onFileOutcome:outcome=>{outcomes.set(outcome.source,[{...outcome,destinationSlot:0}]);}});

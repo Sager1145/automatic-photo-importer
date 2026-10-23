@@ -6,7 +6,7 @@ import path from 'node:path';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,resumeOrganization} from '../core/index';
 import {organizeByCopy} from './fixtures/records';
 configureOrganizationRecovery('edited-organization-fixture-key-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'edited-organization-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));const source=path.join(base,'library'),target=path.join(source,'photobackup');await fs.mkdir(target,{recursive:true});const put=async(relative:string,contents='original')=>{const file=path.join(source,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,contents);return file;};return{base,source,target,put};}
 const metadata=async(file:string)=>({camera:'ILCE-7M5',date:'2025-06-26T13:50:35+08:00',edited:file.endsWith('.JPG')||file.endsWith('.ARW'),fields:{}});
 

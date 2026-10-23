@@ -8,7 +8,7 @@ import type {Metadata} from '../shared';
 import {diskImage,temporary} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Camera',date:'2022-05-06T12:00:00Z',fields:{}});
 
 async function fixture(t:test.TestContext,parent?:string) {
@@ -67,7 +67,7 @@ test('a later organization and the misplaced check ignore the Problem files fold
   assert.deepEqual(later.plans[0]!.entries,[]);
   assert.deepEqual(later.problems,[]);
   assert.deepEqual(later.inventory.files.filter(file=>file.relative.startsWith('Problem files')),[]);
-  const {placed:_placed,...found}=await findMisplaced(f.library,f.library,{...options,collectProblems:true},metadata);assert.deepEqual(found,{count:0,bytes:0,files:[]});
+  const {placed:_placed,...found}=await findMisplaced(f.library,f.library,options,metadata);assert.deepEqual(found,{count:0,bytes:0,files:[]});
   // A new 0-byte file with the same relative path is merged as an identical one, never overwriting.
   await f.put('old/trip/EMPTY.CR3','');
   const again=await organize(f.library,true);

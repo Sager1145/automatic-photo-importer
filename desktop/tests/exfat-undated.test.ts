@@ -13,7 +13,7 @@ import type { Metadata } from '../shared';
 // defeat the identity cleanup relies on.
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const undated=async():Promise<Metadata>=>({camera:'Unknown',fields:{}});
 
 test('a clean import of undated videos to exFAT leaves no staging file or receipt behind',async t=>{

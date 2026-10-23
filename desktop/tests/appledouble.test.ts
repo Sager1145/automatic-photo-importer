@@ -121,7 +121,7 @@ async function card(t:test.TestContext){
   await fs.writeFile(path.join(source,'DSC_0002.JPG'),Buffer.alloc(120_000,9));
   return source;
 }
-const importOptions={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const importOptions={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 
 test('an import on exFAT leaves no ._ file beside the published files',async t=>{
   const mount=await exfat(t);

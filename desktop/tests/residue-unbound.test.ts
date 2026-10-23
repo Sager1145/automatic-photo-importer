@@ -12,7 +12,7 @@ import type {Metadata} from '../shared';
 import {openReceiptsFor,stagePathFor} from './fixtures/receipts';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00Z',fields:{}});
 
 /** A whole file at its final name (the card's bytes) beside a direct-copy receipt that does not bind it: its creation date is far from every date the receipt allows. */

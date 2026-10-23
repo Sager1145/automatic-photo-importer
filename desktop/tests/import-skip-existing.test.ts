@@ -12,7 +12,7 @@ import {stagePathFor} from './fixtures/receipts';
 import {randomUUID} from 'node:crypto';
 
 configureOrganizationRecovery('skip-existing-fixture-host-authentication-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 const bytes=(seed:number,size=5000)=>{const data=Buffer.alloc(size);for(let i=0;i<size;i++)data[i]=(i*7+seed)%251;return data;};
 async function fixture(t:test.TestContext){

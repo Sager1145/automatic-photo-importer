@@ -90,5 +90,5 @@ test('the planner refuses an unsafe edited folder with the same message the sett
   const base=await temporary(t),source=path.join(base,'card'),root=path.join(base,'backup');
   await fs.mkdir(source);await fs.mkdir(root);await fs.writeFile(path.join(source,'A.JPG'),'bytes');
   const metadata=async():Promise<Metadata>=>({camera:'Cam',date:'2024-02-03T12:00:00Z',fields:{}});
-  await assert.rejects(plan(source,[root],{backup:false,template:'{year}/{camera}',layout:'flat',unknownRules:{},editedFolder:'CON'},metadata),(error:unknown)=>error instanceof MessageError&&error.key==='error.editedFolderName');
+  await assert.rejects(plan(source,[root],{backup:false as const,template:'{year}/{camera}',layout:'flat',unknownRules:{},editedFolder:'CON'},metadata),(error:unknown)=>error instanceof MessageError&&error.key==='error.editedFolderName');
 });

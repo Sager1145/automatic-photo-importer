@@ -9,7 +9,7 @@ import {safeComponent} from '../folder-template';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 // SNAP: nothing. NOCAM: a date but no camera. SHOT: a date and a known origin (Screenshots), no camera. BROKEN: cannot be read.
 const metadata=async(file:string):Promise<Metadata>=>{
   const name=path.basename(file);
@@ -89,7 +89,7 @@ test('organization keep leaves unknown files where they are, and the misplaced c
   const f=await fixture(t);
   const snap=await f.put(f.library,'old/SNAP_1.PNG','screenshot');await f.put(f.library,'old/IMG_2.JPG','dated');
   const legacy=await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_3.JPG','no camera');
-  const options={...base,reorganize:true,noMetadata:'keep' as const};
+  const options={...base,reorganize:true as const,noMetadata:'keep' as const};
   const found=await plan(f.library,[f.library],options,metadata);
   assert.deepEqual(sources(found),['IMG_2.JPG']);
   assert.equal(found.noMetadata?.count,2);
@@ -97,7 +97,7 @@ test('organization keep leaves unknown files where they are, and the misplaced c
   assert.deepEqual(result.errors,[]);
   assert.equal(await fs.readFile(snap,'utf8'),'screenshot');assert.equal(await exists(legacy),true);
   assert.equal(await exists(path.join(f.library,'2022/202205/Cam/IMG_2.JPG')),true);
-  const again=await findMisplaced(f.library,f.library,{template:base.template,layout:base.layout,unknownRules:{},noMetadata:'keep'},metadata);
+  const again=await findMisplaced(f.library,f.library,{template:base.template,layout:base.layout,noMetadata:'keep'},metadata);
   assert.equal(again.count,0);
 });
 
@@ -105,7 +105,7 @@ test('organization folder moves unknown files under the named folder, removes em
   const f=await fixture(t);
   await f.put(f.library,'old/trip/SNAP_1.PNG','screenshot');await f.put(f.library,'old/IMG_2.JPG','dated');
   await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_3.JPG','no camera');
-  const options={...base,reorganize:true,noMetadata:'folder' as const,noMetadataFolder:'Not dated'};
+  const options={...base,reorganize:true as const,noMetadata:'folder' as const,noMetadataFolder:'Not dated'};
   const found=await plan(f.library,[f.library],options,metadata);
   assert.equal(found.noMetadata?.folder,'Not dated');
   const result=await executeReorganization(found.plans[0]!,undefined,undefined);
@@ -113,7 +113,7 @@ test('organization folder moves unknown files under the named folder, removes em
   assert.equal(await fs.readFile(path.join(f.library,'Not dated/old/trip/SNAP_1.PNG'),'utf8'),'screenshot');
   assert.equal(await fs.readFile(path.join(f.library,'Not dated/2021/202103/NOCAM_3.JPG'),'utf8'),'no camera');
   assert.equal(await exists(path.join(f.library,'2021/202103/Unknown Camera')),false,'the emptied legacy folder is removed');
-  const again=await findMisplaced(f.library,f.library,{template:base.template,layout:base.layout,unknownRules:{},noMetadata:'folder',noMetadataFolder:'Not dated'},metadata);
+  const again=await findMisplaced(f.library,f.library,{template:base.template,layout:base.layout,noMetadata:'folder',noMetadataFolder:'Not dated'},metadata);
   assert.equal(again.count,0);
   assert.deepEqual(sources(await plan(f.library,[f.library],options,metadata)),[]);
 });

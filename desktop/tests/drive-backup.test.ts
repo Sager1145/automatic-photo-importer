@@ -8,7 +8,7 @@ import {driveIdentity} from '../platform/volumes';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-const base={backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}};
+const base={backup:true as const,template:'{year}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>{throw new Error('Backup must not read metadata');};
 async function fixture(t:test.TestContext){
  const folder=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-drive-backup-')));
@@ -71,6 +71,20 @@ test('mirror review lists extra and changed files, then moves them to a dated ho
  assert.ok(held.every(file=>file.split(path.sep)[1]==='Card'));
  assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('gone.JPG'))!),'utf8'),'gone bytes');
  assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('changed.txt'))!),'utf8'),'version 1');
+});
+
+test('a mirror plan read back from JSON sets nothing aside: only the reviewed plan in memory may',async t=>{
+ const {source,root,put}=await fixture(t);
+ const gone=await put('gone.txt','reviewed');
+ await execute(await backup(source,root,{name:'Card',identity:'card',mirror:true}));
+ await fs.rm(gone);
+ const review=await backup(source,root,{name:'Card',identity:'card',mirror:true});
+ assert.equal(review.removals?.length,1);
+ await assert.rejects(execute(JSON.parse(JSON.stringify(review))),/reviewed backup plan/);
+ assert.equal(await fs.readFile(path.join(root,'Drive backups/Card/gone.txt'),'utf8'),'reviewed');
+ // An additive backup plan carries no such authority and runs from its serialized form.
+ const additive=await backup(source,root,{name:'Card',identity:'card',mirror:false});
+ assert.deepEqual((await execute(JSON.parse(JSON.stringify(additive)))).errors,[]);
 });
 
 test('mirror refuses to move a destination file that changed after review',async t=>{

@@ -26,7 +26,7 @@ test('two destinations: the verifying counter starts at 0 and never decreases',a
  const base=await temporary(t),source=path.join(base,'s'),a=path.join(base,'a'),b=path.join(base,'b');
  for(const folder of [source,a,b])await fs.mkdir(folder);
  for(let i=0;i<6;i++)await fs.writeFile(path.join(source,`f${i}.bin`),Buffer.alloc(256*1024,i+1));
- const {plans}=await plan(source,[a,b],{backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
+ const {plans}=await plan(source,[a,b],{backup:true,unknownRules:{}},async()=>({fields:{}}));
  const seen:Progress[]=[];
  await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async()=>{},settled:()=>{},progress:(_index,value)=>seen.push({...value})});
  checkVerifying(seen,12);
@@ -37,13 +37,13 @@ test('video-root: the photo and video plans of one destination do not reset the 
  for(const folder of [source,photos,videos])await fs.mkdir(folder);
  for(let i=0;i<4;i++)await fs.writeFile(path.join(source,`P${i}.JPG`),Buffer.alloc(128*1024,i+1));
  for(let i=0;i<3;i++)await fs.writeFile(path.join(source,`V${i}.MOV`),Buffer.alloc(256*1024,i+9));
- const {plans}=await plan(source,[photos],{backup:false,template:'{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{}},async()=>({camera:'Cam',fields:{}}));
+ const {plans}=await plan(source,[photos],{backup:false as const,template:'{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{}},async()=>({camera:'Cam',fields:{}}));
  const seen:Progress[]=[];
  await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async()=>{},settled:()=>{},progress:(_index,value)=>seen.push({...value})});
  checkVerifying(seen,7);
 });
 
-const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:true as const,unknownRules:{}};
 const metadata=async()=>({fields:{}});
 async function run(source:string,root:string){
  const {plans}=await plan(source,[root],options,metadata),seen:Progress[]=[];

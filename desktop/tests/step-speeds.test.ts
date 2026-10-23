@@ -112,13 +112,13 @@ test('real transfers report bytes while copying and rename steps report files, n
  for(const name of ['C.JPG','D.JPG'])await fs.writeFile(path.join(library,'incoming',name),'original '+name);
  const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
  const events:Progress[]=[];
- const {plans}=await core.plan(source,[destination],{backup:false,template:'{camera}',layout:'flat',unknownRules:{}},metadata);
+ const {plans}=await core.plan(source,[destination],{backup:false as const,template:'{camera}',layout:'flat',unknownRules:{}},metadata);
  await core.executeMany(plans,undefined,(_index,progress)=>events.push(progress));
  const copying=events.filter(event=>event.phase==='copying'&&event.bytes>0);
  assert.ok(copying.length>0&&copying.every(event=>event.speed>0),'copying events carry bytes and speed');
  assert.ok(events.some(event=>event.phase==='verifying'&&event.totalBytes>0&&event.bytes>0),'verifying events carry the bytes being re-read');
  const moves:Progress[]=[];
- const {plans:[organize]}=await core.plan(library,[library],{backup:false,template:'{year}/{camera}',layout:'format',unknownRules:{},reorganize:true},metadata);
+ const {plans:[organize]}=await core.plan(library,[library],{backup:false,template:'{year}/{camera}',layout:'format',reorganize:true},metadata);
  await core.executeReorganization(organize!,undefined,progress=>moves.push(progress));
  const steps=moves.filter(event=>event.step==='confirming'||event.step==='moving');
  assert.ok(steps.some(event=>event.step==='confirming')&&steps.some(event=>event.step==='moving'));

@@ -10,7 +10,7 @@ import {sameHardLink,sameFile,movedFileIdentity} from '../core/recovery';
 import {journalFileFor,journalFolderFor,journalLines,organizeByCopy} from './fixtures/records';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 async function fixture(t:test.TestContext,count=1){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-rename-')));

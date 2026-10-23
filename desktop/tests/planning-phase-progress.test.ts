@@ -9,7 +9,7 @@ import type {PlanProgress} from '../core/index';
 
 // "Everything must update": the phases of planning that used to report nothing now count their own work.
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const base={backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}};
+const base={backup:true as const,template:'{year}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>{throw new Error('Backup must not read metadata');};
 type Call={count:number;file:string;detail?:Parameters<PlanProgress>[2]};
 async function fixture(t:test.TestContext,count=12){

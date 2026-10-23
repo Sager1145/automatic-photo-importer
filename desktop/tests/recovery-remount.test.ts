@@ -8,7 +8,7 @@ import {journalLines,organizeAs,resealJournalLine} from './fixtures/records';
 
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 
 /** What a journal looks like after the drive is mounted again: macOS gives the volume a new

@@ -9,7 +9,7 @@ import {diskImage,executeAll,put,run,temporary} from './fixtures/edge';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
 const darwin={skip:process.platform!=='darwin'};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00',fields:{}});
 
@@ -37,7 +37,7 @@ async function card(source:string){
 }
 /** The checks the app runs after a job, on the destination. */
 async function checks(destination:string,temporaryFolder:string){
- await findMisplaced(destination,destination,{template:options.template,layout:options.layout,unknownRules:{}},metadata);
+ await findMisplaced(destination,destination,{template:options.template,layout:options.layout},metadata);
  await findResidue([destination],{temporary:temporaryFolder});
 }
 

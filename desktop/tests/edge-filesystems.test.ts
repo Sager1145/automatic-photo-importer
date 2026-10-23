@@ -7,7 +7,7 @@ import type {Metadata} from '../shared';
 import {assertCopied,diskImage,executeAll,fileSha,leftovers,put,run,temporary,tree} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
 const darwin={skip:process.platform!=='darwin'};
 
 test('capture dates exFAT or APFS cannot store keep the source dates instead of failing the copy',darwin,async t=>{

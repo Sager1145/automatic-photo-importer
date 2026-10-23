@@ -7,7 +7,7 @@ import { plan, execute, executeReorganization, configureOrganizationRecovery } f
 import type { Metadata } from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Camera',date:'2022-05-06T12:00:00Z',fields:{}});
 
 async function fixture(t:test.TestContext,reorganize=false) {

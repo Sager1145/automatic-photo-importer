@@ -6,7 +6,7 @@ import os from 'node:os';
 import {inventory,plan} from '../core/index';
 import type {InventoryFile,Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const camera=async():Promise<Metadata>=>({camera:'Cam',date:'2024-03-04T10:00:00Z',fields:{}});
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'whitelist-')));

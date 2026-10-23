@@ -7,7 +7,7 @@ import {plan} from '../core/index';
 import {allocateDestinations,destinationEntries,fillFirst} from '../core/allocation';
 import type {Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 
 test('fill-first names each file only against the files that land on its own disk',async t=>{

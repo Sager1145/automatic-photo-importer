@@ -62,7 +62,7 @@ test('a file rewritten in place after the scan makes planning list the card agai
  const scan=await inventory(source,{});
  await fs.writeFile(photo,'a longer rewritten photo');
  const {plan}=await import('../core');
- const {plans:[transfer]}=await plan(source,[root],{backup:false,template:'{year}',layout:'flat' as const,unknownRules:{},reuse:scan},async()=>({fields:{}}));
+ const {plans:[transfer]}=await plan(source,[root],{backup:false as const,template:'{year}',layout:'flat' as const,unknownRules:{},reuse:scan},async()=>({fields:{}}));
  assert.equal(transfer!.entries[0]!.size,Buffer.byteLength('a longer rewritten photo'));
 });
 

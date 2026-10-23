@@ -8,7 +8,7 @@ import {formatFolder} from '../media-formats';
 import type {MediaLayout,Metadata,PlanEntry,TransferPlan} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z6III',date:'2026-10-03T12:00:00',fields:{}});
 const card=['DSC_0001.NEF','DSC_0001.JPG','DSC_0001.xmp','DSC_0001.dop','NKSC_PARAM/DSC_0001.NEF.nksc','IMG_0002.HEIC','IMG_0002.AAE','SCAN_0003.tif','C0004.MP4','C0004M01.XML','DJI_0005.MP4','DJI_0005.LRF','DJI_0005.WAV','DJI_0006.LRF'];
 

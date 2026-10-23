@@ -9,7 +9,7 @@ import {journalFolderFor,journalFileFor,editJournalLine,organizeByCopy} from './
 
 async function singlePlan(source:string,root:string,...args:Parameters<typeof core.plan> extends [string,string[],...infer Rest]?Rest:never){return (await core.plan(source,[root],...args)).plans[0]!;}
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 async function fixture(t:test.TestContext) {
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'organization-recovery-')));

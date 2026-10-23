@@ -11,7 +11,7 @@ import {stagingFor} from './fixtures/receipts';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>({fields:{}});
 async function fixture(t:test.TestContext,destinations=1){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'transfer-speed-')));

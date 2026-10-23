@@ -30,7 +30,7 @@ test('month names are English with the month number first, whatever the app lang
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const source=path.join(root,'card'),backup=path.join(root,'backup');
  await fs.mkdir(source);await fs.mkdir(backup);await fs.writeFile(path.join(source,'DSC_0001.NEF'),'raw');
- const at=async(template:string)=>path.relative(backup,(await plan(source,[backup],{backup:false,template,layout:'flat',unknownRules:{}},async()=>({camera:'Nikon Z6III',date:'2026-10-24T09:00:00',fields:{}}))).plans[0]!.entries[0]!.destination);
+ const at=async(template:string)=>path.relative(backup,(await plan(source,[backup],{backup:false as const,template,layout:'flat',unknownRules:{}},async()=>({camera:'Nikon Z6III',date:'2026-10-24T09:00:00',fields:{}}))).plans[0]!.entries[0]!.destination);
  assert.equal(await at('{year}/{monthName}/{camera}'),'2026/10 October/Nikon Z6III/DSC_0001.NEF');
  assert.equal(await at('{camera}/{year}/{yearMonthName}/{day}'),'Nikon Z6III/2026/2026-10 October/24/DSC_0001.NEF');
 });

@@ -11,7 +11,7 @@ async function drive(t:test.TestContext){
  const put=async(relative:string)=>{const file=path.join(base,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,relative);return file;};
  return {base,root:path.join(base,'photobackup'),put};
 }
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async()=>({camera:'Camera',date:'2024-02-03T12:00:00',fields:{}});
 
 test('choosing the whole backup drive as a source leaves the backup folder out automatically',async t=>{

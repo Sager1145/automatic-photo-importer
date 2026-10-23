@@ -95,7 +95,7 @@ test('stage 1 hashes only candidates during planning and records bursts, pairs a
     'LONELY.JPG': exif({ date: '2024-05-06T07:11:00.50', shutterCount: '9' }),
   };
   const steps: string[] = [];
-  const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table), undefined, (_count, _file, detail) => { if (detail?.step === 'candidates') steps.push(detail.step); });
+  const planned = await plan(source, [root], { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table), undefined, (_count, _file, detail) => { if (detail?.step === 'candidates') steps.push(detail.step); });
   const found = planned.duplicates!;
   assert.deepEqual(found.files.filter(item => item.sha256).map(item => path.basename(item.path)).sort(), ['A_0001.JPG', 'B_9999.JPG'], 'only the candidates were hashed');
   assert.ok(steps.length > 0, 'progress names the candidates step');
@@ -177,7 +177,7 @@ test('recordPlanDuplicates keeps what planning found per library and never delet
   const bytes = 'same bytes';
   await write(source, 'A.JPG', bytes); await write(source, 'B.JPG', bytes);
   const table = { 'A.JPG': exif(), 'B.JPG': exif() };
-  const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table));
+  const planned = await plan(source, [root], { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table));
   const entries = planned.plans[0]!.entries;
   await write(root, '2024/202405/Nikon Z f/A.JPG', bytes); await write(root, '2024/202405/Nikon Z f/B.JPG', bytes);
   const placed = async (from: string) => { const destination = entries.find(entry => entry.source === from)!.destination; return [from, { destination, identity: statKey(await fs.lstat(destination, { bigint: true })) }] as const; };
@@ -201,7 +201,7 @@ test('stage 1 runs for imports only, and reuses a hash remembered for the source
   await fs.mkdir(root);
   await write(source, 'DCIM/A_0001.JPG', 'one'); await write(source, 'DCIM/B_9999.JPG', 'two');
   const table = { 'A_0001.JPG': exif(), 'B_9999.JPG': exif() };
-  const options = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {}, duplicates: true };
+  const options = { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {}, duplicates: true };
   // Remembered hashes are used as they are (the files differ, the memory says they do not): nothing was read again.
   const asked: string[] = [];
   const imported = await plan(source, [root], { ...options, sourceDigest: file => { asked.push(path.basename(file)); return 'a'.repeat(64); } }, reader(table));
@@ -277,7 +277,7 @@ test('two copies of one Live Photo: the stills are hashed at import time, their 
   for (const folder of ['100APPLE', '101APPLE']) { await write(source, `DCIM/${folder}/IMG_0001.HEIC`, 'live still bytes'); await write(source, `DCIM/${folder}/IMG_0001.MOV`, 'live movie bytes'); }
   const live = exif({ camera: 'Apple iPhone 15', date: '2024-05-06T07:10:00.50' });
   const apple = async (target: string): Promise<Metadata> => ({ camera: 'Apple iPhone 15', make: 'Apple', date: live.date, contentId: 'LIVE-1', fields: {}, fingerprint: live });
-  const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
+  const planned = await plan(source, [root], { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
   const files = planned.duplicates!.files;
   assert.deepEqual(files.map(item => path.relative(source, item.path)).sort(), ['DCIM/100APPLE/IMG_0001.HEIC', 'DCIM/101APPLE/IMG_0001.HEIC']);
   assert.ok(files.every(item => item.sha256 === files[0]!.sha256 && item.sha256), 'both stills were hashed as candidates');
@@ -363,7 +363,7 @@ test('planning and the scan take the same members: no empty file, no companion (
   await fs.mkdir(root);
   await write(source, 'IMG_1.HEIC', 'still'); await write(source, 'IMG_1.MOV', 'clip bytes'); await write(source, 'EMPTY.JPG', ''); await write(source, 'A.JPG', 'photo'); await write(source, 'notes.txt', 'text');
   const apple = async (target: string): Promise<Metadata> => ({ camera: 'iPhone 15', make: 'Apple', date: '2024-05-06T07:08:09Z', fields: {}, fingerprint: exif({ camera: 'iPhone 15', shutterCount: path.basename(target) }) });
-  const planned = await plan(source, [root], { backup: false, template: '{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
+  const planned = await plan(source, [root], { backup: false as const, template: '{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
   assert.deepEqual(planned.duplicates!.files.map(item => path.basename(item.path)).sort(), ['A.JPG', 'IMG_1.HEIC']);
   // The same library scanned: the empty file and the text file are not members either.
   await write(root, 'EMPTY.JPG', ''); await write(root, 'A.JPG', 'photo'); await write(root, 'notes.txt', 'text');
@@ -376,7 +376,7 @@ test('the library\'s app data folder is left out of the look for files filed els
   await write(source, 'A.JPG', 'photo bytes');
   // The same bytes only inside the app's own data folder of the library: not a copy filed elsewhere.
   await write(root, 'Photo Importer Data/kept/A.JPG', 'photo bytes');
-  const planned = await plan(source, [root], { backup: false, template: '{camera}', layout: 'flat', unknownRules: {}, lookElsewhere: () => true }, reader({}));
+  const planned = await plan(source, [root], { backup: false as const, template: '{camera}', layout: 'flat', unknownRules: {}, lookElsewhere: () => true }, reader({}));
   assert.equal(planned.plans[0]!.entries[0]!.routed, undefined);
   assert.equal(planned.plans[0]!.entries[0]!.skip, false);
 });

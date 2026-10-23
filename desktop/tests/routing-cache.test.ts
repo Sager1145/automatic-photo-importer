@@ -60,7 +60,7 @@ test('an organization that moves files tells the observer where each went, with 
  const names=['A.JPG','B.JPG','C.JPG'];
  for(const name of names)await fs.writeFile(path.join(card,name),'bytes of '+name);
  const stub=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
- const plan=(await core.plan(drive,[photos],{backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{},layout:'flat',reorganize:true,sourceFolders:['2025']},stub)).plans[0]!;
+ const plan=(await core.plan(drive,[photos],{backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat',reorganize:true,sourceFolders:['2025']},stub)).plans[0]!;
  const before=new Map<string,string>();
  for(const name of names){const stat=await fs.lstat(path.join(card,name),{bigint:true});before.set(path.join(card,name),JSON.stringify(identity(stat)));}
  const calls:{from:string;reviewed:string;to:string;now:string}[]=[];

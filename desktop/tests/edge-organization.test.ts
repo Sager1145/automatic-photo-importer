@@ -27,7 +27,7 @@ async function snapshot(drive:string){
  for(const [relative,digest] of await tree(drive))result.set(relative,`${digest} ${(await fs.stat(path.join(drive,relative))).mtime.toISOString()}`);
  return result;
 }
-const settings=(layout:MediaLayout,photos:string,videos:string)=>({backup:false,reorganize:true,template:'{year}/{yyyymm}/{camera}',layout,unknownRules:{},...(layout==='video-root'?{videoRoots:[videos],sourceFolders:['photobackup','videobackup']}:{})});
+const settings=(layout:MediaLayout,photos:string,videos:string)=>({backup:false as const,reorganize:true as const,template:'{year}/{yyyymm}/{camera}',layout,unknownRules:{},...(layout==='video-root'?{videoRoots:[videos],sourceFolders:['photobackup','videobackup']}:{})});
 async function organize(drive:string,photos:string,videos:string,layout:MediaLayout,strategy:'rename'|'copy',signal?:AbortSignal,onProgress?:()=>void){
  const source=layout==='video-root'?drive:photos;
  const {plans:[transfer]}=await core.plan(source,[photos],settings(layout,photos,videos),metadata);

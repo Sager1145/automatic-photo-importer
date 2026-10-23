@@ -8,7 +8,7 @@ import os from 'node:os';
 import {plan} from '../core';
 import type {Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 const SIZE=200_000;
 /** An uncompressed-RAW-like file: the same first 64 KB for every `seed`, different afterwards. */

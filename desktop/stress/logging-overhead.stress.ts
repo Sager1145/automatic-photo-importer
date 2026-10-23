@@ -9,7 +9,7 @@ import type { Metadata } from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata = async (): Promise<Metadata> => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} });
-const options = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {} };
+const options = { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {} };
 const FILES = 2000;
 
 /** One complete import (plan, copy, verify, publish) of 2,000 small files; returns wall and CPU time in ms. */

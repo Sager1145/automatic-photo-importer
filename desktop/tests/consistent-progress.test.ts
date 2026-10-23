@@ -226,7 +226,7 @@ test('the destination label shows only with several destinations',()=>{
 
 // ---- backend: the steps after the moves ----------------------------------------------------
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 
 test('stashing the duplicates, closing the journal and releasing report their own steps with counts and files',async t=>{

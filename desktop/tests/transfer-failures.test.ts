@@ -14,7 +14,7 @@ configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>name!=='Photo Importer Data'&&!name.startsWith('photo-importer-index'));
 
 
-const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:true as const,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'transfer-failures-')));
  t.after(()=>fs.rm(base,{recursive:true,force:true}));
@@ -153,7 +153,7 @@ test('new nested destination bindings are synchronized through the selected root
 
 test('exclusive publication durably records intent before copying and releases it after the destination binding is synchronized',async t=>{
  const f=await fixture(t);await fs.rename(f.original,path.join(f.source,'photo.JPG'));
- const prepared=(await plan(f.source,[f.root],{...options,backup:false,template:'{year}/{yyyymm}/{camera}'},async()=>({camera:'Fixture Camera',date:'2026-07-01T12:00:00+08:00',fields:{}}))).plans[0];
+ const prepared=(await plan(f.source,[f.root],{...options,backup:false as const,template:'{year}/{yyyymm}/{camera}'},async()=>({camera:'Fixture Camera',date:'2026-07-01T12:00:00+08:00',fields:{}}))).plans[0];
  const expected=[path.join(f.root,'2026/202607/Fixture Camera'),path.join(f.root,'2026/202607'),path.join(f.root,'2026'),f.root],synced=new Set<string>();let directorySyncs=0,started=false,released=false;
  const restore=handles(t,(file,_flags,handle)=>{if(expected.includes(file)){const sync=handle.sync.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();synced.add(file);if(file===path.dirname(prepared.entries[0].destination))directorySyncs++;});}});
  const open=fs.open.bind(fs),destination=prepared.entries[0].destination;

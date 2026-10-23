@@ -14,7 +14,7 @@ async function fixture(t:test.TestContext){
  t.after(()=>fs.rm(base,{recursive:true,force:true}));
  const source=path.join(base,'source'),root=path.join(base,'destination'),original=path.join(source,'original.bin'),data=Buffer.alloc(4*1024*1024,7);
  await fs.mkdir(source);await fs.mkdir(root);await fs.writeFile(original,data);
- const {plans:[transfer]}=await plan(source,[root],{backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
+ const {plans:[transfer]}=await plan(source,[root],{backup:true,unknownRules:{}},async()=>({fields:{}}));
  return {source,root,original,data,transfer};
 }
 
