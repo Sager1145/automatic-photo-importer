@@ -64,6 +64,22 @@ export function truncateMiddle(value: string, max = 56): string {
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
 }
 /** The file a step is on, as the path relative to the source root, with its full path as the tooltip. */
+/** The kinds of step a progress bar can show; each has one color (--step-<kind> in styles.css) everywhere it is drawn. */
+export type StepKind = 'scan' | 'read' | 'compare' | 'copy' | 'verify' | 'move' | 'tidy' | 'delete';
+export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>): StepKind | undefined {
+  if (!progress) return undefined;
+  switch (progress.step) {
+    case 'listing': case 'scanning': return 'scan';
+    case 'checking': case 'reading': case 'history': case 'earlier': return 'read';
+    case 'comparing': case 'existing': case 'confirming': return 'compare';
+    case 'moving': return 'move';
+    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': return 'tidy';
+    case 'deleting': return 'delete';
+    case 'downloading': return 'copy';
+  }
+  return progress.phase === 'verifying' ? 'verify' : progress.renames ? 'move' : progress.phase === 'planning' ? 'read' : 'copy';
+}
+/** The file in progress sits on its own full-width line below the stats, so a longer name never moves them. */
 function ProgressFile({ file }: { file?: string }) {
   return file ? <span className="progress-file" data-testid="progress-file" title={file}>{truncateMiddle(file)}</span> : null;
 }
@@ -73,13 +89,13 @@ function ProgressFile({ file }: { file?: string }) {
 export interface ProgressDisplayProps {
   label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: Pick<Progress, 'speed' | 'fileRate'>;
   startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
-  heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean;
+  heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean; step?: StepKind;
 }
 export function ProgressDisplay(props: ProgressDisplayProps) {
   const { t, formatNumber } = useTranslation();
   const known = props.fraction !== undefined;
   const shown = known ? (props.finished ? 1 : Math.min(.99, Math.max(0, props.fraction!))) : 0;
-  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.testId ? { 'data-testid': props.testId } : {})}>
+  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.step ? { 'data-step': props.step } : {})} {...(props.testId ? { 'data-testid': props.testId } : {})}>
     {props.heading}
     <ProgressBar value={shown} indeterminate={!known} label={props.label} />
     <div className="progress-display-line">
@@ -87,9 +103,9 @@ export function ProgressDisplay(props: ProgressDisplayProps) {
       {known && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
       {props.speed && <ProgressSpeed progress={props.speed} />}
       <ProgressTiming startedAt={props.startedAt} endedAt={props.endedAt} left={props.left} etaTestId={props.etaTestId} />
-      <ProgressFile file={props.file} />
       {props.extra}{props.actions}
     </div>
+    <ProgressFile file={props.file} />
   </div>;
 }
 /** Time left for an operation that is not a job (a review, a check, a listing). */
@@ -100,7 +116,7 @@ function progressLeft(progress: Pick<Progress, 'eta' | 'total' | 'share'>, t: Re
 export function OperationProgress({ progress, label, testId, className }: { progress?: Progress; label: string; testId?: string; className?: string }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   if (!progress) return <ProgressDisplay label={label} testId={testId} className={className} />;
-  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t)} file={progress.file} />;
+  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t)} file={progress.file} step={stepKind(progress)} />;
 }
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
 function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
@@ -363,12 +379,12 @@ function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
   useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
 }
 
-function MiniSteps({ states, moving = false }: { states: StepState[]; moving?: boolean }) {
+function MiniSteps({ states, kinds }: { states: StepState[]; kinds: StepKind[]; }) {
   const { t } = useTranslation();
-  const names = [t("Scanning"), t(moving ? "Moving" : "Copying"), t("Verifying")];
+  const names = [t("Scanning"), t(kinds[1] === 'move' ? "Moving" : "Copying"), t("Verifying")];
   const labels: Record<StepState, string> = { pending: t("Waiting"), active: t("In progress"), done: t("Complete"), error: t("Needs attention"), paused: t("Paused"), skipped: t("Skipped") };
   const icons: Record<StepState, LucideIcon | null> = { pending: null, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
-  return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state}>{icons[state] ? <Icon icon={icons[state]!} size={9} /> : null}</i>)}</span>;
+  return <span className="mini-steps" role="img" aria-label={states.map((state, index) => `${names[index]}: ${labels[state]}`).join(', ')} title={t("Import steps")}>{states.map((state, index) => <i key={index} data-state={state} data-step={kinds[index]}>{icons[state] ? <Icon icon={icons[state]!} size={9} /> : null}</i>)}</span>;
 }
 
 export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
@@ -384,7 +400,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
       const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
       const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff), capacity = sourceCapacity(state, source);
       return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
-        <SidebarCapacity total={capacity.total ?? source.total} free={capacity.free ?? source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} moving={!!job?.progress?.renames} />} /></li>;
+        <SidebarCapacity total={capacity.total ?? source.total} free={capacity.free ?? source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} kinds={sourceStepKinds(job)} />} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
   </section>;
 }
@@ -603,7 +619,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined}
-        file={lead?.progress?.file} />
+        step={stepKind(lead?.progress)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
     </section>);
@@ -978,16 +994,21 @@ export function sourceStepStates(job: Job | undefined, inventory: Inventory | un
   const current: StepState = job.phase === 'error' ? 'error' : job.phase === 'stopped' ? 'paused' : 'active';
   return [0, 1, 2].map(index => index === 2 && verifyOff ? 'skipped' : index < stage ? 'done' : index === stage ? current : 'pending');
 }
+/** The color kind of Scanning, Copying (or Moving) and Verifying; Scanning takes the kind of the sub-step it is on (reading metadata, comparing). */
+export function sourceStepKinds(job?: Job): [StepKind, StepKind, StepKind] {
+  const lead = job?.progress && job.progress.phase !== 'copying' && job.progress.phase !== 'verifying' ? stepKind(job.progress) : undefined;
+  return [lead ?? 'scan', job?.progress?.renames ? 'move' : 'copy', 'verify'];
+}
 export function SourceSteps({ job, inventory, scanning, verifyOff }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean }) {
   const { t, formatNumber } = useTranslation();
-  const states = sourceStepStates(job, inventory, scanning, verifyOff);
+  const states = sourceStepStates(job, inventory, scanning, verifyOff), kinds = sourceStepKinds(job);
   const icons: Record<StepState, LucideIcon> = { pending: Circle, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
   const names = [t("Scanning"), t(job?.progress?.renames ? "Moving" : "Copying"), t("Verifying")];
   const fraction = job ? cardFraction(job) : undefined;
   // One style for every step: done is checked, the current one shows its percent, the rest wait.
   return <ol className="source-steps" aria-label={t("Import steps")} data-testid="source-steps">{names.map((label, index) => {
     const state = states[index]!;
-    return <li key={index} data-state={state} aria-current={state === 'active' ? 'step' : undefined} title={state === 'skipped' ? t("Verification after copy is off") : undefined}><span className="step-mark"><Icon icon={icons[state]} size={12} /></span><span>{label}</span>{state === 'active' && fraction !== undefined && <span className="step-percent">{`${formatNumber(shownPercent(fraction, false))}%`}</span>}</li>;
+    return <li key={index} data-state={state} data-step={kinds[index]} aria-current={state === 'active' ? 'step' : undefined} title={state === 'skipped' ? t("Verification after copy is off") : undefined}><span className="step-mark"><Icon icon={icons[state]} size={12} /></span><span>{label}</span>{state === 'active' && fraction !== undefined && <span className="step-percent">{`${formatNumber(shownPercent(fraction, false))}%`}</span>}</li>;
   })}</ol>;
 }
 
@@ -1225,7 +1246,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
     <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={job.phase === 'complete'} count={count}
-      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={working && progress ? progress.file : undefined} actions={actions} />
+      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
@@ -1246,7 +1267,7 @@ export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { s
   const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
   const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
   const count = reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : listing ? t("Listing files…") : undefined;
-  return <ProgressDisplay testId="scan-progress" className="progress-scan" label={t("{name} scanning", { name: sourceName })} fraction={fraction}
+  return <ProgressDisplay testId="scan-progress" className="progress-scan" step={reading ? 'read' : 'scan'} label={t("{name} scanning", { name: sourceName })} fraction={fraction}
     count={count}
     speed={reading ? { speed: 0, fileRate: cameraInfo.fileRate } : listing ? { speed: 0, fileRate: listing.fileRate } : undefined}
     startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined}
@@ -1281,7 +1302,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
     {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={job?.phase === 'complete'}
       count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
-      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined}
+      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined} step={stepKind(progress)}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
@@ -1289,7 +1310,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
-    {active && !progress && <ProgressDisplay className="progress-in-card" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
+    {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <details className="source-disclosure">
       <summary aria-label={t("Drive details")}><div className="source-compact-capacity"><CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
