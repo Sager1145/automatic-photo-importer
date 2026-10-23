@@ -213,8 +213,9 @@ async function storeRecord(folder:string,base:string,baseStat:BigIntStats):Promi
  return store;
 }
 /** Every store a reader must consult for `folder`: in `folder` itself and each folder above it on the same
- * device, that holds a plain (not linked) "Photo Importer Data" folder with a verified record. A store folder
- * whose record is missing is skipped while empty (a creation cut short); one with records is refused. */
+ * device, that holds a plain (not linked) "Photo Importer Data" folder with a verified record. A folder by that
+ * name without a record (a creation cut short, or the user's own folder) is skipped; writers refuse to adopt one
+ * that holds anything. */
 export async function storesFor(folder:string):Promise<Store[]>{
  const found:Store[]=[];let current=path.resolve(folder);
  const first=await maybeLstat(current);if(!first)return found;
@@ -224,7 +225,8 @@ export async function storesFor(folder:string):Promise<Store[]>{
   if(stat?.isDirectory()&&!stat.isSymbolicLink()&&stat.dev===here.dev){
    const store=await storeRecord(candidate,current,here);
    if(store)found.push(store);
-   else if((await fs.readdir(candidate)).some(name=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${candidate}`);
+   // Not a store (a folder of the user's own, or one whose record is missing): skipped, never read or written.
+   else if((await fs.readdir(candidate)).some(name=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name)))console.warn(`Skipped ${candidate}: it has no store record, so it is not this app's records folder`);
   }
   const parent=path.dirname(current);if(parent===current)break;current=parent;
  }

@@ -161,3 +161,13 @@ test('many callers making the same store at once share one creation',async t=>{
  assert.ok(stores.every(item=>item.path===stores[0]!.path&&item.ino===stores[0]!.ino));
  assert.deepEqual((await fs.readdir(path.join(root,'Photo Importer Data'))).sort(),['store.json']);
 });
+
+test('a folder of the user\'s own named "Photo Importer Data" (no store record) is skipped by readers, with a warning, and refused by writers',async t=>{
+ const root=await drive(t),library=path.join(root,'library');await fs.mkdir(library);
+ await fs.mkdir(path.join(root,'Photo Importer Data'));await fs.writeFile(path.join(root,'Photo Importer Data','notes.txt'),'mine');
+ const warnings:string[]=[];t.mock.method(console,'warn',(text:string)=>{warnings.push(String(text));});
+ assert.deepEqual(await store.storesFor(library),[]);
+ assert.ok(warnings.some(text=>text.includes('no store record')),warnings.join('; '));
+ await assert.rejects(store.ensureStore(root),/no store record/);
+ assert.equal(await fs.readFile(path.join(root,'Photo Importer Data','notes.txt'),'utf8'),'mine');
+});
