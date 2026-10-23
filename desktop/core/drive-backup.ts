@@ -49,13 +49,15 @@ export async function driveFolder(root:string,drive:Drive):Promise<string> {
 /** Compare the drive's folder on one destination with the planned copies.
  * `known` lets allocation reuse these hashes: true is a verified copy, false
  * is a file the reviewed mirror moves away before copying. */
-export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[],resolve:(entry:PlanEntry)=>Promise<string>,index:DestinationIndex,signal?:AbortSignal):Promise<{removals:ReviewedRemoval[];known:Map<string,boolean>}> {
+export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[],resolve:(entry:PlanEntry)=>Promise<string>,index:DestinationIndex,signal?:AbortSignal,/** Files compared so far, files found so far (the walk finds more as it goes) and the file. */onProgress?:(compared:number,found:number,file:string)=>void):Promise<{removals:ReviewedRemoval[];known:Map<string,boolean>}> {
+  let found=0,compared=0;
   const planned=new Map(pending.map(entry=>[pathKey(entry.destination),entry])),removals:ReviewedRemoval[]=[],known=new Map<string,boolean>();
   const base=path.join(root,DRIVE_BACKUPS,folder);await contained(base,root);
   async function walk(current:string):Promise<void> {
     checkAbort(signal);
     let entries;
     try { entries=await fs.readdir(current,{withFileTypes:true}); } catch(error) { if(code(error)==='ENOENT') return; throw error; }
+    found+=entries.filter(entry=>entry.isFile()&&!ignoredName(entry.name)&&!(current===base&&(entry.name===marker||entry.name===legacyMarker))).length;onProgress?.(compared,found,path.relative(base,current)||folder);
     for(const entry of entries) {
       if(ignoredName(entry.name) || (current===base && (entry.name===marker||entry.name===legacyMarker)) || entry.isSymbolicLink()) continue;
       const file=path.join(current,entry.name);await contained(file,root);
@@ -65,6 +67,7 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
       if(expected===undefined) removals.push({path:file,size:Number(before.size),reason:'missing',stat:statKey(before)});
       else if(before.size===BigInt(expected.size) && await index.digestOf(file,signal)===await resolve(expected)) known.set(key,true);
       else {known.set(key,false);removals.push({path:file,size:Number(before.size),reason:'changed',stat:statKey(before)});}
+      onProgress?.(++compared,found,entry.name);
     }
   }
   await walk(base);
