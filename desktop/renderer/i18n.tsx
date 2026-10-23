@@ -865,6 +865,7 @@ Keep all|全部保留|全部保留|すべて残す
 Will be removed|将被移除|將被移除|削除されます
 Remove duplicates from {name}?|要从 {name} 移除重复文件吗？|要從 {name} 移除重複檔案嗎？|{name} から重複ファイルを削除しますか？
 Remove {files} files?|要移除 {files} 个文件吗？|要移除 {files} 個檔案嗎？|{files} 件のファイルを削除しますか？
+{count} of these files were placed by an earlier organization; removing them ends that organization's Undo.|其中 {count} 个文件由之前的整理放置；移除它们会使该次整理无法再撤销。|其中 {count} 個檔案由先前的整理放置；移除它們會使該次整理無法再復原。|これらのうち {count} 件は以前の整理で配置されたものです。削除すると、その整理の取り消しはできなくなります。
 {files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.|{groups} 组中的 {files} 个文件将移到恢复区域，释放后可腾出 {size}。|{groups} 組中的 {files} 個檔案將移到復原區域，釋放後可騰出 {size}。|{groups} グループの {files} 件が復元用の領域に移動し、解放すると {size} が空きます。
 Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.|目前不会删除任何内容。你可以撤销，只有在释放已移除的文件后才会腾出空间。|目前不會刪除任何內容。你可以復原，只有在釋放已移除的檔案後才會騰出空間。|まだ何も削除されません。元に戻せます。削除したファイルを解放したときに初めて空き容量が増えます。
 The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.|会先检查每组保留的文件。其余 {files} 个文件（{size}）会移到恢复区域，可用“撤销”放回。|會先檢查每組保留的檔案。其餘 {files} 個檔案（{size}）會移到復原區域，可用「復原」放回。|各グループの残すファイルを先に確認します。残りの {files} 件（{size}）は復元用の領域に移動し、「元に戻す」で戻せます。

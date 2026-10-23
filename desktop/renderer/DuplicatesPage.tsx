@@ -25,9 +25,9 @@ export function LevelSelector({ level, onChange, disabled = false }: { level: Du
 }
 
 /** What removing would do with the current level and the user's choices. */
-export function removalPlan(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string>, editedFolder?: string): { resolved: ResolvedGroup[]; summary: RemovalSummary } {
+export function removalPlan(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string>, editedFolder?: string, earlier?: readonly string[]): { resolved: ResolvedGroup[]; summary: RemovalSummary } {
   const resolved = resolveGroups(groups, level, decisions, editedFolder);
-  return { resolved, summary: summarize(resolved) };
+  return { resolved, summary: summarize(resolved, earlier) };
 }
 
 const separator = (root: string) => root.includes('\\') && !root.includes('/') ? '\\' : '/';
@@ -121,16 +121,17 @@ export function GroupView({ item, number, thumbs, exifs, onDecide, disabled = fa
 }
 
 /** The two-step confirmation: the first sheet says what happens, the second asks again with the exact amount and Cancel focused. */
-export function DuplicatesConfirm({ step, summary, name, onCancel, onConfirm }: { step: 'first' | 'second'; summary: Pick<RemovalSummary, 'groups' | 'files' | 'bytes'>; name: string; onCancel: () => void; onConfirm: () => void }) {
+export function DuplicatesConfirm({ step, summary, name, onCancel, onConfirm }: { step: 'first' | 'second'; summary: Pick<RemovalSummary, 'groups' | 'files' | 'bytes'> & { earlier?: number }; name: string; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useAnimatedClose(dialog, onCancel);
   useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const values = { files: formatNumber(summary.files), groups: formatNumber(summary.groups), size: formatBytes(summary.bytes), name };
+  const earlierNote = summary.earlier ? <p className="field-error" data-testid="duplicates-earlier-warning">{t("{count} of these files were placed by an earlier organization; removing them ends that organization's Undo.", { count: formatNumber(summary.earlier) })}</p> : null;
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="duplicates-confirm-heading" data-testid={`duplicates-confirm-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id="duplicates-confirm-heading">{step === 'first' ? t("Remove duplicates from {name}?", { name }) : t("Remove {files} files?", values)}</h2></div>
     <div className="activity-content">
-      {step === 'first' ? <><p>{t("{files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.", values)}</p><p>{t("Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.")}</p></> : <p>{t("The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.", values)}</p>}
+      {step === 'first' ? <><p>{t("{files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.", values)}</p><p>{t("Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.")}</p>{earlierNote}</> : <><p>{t("The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.", values)}</p>{earlierNote}</>}
     </div>
     <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid="duplicates-confirm-button" onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Remove {files} files", values)}</Button></div>
   </dialog>;
@@ -233,7 +234,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
   useEffect(() => { setPageIndex(0); }, [dup.root, dup.revision, level, filter]);
   const locked = dup.status === 'scanning' || dup.status === 'removing';
   const busy = duplicatesBusy(state);
-  const plan = useMemo(() => removalPlan(groups, level, decisions, editedFolder), [groups, level, decisions, editedFolder]);
+  const plan = useMemo(() => removalPlan(groups, level, decisions, editedFolder, dup.earlier), [groups, level, decisions, editedFolder, dup.earlier]);
   const shown = useMemo(() => plan.resolved.map((item, index) => ({ item, number: index + 1 })).filter(entry => filter === 'all' || (filter === 'auto') === entry.item.auto), [plan.resolved, filter]);
   const pages = Math.max(1, Math.ceil(shown.length / GROUPS_PER_PAGE)), current = Math.min(pageIndex, pages - 1);
   const visible = shown.slice(current * GROUPS_PER_PAGE, (current + 1) * GROUPS_PER_PAGE);
@@ -272,6 +273,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
     {running && <section className="organization-action organization-running" aria-labelledby="duplicates-running-heading" data-testid="duplicates-running"><CardHeader icon={LoaderCircle} id="duplicates-running-heading" title={t("Removing duplicates")} detail={dup.name} /><OrganizationProgress job={running} act={act} /></section>}
     {dup.result && !running && <p className="notice" role="status" data-testid="duplicates-result"><Icon icon={CheckCircle2} />{t("{count} duplicates set aside ({size}).", { count: formatNumber(dup.result.removed), size: formatBytes(dup.result.bytes) })}{dup.result.errors > 0 && ` ${t("{count} errors", { count: formatNumber(dup.result.errors) })}`}</p>}
     {loadError && <p className="field-error" role="alert">{loadError}</p>}
+    {state.error?.key === 'error.duplicatesLibraries' && <p className="field-error" role="alert" data-testid="duplicates-libraries-error">{t(state.error)}</p>}
     {dup.root && dup.status === 'ready' && <>
       <section className="organization-action" aria-labelledby="duplicates-summary-heading" data-testid="duplicates-summary">
         <CardHeader icon={Trash2} id="duplicates-summary-heading" title={t("Before you remove")} detail={t("{groups} groups of duplicates found in {files} files.", { groups: formatNumber(groups.length), files: formatNumber(dup.files) })}>
@@ -283,6 +285,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
           <div><dt>{t("Space to free")}</dt><dd data-metric="bytes">{formatBytes(summary.bytes)}</dd></div>
           <div><dt>{t("Waiting for your choice")}</dt><dd data-metric="undecided">{formatNumber(summary.undecided)}</dd></div>
         </dl>
+        {summary.earlier ? <p className="field-error" data-testid="duplicates-earlier-summary">{t("{count} of these files were placed by an earlier organization; removing them ends that organization's Undo.", { count: formatNumber(summary.earlier) })}</p> : null}
         <p className="inline-note"><Icon icon={Info} size={14} />{t("Removed files go to a recovery area first. Nothing is deleted until you release them.")}</p>
       </section>
       <section className="organization-action duplicate-groups" aria-labelledby="duplicates-groups-heading">
