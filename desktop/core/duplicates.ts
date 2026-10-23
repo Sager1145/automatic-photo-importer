@@ -44,7 +44,7 @@ export class DuplicateStore {
       const file=path.join(root,NAME),stat=await fs.lstat(file);
       if(!stat.isFile()||stat.size>MAX_BYTES) return store;
       const data=JSON.parse(await fs.readFile(file,'utf8'));
-      if(data?.version!==1||data.rootIdentity!==rootIdentity||!data.files||typeof data.files!=='object') return store;
+      if(data?.version!==2||data.rootIdentity!==rootIdentity||!data.files||typeof data.files!=='object') return store;
       for(const [relative,value] of Object.entries(data.files as {[name:string]:FileRecord})) if(value&&typeof value.size==='string'&&typeof value.mtimeNs==='string'&&typeof value.ino==='string'&&typeof value.kind==='string') store.files.set(relative,{...value,birth:Number(value.birth)||0,ctime:Number(value.ctime)||0,edited:!!value.edited});
       store.groups=Array.isArray(data.groups)?data.groups.filter((group:StoredGroup)=>Array.isArray(group?.files)&&group.files.every(item=>typeof item==='string')):[];
       store.complete=data.complete===true;store.updated=String(data.updated??'');
@@ -61,7 +61,7 @@ export class DuplicateStore {
       const target=path.join(this.root,NAME),temporary=path.join(this.root,`${DUPLICATES_PREFIX}-${randomUUID()}.tmp`);
       try {
         const handle=await fs.open(temporary,'wx',0o600);
-        try { await handle.writeFile(JSON.stringify({version:1,rootIdentity:this.rootIdentity,updated:new Date().toISOString(),complete:this.complete,files:Object.fromEntries(this.files),groups:this.groups})); await handle.sync(); }
+        try { await handle.writeFile(JSON.stringify({version:2,rootIdentity:this.rootIdentity,updated:new Date().toISOString(),complete:this.complete,files:Object.fromEntries(this.files),groups:this.groups})); await handle.sync(); }
         finally { await handle.close(); }
         await fs.rename(temporary,target);
       } catch(error) { await fs.unlink(temporary).catch(()=>{}); this.dirty=true; throw error; }

@@ -108,7 +108,7 @@ test('stage 2 finds a renamed SHA duplicate that stage 1 could not match, and re
   assert.equal(result.groups[0]!.strength, 'sha');
   assert.deepEqual(result.groups[0]!.files.map(item => item.path).sort(), ['2024/202405/Nikon Z f/DSC_0001.NEF', 'Imported/holiday.nef']);
   const saved = JSON.parse(await fs.readFile(path.join(root, `${DUPLICATES_PREFIX}.json`), 'utf8'));
-  assert.equal(saved.version, 1); assert.equal(saved.complete, true); assert.equal(saved.groups.length, 1);
+  assert.equal(saved.version, 2); assert.equal(saved.complete, true); assert.equal(saved.groups.length, 1);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}.json`), true);
   assert.equal(ignoredName(`${DUPLICATES_PREFIX}-11111111-1111-4111-8111-111111111111.tmp`), true);
   assert.equal((await inventory(root, { backup: true })).files.some(item => item.path.includes(DUPLICATES_PREFIX)), false);
@@ -226,4 +226,22 @@ test('app folders are skipped at any depth: a parent of one library never pairs 
   const result = await scan(parent);
   assert.equal(result.files, 1, 'only the library photo is looked at');
   assert.deepEqual(result.groups, []);
+});
+
+test('a version 1 duplicate store is ignored and its files are read again; the store is written as version 2', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'identical one'); await write(root, 'b/two.JPG', 'identical one');
+  const counter = { reads: 0 };
+  const deps = async () => ({ metadata: reader({}, counter), index: await destinationIndex(root, await identity(root)) });
+  await scanDuplicates(root, await deps());
+  const storeFile = path.join(root, `${DUPLICATES_PREFIX}.json`);
+  const saved = JSON.parse(await fs.readFile(storeFile, 'utf8'));
+  assert.equal(saved.version, 2);
+  assert.equal(counter.reads, 2);
+  await fs.writeFile(storeFile, JSON.stringify({ ...saved, version: 1 }));
+  dropDuplicateStores(); dropDestinationIndexes();
+  const again = await scanDuplicates(root, await deps());
+  assert.equal(counter.reads, 4, 'v1 records are re-read, not trusted');
+  assert.equal(again.groups.length, 1);
+  assert.equal(JSON.parse(await fs.readFile(storeFile, 'utf8')).version, 2);
 });
