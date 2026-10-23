@@ -1031,6 +1031,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           log('detailed','exec','preflight',{source:entry.source,destination:entry.destination,decision:matches===true?'skip':'copy',reason:matches===true?'destination already holds this checksum':entry.digest?'no matching file at the destination':'no checksum planned'});
           // A file found elsewhere under older rules is never copied: if it changed since planning, the whole family waits for a retry.
           if(entry.routed!==undefined&&matches!==true)throw new Error(`Destination changed after copy preparation; retry: ${entry.destination}`);
+          if(matches!==true)run.pending.add(entry.id);
           checked++;existing(path.basename(entry.source));
         }
       } catch(error) { if(isAbort(error))throw error; fail(run,batch,error); }
