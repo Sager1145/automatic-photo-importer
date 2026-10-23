@@ -164,7 +164,7 @@ export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanO
       let info:Metadata|undefined;
       if(mode==='full') try { info=await deps.metadata(item.path); } catch(error) { if((error as Error)?.name==='AbortError') throw error; }
       const inEdited=relative.split('/').slice(0,-1).includes(edited);
-      record={size:String(stat.size),mtimeNs:String(stat.mtimeNs),ino:String(stat.ino),kind:item.kind,birth:milliseconds(stat.birthtimeNs),ctime:milliseconds(stat.ctimeNs),edited:inEdited||info?.edited===true,...(mode==='full'?{read:true}:{}),...(info?.fingerprint&&Object.keys(info.fingerprint).length?{exif:info.fingerprint}:{})};
+      record={size:String(stat.size),mtimeNs:String(stat.mtimeNs),ino:String(stat.ino),kind:item.kind,birth:milliseconds(stat.birthtimeNs),ctime:milliseconds(stat.ctimeNs),edited:inEdited||info?.edited===true,...(mode==='full'&&info?{read:true}:{}),...(info?.fingerprint&&Object.keys(info.fingerprint).length?{exif:info.fingerprint}:{})};
       store.files.set(relative,record);store.mark();
     }
     const found=asFile(relative,record,stat);stats.set(found,stat);items.push(found);
