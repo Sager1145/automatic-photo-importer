@@ -67,7 +67,7 @@ test('a same-size file that takes the planned path after planning: the outcome i
  assert.deepEqual(withheld,[]);
  assert.deepEqual(files.map(file=>file.destinations),[[outcome.destination]]);
  // Duplicate records go to the copy; the foreign file gets neither the source's kind nor its EXIF.
- const found:PlanDuplicates={files:[{path:original,size:data.length,kind:'JPEG',edited:false,birth:0,ctime:0,exif}],groups:[]};
+ const found:PlanDuplicates={files:[{path:original,size:data.length,kind:'JPEG',edited:false,birth:0,ctime:0,exif}]};
  await recordPlanDuplicates(root,found,source=>{const item=bySource.get(source)?.[0];return item?.finalIdentity?{destination:item.destination,identity:item.finalIdentity}:undefined;});
  dropDuplicateStores();
  const store=await duplicateStore(root,await identity(root));
@@ -140,7 +140,7 @@ test('a copy whose stat proves nothing (exFAT-like) is verified but bound to no 
  const {outcomes,bySource,result}=await run(plans);
  assert.deepEqual(result.errors,[]);
  assert.deepEqual(outcomes.map(item=>[item.verification,item.finalIdentity]),[['content-verified',undefined]]);
- const found:PlanDuplicates={files:[{path:original,size:5000,kind:'JPEG',edited:false,birth:0,ctime:0,exif}],groups:[]};
+ const found:PlanDuplicates={files:[{path:original,size:5000,kind:'JPEG',edited:false,birth:0,ctime:0,exif}]};
  await recordPlanDuplicates(root,found,source=>{const item=bySource.get(source)?.[0];return item?.finalIdentity?{destination:item.destination,identity:item.finalIdentity}:undefined;});
  t.mock.restoreAll();syncBuiltinESMExports();dropDuplicateStores();
  assert.equal((await duplicateStore(root,await identity(root))).files.size,0);

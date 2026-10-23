@@ -17,8 +17,7 @@ import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, co
 export { inventory } from './inventory';
 import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
-import { APP_FOLDERS, confirmCandidates, type PlanDuplicates } from './duplicates';
-import { buildGroups } from '../duplicate-rules';
+import { APP_FOLDERS, confirmCandidates, duplicateMember, type PlanDuplicates } from './duplicates';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, APP_DATA_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
@@ -370,7 +369,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
   if(options.duplicates&&!options.backup&&!options.reorganize&&!options.misplacedOnly) {
     const edited=options.editedFolder??'editied';
-    const items:DuplicateFile[]=files.filter(file=>file.kind!=='Other'&&(!file.companionOf||livePaired.has(file.path))&&sourceStats.has(file.path)&&file.size>0).map(file=>{
+    const items:DuplicateFile[]=files.filter(file=>duplicateMember(file)&&sourceStats.has(file.path)).map(file=>{
       const stat=sourceStats.get(file.path)!,info=infos.get(file.path),exif=info?.fingerprint;
       return {path:file.path,size:file.size,kind:file.kind,edited:info?.edited===true||file.relative.split(path.sep).slice(0,-1).includes(edited),...(exif&&Object.keys(exif).length?{exif}:{}),birth:Number(stat.birthtimeNs)/1e6,ctime:Number(stat.ctimeNs)/1e6};
     });
@@ -385,7 +384,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       },{signal,onProgress:progress=>onProgress?.(progress.completed,progress.file,{step:'candidates',total:progress.total,bytes:0,totalBytes:0})});
     } catch(error) { if(isAbort(error)) throw error; }
     for(const item of items) if(item.sha256) early.set(item.path,item.sha256);
-    duplicates={files:items,groups:buildGroups(items)};
+    duplicates={files:items};
   }
   // Each ancestor describes only media within its own subtree. Stop at the
   // nearest evidence, including mixed-camera evidence, rather than guessing
@@ -617,14 +616,13 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Identical bytes may already sit elsewhere in the library (folders of older rules, the other root).
   // Only imports look: never a backup or drive copy, an organization or its read-only check.
   const lookup=!options.backup&&!options.drive&&!options.reorganize&&!options.misplacedOnly;
-  const APP_NAMES=[...APP_FOLDERS,'Photo Importer Data'];
   /** The library's files by size (this session's listing is reused). `listed` counts files found while listing. */
   async function sizesOf(destination:Root&{videos?:Root},listed:(found:number,file:string)=>void):Promise<Map<number,string[]>> {
     const sizes=new Map<number,string[]>();let before=0;
     for(const part of [destination,...(destination.videos?[destination.videos]:[])]) {
       const index=await destinationIndex(part.root,part.identity),offset=before;
       index.listing??=(async()=>{
-        const found=await inventory(part.root,{backup:true,excludeNames:APP_NAMES,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
+        const found=await inventory(part.root,{backup:true,excludeNames:APP_FOLDERS,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
         // Conflict copies are never proof that a file is filed: they hold what the folder rules could not place.
         return found.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-')&&!file.relative.split(path.sep).includes('Conflicts')&&file.relative.split(path.sep)[0]?.toLowerCase()!==unknownFolder.toLowerCase();}).map(file=>({path:file.path,size:file.size}));
       })();

@@ -97,7 +97,6 @@ test('stage 1 hashes only candidates during planning and records bursts, pairs a
   const steps: string[] = [];
   const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table), undefined, (_count, _file, detail) => { if (detail?.step === 'candidates') steps.push(detail.step); });
   const found = planned.duplicates!;
-  assert.deepEqual(found.groups.map(group => [group.strength, group.files.map(item => path.basename(item.path)).sort()]), [['sha', ['A_0001.JPG', 'B_9999.JPG']]]);
   assert.deepEqual(found.files.filter(item => item.sha256).map(item => path.basename(item.path)).sort(), ['A_0001.JPG', 'B_9999.JPG'], 'only the candidates were hashed');
   assert.ok(steps.length > 0, 'progress names the candidates step');
   assert.equal(found.files.length, 9, 'every examined media file carries its EXIF');
@@ -206,7 +205,7 @@ test('stage 1 runs for imports only, and reuses a hash remembered for the source
   // Remembered hashes are used as they are (the files differ, the memory says they do not): nothing was read again.
   const asked: string[] = [];
   const imported = await plan(source, [root], { ...options, sourceDigest: file => { asked.push(path.basename(file)); return 'a'.repeat(64); } }, reader(table));
-  assert.deepEqual(imported.duplicates!.groups.map(group => group.strength), ['sha']);
+  assert.deepEqual(imported.duplicates!.files.map(item => item.sha256), ['a'.repeat(64), 'a'.repeat(64)]);
   assert.ok(asked.includes('A_0001.JPG') && asked.includes('B_9999.JPG'));
   // An organization of a library never hashes name or EXIF candidates.
   await fs.cp(source, root, { recursive: true });
@@ -272,17 +271,16 @@ test('a duplicate store that fails authentication is ignored and its files are r
   assert.equal((await storedRecord(root)).v, 5); assert.equal(Object.keys((await storedRecord(root)).files).length, 2);
 });
 
-test('duplicate MOVs of two copies of one Live Photo are found at import time', async t => {
+test('two copies of one Live Photo: the stills are hashed at import time, their clips only go with them', async t => {
   const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'library');
   await fs.mkdir(root, { recursive: true });
   for (const folder of ['100APPLE', '101APPLE']) { await write(source, `DCIM/${folder}/IMG_0001.HEIC`, 'live still bytes'); await write(source, `DCIM/${folder}/IMG_0001.MOV`, 'live movie bytes'); }
   const live = exif({ camera: 'Apple iPhone 15', date: '2024-05-06T07:10:00.50' });
   const apple = async (target: string): Promise<Metadata> => ({ camera: 'Apple iPhone 15', make: 'Apple', date: live.date, contentId: 'LIVE-1', fields: {}, fingerprint: live });
   const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
-  const groups = planned.duplicates!.groups.map(group => [group.strength, group.files.map(item => path.relative(source, item.path)).sort()]);
-  assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.MOV')) && (names as string[]).length === 2), `MOV pair grouped: ${JSON.stringify(groups)}`);
-  assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.HEIC')) && (names as string[]).length === 2), `HEIC pair grouped: ${JSON.stringify(groups)}`);
-  assert.equal(groups.length, 2, 'a still and its own movie are never grouped together');
+  const files = planned.duplicates!.files;
+  assert.deepEqual(files.map(item => path.relative(source, item.path)).sort(), ['DCIM/100APPLE/IMG_0001.HEIC', 'DCIM/101APPLE/IMG_0001.HEIC']);
+  assert.ok(files.every(item => item.sha256 === files[0]!.sha256 && item.sha256), 'both stills were hashed as candidates');
 });
 
 test('buildGroups scales linearly: 100k files in one class group in under 2 s with a stable order', () => {
@@ -358,4 +356,27 @@ test('a freshly written file (ctime equal to mtime, as on exFAT) has its metadat
   const counter = { reads: 0 };
   for (let run = 0; run < 2; run++) await scanDuplicates(root, { metadata: reader({}, counter), index: await destinationIndex(root, await identity(root)) });
   assert.equal(counter.reads, 2);
+});
+
+test('planning and the scan take the same members: no empty file, no companion (a Live Photo clip included), nothing unrecognised', async t => {
+  const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'backup');
+  await fs.mkdir(root);
+  await write(source, 'IMG_1.HEIC', 'still'); await write(source, 'IMG_1.MOV', 'clip bytes'); await write(source, 'EMPTY.JPG', ''); await write(source, 'A.JPG', 'photo'); await write(source, 'notes.txt', 'text');
+  const apple = async (target: string): Promise<Metadata> => ({ camera: 'iPhone 15', make: 'Apple', date: '2024-05-06T07:08:09Z', fields: {}, fingerprint: exif({ camera: 'iPhone 15', shutterCount: path.basename(target) }) });
+  const planned = await plan(source, [root], { backup: false, template: '{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
+  assert.deepEqual(planned.duplicates!.files.map(item => path.basename(item.path)).sort(), ['A.JPG', 'IMG_1.HEIC']);
+  // The same library scanned: the empty file and the text file are not members either.
+  await write(root, 'EMPTY.JPG', ''); await write(root, 'A.JPG', 'photo'); await write(root, 'notes.txt', 'text');
+  const scanned = await scan(root, { 'A.JPG': exif() });
+  assert.equal(scanned.files, 1);
+});
+
+test('the library\'s app data folder is left out of the look for files filed elsewhere, as from the duplicate scan', async t => {
+  const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'backup');
+  await write(source, 'A.JPG', 'photo bytes');
+  // The same bytes only inside the app's own data folder of the library: not a copy filed elsewhere.
+  await write(root, 'Photo Importer Data/kept/A.JPG', 'photo bytes');
+  const planned = await plan(source, [root], { backup: false, template: '{camera}', layout: 'flat', unknownRules: {}, lookElsewhere: () => true }, reader({}));
+  assert.equal(planned.plans[0]!.entries[0]!.routed, undefined);
+  assert.equal(planned.plans[0]!.entries[0]!.skip, false);
 });
