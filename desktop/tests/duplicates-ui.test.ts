@@ -5,7 +5,7 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,translationCatalogs,languages} from '../renderer/i18n';
 import {categories} from '../renderer/exif-categories';
-import {LevelSelector,GroupView,DuplicatesConfirm,RemovedDuplicates,removalPlan,fileBadges,GROUPS_PER_PAGE,Pagination} from '../renderer/DuplicatesPage';
+import {LevelSelector,ScanUnread,GroupView,DuplicatesConfirm,RemovedDuplicates,removalPlan,fileBadges,GROUPS_PER_PAGE,Pagination} from '../renderer/DuplicatesPage';
 import {nextConfirmStep} from '../renderer/RootApp';
 import type {DuplicateFile,DuplicateGroup,Language,Metadata,Thumbnail,OrganizationRecovery} from '../shared';
 
@@ -23,7 +23,7 @@ const view=(group:DuplicateGroup,options:{thumbs?:Record<string,Thumbnail>;exifs
 test('the level selector explains three levels in plain words and marks the chosen one',()=>{
  const html=render(createElement(LevelSelector,{level:2,onChange:()=>{}}));
  for(const level of [1,2,3])assert.match(html,new RegExp(`data-testid="duplicate-level-${level}"`));
- assert.match(html,/You decide every group/);assert.match(html,/same SHA-256\) are removed automatically/);assert.match(html,/same EXIF but a different size/);
+ assert.match(html,/You decide every group/);assert.match(html,/same SHA-256\) are removed automatically/);assert.match(html,/same EXIF are removed only after you confirm/);
  assert.equal((html.match(/aria-checked="true"/g)??[]).length,1);
  assert.match(html.match(/<button[^>]*data-testid="duplicate-level-2"[^>]*>/)![0],/aria-checked="true"/);
  assert.match(render(createElement(LevelSelector,{level:1,onChange:()=>{},disabled:true})),/disabled/);
@@ -106,4 +106,13 @@ test('every new string, EXIF category, label and value is translated in all lang
  for(const category of categories){keys.add(category.title);for(const tag of category.tags)keys.add(tag.label);}
  for(const match of readFileSync(new URL('../renderer/exif-categories.ts',import.meta.url),'utf8').matchAll(/\d+: '([^']+)'/g))keys.add(match[1]!);
  for(const language of languages.filter(language=>language!=='en'))for(const key of keys)assert.ok(Object.hasOwn(translationCatalogs[language as Exclude<Language,'en'>],key),`${language}: ${key}`);
+});
+
+test('a scan with unread files says the results are usable and how many files were not read, in every language',()=>{
+ const unread={count:3,sample:[{path:'a/one.JPG',step:'hash' as const,error:{key:'text' as const,params:{text:'EIO: i/o error'}}},{path:'b/two.JPG',step:'metadata' as const,error:{key:'text' as const,params:{text:'exiftool crashed'}}}]};
+ const html=render(createElement(ScanUnread,{unread}));
+ assert.match(html,/data-testid="duplicates-unread"/);assert.match(html,/results are usable/);assert.match(html,/\b3 files could not be read/);
+ assert.match(html,/a\/one\.JPG/);assert.match(html,/EIO: i\/o error/);
+ assert.match(render(createElement(ScanUnread,{unread}),'ja'),/3/);
+ assert.doesNotMatch(render(createElement(ScanUnread,{unread}),'zh-Hans'),/results are usable/);
 });

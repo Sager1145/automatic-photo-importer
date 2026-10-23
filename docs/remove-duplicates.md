@@ -6,7 +6,7 @@ Two parts. **A** records duplicates while the app already reads files (organizat
 
 - Removed duplicates go to the organization recovery store (`Photo Importer Recovery/<journal>/originals/…`) first, with undo, exactly like organization stashes. Space is freed only by an explicit **Release** (the existing finalize). The journal, stash, finalize and undo code in `desktop/core/recovery.ts` is reused.
 - Default copy to keep in a group: the one inside the organized structure (`{year}/{yyyymm}/{camera}/…` under the library root); if several are, the earliest imported (oldest file birth time, then ctime); then the shorter path, then alphabetical. The user can override per group.
-- Auto-removal (level 3) applies only to SHA-256-identical files, or to files whose EXIF (capture time with sub-seconds, camera model and serial number, shutter count / image number, lens, dimensions) and size are all identical. Same EXIF but different size, same name only, or same time only: the user decides.
+- Auto-removal (levels 2 and 3) applies only to SHA-256-identical files. Every other group (same EXIF with the same or another size, same name and time) waits for the user's decision. A copy removed without a decision is hashed again at removal and stays where it is if its bytes no longer match the kept copy.
 - RAW previews use macOS ImageIO through `sips` (reliable, no native rebuild). Thumbnails are cached in `userData/thumbnails`. If the system cannot decode a RAW (a new camera), a clear message suggests a macOS update or Adobe DNG Converter and the embedded preview from exiftool (`PreviewImage`, `JpgFromRaw`, `ThumbnailImage`) is shown instead.
 - Copies on different destinations are never paired: every scan, index file and journal belongs to one library root.
 - Organization and import never delete because of duplicates; they only record.
@@ -25,26 +25,27 @@ Both stages report through the shared `ProgressDisplay` with named steps: `finge
 | strength | meaning | level 1 | level 2 | level 3 |
 | --- | --- | --- | --- | --- |
 | `sha` | all members have the same SHA-256 | user | auto | auto |
-| `exif` | same EXIF key and same size, different SHA | user | user | auto |
+| `exif` | same EXIF key and same size, different SHA | user | user | user |
 | `exif-size` | same EXIF key, sizes differ (or a mixed group) | user | user | user |
 | `similar` | same name and capture time only | user | user | user |
 
 ### Duplicate index
 
-`photo-importer-duplicates.json` at the library root (visible, ignored by inventory and by the leftover cleanup like `photo-importer-index.json`; temporary `photo-importer-duplicates-<uuid>.tmp`):
+`duplicates.json` in the library's records folder (sealed records v5, beside the destination index `index.json`):
 
 ```json
-{ "version": 1, "rootIdentity": "dev:ino", "updated": "ISO", "complete": true,
-  "files": { "rel/path.NEF": { "size": 1, "mtimeNs": "…", "ino": "…", "kind": "RAW", "birth": 0, "ctime": 0, "edited": false, "exif": { "date": "…", "camera": "…" } } },
-  "groups": [ { "strength": "sha", "files": ["rel/a.NEF", "rel/b.NEF"] } ] }
+{ "rootIdentity": "dev:ino",
+  "files": { "rel/path.NEF": { "stat": { "dev": "…", "ino": "…", "size": "…", "mtime": "…", "ctime": "…" }, "kind": "RAW", "edited": false, "exif": { "date": "…", "camera": "…" } } } }
 ```
 
-Records are trusted only while the file's size, mtime and inode are unchanged. The page lists the library and compares; if a media file is new, changed or gone the index is stale and an incremental rescan reuses every still-valid record.
+It caches only each file's metadata, so a scan does not read it again. Content digests live only in the destination index. Both use one rule (`provablySame` in `desktop/core/destination-index.ts`): a record is trusted only while dev, inode, size, mtime and ctime all match and the stat is provable; a ctime equal to mtime (FAT, exFAT, or a file just written) proves nothing, so that file is read again.
+
+A file whose metadata cannot be read is still grouped by its content; one whose contents cannot be read is left out of that scan's groups and is not tried twice in one scan. `ScanResult.failures` lists both, one entry per file, and the page says the results are usable and how many files were not read.
 
 ## B. Remove duplicates
 
 1. **Scope**: a destination library (the backup folder of destination 1 or 2) or any chosen folder, optionally restricted to sub-folders. One root at a time.
-2. **Levels**: 1 the user decides every group; 2 SHA groups are auto-resolved; 3 SHA and EXIF+size groups are auto-resolved (see the table).
+2. **Levels**: 1 the user decides every group; 2 and 3 auto-resolve SHA groups only (see the table).
 3. **Review**: per group, side-by-side previews, a radio per file for the file to keep ("Keep all" is also offered), and badges: *SHA identical*, *EXIF identical*, *Size differs*, *In organized structure*. **Basic** shows camera, lens, date/time, exposure, aperture, ISO, focal length, dimensions, file size, SHA match and path. **Full** shows grouped, readable EXIF from a curated category map (Exposure, Camera & Lens, Date & Time, Location, Image, Maker Notes, File) built from exiftool `-G1` groups and the documented tag names (exiftool.org/TagNames). Binary, thumbnail, duplicate and internal tags are hidden; labels and units are friendly.
 4. **Confirm**: a summary (groups, files to remove, space to free) and a confirmation.
 5. **Execute** = stash into recovery with undo. A removal is a journal in the library root's recovery store with `kind: "duplicates"`; each removed file is an entry whose *destination* is the kept file. Because the kept file of an `exif` group has a different SHA, entries carry `kept: { digest, size }`; the journal's destination check uses it, so run, recheck, undo and finalize all verify the kept copy. A missing kept copy stops the run; nothing is copied.
@@ -66,7 +67,7 @@ Known limits: removing a file that an earlier organization placed supersedes tha
 
 ## Tests
 
-`desktop/tests/duplicates-*.test.ts`: stage 1 and 2 detection (bursts, RAW+JPG, Live Photo, edited versions are never duplicates; renamed SHA duplicates found in stage 2), keep rule, each level's split (same EXIF but different size is manual), stash/undo/release through the journal, different destinations never paired, curated EXIF categories, thumbnail fallback, and renderer tests for the group view and level selector.
+`desktop/tests/duplicates-*.test.ts`: stage 1 and 2 detection (bursts, RAW+JPG, Live Photo, edited versions are never duplicates; renamed SHA duplicates found in stage 2), keep rule, each level's split (only SHA groups are automatic; a byte-different EXIF group is never removed without a decision), scan failures, stash/undo/release through the journal, different destinations never paired, curated EXIF categories, thumbnail fallback, and renderer tests for the group view and level selector.
 
 ## Review fixes (claude/remove-duplicates-fixes)
 

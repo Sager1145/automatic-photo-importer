@@ -817,7 +817,7 @@ You decide every group. Nothing is removed until you choose which file to keep.|
 Level 2: identical files|级别 2：完全相同的文件|層級 2：完全相同的檔案|レベル2：完全に同一のファイル
 Files that are exactly the same (same SHA-256) are removed automatically, keeping the copy in your organized folders. You decide all other groups.|完全相同（SHA-256 相同）的文件会自动移除，并保留已整理文件夹中的那一份。其他分组由你决定。|完全相同（SHA-256 相同）的檔案會自動移除，並保留已整理資料夾中的那一份。其他群組由你決定。|完全に同一（SHA-256 が同じ）のファイルは自動で削除され、整理済みフォルダー内のものが残ります。それ以外のグループは自分で決めます。
 Level 3: automatic|级别 3：自动|層級 3：自動|レベル3：自動
-Exactly identical files, and files with identical EXIF and size, are removed automatically. You decide only the groups with the same EXIF but a different size, or the same name and time.|完全相同的文件，以及 EXIF 和大小都相同的文件，会自动移除。只有 EXIF 相同但大小不同，或仅名称和时间相同的分组由你决定。|完全相同的檔案，以及 EXIF 和大小都相同的檔案，會自動移除。只有 EXIF 相同但大小不同，或僅名稱和時間相同的群組由你決定。|完全に同一のファイル、および EXIF とサイズが同じファイルは自動で削除されます。EXIF は同じでサイズが異なるグループや、名前と時刻だけが同じグループは自分で決めます。
+Exactly identical files (same SHA-256) are removed automatically. Files with the same EXIF are removed only after you confirm them, even when their size matches.|完全相同的文件（SHA-256 相同）会自动移除。EXIF 相同的文件即使大小一致，也要在你确认后才会移除。|完全相同的檔案（SHA-256 相同）會自動移除。EXIF 相同的檔案即使大小一致，也要在你確認後才會移除。|完全に同一のファイル（SHA-256 が同じ）は自動で削除されます。EXIF が同じファイルは、サイズが同じでも確認してから削除されます。
 Removal level|移除级别|移除層級|削除レベル
 Identical files|完全相同的文件|完全相同的檔案|同一のファイル
 Same EXIF and size|EXIF 和大小相同|EXIF 和大小相同|EXIF とサイズが同じ

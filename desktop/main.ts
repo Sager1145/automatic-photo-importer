@@ -845,6 +845,8 @@ async function applyReview(){
 // ---- Remove duplicates: scan one library, review, set the chosen copies aside (recovery store, with undo).
 let duplicateGroups:DuplicateGroup[]=[],duplicateCompanions=new Map<string,string[]>(),duplicateControl:AbortController|undefined;
 const dup:Omit<DuplicatesState,'scopes'>={status:'idle',revision:0,groups:0,files:0};
+/** Unread files a scan names in the state (all are counted). */
+const UNREAD_SAMPLE=20;
 const chosenScopes=new Map<string,DuplicateScope>();
 function duplicateScopes():DuplicateScope[]{
  const result:DuplicateScope[]=[];
@@ -865,12 +867,13 @@ async function scanDuplicatesAction(){
  if(!root||!scope)throw new MessageError('error.duplicatesScope');
  assertIdle();
  const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();
- dup.status='scanning';dup.result=undefined;dup.progress=undefined;emit();
+ dup.status='scanning';dup.result=undefined;dup.unread=undefined;dup.progress=undefined;emit();
  try{
   await stopResidueCheck();
   const real=await fs.realpath(root).catch(()=>{throw new MessageError('error.duplicatesUnavailable');});
   const result=await scanDuplicates(real,{metadata:file=>metadata(file,{details:false}),index:await destinationIndex(real,await identity(real))},{editedFolder:state.preferences.editedFolder,signal:control.signal,onProgress:progress=>{dup.progress=progress;progressEmit();}});
   duplicateGroups=result.groups;duplicateCompanions=result.companions;
+  if(result.failures.length){dup.unread={count:result.failures.length,sample:result.failures.slice(0,UNREAD_SAMPLE)};}
   dup.earlier=[...await placedByEarlierJournals(real,control.signal,update=>{dup.progress={phase:'planning',step:'journals',completed:update.read,total:update.total,bytes:0,totalBytes:0,speed:0,file:update.file,journal:{index:update.journal,count:update.journals}};progressEmit();}).catch(()=>new Set<string>())];
   Object.assign(dup,{files:result.files,groups:result.groups.length,scannedAt:new Date().toISOString(),revision:dup.revision+1,status:'ready' as const});
  }catch(error){
@@ -892,7 +895,7 @@ async function duplicatesStale(roots:string[]){
  const own=dup.root,mine=[own,await fs.realpath(own).catch(()=>own)];
  for(const root of roots){
   const real=await fs.realpath(root).catch(()=>root);
-  if(mine.some(item=>within(item,real)||within(real,item))){duplicateGroups=[];Object.assign(dup,{status:'idle' as const,groups:0,files:0,earlier:undefined,revision:dup.revision+1});emit();return;}
+  if(mine.some(item=>within(item,real)||within(real,item))){duplicateGroups=[];Object.assign(dup,{status:'idle' as const,groups:0,files:0,earlier:undefined,unread:undefined,revision:dup.revision+1});emit();return;}
  }
 }
 async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string>){
@@ -976,8 +979,8 @@ async function action(input:Action):Promise<void>{
    if(input.sourceId!==undefined&&!sources.length)throw new MessageError('error.sourceDisconnected');
    for(const source of sources)void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;
   }
-  case 'duplicatesScope':{if(!duplicateScope(input.root))throw new MessageError('error.duplicatesScope');if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');if(dup.root!==input.root){duplicateGroups=[];Object.assign(dup,{root:input.root,name:duplicateScope(input.root)!.name,status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
-  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const libraries=await Promise.all(duplicateScopes().filter(item=>item.destination).map(item=>fs.realpath(item.root).catch(()=>item.root)));if(overlappingLibraries(root,libraries).length>1)throw new MessageError('error.duplicatesLibraries');approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesScope':{if(!duplicateScope(input.root))throw new MessageError('error.duplicatesScope');if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');if(dup.root!==input.root){duplicateGroups=[];Object.assign(dup,{root:input.root,name:duplicateScope(input.root)!.name,status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,unread:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const libraries=await Promise.all(duplicateScopes().filter(item=>item.destination).map(item=>fs.realpath(item.root).catch(()=>item.root)));if(overlappingLibraries(root,libraries).length>1)throw new MessageError('error.duplicatesLibraries');approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,unread:undefined,revision:dup.revision+1});}break;}
   case 'duplicatesScan':await scanDuplicatesAction();break;
   case 'duplicatesStop':duplicateControl?.abort();break;
   case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;

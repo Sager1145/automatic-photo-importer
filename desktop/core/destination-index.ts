@@ -18,11 +18,19 @@ export async function indexLocations(root:string,name:string):Promise<string[]>{
 export async function indexTarget(root:string,name:string):Promise<string>{
   const store=await storeFor(root);return path.join(await storeFolder(store,LIBRARIES,libraryPartition(store,root)),name);
 }
-interface Recorded {dev:string;ino:string;size:string;mtime:string;ctime:string;sha256:string;}
-const fingerprint=(stat:BigIntStats)=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
+/** The stat a cached record (a digest here, a file's metadata in the duplicate store) is bound to. */
+export interface StatRecord {dev:string;ino:string;size:string;mtime:string;ctime:string;}
+interface Recorded extends StatRecord {sha256:string;}
+export const statRecord=(stat:BigIntStats):StatRecord=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 /** FAT and exFAT report ctime equal to mtime and reuse entry numbers as inodes, so
- * there an unchanged stat proves nothing; such files are always hashed. */
+ * there an unchanged stat proves nothing; such files are always read again. */
 export const provable=(stat:BigIntStats)=>stat.ctimeNs!==stat.mtimeNs;
+/** Whether a cached record still describes the file: a provable stat with every recorded field unchanged. */
+export function provablySame(recorded:StatRecord,stat:BigIntStats):boolean {
+  if(!provable(stat)) return false;
+  const now=statRecord(stat);
+  return recorded.dev===now.dev && recorded.ino===now.ino && recorded.size===now.size && recorded.mtime===now.mtime && recorded.ctime===now.ctime;
+}
 /** Every stat field, birth time included: what a short-lived, in-memory reuse is bound to. */
 export const full=(stat:BigIntStats)=>`${statKey(stat)}:${stat.birthtimeNs}`;
 /** What the duplicate checks need: a destination file's SHA-256. */
@@ -35,11 +43,6 @@ async function memoized(memo:Map<string,{stat:string;sha256:string}>,file:string
   if(sameStat(before,after)&&before.birthtimeNs===after.birthtimeNs) {const value={stat:full(after),sha256};memo.set(file,value);also?.set(file,value);}
   else also?.delete(file);
   return sha256;
-}
-function unchanged(recorded:Recorded,stat:BigIntStats):boolean {
-  if(!provable(stat)) return false;
-  const now=fingerprint(stat);
-  return recorded.dev===now.dev && recorded.ino===now.ino && recorded.size===now.size && recorded.mtime===now.mtime && recorded.ctime===now.ctime;
 }
 
 /** The file's text, read in chunks so a large index reports how far it is. */
@@ -92,7 +95,7 @@ export class DestinationIndex implements Digests {
   async digestOf(file:string,signal?:AbortSignal):Promise<string> {
     checkAbort(signal);
     const before=await fs.lstat(file,{bigint:true}),known=this.files.get(this.key(file));
-    if(known && unchanged(known,before)) return known.sha256;
+    if(known && provablySame(known,before)) return known.sha256;
     const sha256=await digest(file,signal),after=await fs.lstat(file,{bigint:true});
     // Record only the stat the hash was computed under; a change in between is not cached.
     if(sameStat(before,after)) this.remember(file,sha256,after);
@@ -111,12 +114,12 @@ export class DestinationIndex implements Digests {
   /** The recorded digest of a file whose whole stat still matches, without reading it. */
   cached(file:string,stat:BigIntStats):string|undefined {
     const known=this.files.get(this.key(file));
-    return known&&unchanged(known,stat)?known.sha256:undefined;
+    return known&&provablySame(known,stat)?known.sha256:undefined;
   }
   /** Record a digest computed from bytes this app just wrote or verified. */
   remember(file:string,sha256:string,stat:BigIntStats):void {
     if(!stat.isFile() || !provable(stat)) return;
-    this.files.set(this.key(file),{...fingerprint(stat),sha256});this.dirty=true;
+    this.files.set(this.key(file),{...statRecord(stat),sha256});this.dirty=true;
   }
   forget(file:string):void {this.hints.delete(file);if(this.files.delete(this.key(file)))this.dirty=true;}
   clear():void {this.listing=undefined;this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}

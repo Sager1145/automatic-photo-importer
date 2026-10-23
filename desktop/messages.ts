@@ -24,6 +24,7 @@ export const backendMessages={
  'history.duplicatesRemoved':{en:'Duplicates removed: {name}','zh-Hans':'已移除重复文件：{name}','zh-Hant':'已移除重複檔案：{name}',ja:'重複ファイルを削除：{name}'},
  'history.duplicatesReleased':{en:'Removed duplicates released','zh-Hans':'已释放已移除的重复文件','zh-Hant':'已釋放已移除的重複檔案',ja:'削除した重複ファイルを解放'},
  'history.duplicatesUndone':{en:'Duplicate removal undone','zh-Hans':'已撤销重复文件移除','zh-Hant':'已復原重複檔案移除',ja:'重複ファイルの削除を取り消し'},
+ 'duplicates.unread':{en:'The results are usable, but {count} files could not be read. A file whose contents could not be read is in no group; scan again to retry it.','zh-Hans':'结果可以使用，但有 {count} 个文件无法读取。内容无法读取的文件不在任何分组中；重新扫描即可重试。','zh-Hant':'結果可以使用，但有 {count} 個檔案無法讀取。內容無法讀取的檔案不在任何群組中；重新掃描即可重試。',ja:'結果は使用できますが、{count} 件のファイルを読み取れませんでした。内容を読み取れなかったファイルはどのグループにも含まれません。もう一度スキャンすると再試行します。'},
  'error.duplicatesScope':{en:'Choose a library to look through first.','zh-Hans':'请先选择要查找的媒体库。','zh-Hant':'請先選擇要查找的媒體庫。',ja:'先に調べるライブラリを選択してください。'},
  'error.duplicatesNothing':{en:'There is nothing to remove yet. Decide at least one group first.','zh-Hans':'暂时没有可移除的内容。请先决定至少一组。','zh-Hant':'暫時沒有可移除的內容。請先決定至少一組。',ja:'削除するものがまだありません。先に少なくとも 1 つのグループを決めてください。'},
  'error.duplicatesStale':{en:'Scan the library again first.','zh-Hans':'请先重新扫描该媒体库。','zh-Hant':'請先重新掃描該媒體庫。',ja:'先にライブラリをもう一度スキャンしてください。'},
