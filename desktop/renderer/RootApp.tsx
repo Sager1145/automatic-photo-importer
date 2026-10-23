@@ -372,7 +372,7 @@ export default function RootApp() {
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
   // The badge counts rows (groups needing attention), from the summaries; paths are never iterated.
-  const badge = useMemo(() => rowCounts(buildRows(errors)), [errors]);
+  const badge = rowCounts(buildRows(errors));
   // Window-only errors clear here; the rest ask the main process, which leaves every job as it is.
   const clearErrorItems = (ids?: string[], severity?: Severity) => {
     const local = new Set((ids ?? errors.flatMap(error => error.id?.startsWith('local:') && (!severity || error.severity === severity) ? [error.id] : [])).filter(id => id.startsWith('local:')).map(id => id.slice(6)));
