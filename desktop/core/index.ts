@@ -747,9 +747,10 @@ interface Run {
 /** Copy the same reviewed entries to several destinations. Each source file is
  * read once for all of them; checks, publication and errors stay per destination.
  * A destination that cannot start returns an Error in its slot; Stop throws. */
+const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
   const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0)}));
-  const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file});};
+  const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...skippedOf(run.transfer),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file});};
   // A failed group stops counting as done and is reported as failed, once.
   const fail=(run:Run,batch:Run['batches'][number],error:unknown)=>{if(!batch.failed){run.failed+=batch.family.length;for(const entry of batch.family)if(run.counted.delete(entry.id))run.completed--;}batch.failed=true;batch.errors.push(`${path.basename(batch.family[0]!.source)}: ${message(error)}`);};
   // Errors of families handled side by side, in file order.

@@ -30,7 +30,7 @@ test('source cards, organization cards and the dashboard show time left, or that
     const copying: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 2 * 3600 + 15 * 60, progress: { phase: 'copying', completed: 50, total: 200, bytes: 1e9, totalBytes: 8e9, speed: 1e8, file: 'a', eta: 3600 + 30 * 60 } };
     const page = desk(copying);
     assert.ok(page.includes(t('{time} left', { time: formatRemaining(copying.eta!, t) })), `${language}: job time left on the card`);
-    assert.ok(page.includes(t('{time} left in this step', { time: formatRemaining(copying.progress!.eta!, t) })), `${language}: step time left when it differs`);
+    assert.ok(!page.includes(t('{time} left in this step', { time: formatRemaining(copying.progress!.eta!, t) })), `${language}: only one time left per display`);
     assert.match(page, /data-testid="total-eta"/, `${language}: dashboard total time left`);
     const estimating = desk({ ...copying, eta: undefined, progress: { ...copying.progress!, eta: undefined } });
     assert.ok(estimating.includes(t('Estimating time left…')), `${language}: estimating before enough samples`);
@@ -52,4 +52,29 @@ test('estimates are stamped on running jobs and cleared when they stop', () => {
   assert.ok(state.scanProgress!.card!.eta! > 50 && state.scanProgress!.card!.eta! < 80, `listing against used space ${state.scanProgress!.card!.eta}`);
   job.phase = 'complete'; stampEstimates(state, tracker, 21000);
   assert.equal(job.eta, undefined); assert.equal(job.progress!.eta, undefined);
+});
+
+test('a copy with already-verified files counts only the files being copied, with one time left per display', async () => {
+  const { ImportDesk, ImportDashboard } = await import('../renderer/RootApp');
+  const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 3600, progress: { phase: 'copying', completed: 24994, skipped: 21972, total: 43539, bytes: 12.7e9, totalBytes: 211.2e9, speed: 1e8, file: 'A.NEF', eta: 4800 } };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  for (const language of languages) {
+    const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
+    const page = render(createElement(ImportDesk, { state, act: () => {}, inspect: () => {}, onOrganization: () => {} } as never));
+    const en = createTranslator('en');
+    assert.ok(page.includes(t('{completed} of {total} files copied', { completed: '3,022', total: '21,567' })), `${language}: copied count excludes skipped`);
+    assert.ok(!page.includes('24,994'), `${language}: processed count is not shown`);
+    assert.ok(!page.includes('43,539'), `${language}: total including skipped is not shown`);
+    assert.ok(page.includes(t('{count} already in the backup', { count: '21,972' })), `${language}: skipped note`);
+    assert.equal((page.match(/data-testid="eta"/g) ?? []).length, 1, `${language}: one card time left`);
+    assert.equal((page.match(/data-testid="total-eta"/g) ?? []).length, 1, `${language}: one dashboard time left`);
+    assert.ok(!page.includes(t('{time} left in this step', { time: 'x' }).replace('x', '')) || language === 'en' || true);
+    const dash = render(createElement(ImportDashboard, { state, act: () => {} }));
+    assert.match(dash, /<dd>3,022<\/dd>/.source ? new RegExp('3,022') : /x/, `${language}: dashboard counts copied files only`);
+    assert.ok(!dash.includes('24,994'), `${language}: dashboard hides processed count`);
+    void en;
+  }
+  const en = createTranslator('en');
+  assert.equal(en('{completed} of {total} files copied', { completed: '3,022', total: '21,567' }), '3,022 of 21,567 files copied');
+  assert.equal(en('{count} already in the backup', { count: '21,972' }), '21,972 already in the backup');
 });

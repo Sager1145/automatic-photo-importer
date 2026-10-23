@@ -666,7 +666,7 @@ Took {time}|用时 {time}|用時 {time}|所要時間 {time}
 Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
 {count} files/s|{count} 个文件/秒|{count} 個檔案/秒|{count} ファイル/秒
 {time} left|剩余{time}|剩餘{time}|残り{time}
-{time} left in this step|此步骤剩余{time}|此步驟剩餘{time}|このステップの残り{time}
+{count} already in the backup|备份中已有 {count} 个|備份中已有 {count} 個|バックアップに {count} 件が既にあります
 {time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）
 under a minute|不到 1 分钟|不到 1 分鐘|1 分未満
 about {minutes} min|约 {minutes} 分钟|約 {minutes} 分鐘|約 {minutes} 分

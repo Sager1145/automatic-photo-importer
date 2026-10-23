@@ -593,13 +593,14 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const overall = measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
   // No job, no planned bytes: only "No transfer planned" is shown, with an empty bar and no percentage.
   const nothingPlanned = !(total > 0 && transferred > 0) && !lead?.progress && !active.length && overall === undefined;
+  const doneFiles = (job: Job) => job.progress ? (doing.size === 1 && doing.has('copied') ? copyBasis(job.progress).completed : job.progress.completed) : 0;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
       <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
         <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
-        <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+(job.progress?.completed??0),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
+        <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+doneFiles(job),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : t("Choose a backup destination")}</small></div>
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
@@ -1009,15 +1010,26 @@ export function shownPercent(fraction: number, finished: boolean): number {
 const fileSteps = ['history', 'earlier', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
 /** How far a step is, the same number the count and the percent show. Undefined only while nothing can be estimated. */
 export function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
+  const basis = copyBasis(progress);
   // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
-  const files = progress.total ? progress.completed / progress.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
+  const files = basis.total ? basis.completed / basis.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
   // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
   if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
   return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
 }
+/** Copying counts only the files being copied: those already verified on the destination are skipped and shown apart. */
+export function copyBasis(progress: NonNullable<Job['progress']>): { completed: number; total: number; skipped: number } {
+  const copying = progress.phase === 'copying' && !progress.step && !progress.renames, skipped = copying ? Math.min(progress.skipped ?? 0, progress.total) : 0;
+  return { completed: Math.max(0, progress.completed - skipped), total: progress.total - skipped, skipped };
+}
+/** The quiet note beside a copy count: how many files were already in the backup. */
+export function progressSkippedNote(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string): string | undefined {
+  const { skipped } = copyBasis(progress);
+  return skipped > 0 ? t("{count} already in the backup", { count: formatNumber(skipped) }) : undefined;
+}
 export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
-  const counts = { completed: formatNumber(progress.completed), total: formatNumber(progress.total) };
+  const basis = copyBasis(progress), counts = { completed: formatNumber(basis.completed), total: formatNumber(basis.total) };
   // While listing, the size found so far is the only other measure.
   if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
   if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
@@ -1083,7 +1095,7 @@ function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>): string 
   if (!progress) return undefined;
   const step = progress.eta, all = job.eta ?? step;
   if (all === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
-  return t("{time} left", { time: formatRemaining(all, t) }) + (step !== undefined && all - step >= 60 ? ` · ${t("{time} left in this step", { time: formatRemaining(step, t) })}` : '');
+  return t("{time} left", { time: formatRemaining(all, t) });
 }
 /** A speed whose unit holds near a boundary while this display stays on screen (see speedUnit). */
 function Speed({ value }: { value: number }) {
@@ -1291,6 +1303,7 @@ function SourceRow({ reviewing = false, reviewProgress, source, job, queuePositi
       count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
       speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
+    {progress && !already && progressSkippedNote(progress, t, formatNumber) && <p className="source-quiet-note" data-testid="already-in-backup"><Icon icon={CheckCheck} size={13} />{progressSkippedNote(progress, t, formatNumber)}</p>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
