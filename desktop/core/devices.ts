@@ -17,10 +17,16 @@ type Classify=(file:string)=>Promise<DeviceKind>;
 const run=(command:string,args:string[])=>new Promise<string>((resolve,reject)=>execFile(command,args,{timeout:10000,maxBuffer:1024*1024},(error,stdout)=>error?reject(error):resolve(stdout)));
 /** The mount point of `file`'s volume, as df reports it (firmlinked folders such as /Users are
  * not mount points themselves). */
-async function mountOf(file:string):Promise<string> {
+export async function mountOf(file:string):Promise<string> {
   const mount=(await run('/bin/df',['-P',file])).trim().split('\n')[1]?.match(/\d+%\s+(\/.*)$/)?.[1];
   if(!mount) throw new Error('No mount point');
   return mount;
+}
+/** The volume mounted at `mount`, from diskutil: its UUID (the same volume under any path or device number) and file system type ("exfat", "msdos", "apfs"...). */
+export async function volumeOf(mount:string):Promise<{uuid?:string;type?:string}> {
+  const info=await run('/usr/sbin/diskutil',['info','-plist',mount]);
+  const text=(name:string)=>info.match(new RegExp(`<key>${name}</key>\\s*<string>([^<]*)</string>`))?.[1];
+  return {uuid:text('VolumeUUID'),type:text('FilesystemType')};
 }
 /** macOS: diskutil names the bus and medium. Linux: sysfs. Anything else stays unknown. */
 async function classify(file:string,dev:bigint):Promise<DeviceKind> {
@@ -113,9 +119,11 @@ export class DeviceStreams {
 /** The process-wide slots: every whole-file stream of every job goes through them. */
 export const streams=new DeviceStreams();
 
-/** Metadata reads in flight while checking or scanning: enough to fill ExifTool's multi-file requests (platform/metadata.ts)
- * on every process; the device's own limit still caps the requests running at once. */
-export const CHECK_CONCURRENCY=32;
+/** Files per ExifTool request for routing reads (platform/metadata.ts). */
+export const ROUTING_BATCH=16;
+/** Metadata reads in flight while checking or scanning: enough to fill ExifTool's multi-file requests (platform/metadata.ts) on every
+ * request the fastest device runs at once, plus one batch being gathered; the device's own limit still caps the requests running at once. */
+export const CHECK_CONCURRENCY=ROUTING_BATCH*(Math.max(...Object.values(STREAMS))+1);
 
 /** CPU worker count for a pool wanting up to `cap`: never above the user's thread limit, never below one. */
 export {cpuWorkers};

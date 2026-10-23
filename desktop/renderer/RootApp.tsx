@@ -14,7 +14,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, MigrationState, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
@@ -22,6 +22,7 @@ import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
+import { validNoMetadataFolder } from '../no-metadata';
 import { listingShare } from '../listing-estimate';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
 import { BrandLogo } from './BrandLogo';
@@ -497,9 +498,9 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
 }
 
 /** What a destination is doing now, from state the app already holds (jobs, the folder check, duplicates, leftover cleanup). */
-export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
-export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
-const destinationPriority: DestinationStatusKind[] = ['receiving', 'verifying', 'organizing', 'folder-check', 'cleaning'];
+export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'checking-files' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
+export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** checking-files: the step the bar is drawn in. */layer?: StepKind; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
+const destinationPriority: DestinationStatusKind[] = ['receiving', 'checking-files', 'verifying', 'organizing', 'folder-check', 'cleaning'];
 function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
 export function destinationActivity(state: AppState, path: string): DestinationActivity {
   const empty = { completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, fileRate: 0, sources: [] as string[] };
@@ -515,7 +516,10 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
     if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
-    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name, paused: jobPaused(job) });
+    // Progress left over from an earlier run (planning figures on a job already copying) says nothing about what the job does now; without any, the job's phase decides.
+    const progress = job.progress && job.phase === 'copying' && job.progress.phase === 'planning' ? undefined : job.progress;
+    const stage = progress?.phase ?? (job.phase === 'verifying' ? 'planning' : job.phase === 'copying' ? 'copying' : undefined);
+    parts.push({ kind: tidy ? 'cleaning' : stage === 'planning' ? 'checking-files' : stage === 'verifying' ? 'verifying' : 'receiving', progress, eta: job.eta ?? progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
   if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
@@ -524,7 +528,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   const kind = destinationPriority.find(item => parts.some(part => part.kind === item));
   if (!kind) return { kind: 'idle', ...empty };
   const same = parts.filter(part => part.kind === kind);
-  const sum = { ...empty, sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
+  const layer = kind === 'checking-files' ? stepKind(same.find(part => part.progress)?.progress) : undefined;
+  const sum = { ...empty, ...(layer ? { layer } : {}), sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
   const etas: (number | undefined)[] = [];
   for (const { progress, eta } of same) {
     etas.push(eta);
@@ -540,8 +545,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
 function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
   const { t, formatNumber, formatBytes, language } = useTranslation();
-  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
-  const step = ({ receiving: 'copy', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
+  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), 'checking-files': t("Checking files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
+  const step = ({ receiving: 'copy', 'checking-files': activity.layer ?? 'read', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
   const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
   // Verifying sits over the finished copy layer, as in every other bar.
   const top = Math.min(1, Math.max(0, activity.fraction ?? 0)), layers: StageLayer[] = activity.kind === 'verifying' ? [{ kind: 'copy', fraction: 1 }, { kind: 'verify', fraction: top }] : step ? [{ kind: step as StepKind, fraction: top }] : [];
@@ -572,11 +577,50 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
       const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
         <SidebarDestinationStatus activity={destinationActivity(state, path)} />
-        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} /></li>;
+        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} />
+        <SidebarMigration state={state} path={path} act={act} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
   </section>;
 }
 
+/** What the conversion of earlier-version records is doing, in words. */
+function useMigrationStep() {
+  const { t } = useTranslation();
+  return (step: MigrationState['step']) => ({ looking: t("Looking for earlier records"), converting: t("Reading earlier records"), originals: t("Moving kept originals"), removing: t("Removing old record files"), receipts: t("Converting import records"), caches: t("Converting cached records"), cleanup: t("Tidying old record folders") })[step];
+}
+/** Pause or resume the conversion of earlier-version records (for this session). */
+function MigrationToggle({ paused, act, compact }: { paused: boolean; act?: Dispatch; compact?: boolean }) {
+  const { t } = useTranslation();
+  if (!act) return null;
+  const label = paused ? t("Resume conversion") : t("Pause conversion");
+  return <Button kind={compact ? 'quiet' : 'secondary'} icon={paused ? Play : Pause} data-testid="migration-toggle" aria-label={label} title={label} onClick={() => act({ type: paused ? 'resumeMigration' : 'pauseMigration' })}>{compact ? undefined : label}</Button>;
+}
+/** The destination row while its earlier records are converted (the step and a counter that moves), waiting for the
+ * drive to be idle, or paused; with the control that pauses or resumes it. */
+function SidebarMigration({ state, path, act }: { state: AppState; path: string; act?: Dispatch }) {
+  const { t, formatNumber } = useTranslation();
+  const stepName = useMigrationStep();
+  const migration = state.migration?.drive === path ? state.migration : undefined, waiting = state.migrationWaiting?.includes(path), paused = !!state.migrationPaused;
+  if (!migration && !waiting) return null;
+  let text: string;
+  if (migration) {
+    const step = stepName(migration.step);
+    text = migration.total > 0 ? t("{step} · {completed} of {total}", { step, completed: formatNumber(migration.completed), total: formatNumber(migration.total) }) : migration.completed > 0 ? `${step} · ${formatNumber(migration.completed)}` : step;
+  } else text = paused ? t("Conversion paused") : t("Earlier records are converted once the drive is idle");
+  return <div className="sidebar-migration-line" data-testid="sidebar-migration" {...(paused && !migration ? { 'data-paused': '' } : {})}><small className="sidebar-capacity-text sidebar-migration" title={migration ? `${t("Converting earlier records")} · ${text}` : text}>{text}</small><MigrationToggle paused={paused && !migration} act={act} compact /></div>;
+}
+/** Settings: the conversion while it runs (step, counter, file), and what it left as it was. */
+export function RecordsConversion({ state, act }: { state: AppState; act?: Dispatch }) {
+  const { t, formatNumber } = useTranslation();
+  const stepName = useMigrationStep();
+  const migration = state.migration, problems = Object.entries(state.migrationProblems ?? {});
+  return <div data-testid="records-conversion">
+    {(migration || state.migrationPaused || (state.migrationWaiting?.length ?? 0) > 0) && <div className="records-conversion-actions">{state.migrationPaused && <span className="settings-row-note">{t("Conversion is paused until you resume it or restart the app.")}</span>}<MigrationToggle paused={!!state.migrationPaused && !migration} act={act} /></div>}
+    {migration && <ProgressDisplay label={t("Records conversion progress")} testId="records-conversion-progress" heading={<span className="settings-row-note">{`${filename(migration.drive) || migration.drive} · ${stepName(migration.step)}`}</span>} fraction={migration.total > 0 ? migration.completed / migration.total : undefined} count={migration.total > 0 ? t("{completed} of {total}", { completed: formatNumber(migration.completed), total: formatNumber(migration.total) }) : migration.completed > 0 ? formatNumber(migration.completed) : undefined} file={migration.file || undefined} />}
+    {problems.map(([drive, list]) => <div key={drive} className="settings-row-note" data-testid="records-conversion-problems"><p>{t("{count} could not be converted and were left as they are:", { count: formatNumber(list.length) })} <span>{filename(drive) || drive}</span></p><ul>{list.slice(0, 20).map(item => <li key={item}>{item}</li>)}</ul></div>)}
+    <p className="settings-row-note">{t("Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.")}</p>
+  </div>;
+}
 function sourceInventories(state: AppState) {
   const sources = new Map(state.sources.map(source => [source.id, source]));
   for (const job of state.jobs) if (!job.organization && !sources.has(job.source.id)) sources.set(job.source.id, job.source);
@@ -663,7 +707,8 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
   }, [errors, hidden]);
   useEffect(() => { if (!fresh.length) return; const timer = window.setTimeout(dismiss, fresh.some(error => error.severity === 'error') ? 7000 : 4000); return () => window.clearTimeout(timer); }, [fresh]);
   // The toast lives in the top layer, above the page, the sidebar, the titlebar and any sheet already open.
-  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) node.showPopover(); });
+  // A View Transition draws above the top layer and takes every hit test, so one still running is finished first.
+  useLayoutEffect(() => { const node = toast.current; if (node && !node.matches(':popover-open')) { interfaceTransition?.skipTransition(); node.showPopover(); } });
   if (!fresh.length || hidden) return null;
   // Errors take the toast; warnings alone get a calmer one that dismisses itself sooner.
   const newErrors = fresh.filter(error => error.severity === 'error'), shown = newErrors.length ? newErrors : fresh, severity: Severity = newErrors.length ? 'error' : 'warning';
@@ -715,6 +760,8 @@ export function groupInfo(code: string, count: number, drive: string, t: Transla
     case 'copy-failed': return { title: one ? t("1 file could not be copied") : t("{count} files could not be copied", { count: n }), text: t("These files are not in the backup yet. Retry runs the job again.") };
     case 'file-skipped': return { title: one ? t("1 file was skipped because it failed") : t("{count} files were skipped because they failed", { count: n }), text: t("The other files were copied. Retry runs the job again, including these files.") };
     case 'appledouble-kept': return { title: one ? t("1 macOS ._ file was kept") : t("{count} macOS ._ files were kept", { count: n }), text: t("A ._ file may hold tags or comments, so it was left in place. Your photos are not affected.") };
+    case 'kept-no-metadata': return { title: one ? t("1 unknown file was left where it is") : t("{count} unknown files were left where they are", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.") };
+    case 'filed-no-metadata': return { title: one ? t("1 unknown file was filed in the unknown files folder") : t("{count} unknown files were filed in the unknown files folder", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.") };
     case 'appledouble-failed': return { title: one ? t("1 macOS ._ file or folder could not be checked") : t("{count} macOS ._ files or folders could not be checked", { count: n }), text: t("These were left as they are. Your photos are not affected.") };
     default: return { title: one ? t("1 issue needs attention") : t("{count} issues need attention", { count: n }) };
   }
@@ -893,10 +940,12 @@ export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Disp
   const files = (count: number) => count === 1 ? t("1 leftover file") : t("{count} leftover files", { count: formatNumber(count) });
   const status = residue?.checking ? t("Looking for leftover files…") : !residue?.checkedAt ? t("Not checked yet.") : residue.files ? `${files(residue.files)} · ${formatBytes(residue.bytes)}` : t("No leftover files.");
   return <div data-testid="residue-cleanup">
-    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
+    <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} title={busy ? t("Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.") : undefined} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
     {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
     {!!residue?.recoverable?.files && <p className="settings-row-note" data-testid="residue-recoverable">{t("{count} complete copies whose card file changed are kept: {folder}", { count: formatNumber(residue.recoverable.files), folder: residue.recoverable.folder ?? '' })}</p>}
+    {residue?.unbound?.paths.map(file => <p key={file} className="settings-row-note" data-testid="residue-unbound">{t("A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.", { path: file })} <Button disabled={busy || !!residue.checking} onClick={() => act({ type: 'removeReceipt', file })}>{t("Remove receipt")}</Button></p>)}
+    {!!residue?.unbound && residue.unbound.files > residue.unbound.paths.length && <p className="settings-row-note">{t("{count} more files have an old copy receipt. Clean up removes those receipts too; the files are kept.", { count: formatNumber(residue.unbound.files - residue.unbound.paths.length) })}</p>}
     {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
     <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
   </div>;
@@ -946,6 +995,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         </SettingsSection>
         <SettingsSection title={t("Performance")} icon={Gauge}><PerformanceSettings state={state} act={act} /></SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
+        <SettingsSection title={t("Files without metadata")} icon={FileQuestion}><NoMetadataSettings preferences={p} act={act} /></SettingsSection>
         <SettingsSection title={t("Other file rules")} icon={FileQuestion}><FileRules preferences={p} act={act} /></SettingsSection>
       </fieldset>
     </>,
@@ -960,6 +1010,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         <p className="settings-row-note">{p.autoOrganizeBackup === 'auto' ? t("Misplaced files are moved into place after each import.") : p.autoOrganizeBackup === 'off' ? t("Not checked automatically.") : t("Checked after each import. You choose when to move files.")}</p>
       </SettingsSection>
       <SettingsSection title={t("Leftover files")} icon={Trash2}><LeftoverFiles state={state} act={act} busy={busy} /></SettingsSection>
+      {(state.migration || state.migrationPaused || (state.migrationWaiting?.length ?? 0) > 0 || Object.keys(state.migrationProblems ?? {}).length > 0) && <SettingsSection title={t("Records from the earlier version")} icon={RefreshCw}><RecordsConversion state={state} act={act} /></SettingsSection>}
     </>,
     drives: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /></>,
     general: <>
@@ -1105,6 +1156,26 @@ export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }:
     {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
     {detail}<p className="recovery-root">{root}</p>
   </ConfirmSheet>;
+}
+
+// What to do with files that have no capture date, no camera and no known origin, or unreadable metadata.
+export function NoMetadataSettings({ preferences: p, act }: { preferences: Preferences; act: Dispatch }) {
+  const { t } = useTranslation();
+  const current = p.noMetadataHandling ?? 'keep', folder = p.noMetadataFolder ?? 'Unknown files';
+  const [draft, setDraft] = useState(folder);
+  useEffect(() => setDraft(folder), [folder]);
+  const choices: { value: NonNullable<Preferences['noMetadataHandling']>; label: string; detail: string }[] = [
+    { value: 'keep', label: t("Leave where they are"), detail: t("Not moved or copied, and Delete originals never removes them. You are warned before a job starts.") },
+    { value: 'folder', label: t("Move to a folder"), detail: t("Organized or copied into one folder directly under your library, keeping their subfolders.") },
+    { value: 'fileDate', label: t("Use file date"), detail: t("Filed by the file's modified date, in a camera folder with the folder name below.") },
+  ];
+  const valid = validNoMetadataFolder(draft, [p.editedFolder ?? '', p.basePath, p.videoBasePath ?? '']);
+  return <div className="backup-mode" data-testid="no-metadata-settings">
+    <span className="field-label">{t("Files with unknown metadata")}</span>
+    <div className="segmented" role="group" aria-label={t("Files with unknown metadata")}>{choices.map(choice => <button key={choice.value} type="button" aria-pressed={current === choice.value} onClick={() => act({ type: 'preferences', patch: { noMetadataHandling: choice.value } })}>{choice.label}</button>)}</div>
+    <p className="settings-explanation">{choices.find(choice => choice.value === current)!.detail}</p>
+    <div className="settings-row"><label htmlFor="settings-no-metadata-folder">{t("Unknown files folder name")}</label><input id="settings-no-metadata-folder" value={draft} aria-invalid={!valid} onChange={event => setDraft(event.target.value)} onBlur={() => { if (valid && draft !== folder) act({ type: 'preferences', patch: { noMetadataFolder: draft } }); }} />{!valid && <p className="settings-explanation field-error" role="alert" data-testid="no-metadata-folder-error">{t("Use one folder name: no slashes or special characters, not a date or year, and not a folder the app uses. The saved name stays in use until this is fixed.")}</p>}</div>
+  </div>;
 }
 
 function UnknownDefaultControl({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
@@ -1287,14 +1358,36 @@ function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
   const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
   return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
 }
+/** Which stage of a plan's bar a step of the time-left model belongs to: for an import everything before copying is the first stage, then copying, then verifying and publishing. */
+function stageOfStep(plan: StagePlan, step: string): number {
+  const last = plan.kinds.length - 1;
+  const kind: StepKind | undefined = step === 'copying' ? 'copy' : /^(verifying|publish)/.test(step) ? 'verify' : stepKind({ step } as Pick<Progress, 'phase' | 'step' | 'renames'>);
+  if (plan.kinds !== organizationKinds) return kind === 'copy' ? Math.min(1, last) : kind === 'verify' ? last : 0;
+  const at = kind ? plan.kinds.indexOf(kind) : -1;
+  return at < 0 ? 0 : at;
+}
+/** The share of the whole job done once stage `stage` and those before it are counted (what the model's steps up to it have done), from the job's cumulative step shares. */
+function shareThrough(job: Job, plan: StagePlan, stage: number): number {
+  let share = 0;
+  for (const item of job.stageShares ?? []) if (stageOfStep(plan, item.step) <= stage) share = Math.max(share, item.share);
+  return share;
+}
+/** A running job's layers drawn by cost: layer i reaches as far as everything up to its stage has done of the whole job, so the bar's length is the percent shown
+ * (a finished stage stays as a full-colour segment and the next colour grows over it). Undefined when the job has no step shares yet. */
+function costLayers(job: Job, plan: StagePlan): StageLayer[] | undefined {
+  if (!job.stageShares?.length || plan.finished || job.fraction === undefined) return undefined;
+  const top = Math.min(1, Math.max(0, job.fraction));
+  return plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? Math.min(top, shareThrough(job, plan, index)) : top }));
+}
 const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
-/** A job's bar: one layer per stage up to the one it is on; the passed stages are full, the current one is as far as it is. */
+/** A job's bar: one layer per stage up to the one it is on, each as far as the job's cost done through that stage (the bar is as long as the percent). */
 export function jobStageLayers(job: Job, verify = true): StageLayer[] {
   const plan = stagePlan(job, verify);
-  return plan ? layersOfPlan(plan) : [];
+  return plan ? costLayers(job, plan) ?? layersOfPlan(plan) : [];
 }
 /** The total bar: the layers of the least advanced job, so the top color is the stage that still holds the whole back. Jobs already past that
- * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color. */
+ * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color.
+ * When every job reports its cost, each layer is the cost done through its stage over all jobs' cost, so the bar is as long as the percent. */
 export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const plans = jobs.flatMap(job => { const plan = stagePlan(job, verify); return plan ? [{ job, plan }] : []; });
   if (!plans.length) return [];
@@ -1302,6 +1395,11 @@ export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const open = plans.filter(item => !item.plan.finished);
   if (!open.length) return layersOfPlan(plans.reduce((best, item) => rank(item.plan) > rank(best.plan) ? item : best).plan);
   const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best), floor = rank(least.plan);
+  const comparable = plans.every(({ job, plan }) => job.cost && job.cost.total > 0 && (plan.finished || job.stageShares?.length) && (plan.kinds === organizationKinds) === (least.plan.kinds === organizationKinds) && plan.kinds.length === least.plan.kinds.length);
+  if (comparable) {
+    const weight = plans.reduce((sum, { job }) => sum + job.cost!.total, 0);
+    return least.plan.kinds.slice(0, least.plan.index + 1).map((kind, index) => ({ kind, fraction: Math.min(1, plans.reduce((sum, { job, plan }) => sum + job.cost!.total * (plan.finished ? 1 : shareThrough(job, plan, index)), 0) / weight) }));
+  }
   const weights = plans.map(({ job, plan }) => ({ fraction: rank(plan) > floor || plan.finished ? 1 : plan.fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }));
   const top = weights.reduce((sum, item) => sum + item.fraction * item.weight, 0) / weights.reduce((sum, item) => sum + item.weight, 0);
   return layersOfPlan(least.plan, top);
@@ -1528,7 +1626,7 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   const { t } = useTranslation();
   return <article data-source-id={job.source.id} data-testid="organization-card" className={`source-row organization-card ${job.phase === 'error' ? 'source-error' : ''}`}>
     <div className="source-row-top"><div className="source-device"><Icon icon={FolderCog} size={21} /></div><div className="source-identity"><h3 title={organizationPlace(job, true)}>{t("Library organization")}</h3><span className={`source-status ${job.phase}`}><span key={organizationStatus(job, t)} className="source-status-text">{organizationStatus(job, t)}</span></span></div></div>
-    <p className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job, true)}<RevealButton path={job.source.path} act={act} /></p>
+    <p className="progress-job-place progress-job-place-action" title={organizationPlace(job, true)}><span>{organizationPlace(job, true)}</span><RevealButton path={job.source.path} act={act} /></p>
     <OrganizationProgress job={job} act={act} />
     <SkipFileNotice job={job} act={act} />
   </article>;
@@ -1572,8 +1670,8 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
   if (!job.verifiedOriginals && !done) return null;
   return <div className="source-choice" data-testid="delete-originals">
     <p><Icon icon={Info} size={14} />{t("Import: copy, source untouched")}</p>
-    {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept) })}</p>}
-    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
+    {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept), folders: formatNumber(done.folders ?? 0) })}</p>}
+    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{job.deletingOriginals.folders ? t("Removing empty folders: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.folders.completed), total: formatNumber(job.deletingOriginals.folders.total) }) : t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
     {!!job.verifiedOriginals && <div className="rule-actions"><Button kind="danger" icon={Trash2} data-testid="delete-originals-button" disabled={busy || !!job.deletingOriginals} title={t("Deletes only source files verified in the backup")} onClick={() => choose('open')}>{t("Delete originals already in the backup")}</Button></div>}
     {step !== 'closed' && <OriginalsConfirm key={step} step={step} name={job.source.name} size={measured} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
@@ -1649,8 +1747,9 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
@@ -1677,13 +1776,16 @@ function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queu
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
     {reviewing && !active && !queued && <OperationProgress progress={reviewProgress} label={t("Review progress")} testId="source-review-progress" className="progress-in-card" />}
-    <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+    <div className="source-step-row" data-testid="source-step-row">
+      <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
+      <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
+    </div>
     {job?.space && !already && (job.phase === 'queued' || activePhases.includes(job.phase)) && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
-    <details className="source-disclosure">
-      <summary aria-label={t("Drive details")}><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></summary>
+    <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+      <summary aria-hidden="true"><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={capacity?.total ?? source.total} free={capacity?.free ?? source.free} driveName={capacity?.drive} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div></summary>
       <div className="source-expanded-details">
         <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
@@ -1895,7 +1997,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.converting ? t("Converting from the earlier version") : job.missingRoot ? t("Library folder not found") : job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && !job.converting && !job.missingRoot && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
     </div>
 
   </div>;
@@ -2016,6 +2118,43 @@ export function MirrorRemovals({ review }: { review: NonNullable<AppState['revie
   </section>;
 }
 
+/** Rows of a long list drawn only where they are scrolled to, so thousands of files cost a screenful. */
+export function VirtualList<T>({ items, render, rowHeight = 28, height = 224, label }: { items: readonly T[]; render: (item: T) => ReactNode; rowHeight?: number; height?: number; label: string }) {
+  const [top, setTop] = useState(0);
+  const start = Math.max(0, Math.floor(top / rowHeight) - 4), end = Math.min(items.length, Math.ceil((top + height) / rowHeight) + 4);
+  return <div className="virtual-list" role="list" aria-label={label} style={{ height: Math.min(height, items.length * rowHeight) }} onScroll={event => setTop(event.currentTarget.scrollTop)}>
+    <div style={{ height: items.length * rowHeight, position: 'relative' }}>{items.slice(start, end).map((item, offset) => <div role="listitem" key={start + offset} className="virtual-row" style={{ top: (start + offset) * rowHeight, height: rowHeight }}>{render(item)}</div>)}</div>
+  </div>;
+}
+
+/** The warning before a job that leaves or files apart unknown files (no date, no camera, or unreadable). Nothing starts until Continue. */
+export function NoMetadataNotice({ review, act, busy = false, defaultOpen = false }: { review: Pick<NonNullable<AppState['review']>, 'kind' | 'source' | 'noMetadata' | 'destinationIndex' | 'collectProblemFiles'>; act: Dispatch; busy?: boolean; defaultOpen?: boolean }) {
+  const { t, formatNumber } = useTranslation();
+  const [listing, setListing] = useState(defaultOpen);
+  const found = review.noMetadata;
+  if (!found) return null;
+  const organizing = review.kind === 'reorganize', count = formatNumber(found.count);
+  const headline = found.handling === 'keep'
+    ? organizing ? t("{count} unknown files will be left where they are.", { count }) : t("{count} unknown files will not be copied; they stay on the source.", { count })
+    : organizing ? t("{count} unknown files will be moved to {folder}.", { count, folder: found.folder }) : t("{count} unknown files will be copied to {folder}.", { count, folder: found.folder });
+  const reasons = [
+    found.counts.noDate > 0 && t("{count} without a date", { count: formatNumber(found.counts.noDate) }),
+    found.counts.noCamera > 0 && t("{count} without a camera", { count: formatNumber(found.counts.noCamera) }),
+    found.counts.unreadable > 0 && t("{count} unreadable", { count: formatNumber(found.counts.unreadable) }),
+  ].filter(Boolean).join(', ');
+  const reasonName = (reason: 'noDate' | 'noCamera' | 'unreadable') => reason === 'noDate' ? t("No capture date") : reason === 'noCamera' ? t("No camera") : t("Could not be read");
+  const useFileDate = () => act({ type: 'reviewFileDate' });
+  return <section className="no-metadata-notice" role="alert" data-testid="no-metadata-notice">
+    <div className="no-metadata-heading"><Icon icon={CircleAlert} size={18} /><div><strong>{headline}</strong><p>{reasons}</p><p>{t("They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you continue.")}</p></div></div>
+    <div className="no-metadata-actions">
+      <Button onClick={() => setListing(open => !open)} aria-expanded={listing}>{listing ? t("Hide files") : t("Show files")}</Button>
+      <Button disabled={busy} onClick={useFileDate}>{t("Use file date instead")}</Button>
+      <Button kind="primary" disabled={busy} onClick={() => act({ type: 'applyReview' })}>{t("Continue")}</Button>
+    </div>
+    {listing && <div data-testid="no-metadata-files"><VirtualList label={t("Unknown files")} items={found.files} render={item => <><span className="virtual-name" title={item.relative}>{item.relative}</span><span className="virtual-reason">{reasonName(item.reason)}</span></>} />{found.count > found.files.length && <p>{t("and {count} more", { count: formatNumber(found.count - found.files.length) })}</p>}</div>}
+  </section>;
+}
+
 export function ProblemFilesReview({ review, act, busy = false }: { review: Pick<NonNullable<AppState['review']>, 'kind' | 'problems' | 'collectProblemFiles' | 'destinationIndex'>; act: Dispatch; busy?: boolean }) {
   const { t, formatNumber } = useTranslation();
   const problems = review.problems ?? [];
@@ -2057,5 +2196,5 @@ export function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dis
   const pageSize = 100;
   const lastPage = Math.max(0, Math.ceil(visible.length / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
-  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p><p className="review-mode" data-testid="review-mode"><strong>{review.kind === 'reorganize' ? t("Organize: move, source removed") : t("Import: copy, source untouched")}</strong>{review.kind === 'reorganize' && review.options && <> · {review.options.removeEmptyFolders ? t("Emptied source folders are removed") : t("Emptied source folders are kept")} · {review.options.releaseDuplicates ? t("Confirmed duplicates are released") : t("Confirmed duplicates are kept for undo")}</>}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div>{review.kind === 'import' && driveContext(review.source, state.sources, state.destinationStatus)?.onDestination && <SameDriveNotice sourceId={review.source.id} act={act} />}<div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><ProblemFilesReview review={review} act={act} busy={!!state.busyReview} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
+  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t("{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p><p className="review-mode" data-testid="review-mode"><strong>{review.kind === 'reorganize' ? t("Organize: move, source removed") : t("Import: copy, source untouched")}</strong>{review.kind === 'reorganize' && review.options && <> · {review.options.removeEmptyFolders ? t("Emptied source folders are removed") : t("Emptied source folders are kept")} · {review.options.releaseDuplicates ? t("Confirmed duplicates are released") : t("Confirmed duplicates are kept for undo")}</>}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div>{review.kind === 'import' && driveContext(review.source, state.sources, state.destinationStatus)?.onDestination && <SameDriveNotice sourceId={review.source.id} act={act} />}<div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><NoMetadataNotice review={review} act={act} busy={!!state.busyReview || state.jobs.some(job => ['discovering', 'verifying', 'copying'].includes(job.phase))} /><ProblemFilesReview review={review} act={act} busy={!!state.busyReview} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
 }

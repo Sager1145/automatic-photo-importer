@@ -7,6 +7,8 @@ import {plan} from '../core/index';
 import {executeDestinations} from '../core/destinations';
 import {requiredTransferSpace} from '../core/allocation';
 import type {Progress} from '../shared';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-destinations-')));

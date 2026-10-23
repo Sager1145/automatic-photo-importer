@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {createHmac} from 'node:crypto';
 import * as core from '../core/index';
+import {journalLines,resealJournalLine} from './fixtures/records';
 
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
@@ -14,19 +14,13 @@ const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 /** What a journal looks like after the drive is mounted again: macOS gives the volume a new
  * device number, so every recorded dev:ino and stat.dev carries the old one. */
 async function remount(root:string,id:string,dev:string,manifestToo=true){
- const job=path.join(root,'Photo Importer Recovery',id);
- const seal=(value:Record<string,unknown>)=>{delete value.seal;value.seal=createHmac('sha256',Buffer.from(secret,'utf8')).update(JSON.stringify(value)).digest('hex');return value;};
  const swap=(identity:string)=>identity.replace(/^\d+:/,`${dev}:`);
- const event=(value:Record<string,unknown>)=>{const stat=value.stat as {dev?:string}|undefined;if(stat?.dev)stat.dev=dev;return seal(value);};
- const manifest=JSON.parse(await fs.readFile(path.join(job,'manifest.json'),'utf8'));
- if(manifestToo){manifest.rootIdentity=swap(manifest.rootIdentity);manifest.sourceIdentity=swap(manifest.sourceIdentity);
- for(const entry of manifest.entries){entry.stat.dev=dev;for(const folder of Object.keys(entry.parents))entry.parents[folder]=swap(entry.parents[folder]);}
- await fs.writeFile(path.join(job,'manifest.json'),JSON.stringify(seal(manifest)));}
- for(const name of await fs.readdir(job)){
-  const file=path.join(job,name);
-  if(name==='event-log.jsonl')await fs.writeFile(file,(await fs.readFile(file,'utf8')).split('\n').map(line=>line?JSON.stringify(event(JSON.parse(line))):line).join('\n'));
-  else if(/^event-.*\.json$/.test(name))await fs.writeFile(file,JSON.stringify(event(JSON.parse(await fs.readFile(file,'utf8')))));
+ if(manifestToo){
+  await resealJournalLine(root,id,0,header=>{header.rootIdentity=swap(header.rootIdentity);header.sourceIdentity=swap(header.sourceIdentity);return header;});
+  await resealJournalLine(root,id,1,list=>{for(const entry of list.entries){entry.stat.dev=dev;for(const folder of Object.keys(entry.parents))entry.parents[folder]=swap(entry.parents[folder]);}return list;});
  }
+ const count=(await journalLines(root,id)).length;
+ for(let index=2;index<count;index++)await resealJournalLine(root,id,index,value=>{if(value.stat?.dev)value.stat.dev=dev;return value;});
 }
 
 for(const [strategy,manifestToo] of [['copy',true],['rename',true],['copy',false],['rename',false]] as const)
@@ -49,11 +43,8 @@ test('a journal for a different directory is still refused after a remount',asyn
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'recovery-remount-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original),{recursive:true});await fs.writeFile(original,'precious original');
  const p=(await core.plan(root,[root],options,metadata)).plans[0]!;await core.executeReorganization(p);
- const [job]=await core.getOrganizationRecovery(root),manifestFile=path.join(root,'Photo Importer Recovery',job!.id,'manifest.json');
- const manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'));
+ const [job]=await core.getOrganizationRecovery(root);
  // Another folder's inode under the old device number: not this directory, whatever the mount.
- manifest.rootIdentity=manifest.rootIdentity.replace(/:\d+$/,':1');delete manifest.seal;
- manifest.seal=createHmac('sha256',Buffer.from(secret,'utf8')).update(JSON.stringify(manifest)).digest('hex');
- await fs.writeFile(manifestFile,JSON.stringify(manifest));
+ await resealJournalLine(root,job!.id,0,header=>{header.rootIdentity=header.rootIdentity.replace(/:\d+$/,':1');return header;});
  const [after]=await core.getOrganizationRecovery(root);assert.match(after?.error??'',/identity changed/i);
 });

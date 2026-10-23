@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {plan,execute} from '../core/index';
-import {dropDestinationIndexes} from '../core/destination-index';
+import {plan,execute,configureOrganizationRecovery} from '../core/index';
+import {dropDestinationIndexes,indexTarget} from '../core/destination-index';
 import type {PlanProgress} from '../core/index';
 
 // "Everything must update": the phases of planning that used to report nothing now count their own work.
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>{throw new Error('Backup must not read metadata');};
 type Call={count:number;file:string;detail?:Parameters<PlanProgress>[2]};
@@ -46,7 +47,7 @@ test('a drive backup also counts the comparison of the backup with the drive',as
 test('loading a destination index reports the bytes read, up to its size',async t=>{
  const {source,root}=await fixture(t,40);
  await execute((await plan(source,[root],{...base},noMetadata)).plans[0]!);
- await t.test('index file exists',async()=>assert.ok((await fs.readdir(root)).some(name=>name.startsWith('photo-importer-index'))));
+ await t.test('index file exists',async()=>assert.ok((await fs.lstat(await indexTarget(root,'index.json'))).isFile()));
  dropDestinationIndexes();
  const calls:Call[]=[];
  await plan(source,[root],{...base},noMetadata,undefined,record(calls));

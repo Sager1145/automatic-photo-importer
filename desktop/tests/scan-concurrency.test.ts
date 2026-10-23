@@ -17,6 +17,6 @@ test('the duplicate scan keeps as many metadata reads in flight as the plan chec
   let active = 0, peak = 0;
   const metadata = async (): Promise<Metadata> => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 20)); active--; return { fields: {} }; };
   await scanDuplicates(root, { metadata, index: await destinationIndex(root, await identity(root)) });
-  assert.equal(CHECK_CONCURRENCY, 32);
+  assert.equal(CHECK_CONCURRENCY, 80);
   assert.equal(peak, CHECK_CONCURRENCY);
 });

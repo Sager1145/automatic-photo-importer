@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import crypto from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import * as core from '../core/index';
 import type {Metadata} from '../shared';
+import {appendJournalLine,journalFileFor,journalFolderFor} from './fixtures/records';
 
 // A finished journal's events are read once per app session: a large journal from an earlier
 // version (tens of thousands of event files on a USB drive) would otherwise be read again by every
 // listing and before every organization. Only a finished, unchanged journal is cached.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 // These tests are about the read cache; the listing's automatic conversion (auto-conversion.test.ts) would empty the per-event files they set up.
-core.setConversionGate(()=>false);
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
 const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 
@@ -27,16 +27,23 @@ async function library(t:test.TestContext,{stop=false}:{stop?:boolean}={}){
  const run=core.executeReorganization(plan,stop?controller.signal:undefined,stop?value=>{if(value.step==='moving'&&value.completed>=1)controller.abort();}:undefined,{strategy:'rename'});
  if(stop)await assert.rejects(run,{name:'AbortError'});else assert.deepEqual((await run).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
- const log=path.join(photos,'Photo Importer Recovery',journal!.id,'event-log.jsonl');
+ const log=await journalFileFor(photos,journal!.id);
  return {drive,photos,id:journal!.id,log};
+}
+/** Damage the last signed line without changing the file's size or modified time: only a read of the journal notices. */
+async function corruptQuietly(log:string){
+ const reference=log+'.reference';await fs.copyFile(log,reference);execFileSync('touch',['-r',log,reference]);
+ const text=await fs.readFile(log,'utf8'),at=text.lastIndexOf('"seal":"')+8;
+ await fs.writeFile(log,text.slice(0,at)+(text[at]==='0'?'1':'0')+text.slice(at+1));
+ execFileSync('touch',['-r',reference,log]);await fs.rm(reference);
 }
 const listed=async(root:string,id:string)=>(await core.getOrganizationRecovery(root,{verifyContents:false})).find(job=>job.id===id);
 
 test('a finished, unchanged journal is not read again',async t=>{
  const {photos,id,log}=await library(t);
  assert.equal((await listed(photos,id))?.status,'complete');
- // Unreadable now, yet unchanged: the cached finished state is used.
- await fs.chmod(log,0o000);t.after(()=>fs.chmod(log,0o600).catch(()=>{}));
+ // Damaged now, yet unchanged in size and date: the cached finished state is used.
+ await corruptQuietly(log);
  const again=await listed(photos,id);
  assert.equal(again?.status,'complete');assert.equal(again?.error,undefined);
 });
@@ -52,9 +59,9 @@ test('a new event invalidates the cached state',async t=>{
 test('an unfinished journal is never cached',async t=>{
  const {photos,id,log}=await library(t,{stop:true});
  assert.equal((await listed(photos,id))?.status,'pending');
- await fs.chmod(log,0o000);t.after(()=>fs.chmod(log,0o600).catch(()=>{}));
+ await corruptQuietly(log);
  const again=await listed(photos,id);
- assert.ok(again?.error,'read again, and the unreadable log is reported');
+ assert.ok(again?.error,'read again, and the damaged log is reported');
 });
 
 test('replacing the event log with different contents of another size invalidates the cache',async t=>{
@@ -66,11 +73,11 @@ test('replacing the event log with different contents of another size invalidate
  assert.equal((await listed(photos,id))?.status,'pending');
 });
 
-test('an event file added in the older one-file-per-event format invalidates the cached state',async t=>{
+test('an unsigned event line appended to the journal invalidates the cached state',async t=>{
  const {photos,id}=await library(t);
  assert.equal((await listed(photos,id))?.status,'complete');
  // Not signed by this host: once read, it is refused, which shows the journal was read again.
- await fs.writeFile(path.join(photos,'Photo Importer Recovery',id,'event-00000000-0000-4000-8000-000000000000.json'),JSON.stringify({id,event:'undone',index:0}));
+ await appendJournalLine(photos,id,JSON.stringify({v:5,kind:'event',id,event:'undone',index:0}));
  assert.match((await listed(photos,id))?.error??'',/authentication/);
 });
 
@@ -84,7 +91,7 @@ async function copied(t:test.TestContext){
  const plan=(await core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata)).plans[0]!;
  assert.deepEqual((await core.executeReorganization(plan,undefined,undefined,{strategy:'copy'})).errors,[]);
  const [journal]=await core.getOrganizationRecovery(photos);
- return {drive,photos,id:journal!.id,folder:path.join(photos,'Photo Importer Recovery',journal!.id)};
+ return {drive,photos,id:journal!.id,folder:await journalFolderFor(photos,journal!.id)};
 }
 
 test('events the app appends are applied on top of the cached state',async t=>{
@@ -95,23 +102,12 @@ test('events the app appends are applied on top of the cached state',async t=>{
  assert.equal(after?.retainedFiles,0);assert.equal(after?.status,'complete');
 });
 
-test('a per-event file removed without its record in the log means the journal is read in full',async t=>{
- const {photos,id,folder}=await copied(t);
- const log=path.join(folder,'event-log.jsonl'),lines=(await fs.readFile(log,'utf8')).split('\n').filter(Boolean);
- for(const line of lines)await fs.writeFile(path.join(folder,`event-${randomUUIDish()}.json`),line);await fs.rm(log);
- assert.equal((await listed(photos,id))?.status,'complete');
- const complete=(await fs.readdir(folder)).find(name=>name.startsWith('event-')&&lines.some(line=>line.includes('"event":"complete"')));
- for(const name of (await fs.readdir(folder)).filter(name=>name.startsWith('event-')))if((await fs.readFile(path.join(folder,name),'utf8')).includes('"event":"complete"'))await fs.rm(path.join(folder,name));
- assert.ok(complete);
- assert.equal((await listed(photos,id))?.status,'pending');
-});
-
 test('a journal folder replaced by a copy is read in full',async t=>{
  const {photos,id,folder}=await copied(t);
  assert.equal((await listed(photos,id))?.status,'complete');
  await fs.cp(folder,folder+'-copy',{recursive:true});await fs.rm(folder,{recursive:true});await fs.rename(folder+'-copy',folder);
- const log=path.join(folder,'event-log.jsonl');await fs.chmod(log,0o000);t.after(()=>fs.chmod(log,0o600).catch(()=>{}));
- assert.ok((await listed(photos,id))?.error,'read again: the unreadable log is reported');
+ await corruptQuietly(path.join(folder,'journal.jsonl'));
+ assert.ok((await listed(photos,id))?.error,'read again: the damaged log is reported');
 });
 
 test('a second recheck does not read unchanged files again, a full recheck does, and a changed file is caught',async t=>{
@@ -125,7 +121,6 @@ test('a second recheck does not read unchanged files again, a full recheck does,
  const target=path.join(photos,'2026/202610/Sony A7/BIG.MOV');await fs.writeFile(target,Buffer.alloc(160*1024*1024,8));
  assert.match((await recheck()).errors.join(' '),/Destination changed/);
 });
-function randomUUIDish(){return crypto.randomUUID();}
 
 test('after a quick recheck, finalize still reads file contents before releasing anything',async t=>{
  const {photos,id}=await copied(t);

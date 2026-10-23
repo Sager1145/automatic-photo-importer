@@ -112,7 +112,8 @@ async function exfat(t:test.TestContext):Promise<string|undefined> {
   return mount;
 }
 // Only those beside files: macOS also makes one for each folder, which this feature does not touch.
-const sidecars=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).filter(name=>/^\._.*\.[A-Za-z0-9]+$/.test(path.basename(name))).sort();
+// The app's own data folder is left out: its records are not media and the sweep does not look there.
+const sidecars=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).filter(name=>!name.split(path.sep).includes('Photo Importer Data')&&/^\._.*\.[A-Za-z0-9]+$/.test(path.basename(name))).sort();
 async function card(t:test.TestContext){
   const source=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'appledouble-card-')));
   t.after(()=>fs.rm(source,{recursive:true,force:true}));
@@ -170,7 +171,7 @@ test('an orphan present before an import stays; organization removes moved-file 
   const review=(await plan(library,[library],{...importOptions,reorganize:true},metadata)).plans[0]!;
   const result=await executeReorganization(review,undefined,undefined,{strategy:'rename',removeAppleDouble:true});
   assert.deepEqual(result.errors,[]);
-  assert.deepEqual((await sidecars(library)).filter(name=>!name.startsWith('Photo Importer Recovery')).map(name=>path.basename(name)).filter(name=>name!=='._notes.txt'),['._TAGGED.JPG']);
+  assert.deepEqual((await sidecars(library)).map(name=>path.basename(name)).filter(name=>name!=='._notes.txt'),['._TAGGED.JPG']);
   assert.ok(result.appleDouble!.orphans>=1&&result.appleDouble!.removed>=1);
 });
 

@@ -43,7 +43,7 @@ function simulateExfat(t:test.TestContext,drive:string){
 
 const organizing={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const sony=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
-const recovery=(file:string)=>file.includes(`${path.sep}Photo Importer Recovery${path.sep}`);
+const recovery=(file:string)=>file.includes(`${path.sep}Photo Importer Data${path.sep}Organizations${path.sep}`);
 
 // The copy streams and hashes the source once, the stage is read back once, and the hard link publishes that
 // verified inode: neither the published name nor the original set aside is read again.
@@ -86,7 +86,7 @@ async function organized(t:test.TestContext,name:string){
  await photo(original,data);
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
  assert.deepEqual((await core.executeReorganization(transfer!)).errors,[]);
- const [id]=(await fs.readdir(path.join(root,'Photo Importer Recovery'))).filter(name=>/^[0-9a-f-]{36}$/.test(name));
+ const id=(await core.getOrganizationRecovery(root))[0]?.id;
  const role=(file:string)=>file===original?'source':file===transfer!.entries[0]!.destination?'destination':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined;
  return {root,id:id!,original,data,destination:transfer!.entries[0]!.destination,role};
 }
@@ -221,7 +221,8 @@ test('on exFAT the destination is still read twice per job that skips it',async 
  const base=await folder(t,'verify-once-exfat-'),card=path.join(base,'card'),drive=path.join(base,'exfat'),source=path.join(card,'A.bin');
  await photo(source,Buffer.alloc(SIZE,4));await fs.mkdir(drive);
  simulateExfat(t,drive);
- const reads=countReads(t,file=>file.startsWith(drive+path.sep)&&!file.endsWith('.partial')?'destination':undefined);
+ // The app's own records (Photo Importer Data: receipts, index) are not the destination file.
+ const reads=countReads(t,file=>file.startsWith(drive+path.sep)&&!file.endsWith('.partial')&&!file.includes(`${path.sep}Photo Importer Data${path.sep}`)?'destination':undefined);
  const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const job=async()=>{const before=reads.files().destination??0;const {plans:[transfer]}=await core.plan(card,[drive],options,none);return {result:await core.execute(transfer!,undefined,undefined,{exclusiveCopy:true}),reads:(reads.files().destination??0)-before};};
  assert.equal((await job()).result.copied,1);

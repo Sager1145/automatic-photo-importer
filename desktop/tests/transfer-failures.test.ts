@@ -7,8 +7,11 @@ import os from 'node:os';
 import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
 import {plan,execute} from '../core';
-/** Directory listing without the destination checksum index, which every copy may refresh. */
-const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
+import {configureOrganizationRecovery} from '../core/index';
+import {openReceiptsFor,stagingFor} from './fixtures/receipts';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+/** Directory listing without the app's own data folder (the store, whose staging and receipts are checked separately). */
+const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>name!=='Photo Importer Data'&&!name.startsWith('photo-importer-index'));
 
 
 const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -32,14 +35,17 @@ function handles(t:test.TestContext,configure:(file:string,flags:unknown,handle:
  syncBuiltinESMExports();
  const restore=()=>{t.mock.restoreAll();syncBuiltinESMExports();};t.after(restore);return restore;
 }
-function writing(file:string,flags:unknown,root:string){return file.startsWith(root+path.sep)&&typeof flags==='string'&&flags.includes('w');}
+/** A file the copy itself writes: media or a staged copy, not the store's other records. */
+function writing(file:string,flags:unknown,root:string){const store=path.join(root,'Photo Importer Data')+path.sep;return file.startsWith(root+path.sep)&&(!file.startsWith(store)||file.startsWith(path.join(store,'Imports','Staging')+path.sep))&&typeof flags==='string'&&flags.includes('w');}
+/** Nothing is left staged and no receipt is open: a failed copy cleans up after itself. */
+async function settled(root:string){assert.deepEqual(await fs.readdir(await stagingFor(root)),[]);assert.equal((await openReceiptsFor(root)).size,0);}
 
 for(const code of ['EIO','ENODEV','EACCES'])test(`source ${code} after streaming starts preserves originals and permits a clean retry`,async t=>{
  const f=await fixture(t),prepared=await f.prepare();let streamed=0,injected=false;
  const restore=handles(t,(file,_flags,handle)=>{if(file!==f.original)return;const read=handle.read.bind(handle);t.mock.method(handle,'read',async(...args:Parameters<typeof handle.read>)=>{if(streamed>0&&!injected){injected=true;throw fault(code);}return read(...args);});});
  const result=await execute(prepared,undefined,progress=>{streamed=progress.bytes;});restore();
  assert.equal(injected,true);assert.ok(streamed>0);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],new RegExp(code));
- await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await f.retry();
+ await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.retry();
 });
 
 for(const code of ['ENOSPC','EIO','ENODEV','EACCES'])test(`destination ${code} mid-write never publishes an incomplete file or changes existing files`,async t=>{
@@ -47,7 +53,7 @@ for(const code of ['ENOSPC','EIO','ENODEV','EACCES'])test(`destination ${code} m
  const restore=handles(t,(file,flags,handle)=>{if(!writing(file,flags,f.root))return;const write=handle.write.bind(handle);t.mock.method(handle,'write',async(buffer:Buffer,offset:number,length:number,position:number|null)=>{if(written>0&&!injected){injected=true;throw fault(code);}const result=await write(buffer,offset,length,position);written+=result.bytesWritten;return result;});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.ok(written>0);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],new RegExp(code));
- await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await f.retry();
+ await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.retry();
 });
 
 test('a destination fsync failure preserves originals, reports failure and can be retried',async t=>{
@@ -55,15 +61,15 @@ test('a destination fsync failure preserves originals, reports failure and can b
  const restore=handles(t,(file,flags,handle)=>{if(!writing(file,flags,f.root))return;const sync=handle.sync.bind(handle);t.mock.method(handle,'sync',async()=>{if(!injected){injected=true;throw fault('EIO');}return sync();});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/EIO/);
- await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await f.retry();
+ await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.retry();
 });
 
 test('corrupted staged destination bytes are detected before publication and remain retryable',async t=>{
  const f=await fixture(t),prepared=await f.prepare();let injected=false;
- const restore=handles(t,(file,flags,handle)=>{if(!writing(file,flags,f.root))return;const sync=handle.sync.bind(handle),write=handle.write.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();if(!injected){injected=true;await write(Buffer.from([66]),0,1,0);}});});
+ const restore=handles(t,(file,flags,handle)=>{if(!writing(file,flags,f.root))return;const sync=handle.sync.bind(handle),write=handle.write.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();if(!injected&&(await handle.stat()).size===f.data.length){injected=true;await write(Buffer.from([66]),0,1,0);}});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/verification failed/i);
- await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await f.retry();
+ await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.retry();
 });
 
 test('short filesystem writes are completed without losing or duplicating bytes',async t=>{
@@ -78,7 +84,7 @@ test('a zero-progress filesystem write fails without publishing partial contents
  const restore=handles(t,(file,flags,handle)=>{if(!writing(file,flags,f.root))return;const write=handle.write.bind(handle);t.mock.method(handle,'write',async(buffer:Buffer,offset:number,length:number,position:number|null)=>{if(!injected){injected=true;return {bytesWritten:0,buffer};}return write(buffer,offset,length,position);});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/Unable to write/);
- await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await f.retry();
+ await f.unchanged();assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.retry();
 });
 
 test('one full destination cannot prevent the other copy, and retry verifies the healthy destination',async t=>{
@@ -89,7 +95,7 @@ test('one full destination cannot prevent the other copy, and retry verifies the
  const [failed,successful]=await Promise.all(prepared.plans.map(transfer=>execute(transfer)));restore();
  assert.equal(injected,true);assert.equal(failed.copied,0);assert.equal(failed.errors.length,1);assert.match(failed.errors[0],/ENOSPC/);assert.deepEqual(successful,{copied:1,skipped:0,errors:[]});
  const hash=(bytes:Buffer)=>createHash('sha256').update(bytes).digest('hex');assert.equal(hash(await fs.readFile(path.join(healthy,'original.bin'))),hash(f.data));
- assert.deepEqual(await visible(f.root),['keep.txt']);await f.unchanged();assert.equal(await fs.readFile(path.join(healthy,'keep.txt'),'utf8'),'healthy pre-existing file');
+ assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.unchanged();assert.equal(await fs.readFile(path.join(healthy,'keep.txt'),'utf8'),'healthy pre-existing file');
  const retry=await prepare();assert.equal(retry.plans[0].entries[0].skip,false);assert.equal(retry.plans[1].entries[0].skip,true);
  assert.deepEqual(await Promise.all(retry.plans.map(transfer=>execute(transfer))),[{copied:1,skipped:0,errors:[]},{copied:0,skipped:1,errors:[]}]);
  for(const root of [f.root,healthy])assert.equal(hash(await fs.readFile(path.join(root,'original.bin'))),hash(f.data));await f.unchanged();assert.equal(await fs.readFile(path.join(healthy,'keep.txt'),'utf8'),'healthy pre-existing file');
@@ -103,10 +109,11 @@ test('corruption during exclusive publication is reported with its intent retain
  const result=await execute(prepared,undefined,undefined,{exclusiveCopy:true});restoreHandles();restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/Destination verification failed/);
  const corrupted=await fs.readFile(destination);assert.equal(corrupted.length,f.data.length);assert.equal(corrupted[0],66);assert.notDeepEqual(corrupted,f.data);await f.unchanged();
- const names=await visible(f.root),intentName=names.find(name=>name.startsWith('photo-importer-intent-'));assert.ok(intentName);assert.equal(names.some(name=>name.endsWith('.partial')),false);
- const intentBytes=await fs.readFile(path.join(f.root,intentName));const intent=JSON.parse(intentBytes.toString());assert.equal(intent.source,f.original);assert.equal(intent.destination,destination);assert.equal(intent.sha256,createHash('sha256').update(f.data).digest('hex'));
+ const names=await visible(f.root);assert.equal(names.some(name=>name.endsWith('.partial')||name.startsWith('photo-importer-')),false);assert.deepEqual(await fs.readdir(await stagingFor(f.root)),[]);
+ // The receipt written before the first byte stays open, naming the corrupt output, and a retry leaves it alone.
+ const intents=[...(await openReceiptsFor(f.root))].filter(([,record])=>record.destination===destination);assert.equal(intents.length,1);const [rid,intent]=intents[0];assert.equal(intent.source,f.original);assert.equal(intent.sha256,createHash('sha256').update(f.data).digest('hex'));
  const retry=await f.prepare();assert.notEqual(retry.entries[0].destination,destination);assert.deepEqual(await execute(retry,undefined,undefined,{exclusiveCopy:true}),{copied:1,skipped:0,errors:[]});
- assert.deepEqual(await fs.readFile(retry.entries[0].destination),f.data);assert.deepEqual(await fs.readFile(destination),corrupted);assert.deepEqual(await fs.readFile(path.join(f.root,intentName)),intentBytes);await f.unchanged();
+ assert.deepEqual(await fs.readFile(retry.entries[0].destination),f.data);assert.deepEqual(await fs.readFile(destination),corrupted);assert.deepEqual((await openReceiptsFor(f.root)).get(rid),intent);await f.unchanged();
 });
 
 test('verified copying preserves pre-existing malformed media bytes and does not claim to validate the image format',async t=>{
@@ -118,7 +125,7 @@ test('verified copying preserves pre-existing malformed media bytes and does not
 
 test('directory-sync failure does not acknowledge a valid publication and retry synchronizes the existing copy',async t=>{
  const f=await fixture(t),prepared=await f.prepare();let injected=false;
- const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{injected=true;throw fault('EIO');});});
+ const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{if(await fs.stat(prepared.entries[0].destination).then(()=>false,()=>true))return;injected=true;throw fault('EIO');});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.skipped,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/EIO/);
  assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);await f.unchanged();
@@ -130,7 +137,7 @@ test('directory-sync failure does not acknowledge a valid publication and retry 
 
 test('unsupported directory synchronization cannot be reported as a completed backup',async t=>{
  const f=await fixture(t),prepared=await f.prepare();let injected=false;
- const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{injected=true;throw fault('ENOTSUP');});});
+ const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{if(await fs.stat(prepared.entries[0].destination).then(()=>false,()=>true))return;injected=true;throw fault('ENOTSUP');});});
  const result=await execute(prepared);restore();
  assert.equal(injected,true);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/ENOTSUP/);
  assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);await f.unchanged();
@@ -149,17 +156,24 @@ test('exclusive publication durably records intent before copying and releases i
  const prepared=(await plan(f.source,[f.root],{...options,backup:false,template:'{year}/{yyyymm}/{camera}'},async()=>({camera:'Fixture Camera',date:'2026-07-01T12:00:00+08:00',fields:{}}))).plans[0];
  const expected=[path.join(f.root,'2026/202607/Fixture Camera'),path.join(f.root,'2026/202607'),path.join(f.root,'2026'),f.root],synced=new Set<string>();let directorySyncs=0,started=false,released=false;
  const restore=handles(t,(file,_flags,handle)=>{if(expected.includes(file)){const sync=handle.sync.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();synced.add(file);if(file===path.dirname(prepared.entries[0].destination))directorySyncs++;});}});
- const open=fs.open.bind(fs),unlink=fs.unlink.bind(fs);
- t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{const handle=await open(...args);if(String(args[0])===prepared.entries[0].destination&&args[1]==='wx'){const write=handle.write.bind(handle);t.mock.method(handle,'write',async(...writeArgs:Parameters<typeof handle.write>)=>{assert.ok(expected.every(folder=>synced.has(folder)),'Intent and all new ancestor bindings must be synchronized before copying');assert.ok(directorySyncs>=1);started=true;return write(...writeArgs);});}return handle;});
- t.mock.method(fs,'unlink',async(file:Parameters<typeof fs.unlink>[0])=>{// The receipt written before the name exists is removed as soon as the real one is durable, before any data.
-if(String(file).includes('photo-importer-intent-')&&JSON.parse(await fs.readFile(String(file),'utf8')).fileIdentity!=='creating'){assert.ok(directorySyncs>=2,'Published destination must be synchronized before intent removal');assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);released=true;}await unlink(file);});syncBuiltinESMExports();
+ const open=fs.open.bind(fs),destination=prepared.entries[0].destination;
+ t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{const handle=await open(...args),file=String(args[0]);
+  if(file===destination&&args[1]==='wx'){const write=handle.write.bind(handle);t.mock.method(handle,'write',async(...writeArgs:Parameters<typeof handle.write>)=>{assert.equal([...(await openReceiptsFor(f.root)).values()].some(record=>record.destination===destination),true,'The intent must be durable before the first byte');started=true;return write(...writeArgs);});}
+  // The receipt log: the receipt written before the name exists is closed as soon as the real one is durable, before any data; the real one only once the destination binding is synchronized.
+  if(file.startsWith(path.join(f.root,'Photo Importer Data','Imports')+path.sep)&&/receipts-\d+\.jsonl$/.test(file)){const writeFile=handle.writeFile.bind(handle);t.mock.method(handle,'writeFile',async(...writeArgs:Parameters<typeof handle.writeFile>)=>{
+   // The release is the close after which no publication receipt for the destination is left open.
+   const closed=new Set(String(writeArgs[0]).split('\n').filter(Boolean).map(line=>JSON.parse(line)).filter(line=>line.op==='close').map(line=>line.rid as string));
+   const publications=[...(await openReceiptsFor(f.root))].filter(([rid,record])=>record.destination===destination&&record.kind==='publication');
+   if(publications.some(([rid])=>closed.has(rid))&&publications.every(([rid])=>closed.has(rid))){assert.ok(expected.every(folder=>synced.has(folder)),'Every new ancestor binding must be synchronized before intent removal');assert.ok(directorySyncs>=1,'Published destination must be synchronized before intent removal');assert.deepEqual(await fs.readFile(destination),f.data);released=true;}
+   return writeFile(...writeArgs);});}
+  return handle;});syncBuiltinESMExports();
  const result=await execute(prepared,undefined,undefined,{exclusiveCopy:true});restore();
- assert.equal(started,true);assert.equal(released,true);assert.ok(directorySyncs>=3,'Intent removal directory entry must also be synchronized');assert.deepEqual(result,{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(path.join(f.source,'photo.JPG')),f.data);assert.equal(await fs.readFile(path.join(f.root,'keep.txt'),'utf8'),'pre-existing destination');
+ assert.equal(started,true);assert.equal(released,true);assert.equal((await openReceiptsFor(f.root)).size,0);assert.deepEqual(result,{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(path.join(f.source,'photo.JPG')),f.data);assert.equal(await fs.readFile(path.join(f.root,'keep.txt'),'utf8'),'pre-existing destination');
 });
 
 test('premature source EOF cannot pass verification merely because its file identity and size are unchanged',async t=>{
  const f=await fixture(t),prepared=await f.prepare();let streamed=0,injected=false;
  const restore=handles(t,(file,_flags,handle)=>{if(file!==f.original)return;const read=handle.read.bind(handle);t.mock.method(handle,'read',async(...args:Parameters<typeof handle.read>)=>{if(streamed>0&&!injected){injected=true;return {bytesRead:0,buffer:args[0]};}return read(...args);});});
  const result=await execute(prepared,undefined,progress=>{streamed=progress.bytes;});restore();
- assert.equal(injected,true);assert.ok(streamed>0);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/Source changed/);assert.deepEqual(await visible(f.root),['keep.txt']);await f.unchanged();await f.retry();
+ assert.equal(injected,true);assert.ok(streamed>0);assert.equal(result.copied,0);assert.equal(result.errors.length,1);assert.match(result.errors[0],/Source changed/);assert.deepEqual(await visible(f.root),['keep.txt']);await settled(f.root);await f.unchanged();await f.retry();
 });

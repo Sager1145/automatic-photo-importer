@@ -148,6 +148,28 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files put back|已放回 {completed}/{total} 个文件|已放回 {completed}/{total} 個檔案|{total} 件中 {completed} 件を元に戻し済み
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
+Converting earlier records|正在转换早期记录|正在轉換早期記錄|以前の記録を変換中
+Converting from the earlier version|正在从早期版本转换|正在從早期版本轉換|以前のバージョンから変換中
+Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
+{completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
+{step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
+Looking for earlier records|正在查找早期记录|正在尋找早期記錄|以前の記録を探しています
+Reading earlier records|正在读取早期记录|正在讀取早期記錄|以前の記録を読み込み中
+Moving kept originals|正在移动保留的原件|正在移動保留的原始檔案|保持中のオリジナルを移動中
+Removing old record files|正在删除旧记录文件|正在刪除舊記錄檔案|古い記録ファイルを削除中
+Converting import records|正在转换导入记录|正在轉換匯入記錄|読み込み記録を変換中
+Converting cached records|正在转换缓存记录|正在轉換快取記錄|キャッシュ記録を変換中
+Tidying old record folders|正在整理旧记录文件夹|正在整理舊記錄資料夾|古い記録フォルダーを整理中
+Records from the earlier version|早期版本的记录|早期版本的記錄|以前のバージョンの記録
+Records conversion progress|记录转换进度|記錄轉換進度|記録変換の進行状況
+Pause conversion|暂停转换|暫停轉換|変換を一時停止
+Resume conversion|继续转换|繼續轉換|変換を再開
+Conversion paused|转换已暂停|轉換已暫停|変換を一時停止中
+Earlier records are converted once the drive is idle|驱动器空闲后将转换早期记录|磁碟閒置後將轉換早期記錄|ドライブが空いたら以前の記録を変換します
+Conversion is paused until you resume it or restart the app.|转换已暂停，直到你继续转换或重新启动应用。|轉換已暫停，直到你繼續轉換或重新啟動 App。|再開するかアプリを再起動するまで、変換は一時停止します。
+{count} could not be converted and were left as they are:|{count} 项无法转换，已保持原样：|{count} 項無法轉換，已保持原樣：|{count} 件は変換できなかったため、そのままにしました：
+Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.|本应用早期版本在驱动器上写入的记录，会在驱动器空闲时转换到该驱动器的 Photo Importer Data 文件夹中。整理资料库需等待其记录转换完成；导入照常进行。|本 App 早期版本在磁碟上寫入的記錄，會在磁碟閒置時轉換到該磁碟的 Photo Importer Data 資料夾中。整理資料庫需等待其記錄轉換完成；匯入照常進行。|このアプリの以前のバージョンがドライブに書き込んだ記録は、ドライブがほかに使われていないときに、そのドライブの Photo Importer Data フォルダーへ変換されます。ライブラリの整理は記録の変換が終わるまで待ちます。読み込みはそのまま続きます。
+{count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。
 Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
 Checking {drive} folder layout|正在检查 {drive} 的文件夹结构|正在檢查 {drive} 的資料夾結構|{drive} のフォルダー構成を確認中
 Organization history progress|整理记录读取进度|整理記錄讀取進度|整理履歴の読み込み状況
@@ -622,6 +644,9 @@ No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファ�
 Clean up|清理|清理|クリーンアップ
 {count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
 {count} complete copies whose card file changed are kept: {folder}|{count} 个完整副本的存储卡文件已更改，已保留：{folder}|{count} 個完整副本的記憶卡檔案已變更，已保留：{folder}|カード上のファイルが変わった完全なコピー {count} 個を保管しています：{folder}
+A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.|{path} 处的文件有一份旧的复制回执，与它已不相符；文件会保留。请移除该回执，以便继续导入。|{path} 處的檔案有一份舊的複製回執，與它已不相符；檔案會保留。請移除該回執，以便繼續匯入。|{path} のファイルに、一致しなくなった古いコピーの受領記録があります。ファイルはそのままです。インポートを続けるには受領記録を削除してください。
+Remove receipt|移除回执|移除回執|受領記録を削除
+{count} more files have an old copy receipt. Clean up removes those receipts too; the files are kept.|另有 {count} 个文件有旧的复制回执。点击“清理”也会移除这些回执；文件会保留。|另有 {count} 個檔案有舊的複製回執。點選「清理」也會移除這些回執；檔案會保留。|ほかに {count} 個のファイルに古いコピーの受領記録があります。クリーンアップでこれらの受領記録も削除されます。ファイルは残ります。
 Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
 Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
@@ -746,6 +771,34 @@ Checking organization files: {count} · {file}|正在检查整理文件：{count
 Preparing organization review…|正在准备整理预览…|正在準備整理預覽…|整理の確認を準備中…
 Copy to camera folders|复制到相机文件夹|複製到相機資料夾|カメラ別フォルダーにコピー
 Remember for these extensions|记住这些扩展名的选择|記住這些副檔名的選擇|これらの拡張子の設定を保存
+{count} unknown files will be left where they are.|{count} 个未知文件将保留在原位。|{count} 個未知檔案將保留在原位。|不明なファイル {count} 件はそのままの場所に残します。
+{count} unknown files will not be copied; they stay on the source.|{count} 个未知文件不会被复制，仍留在来源中。|{count} 個未知檔案不會被複製，仍留在來源中。|不明なファイル {count} 件はコピーされず、ソースに残ります。
+{count} unknown files will be moved to {folder}.|{count} 个未知文件将被移动到 {folder}。|{count} 個未知檔案將被移動到 {folder}。|不明なファイル {count} 件を {folder} に移動します。
+{count} unknown files will be copied to {folder}.|{count} 个未知文件将被复制到 {folder}。|{count} 個未知檔案將被複製到 {folder}。|不明なファイル {count} 件を {folder} にコピーします。
+{count} without a date|{count} 个无日期|{count} 個無日期|日付なし {count} 件
+{count} without a camera|{count} 个无相机|{count} 個無相機|カメラなし {count} 件
+{count} unreadable|{count} 个无法读取|{count} 個無法讀取|読み取り不可 {count} 件
+No capture date|无拍摄日期|無拍攝日期|撮影日なし
+No camera|无相机|無相機|カメラなし
+They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you continue.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你继续之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你繼續之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。続行するまで何も始まりません。
+Show files|显示文件|顯示檔案|ファイルを表示
+Hide files|隐藏文件|隱藏檔案|ファイルを隠す
+Use file date instead|改用文件日期|改用檔案日期|ファイルの日付を使う
+1 unknown file was left where it is|有 1 个未知文件保留在原位|有 1 個未知檔案保留在原位|不明なファイル 1 件をそのままの場所に残しました
+{count} unknown files were left where they are|有 {count} 个未知文件保留在原位|有 {count} 個未知檔案保留在原位|不明なファイル {count} 件をそのままの場所に残しました
+1 unknown file was filed in the unknown files folder|有 1 个未知文件被放入未知文件文件夹|有 1 個未知檔案被放入未知檔案資料夾|不明なファイル 1 件を不明ファイル用フォルダーに入れました
+{count} unknown files were filed in the unknown files folder|有 {count} 个未知文件被放入未知文件文件夹|有 {count} 個未知檔案被放入未知檔案資料夾|不明なファイル {count} 件を不明ファイル用フォルダーに入れました
+They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取。你可以在“设置”中更改。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取。你可以在「設定」中變更。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです。設定で変更できます。
+Files without metadata|无元数据的文件|無中繼資料的檔案|メタデータのないファイル
+Files with unknown metadata|元数据未知的文件|中繼資料未知的檔案|メタデータが不明なファイル
+Leave where they are|保留在原位|保留在原位|そのままにする
+Not moved or copied, and Delete originals never removes them. You are warned before a job starts.|不移动也不复制，“删除原件”也绝不会删除它们。任务开始前会提醒你。|不移動也不複製，「刪除原始檔」也絕不會刪除它們。工作開始前會提醒你。|移動もコピーもされず、「元ファイルを削除」でも削除されません。ジョブの開始前に警告します。
+Move to a folder|移动到文件夹|移動到資料夾|フォルダーに移動
+Organized or copied into one folder directly under your library, keeping their subfolders.|整理或复制到资料库下的同一个文件夹中，并保留其子文件夹结构。|整理或複製到資料庫下的同一個資料夾中，並保留其子資料夾結構。|ライブラリ直下の1つのフォルダーに、サブフォルダー構成を保ったまま整理またはコピーします。
+Use file date|使用文件日期|使用檔案日期|ファイルの日付を使う
+Filed by the file's modified date, in a camera folder with the folder name below.|按文件修改日期归档，放入以下方文件夹名称命名的相机文件夹。|依檔案修改日期歸檔，放入以下方資料夾名稱命名的相機資料夾。|ファイルの更新日で整理し、下のフォルダー名のカメラフォルダーに入れます。
+Use one folder name: no slashes or special characters, not a date or year, and not a folder the app uses. The saved name stays in use until this is fixed.|请使用单一的文件夹名称：不含斜杠或特殊字符，不是日期或年份，也不是应用使用的文件夹。在修正之前仍使用已保存的名称。|請使用單一的資料夾名稱：不含斜線或特殊字元，不是日期或年份，也不是 App 使用的資料夾。在修正之前仍使用已儲存的名稱。|フォルダー名は1つだけにしてください。スラッシュや特殊文字、日付や年、アプリが使うフォルダー名は使えません。修正するまで保存済みの名前を使います。
+Unknown files folder name|未知文件文件夹名称|未知檔案資料夾名稱|不明ファイル用フォルダー名
 All errors|所有错误|所有錯誤|すべてのエラー
 {count} errors|{count} 个错误|{count} 個錯誤|エラー {count} 件
 Close panel|关闭面板|關閉面板|パネルを閉じる
@@ -770,7 +823,8 @@ No verified originals to delete.|没有可删除的已验证原文件。|沒有�
 This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.|这将从 {name} 永久删除 {count} 个文件（{size}）。删除前会逐个与备份中的副本核对。此操作无法撤销。|這將從 {name} 永久刪除 {count} 個檔案（{size}）。刪除前會逐一與備份中的副本核對。此操作無法復原。|{name} から {count} 件（{size}）のファイルを完全に削除します。削除前に、それぞれバックアップ内のコピーと照合します。この操作は取り消せません。
 Counting verified originals…|正在统计已验证的原文件…|正在統計已驗證的原始檔案…|検証済みの元のファイルを数えています…
 {count} files will stay where they are.|有 {count} 个文件会保留在原处。|有 {count} 個檔案會保留在原處。|{count} 件のファイルはそのまま残ります。
-{count} originals deleted ({size}); {kept} left in place|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残しました
+{count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处；已移除 {folders} 个空文件夹|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處；已移除 {folders} 個空資料夾|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残し、空のフォルダ {folders} 件を削除しました
+Removing empty folders: {completed} of {total}|正在移除空文件夹：{completed}/{total}|正在移除空資料夾：{completed}/{total}|空のフォルダを削除中：{total} 件中 {completed} 件
 Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
 Level 1: you decide|级别 1：由你决定|層級 1：由你決定|レベル1：すべて自分で決める
 You decide every group. Nothing is removed until you choose which file to keep.|每一组都由你决定。在你选择要保留的文件之前，不会删除任何内容。|每一組都由你決定。在你選擇要保留的檔案之前，不會移除任何內容。|すべてのグループを自分で決めます。残すファイルを選ぶまで何も削除されません。

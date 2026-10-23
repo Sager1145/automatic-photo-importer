@@ -8,6 +8,8 @@ import {placedEntries} from '../core/allocation';
 import {dropDestinationIndexes} from '../core/destination-index';
 import {recordPartial} from '../core/import-recovery';
 import type {Metadata,PlanEntry,TransferPlan} from '../shared';
+import {stagePathFor} from './fixtures/receipts';
+import {randomUUID} from 'node:crypto';
 
 configureOrganizationRecovery('skip-existing-fixture-host-authentication-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -98,7 +100,8 @@ test('a receipt-bound stale stage at the old path is released by the copy',async
  await f.put(path.join(f.source,'A.JPG'),data);const existing=await f.put(path.join(f.old,'A.JPG'),data);
  const {plans}=await plan(f.source,[f.root],options,metadata);
  const entry=plans[0]!.entries[0]!;
- const stage=await f.put(path.join(f.old,'photo-importer-0a1b2c3d.partial'),data);
+ // The staged copy waits in the records folder's staging folder (records v5).
+ const stage=await f.put(await stagePathFor(f.root,randomUUID()),data);
  await recordPartial('stage',stage,await fs.lstat(stage,{bigint:true}),entry,plans[0]!,new Map());
  const result=await execute(plans[0]!);
  assert.deepEqual(result.errors,[]);assert.equal(result.skipped,1);

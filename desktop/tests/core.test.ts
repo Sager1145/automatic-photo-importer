@@ -6,6 +6,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { inventory, plan as planDestinations, execute, executeReorganization, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
+import {openReceiptsFor,stagingFor} from './fixtures/receipts';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
 
@@ -102,7 +103,7 @@ test('missing camera and capture date use explicit fallback and UTC file modific
   const {source,root,put}=await fixture(t); const f=await put('A.JPG');
   await fs.utimes(f,new Date('2020-12-31T23:59:59Z'),new Date('2020-12-31T23:59:59Z'));
   const p=await plan(source,root,options,async()=>({fields:{}}));
-  assert.equal(p.entries[0]?.destination,path.join(root,'2020/202012/Unknown Camera/JPEG/A.JPG'));
+  assert.equal(p.entries[0]?.destination,path.join(root,'2020/202012/Unknown files/JPEG/A.JPG'));
 });
 
 test('RAW and JPEG retain conflicting camera/date metadata rather than inherit incorrect values',async t=>{
@@ -252,10 +253,13 @@ test('interrupted exclusive publication retains intent journal and partial outpu
   assert.equal(await fs.readFile(original,'utf8'),'original bytes');
   assert.equal(await fs.readFile(path.join(root,'keep.txt'),'utf8'),'existing destination data');
   assert.equal(await fs.readFile(p.entries[0]!.destination,'utf8'),'origina');
+  // Nothing of the app's beside the media: the publication receipt stays open in the records folder's log.
   const remaining=await visible(path.dirname(p.entries[0]!.destination));
-  const journal=remaining.find(name=>name.startsWith('photo-importer-intent-'));
-  assert.ok(journal); assert.equal(remaining.some(name=>name.endsWith('.partial')),false);
-  const intent=JSON.parse(await fs.readFile(path.join(path.dirname(p.entries[0]!.destination),journal),'utf8'));
+  assert.equal(remaining.some(name=>name.startsWith('photo-importer-')||name.endsWith('.partial')),false);
+  assert.deepEqual(await fs.readdir(await stagingFor(root)),[],'the staged copy is gone');
+  const receipts=[...(await openReceiptsFor(root)).values()].filter(record=>record.kind==='publication');
+  assert.equal(receipts.length,1);
+  const intent=receipts[0]!;
   assert.equal(intent.source,original); assert.equal(intent.destination,p.entries[0]!.destination); assert.equal(intent.sha256,createHash('sha256').update(await fs.readFile(original)).digest('hex'));
 });
 

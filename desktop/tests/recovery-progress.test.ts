@@ -7,10 +7,12 @@ import * as core from '../core/index';
 import type {Metadata,Progress} from '../shared';
 import {translationCatalogs} from '../renderer/i18n';
 import {backendMessages} from '../messages';
+import {journalFolderFor} from './fixtures/records';
+import {toLegacy} from './fixtures/legacy-records';
+import {journalConversion} from '../core/recovery';
 
 // "Everything must update": each phase of reading, checking, converting and deleting organization records counts its own work.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-core.setConversionGate(()=>false);
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
 const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
@@ -45,7 +47,7 @@ test('finalize, undo and delete report reading the history before they change an
  assert.ok(removing.length>2,'files are counted as they are removed, not once at the end');
  assert.equal(removing.at(-1)!.completed,removing.at(-1)!.total);
  for(let index=1;index<removing.length;index++)assert.ok(removing[index]!.completed>=removing[index-1]!.completed);
- await assert.rejects(fs.stat(path.join(c.photos,'Photo Importer Recovery')),{code:'ENOENT'},'the recovery folder is gone');
+ await assert.rejects(journalFolderFor(c.photos,c.id),/not found/,'the journal folder is gone');
 });
 
 test('measuring an organization counts files as it goes',async t=>{
@@ -76,7 +78,7 @@ test('looking for the later organization that took files over counts the journal
  const controller=new AbortController();
  await assert.rejects(core.executeReorganization(a,controller.signal,value=>{if(value.step==='moving'&&/\.MOV$/i.test(value.file))controller.abort();},{strategy:'rename'}),{name:'AbortError'});
  const [journal]=await core.getOrganizationRecovery(photos);const A=journal!.id;
- const store=path.join(photos,'Photo Importer Recovery',A),hidden=path.join(drive,'hidden-'+A);
+ const store=await journalFolderFor(photos,A),hidden=path.join(drive,'hidden-'+A);
  await fs.rename(store,hidden);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
  assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined,{strategy:'rename'})).errors,[]);
@@ -101,20 +103,17 @@ test('every new progress label and job message exists in all four languages',()=
  }
 });
 
-test('readEvents of 5,000 per-event files reports at least every 100 files, on a full read and on the incremental one',async t=>{
+test('the converter reading 2,500 per-event files of an earlier version reports at least every 100 files',async t=>{
  const secret='fixture-only-host-recovery-secret-32bytes';
  const {photos,id}=await finished(t);
- const folder=path.join(photos,'Photo Importer Recovery',id),log=path.join(folder,'event-log.jsonl');
- const lines=(await fs.readFile(log,'utf8')).split('\n').filter(Boolean);
+ const folder=await toLegacy(photos,id,{format:'files'});
  const {createHmac,randomUUID}=await import('node:crypto');
  const checked=(index:number)=>{const record={id,root:photos,event:'checked',index:0,at:new Date(Date.UTC(2026,9,21,0,0,0,index)).toISOString()};return JSON.stringify({...record,seal:createHmac('sha256',secret).update(JSON.stringify(record)).digest('hex')});};
- for(let index=0;lines.length<2500;index++)lines.push(checked(index));
- await Promise.all(lines.map(line=>fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),line)));await fs.rm(log);
- const reads=async()=>{const seen:number[]=[];await core.getOrganizationRecovery(photos,{verifyContents:false,onProgress:update=>{if(update.read!==undefined)seen.push(update.read);}});return seen;};
- const gaps=(seen:number[],name:string)=>{let last=0,widest=0;for(const read of seen){widest=Math.max(widest,read-last);last=Math.max(last,read);}assert.ok(widest<=100,`${name}: widest step ${widest}`);};
- const full=await reads();gaps(full,'full read');assert.ok(Math.max(...full)>=2500);
- // 2,500 more files of a finished, cached journal: only those are read, and they are counted as they go.
- for(let index=0;index<2500;index++)await fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),checked(10000+index));
- const incremental=await reads();gaps(incremental,'incremental read');
- assert.ok(incremental.filter(read=>read>0&&read<2500).length>=20,'counted file by file, not once at the end');
+ const present=(await fs.readdir(folder)).filter(name=>name.startsWith('event-')).length;
+ await Promise.all(Array.from({length:2500-present},(_,index)=>fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),checked(index))));
+ const seen:number[]=[];
+ await journalConversion.read(photos,id,read=>seen.push(read));
+ let last=0,widest=0;for(const read of seen){widest=Math.max(widest,read-last);last=Math.max(last,read);}
+ assert.ok(widest<=100,`widest step ${widest}`);assert.ok(Math.max(...seen)>=2500);
+ assert.ok(seen.filter(read=>read>0&&read<2500).length>=20,'counted file by file, not once at the end');
 });

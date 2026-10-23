@@ -8,6 +8,8 @@ import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core';
 import {destinationIndex} from '../core/destination-index';
 import {identity} from '../core/paths';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const sha=(data:Buffer)=>createHash('sha256').update(data).digest('hex');
 async function temporary(t:test.TestContext){
@@ -41,7 +43,10 @@ test('a destination rewritten after publication is not trusted as the copied byt
  await fs.mkdir(path.dirname(original),{recursive:true});await fs.mkdir(root);await fs.writeFile(original,Buffer.alloc(65536,1));
  const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const {plans:[first]}=await plan(source,[root],options,none);
- const stop=onFirstClose(t,copy,rewrite(copy,Buffer.alloc(16,9)));
+ // The copy is rewritten (through its still-linked staging name) just before the staged copy is removed, which is before the index remembers it.
+ const unlink=fs.unlink.bind(fs);let fired=false;
+ t.mock.method(fs,'unlink',async(...args:Parameters<typeof fs.unlink>)=>{if(!fired&&String(args[0]).endsWith('.partial')){fired=true;await rewrite(copy,Buffer.alloc(16,9))();}return unlink(...args);});syncBuiltinESMExports();
+ const stop=()=>{t.mock.restoreAll();syncBuiltinESMExports();return fired;};
  assert.equal((await execute(first!)).copied,1);
  assert.equal(stop(),true);
  const {plans:[again]}=await plan(source,[root],options,none);

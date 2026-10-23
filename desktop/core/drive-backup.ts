@@ -5,10 +5,12 @@ import type { MirrorRemoval, PlanEntry, TransferPlan } from '../shared';
 import { ignoredName } from './inventory';
 import type { DestinationIndex } from './destination-index';
 import { beneath, checkAbort, code, contained, makeParent, pathKey, safeComponent, statKey, syncDirectory, syncParents } from './paths';
+import { hostKeyConfigured, openV5, sealV5 } from './app-store';
 import { log, logDeletion } from '../logger';
 
 export const DRIVE_BACKUPS='Drive backups';
-const marker='photo-importer-drive.json', legacyMarker=`.${marker}`, holding='Removed by mirror';
+export const DRIVE_MARKER='photo-importer-drive.json', LEGACY_DRIVE_MARKER=`.${DRIVE_MARKER}`;
+const marker=DRIVE_MARKER, legacyMarker=LEGACY_DRIVE_MARKER, holding='Removed by mirror';
 export interface Drive {name:string;identity:string;mirror:boolean;}
 /** A removal is bound to the exact inode and timestamps seen during review. */
 export interface ReviewedRemoval extends MirrorRemoval {stat:string;}
@@ -20,10 +22,20 @@ async function owner(folder:string):Promise<string|null|undefined> {
   for(const name of [marker,legacyMarker]) {
     let text;
     try { text=await fs.readFile(path.join(folder,name),'utf8'); } catch(error) { if(code(error)==='ENOENT'&&name===marker) continue; return null; }
-    try { const recorded=JSON.parse(text); return typeof recorded?.identity==='string'?recorded.identity:null; } catch { return null; }
+    try { return markerIdentity(JSON.parse(text)); } catch { return null; }
   }
   return null;
 }
+/** A marker's drive identity: a v5 marker must carry this Mac's seal; the earlier version's plain one is read as before (the converter rewrites it). */
+export function markerIdentity(recorded:unknown):string|null {
+  if(recorded&&typeof recorded==='object'&&(recorded as {v?:unknown}).v!==undefined){
+    try { const opened=openV5('drive',recorded); return typeof opened.identity==='string'?opened.identity:null; } catch { return null; }
+  }
+  const identity=(recorded as {identity?:unknown}|null)?.identity;
+  return typeof identity==='string'?identity:null;
+}
+/** The marker this version writes: sealed when the host key is configured (always in the app). */
+export const markerText=(drive:{identity:string;name:string})=>JSON.stringify(hostKeyConfigured()?sealV5('drive',{identity:drive.identity,name:drive.name}):{identity:drive.identity,name:drive.name});
 /** A valid marker left under the older hidden name becomes the visible one the first time it is used. */
 async function adoptLegacyMarker(folder:string):Promise<void> {
   const visible=path.join(folder,marker),legacy=path.join(folder,legacyMarker);
@@ -82,7 +94,7 @@ export async function claimDriveFolder(root:string,drive:NonNullable<TransferPla
   await makeParent(file,root,rootIdentity);
   try {
     const handle=await fs.open(file,'wx',0o600);
-    try { await handle.writeFile(JSON.stringify({identity:drive.identity,name:drive.name})); await handle.sync(); } finally { await handle.close(); }
+    try { await handle.writeFile(markerText(drive)); await handle.sync(); } finally { await handle.close(); }
     await syncParents(file,root);
   } catch(error) {
     if(code(error)!=='EEXIST') throw error;

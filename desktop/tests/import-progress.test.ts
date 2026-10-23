@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {plan,executeMany,type PlanProgress} from '../core';
 import {I18nProvider} from '../renderer/i18n';
 import {ImportDashboard,ImportDesk,importFraction} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async()=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
@@ -48,6 +52,36 @@ test('comparing reports the bytes it reads when a same-size file already sits at
  // Only the one source file was read; files with no same-size neighbour are not.
  assert.equal(events.filter(event=>event.step==='comparing').at(-1)!.bytes,50);
 });
+
+test('comparing reports the bytes it will read from the start, and the files found identical',async t=>{
+ const {source,roots}=await fixture(t);
+ const different=path.join(roots[0]!,'2024/202402/Sony A7/A.JPG'),same=path.join(roots[0]!,'2024/202402/Sony A7/B.JPG');
+ await fs.mkdir(path.dirname(different),{recursive:true});await fs.writeFile(different,'X'.repeat(50));await fs.writeFile(same,'B.JPG'.repeat(10));
+ const events:{totalBytes:number;matched?:number;matchedBytes?:number}[]=[];
+ await plan(source,roots,options,metadata,undefined,(_count,_file,detail)=>{if(detail?.step==='comparing')events.push(detail);});
+ assert.ok(events.length>0);
+ const sized=events.filter(event=>event.totalBytes>0);
+ assert.ok(sized.length>0&&sized.length<=events.length);
+ assert.ok(sized.every(event=>event.totalBytes===100),'two same-size files of 50 bytes, known before any is read');
+ assert.equal(events.at(-1)!.totalBytes,100);
+ assert.ok(events.slice(0,events.length-sized.length).every(event=>event.totalBytes===0));
+ assert.deepEqual([events.at(-1)!.matched,events.at(-1)!.matchedBytes],[1,50]);
+ for(let index=1;index<events.length;index++)assert.ok(events[index]!.matched!>=events[index-1]!.matched!);
+});
+
+for(const cached of [false,true]) {
+ test(`comparing bytes reach the total with two destinations${cached?' and a source digest already known':''}`,async t=>{
+  const {source,roots}=await fixture(t);
+  for(const root of roots){const taken=path.join(root,'2024/202402/Sony A7/A.JPG');await fs.mkdir(path.dirname(taken),{recursive:true});await fs.writeFile(taken,'X'.repeat(50));}
+  const events:{bytes:number;totalBytes:number}[]=[];
+  const known=cached?{sourceDigest:(file:string)=>createHash('sha256').update(readFileSync(file)).digest('hex')}:{};
+  await plan(source,roots,{...options,...known},metadata,undefined,(_count,_file,detail)=>{if(detail?.step==='comparing')events.push(detail);});
+  const last=events.at(-1)!;
+  assert.equal(last.totalBytes,50,'the source file is read once however many destinations hold a same-size file');
+  assert.equal(last.bytes,50);
+  for(const event of events)assert.ok(event.totalBytes===0||event.bytes<=event.totalBytes);
+ });
+}
 
 test('the copy first reports the check of existing destination files, then copies',async t=>{
  const {source,roots}=await fixture(t);

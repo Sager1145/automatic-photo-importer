@@ -6,7 +6,10 @@ import path from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute,inventory} from '../core';
 import {executeDestinations} from '../core/destinations';
-import {dropDestinationIndexes} from '../core/destination-index';
+import {dropDestinationIndexes,indexTarget} from '../core/destination-index';
+import {stagingFor} from './fixtures/receipts';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>({fields:{}});
@@ -24,7 +27,7 @@ function countReads(t:test.TestContext,original:string,roots:string[]){
  const open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
   const handle=await open(...args),file=String(args[0]);
-  const kind=file===original?'source':roots.some(root=>file.startsWith(root+path.sep))?file.endsWith('.partial')?'stage':path.basename(file).startsWith('photo-importer-index')?undefined:'target':undefined;
+  const kind=file===original?'source':roots.some(root=>file.startsWith(root+path.sep))?file.endsWith('.partial')?'stage':file.includes(`${path.sep}Photo Importer Data${path.sep}`)?undefined:'target':undefined;
   if(kind){const reader=handle.read.bind(handle);t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await reader(...values);read[kind]+=result.bytesRead;return result;});}
   return handle;
  });syncBuiltinESMExports();
@@ -84,7 +87,7 @@ test('a touched or replaced destination file is hashed again instead of trusted'
 test('a corrupt or foreign index is ignored and rebuilt by the next app session',async t=>{
  const f=await fixture(t);
  await execute((await plan(f.source,f.roots,options,noMetadata)).plans[0]!);
- const index=path.join(f.roots[0]!,'photo-importer-index.json');
+ const index=await indexTarget(f.roots[0]!,'index.json');
  assert.ok((await fs.stat(index)).isFile());
  await fs.writeFile(index,'{not json');dropDestinationIndexes();
  const counter=countReads(t,f.original,f.roots);
@@ -127,7 +130,7 @@ test('a destination failing mid-file is dropped while the other still gets its c
  assert.equal(read.source,f.data.length);
  assert.deepEqual(await fs.readFile(path.join(f.roots[1]!,'DCIM','original.bin')),f.data);
  await assert.rejects(fs.lstat(path.join(f.roots[0]!,'DCIM','original.bin')),{code:'ENOENT'});
- assert.deepEqual((await fs.readdir(path.join(f.roots[0]!,'DCIM'))).filter(name=>name.endsWith('.partial')),[]);
+ assert.deepEqual((await fs.readdir(path.join(f.roots[0]!,'DCIM'))).filter(name=>name.endsWith('.partial')),[]);assert.deepEqual(await fs.readdir(await stagingFor(f.roots[0]!)),[]);
 });
 
 test('planning reads metadata for several files at once and keeps issues in file order',async t=>{

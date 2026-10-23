@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { plan, execute, configureOrganizationRecovery } from '../core/index';
 import { recordPartial } from '../core/import-recovery';
+import { stagePathFor, leftoversFor } from './fixtures/receipts';
 import { randomUUID } from 'node:crypto';
 import type { Metadata } from '../shared';
 import files from 'node:fs/promises';
@@ -31,13 +32,6 @@ async function exfat(t:test.TestContext):Promise<string|undefined> {
   t.after(async()=>{await run('hdiutil',['detach','-quiet','-force',mount]).catch(()=>{});await fs.rm(base,{recursive:true,force:true});});
   return mount;
 }
-async function leftovers(folder:string):Promise<string[]> {
-  const found:string[]=[];
-  for(const entry of await fs.readdir(folder,{withFileTypes:true,recursive:true}))
-    if(/^photo-importer-(?!index)/.test(entry.name)) found.push(path.join(entry.parentPath,entry.name));
-  return found;
-}
-
 test('a copy published on exFAT leaves no staging file or stage record behind',async t=>{
   const mount=await exfat(t);
   if(!mount) return t.skip('exFAT disk images are unavailable here');
@@ -50,7 +44,7 @@ test('a copy published on exFAT leaves no staging file or stage record behind',a
   const result=await execute(reviewed);
   assert.deepEqual(result.errors,[]);
   assert.equal(result.copied,2);
-  assert.deepEqual(await leftovers(root),[]);
+  assert.deepEqual(await leftoversFor(root),[]);
   for(const entry of reviewed.entries) assert.equal((await fs.stat(entry.destination)).size,entry.size);
 });
 
@@ -63,18 +57,41 @@ test('a re-import releases a staged copy left by a crashed run once the publishe
   const first=(await plan(source,[root],options,metadata)).plans[0]!,entry=first.entries[0]!;
   // What a crash between staging and cleanup leaves: a complete staged copy and its signed stage record.
   await fs.mkdir(path.dirname(entry.destination),{recursive:true});
-  const partial=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+  const partial=await stagePathFor(root,randomUUID());
   await fs.copyFile(original,partial);
   await recordPartial('stage',partial,await fs.lstat(partial,{bigint:true}),entry,first,new Map());
   // The file reached the backup anyway (published before the crash, or by an earlier version).
   await fs.copyFile(original,entry.destination);
-  assert.equal((await leftovers(root)).length,2);
+  assert.equal((await leftoversFor(root)).length,2);
   const again=(await plan(source,[root],options,metadata)).plans[0]!;
   const result=await execute(again);
   assert.deepEqual(result.errors,[]);assert.equal(result.skipped,1);
-  assert.deepEqual(await leftovers(root),[]);
+  assert.deepEqual(await leftoversFor(root),[]);
   assert.equal((await fs.stat(entry.destination)).size,300_000);
 });
+
+// releaseStaleStage also releases a stage SHORTER than the file: findPartial has already proved it ours (signed receipt, same source and
+// destination, bound by identity) and a byte prefix of the unchanged source, and the published file is verified whole, so it holds nothing
+// the published file and the source do not. A stage that is not a prefix of the source is not ours to judge and stays.
+for(const [name,stageBytes,left] of [['a shorter staged prefix of the source',(data:Buffer)=>data.subarray(0,100_000),false],['a shorter stage whose bytes are not the source\'s',(data:Buffer)=>Buffer.alloc(100_000,1),true]] as const) {
+  test(`a re-import releases ${name} left by a crashed run once the published file matches`,async t=>{
+    const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'short-stage-')));
+    t.after(()=>fs.rm(base,{recursive:true,force:true}));
+    const source=path.join(base,'card'),root=path.join(base,'photobackup'),original=path.join(source,'DSC_0001.NEF');
+    await fs.mkdir(source);await fs.mkdir(root);
+    const data=Buffer.alloc(300_000,7);await fs.writeFile(original,data);
+    const first=(await plan(source,[root],options,metadata)).plans[0]!,entry=first.entries[0]!;
+    await fs.mkdir(path.dirname(entry.destination),{recursive:true});
+    const partial=await stagePathFor(root,randomUUID());
+    await fs.writeFile(partial,stageBytes(data));
+    await recordPartial('stage',partial,await fs.lstat(partial,{bigint:true}),entry,first,new Map());
+    await fs.copyFile(original,entry.destination);
+    const result=await execute((await plan(source,[root],options,metadata)).plans[0]!);
+    assert.deepEqual(result.errors,[]);
+    assert.equal(await fs.lstat(partial).then(()=>true,()=>false),left);
+    assert.equal((await fs.stat(entry.destination)).size,300_000);
+  });
+}
 
 test('a copy stopped while publishing on exFAT is finished in place by the next import, not copied again',async t=>{
   const mount=await exfat(t);
@@ -92,7 +109,7 @@ test('a copy stopped while publishing on exFAT is finished in place by the next 
   assert.equal(again.entries[0]!.destination,destination);
   assert.deepEqual(await execute(again),{copied:1,skipped:0,errors:[]});
   assert.equal((await fs.stat(destination)).size,3*1024*1024);
-  assert.deepEqual(await leftovers(root),[]);
+  assert.deepEqual(await leftoversFor(root),[]);
 });
 
 test('re-importing onto exFAT reads each file already there once to plan and once to confirm it',async t=>{

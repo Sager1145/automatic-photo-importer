@@ -165,7 +165,7 @@ test('garbled camera names and dates never fail a plan or escape the camera fold
   assert.ok(!relative.startsWith('..')&&!path.isAbsolute(relative),relative);
   assert.ok(relative.split(path.sep).every(part=>part&&part!=='.'&&part!=='..'&&Buffer.byteLength(part)<=255&&!/[\u0000-\u001f\u007f]/u.test(part)),relative);
  }
- assert.equal(path.relative(photos,by(transfer!.entries,'K.JPG').destination),'2025/202505/Unknown Camera/JPEG/K.JPG');
+ assert.equal(path.relative(photos,by(transfer!.entries,'K.JPG').destination),'2025/202505/Unknown files/JPEG/K.JPG');
  // Braces in a camera name are part of the name, not template tokens.
  assert.equal(path.relative(photos,by(transfer!.entries,'G.JPG').destination),'2026/202610/Brace{year}Cam/JPEG/G.JPG');
  assert.equal(path.relative(photos,by(transfer!.entries,'H.JPG').destination),'2026/202610/{camera}/JPEG/H.JPG');
@@ -183,8 +183,8 @@ test('files with no, empty or garbage EXIF are read by ExifTool without failing 
  const {inventory:scan,plans:[transfer]}=await plan(source,[photos],{...base,layout:'format'},file=>readMetadata(file,{details:false}));
  // The empty files are skipped (nothing to import); the unreadable ones still plan.
  assert.equal(transfer!.entries.length,4);assert.equal(scan.empty,2);
- // Unreadable files fall back to Unknown Camera and their modified date; ExifTool's complaints are listed.
- for(const entry of transfer!.entries)assert.match(path.relative(photos,entry.destination),/^\d{4}\/\d{6}\/Unknown Camera\//);
+ // Unreadable files fall back to Unknown files and their modified date; ExifTool's complaints are listed.
+ for(const entry of transfer!.entries)assert.match(path.relative(photos,entry.destination),/^\d{4}\/\d{6}\/Unknown files\//);
  assert.ok((scan.issues??[]).length>0);
  assert.equal((await executeAll(transfer!)).errors.length,0);
  await assertCopied(transfer!);

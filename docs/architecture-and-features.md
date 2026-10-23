@@ -124,7 +124,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 移除“直接 USB 相机检测”宣传文案（SRC-11, UI-33） | 已移除 |
 | 多平台前端、macOS 原生窗口按钮（PROJ-05/06/07） | 共享 React/Electron；macOS 已运行；Windows/Linux 包未实机验证 |
 | 首次选择目的地与路径；阻止相机卡作目的地（DST-01–04） | 已实现（`validateDestination`） |
-| 目录模板、预设、自动创建目录（DST-05/06, ORG-01–03）；路径构建器（ORG-22） | 已实现；缺元数据时为 `Unknown Camera`；预设由构建器取代，自由模板保留在“高级”中 |
+| 目录模板、预设、自动创建目录（DST-05/06, ORG-01–03）；路径构建器（ORG-22） | 已实现；无日期、无相机或无法读取的文件（未知文件）默认保留原位（设置可改为移入 `Unknown files` 文件夹或按文件日期归档），不再创建 `Unknown Camera`；预设由构建器取代，自由模板保留在“高级”中 |
 | 路径设置集中在设置页（DST-07, UI-35/36） | 已实现 |
 | 只复制照片/视频与相关伴随文件；忽略 `NIKON001.DSC` 等（FMT-01–07） | 已实现（`known-files.ts` 厂商目录） |
 | 未知格式默认排除、可指定去向/放入相机目录/记住（FMT-08–11） | 已实现 |
@@ -166,3 +166,8 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 - `npm run codex:test -- --no-build`：Electron 23/23 通过（`codex-test.log`、`codex-report.json`），包括一键整理、选择任一目的地整理、源原件逐字节不变。
 
 未验证：本轮没有用真实相机卡、真实双盘或 Windows/Linux 机器重测，也没有做物理断电测试。
+
+
+## Release note: files without metadata
+
+Files with no capture date, no camera and no known origin, or with unreadable metadata, are left where they are by default (Settings > Importing > Files without metadata); imports do not copy them and Delete originals never removes them. Choose "Move to a folder" to file them under one folder directly under the library (default `Unknown files`, also under the video root for videos), or "Use file date" for the old routing. The `Unknown Camera` folder is no longer created. Under "Use file date" a file without a camera is filed as `<date>/Unknown files/` where it used to go to `<date>/Unknown Camera/`. A job someone starts (Start, Import now, Organize now, Organize backup, Organize folder) stops at the review and shows a warning when it finds such files; automatic imports record the warning in the job's issues instead.

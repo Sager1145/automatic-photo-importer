@@ -2,6 +2,7 @@ import {MAX_GROUP_ITEMS,type ExecutionIssue,type Job,type JobIssueGroup} from '.
 import {codeOf,severityOf} from './error-log';
 import {isAcknowledged} from './acknowledge';
 import type {AppleDoubleReport} from './core/appledouble';
+import type {NoMetadataSummary} from './shared';
 
 /** Per job: group lookup by `${severity}|${code}` and every path by code. Appending is O(1): no scan, sort or formatting beyond the capped samples. */
 interface Index {groups:Map<string,JobIssueGroup>;full:Map<string,string[]>;}
@@ -44,6 +45,12 @@ export function reportSummary(errors:string[],warnings:ExecutionIssue[],failedCo
 export function throttled(emit:()=>void,interval:number|(()=>number)=100,now:()=>number=Date.now){
  let last=-Infinity;
  return ()=>{const time=now();if(time-last>(typeof interval==='function'?interval():interval)){last=time;emit();}};
+}
+
+/** Unknown files an import did not copy / an organization left (kept-no-metadata) or filed under the unknown folder (filed-no-metadata): warnings, never failures. */
+export function noMetadataIssues(summary:NoMetadataSummary):ExecutionIssue[]{
+ const code=summary.handling==='keep'?'kept-no-metadata':'filed-no-metadata',why={noDate:'No capture date',noCamera:'No camera',unreadable:'Metadata could not be read'};
+ return summary.files.map((file):ExecutionIssue=>({code,severity:'warning',path:file.path,detail:why[file.reason]}));
 }
 
 /** The "._" files an import or organization kept, and those (or folders) it could not look at or remove, as warnings: they never fail a job. */

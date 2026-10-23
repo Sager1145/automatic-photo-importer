@@ -2,7 +2,8 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { hasher } from './hasher';
-import { streams } from './devices';
+import { streams, mountOf, volumeOf } from './devices';
+import { execFile } from 'node:child_process';
 
 export function checkAbort(signal?:AbortSignal):void {
   if(signal?.aborted) throw new DOMException('Import stopped','AbortError');
@@ -45,6 +46,41 @@ export async function syncDirectory(folder:string):Promise<void> {
 // A sync in progress is shared: a caller that would skip the folder waits for it instead, and
 // gets its failure, so nobody returns before the folder is on disk.
 const changedFolders=new Set<string>(),durableFolders=new Set<string>(),syncing=new Map<string,Promise<void>>();
+// Folder flushes of a copy run are grouped. commitFolder joins a flush of the folder that has been queued but not started
+// (it will start after this request, so it covers every change made before it) and otherwise queues one behind the flush
+// running now: a request never joins a flush that has already started, which may have missed its change. A flush that
+// fails fails every request waiting on it and is not retried. dirtyFolder marks a change nobody waits on (a receipt
+// removed after its file was made durable): the next commit of that folder, a 250 ms timer or flushFolders covers it.
+const queuedCommits=new Map<string,Promise<void>>(),runningCommits=new Map<string,Promise<void>>(),lazyFolders=new Set<string>();
+let lazyTimer:ReturnType<typeof setTimeout>|undefined;
+export function commitFolder(folder:string):Promise<void> {
+  const queued=queuedCommits.get(folder);
+  if(queued) return queued;
+  const previous=runningCommits.get(folder);
+  let start!:()=>void;
+  const turn=new Promise<void>(resolve=>{start=resolve;});
+  const commit=turn.then(async()=>{
+    // From here on this flush has started: later requests queue another, and what was marked lazily is covered.
+    queuedCommits.delete(folder);lazyFolders.delete(folder);
+    const flush=syncDirectory(folder);runningCommits.set(folder,flush);
+    try { await flush; } finally { if(runningCommits.get(folder)===flush) runningCommits.delete(folder); }
+  });
+  queuedCommits.set(folder,commit);
+  // Requests of the same tick still join; it starts once the flush running now (if any) has ended, whatever its outcome.
+  if(previous) void previous.then(start,start); else queueMicrotask(start);
+  return commit;
+}
+/** A folder entry changed that nothing waits on; see commitFolder. */
+export function dirtyFolder(folder:string):void {
+  lazyFolders.add(folder);
+  lazyTimer??=setTimeout(()=>{lazyTimer=undefined;void flushFolders();},250);
+  lazyTimer.unref?.();
+}
+/** Flushes every folder marked by dirtyFolder. A failure leaves only advisory changes (removed receipts) undone, so it is not raised. */
+export async function flushFolders():Promise<void> {
+  if(lazyTimer){clearTimeout(lazyTimer);lazyTimer=undefined;}
+  await Promise.all([...lazyFolders].map(folder=>commitFolder(folder).catch(()=>{})));
+}
 /** A folder whose entries changed outside a publication (a file removed from it): the next synchronization that passes through it as an ancestor covers it. */
 export function markFolderChanged(folder:string):void {changedFolders.add(folder);}
 export async function syncParents(file:string,root:string):Promise<void> {
@@ -53,7 +89,7 @@ export async function syncParents(file:string,root:string):Promise<void> {
     if(own||changedFolders.has(folder)||(!durableFolders.has(folder)&&!syncing.has(folder))){
       // Cleared first, so a subfolder created during this sync marks the folder again.
       changedFolders.delete(folder);
-      const sync=syncDirectory(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
+      const sync=commitFolder(folder).then(()=>{durableFolders.add(folder);},error=>{changedFolders.add(folder);throw error;});
       syncing.set(folder,sync);
       try{await sync;}finally{if(syncing.get(folder)===sync)syncing.delete(folder);}
     } else await syncing.get(folder);
@@ -127,7 +163,7 @@ export function validateRelative(folder:string):void {
 }
 export function safeComponent(value:string):string {
   let result=value.normalize('NFC').replace(/[\\/:\x00-\x1f\x7f<>"|?*]/gu,'-').trim().replace(/[. ]+$/u,'').slice(0,120);
-  if(!result || result==='.' || result==='..') result='Unknown Camera';
+  if(!result || result==='.' || result==='..') result='Unknown files';
   if(/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result)) result='_'+result;
   return result;
 }
@@ -145,10 +181,11 @@ type Stat=import('node:fs').BigIntStats;
 /** exFAT gives a zero-length file no start cluster, so its inode is synthetic (2^63 and up, negative when
  * read as signed) and changes whenever the vnode is recreated. Such an inode proves nothing either way. */
 export function unreliableIno(stat:Pick<Stat,'ino'|'size'>):boolean {return stat.size===0n || stat.ino<0n || stat.ino>=2n**63n;}
-/** The same file: dev, size and times, plus the inode - or the birth time where no inode can be trusted. */
+/** The same file: dev, size and times, plus the inode - or the birth time where either inode cannot be trusted. */
 export function sameStat(a:Stat,b:Stat):boolean {
   if(a.dev!==b.dev || a.size!==b.size || a.mtimeNs!==b.mtimeNs || a.ctimeNs!==b.ctimeNs) return false;
-  return unreliableIno(a)&&unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
+  // exFAT swaps an empty or fresh file's synthetic inode for the real one when it is first flushed: that alone is not another file.
+  return unreliableIno(a)||unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
 }
 /** exFAT (macOS FSKit) reports a birth time as whole seconds while the file is cached after the date helper set it,
  * and as the stored 10 ms value once re-read from disk. A recorded whole second therefore matches any value in that
@@ -178,10 +215,32 @@ export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:num
         }
         const after=await handle.stat({bigint:true});
         const pathname=await fs.lstat(file,{bigint:true});
-        if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
+        if(!sameStat(before,after) || !sameStat(after,pathname)) throw Object.assign(new Error(`File changed while reading; scan again: ${file}`),{changedWhileReading:true});
         return await hash.digest();
       } finally { hash.drop(); }
     } finally { await handle.close(); }
   },signal);
 }
 export function pathKey(file:string):string { return file.normalize('NFC').toLowerCase(); }
+
+const directVolumes=new Map<string,Promise<boolean>>();
+/** Whether files may be written straight to their final names under `root`: only macOS exFAT volumes (LINK_MAX 1 unless the caller
+ * says so), which can neither hard-link nor publish a name atomically, so a staging file buys nothing. FAT (msdos) stays staged until
+ * its local-time timestamps are probed; APFS, network and FUSE volumes, whose birth times are unproven, keep the staged path too.
+ * Answered once per volume UUID, so a path or device number reused by another volume is never taken for the old one. A tool that
+ * fails (a busy machine) is asked again once after a pause; if it still fails the answer is "staged" for this call only. */
+export async function directCapable(root:string,_rootIdentity:string,exclusiveCopy=false):Promise<boolean> {
+  if(process.platform!=='darwin') return false;
+  const answer=async():Promise<boolean> => {
+    const {uuid,type}=await volumeOf(await mountOf(root));
+    if(type!=='exfat') return false;
+    const key=`${uuid??''}\0${exclusiveCopy}`;
+    const check=async()=>exclusiveCopy||(await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim()))))==='1';
+    if(!uuid) return check();
+    let found=directVolumes.get(key);
+    if(!found){found=check();directVolumes.set(key,found);found.catch(()=>directVolumes.delete(key));}
+    return found;
+  };
+  try { return await answer(); }
+  catch { await new Promise(resolve=>setTimeout(resolve,500)); return answer().catch(()=>false); }
+}

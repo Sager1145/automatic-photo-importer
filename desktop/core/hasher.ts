@@ -14,7 +14,7 @@ export interface Hasher {
 // Several hashes per worker: each id keeps its own state, and messages to one worker stay in order.
 const SOURCE=`const {parentPort}=require('node:worker_threads');const {createHash}=require('node:crypto');const hashes=new Map();
 parentPort.on('message',message=>{
- if(message.chunk){let hash=hashes.get(message.id);if(!hash){hash=createHash('sha256');hashes.set(message.id,hash);}hash.update(new Uint8Array(message.chunk));parentPort.postMessage({id:message.id,ack:true});}
+ if(message.chunk){let hash=hashes.get(message.id);if(!hash){hash=createHash('sha256');hashes.set(message.id,hash);}hash.update(new Uint8Array(message.chunk,0,message.length));parentPort.postMessage({id:message.id,ack:true,chunk:message.chunk},[message.chunk]);}
  else if(message.final){const hash=hashes.get(message.id)??createHash('sha256');hashes.delete(message.id);parentPort.postMessage({id:message.id,hex:hash.digest('hex')});}
  else if(message.drop)hashes.delete(message.id);
 });`;
@@ -22,7 +22,7 @@ parentPort.on('message',message=>{
 const PENDING_DESIGN=4;
 /** Scaled by the memory budget (4 at the 2 GB default), at least one so a hash always progresses. */
 export const pendingChunks=():number=>scaledByBudget(PENDING_DESIGN,1,8);
-interface Waiting {acked:()=>void;done?:(hex:string)=>void;fail:(error:Error)=>void;}
+interface Waiting {acked:(chunk?:ArrayBuffer)=>void;done?:(hex:string)=>void;fail:(error:Error)=>void;}
 /** Each message posted expects one reply: a worker stays referenced while any are due. */
 function expect(slot:{worker:Worker;busy:number}):void {if(slot.busy++===0)slot.worker.ref();}
 function settle(slot:{worker:Worker;busy:number}):void {if(slot.busy>0&&--slot.busy===0)slot.worker.unref();}
@@ -34,7 +34,7 @@ class Pool {
     if(this.failed) return undefined;
     if(this.workers.length<this.size()) try {
       const worker=new Worker(SOURCE,{eval:true}),waiting=new Map<number,Waiting>(),slot={worker,waiting,busy:0};
-      worker.on('message',(message:{id:number;ack?:boolean;hex?:string})=>{settle(slot);const item=waiting.get(message.id);if(!item)return;if(message.ack)item.acked();else if(message.hex!==undefined){waiting.delete(message.id);item.done?.(message.hex);}});
+      worker.on('message',(message:{id:number;ack?:boolean;chunk?:ArrayBuffer;hex?:string})=>{settle(slot);const item=waiting.get(message.id);if(!item)return;if(message.ack)item.acked(message.chunk);else if(message.hex!==undefined){waiting.delete(message.id);item.done?.(message.hex);}});
       // A worker that dies fails its hashes (the copy reports an error and can be retried);
       // later hashes run on the main thread.
       const broken=(error:Error)=>{if(!this.workers.includes(slot))return;this.failed=true;slot.busy=0;for(const item of waiting.values())item.fail(error);waiting.clear();};
@@ -54,18 +54,32 @@ class Pool {
     const slot=this.worker();
     // Without workers (or after one failed) hashing runs here, as it always used to.
     if(!slot) {const hash=createHash('sha256');return {update:async chunk=>{hash.update(chunk);},digest:async()=>hash.digest('hex'),drop:()=>{}};}
-    const id=++this.id;let pending=0,wake:(()=>void)|undefined,finished=false,failure:Error|undefined,reject:((error:Error)=>void)|undefined;
-    const item:Waiting={acked:()=>{pending--;wake?.();wake=undefined;},fail:error=>{failure=error;wake?.();wake=undefined;reject?.(error);}};slot.waiting.set(id,item);
+    const id=++this.id;let pending=0,made=0,free:ArrayBuffer[]=[],dropped=false,wake:(()=>void)|undefined,finished=false,failure:Error|undefined,reject:((error:Error)=>void)|undefined;
+    const item:Waiting={acked:chunk=>{pending--;if(chunk&&!dropped){if(made>pendingChunks())made--;else free.push(chunk);}wake?.();wake=undefined;},fail:error=>{failure=error;wake?.();wake=undefined;reject?.(error);}};slot.waiting.set(id,item);
     return {
       update:async chunk=>{
         if(failure) throw failure;
-        const copy=new Uint8Array(chunk.byteLength);copy.set(chunk);
-        pending++;expect(slot);slot.worker.postMessage({id,chunk:copy.buffer},[copy.buffer]);
-        while(pending>=pendingChunks()&&!failure) await new Promise<void>(resolve=>{wake=resolve;});
+        if(dropped) throw new Error('Hash dropped');
+        // Buffers cycle between here and the worker (transferred both ways), so memory stays at pendingChunks() chunks.
+        let buffer:ArrayBuffer|undefined;
+        for(;;) {
+          // A smaller cap (a lower memory limit) lets go of the buffers above it.
+          while(free.length&&made>pendingChunks()){free.pop();made--;}
+          buffer=free.pop();
+          if(buffer&&buffer.byteLength<chunk.byteLength){buffer=undefined;made--;}
+          if(!buffer&&made<pendingChunks()){made++;buffer=new ArrayBuffer(chunk.byteLength);}
+          if(buffer||failure||dropped) break;
+          await new Promise<void>(resolve=>{wake=resolve;});
+        }
+        if(failure||dropped||!buffer) throw failure??new Error('Hash dropped');
+        new Uint8Array(buffer).set(chunk);
+        pending++;expect(slot);slot.worker.postMessage({id,chunk:buffer,length:chunk.byteLength},[buffer]);
+        while(pending>=pendingChunks()&&!failure&&!dropped) await new Promise<void>(resolve=>{wake=resolve;});
         if(failure) throw failure;
+        if(dropped) throw new Error('Hash dropped');
       },
       digest:()=>new Promise<string>((resolve,fail)=>{if(failure){fail(failure);return;}finished=true;item.done=resolve;reject=fail;expect(slot);slot.worker.postMessage({id,final:true});}),
-      drop:()=>{if(!finished){finished=true;slot.waiting.delete(id);slot.worker.postMessage({id,drop:true});}},
+      drop:()=>{dropped=true;free=[];wake?.();wake=undefined;if(!finished){finished=true;slot.waiting.delete(id);slot.worker.postMessage({id,drop:true});}},
     };
   }
 }

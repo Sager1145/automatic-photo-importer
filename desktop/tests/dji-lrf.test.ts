@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {inventory, plan, execute} from '../core/index';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 test('camera imports include standalone DJI LRF videos and preserve their bytes',async t=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'dji-lrf-')));
