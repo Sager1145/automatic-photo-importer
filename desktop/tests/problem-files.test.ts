@@ -67,7 +67,7 @@ test('a later organization and the misplaced check ignore the Problem files fold
   assert.deepEqual(later.plans[0]!.entries,[]);
   assert.deepEqual(later.problems,[]);
   assert.deepEqual(later.inventory.files.filter(file=>file.relative.startsWith('Problem files')),[]);
-  assert.deepEqual(await findMisplaced(f.library,f.library,{...options,collectProblems:true},metadata),{count:0,bytes:0,files:[]});
+  const {placed:_placed,...found}=await findMisplaced(f.library,f.library,{...options,collectProblems:true},metadata);assert.deepEqual(found,{count:0,bytes:0,files:[]});
   // A new 0-byte file with the same relative path is merged as an identical one, never overwriting.
   await f.put('old/trip/EMPTY.CR3','');
   const again=await organize(f.library,true);

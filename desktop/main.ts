@@ -22,6 +22,7 @@ import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
+import {loadPlacement,placedMatches,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
@@ -355,6 +356,28 @@ function releaseMissingVolumes(volumes:MountedVolume[]){
 // Read-only check of each connected destination's backup folder for files outside the folder the
 // rules give them. It runs while nothing else does: after imports finish and when a destination connects.
 let misplacedControl:AbortController|undefined,misplacedTask:Promise<void>|undefined,misplacedScope='',organizeAfterImport=false,misplacedPaths:string[]=[];
+/** Where a destination's saved placement memory lives: one per volume and library, valid for the folder rules it was made under. */
+function placementOf(prefs:Preferences,index:number){
+ const single={...prefs,destinations:[prefs.destinations[index]!],destinationIds:[prefs.destinationIds?.[index]??'']},library=backupLibrary(single);
+ return {library,id:placementId(single.destinationIds[0]!,library.root,library.videoRoot),scope:placementScope({template:single.template,layout:single.mediaLayout,videoTemplate:single.videoTemplate,editedFolder:single.editedFolder,basePaths:[...backupFolders(single),single.basePath,single.videoBasePath]})};
+}
+// Files an import or organization placed are remembered as in place, so the next folder check does not read them
+// again. This runs after the job is done, never holds it up, and the next check waits for it.
+let placementWork:Promise<void>=Promise.resolve();
+function rememberPlaced(plans:TransferPlan[],prefs:Preferences){
+ if(qa)return;
+ inspecting++;
+ const work=placementWork.then(async()=>{
+  try{
+   for(const [index,plan] of plans.entries()){
+    if(plan.drive||!prefs.destinations[index])continue;
+    const {library,id,scope}=placementOf(prefs,index);
+    await rememberEntries(app.getPath('userData'),id,scope,library.source,[library.root,...(library.videoRoot?[library.videoRoot]:[])],destinationEntries(plan));
+   }
+  }finally{inspecting--;void releaseIfIdle();}
+ }).catch(()=>{/* Only a cache: the next check reads everything. */});
+ placementWork=work;
+}
 function scheduleMisplacedCheck(force=false){
  if(qa||(!force&&checkTimer)||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
  const prefs=state.preferences,scope=JSON.stringify([prefs.destinations,prefs.destinationIds,prefs.basePath,prefs.template,prefs.mediaLayout,prefs.videoBasePath,prefs.videoTemplate,prefs.editedFolder,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
@@ -367,7 +390,10 @@ function scheduleMisplacedCheck(force=false){
    const status=state.destinationStatus?.find(item=>item.path===destination),folder=(item:string)=>fs.lstat(item).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink(),()=>false);
    // Both backup folders must exist to be compared; the first import creates them.
    if(!status?.available||status.volumeId!==snapshot.destinationIds?.[0]||!within(library.root,destination)||!await folder(library.root)||library.videoRoot&&!await folder(library.videoRoot)){delete state.misplacedFiles?.[destination];continue;}
-   const found=await findMisplaced(library.source,library.root,{template:snapshot.template,layout:snapshot.mediaLayout,videoTemplate:snapshot.videoTemplate,...(library.videoRoot?{videoRoots:[library.videoRoot]}:{}),...(library.sourceFolders?{sourceFolders:library.sourceFolders}:{}),editedFolder:snapshot.editedFolder,unknownRules:{},...await listingOptions(library.source,library.sourceFolders,false)},file=>metadata(file,{preview:false,details:false}),control.signal,(count,file,detail)=>{(state.misplacedProgress??={})[destination]=planningProgress(count,file,detail);progressEmit();}).finally(()=>{delete state.misplacedProgress?.[destination];});
+   await placementWork;
+   const place=placementOf(snapshot,0),memory=qa?undefined:await loadPlacement(app.getPath('userData'),place.id,place.scope);
+   const found=await findMisplaced(library.source,library.root,{...(memory?{inPlace:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>placedMatches(memory,relative,size,mtimeNs,ino)}:{}),template:snapshot.template,layout:snapshot.mediaLayout,videoTemplate:snapshot.videoTemplate,...(library.videoRoot?{videoRoots:[library.videoRoot]}:{}),...(library.sourceFolders?{sourceFolders:library.sourceFolders}:{}),editedFolder:snapshot.editedFolder,unknownRules:{},...await listingOptions(library.source,library.sourceFolders,false)},file=>metadata(file,{preview:false,details:false}),control.signal,(count,file,detail)=>{(state.misplacedProgress??={})[destination]=planningProgress(count,file,detail);progressEmit();}).finally(()=>{delete state.misplacedProgress?.[destination];});
+   if(!qa)await replacePlacement(app.getPath('userData'),place.id,place.scope,found.placed).catch(()=>{/* Only a cache. */});
    (state.misplacedFiles??={})[destination]={count:found.count,bytes:found.bytes,checkedAt:new Date().toISOString()};emit();
    if(found.count&&organize&&state.preferences.autoOrganizeBackup==='auto')try{queueBackupOrganization(index,true);}catch{/* Another organization or a review comes first; the count stays visible. */}
   }
@@ -540,6 +566,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));recordIssues(job,warnings);
   await recordDuplicates(plans,prepared.duplicates,reorganize);
+  rememberPlaced(plans,prefs);
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings,notes,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
