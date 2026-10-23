@@ -47,7 +47,7 @@ import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
 import {sourcePolicy,freshOrganizeOptions} from './run-policy';
-import {measureOriginals,deleteOriginals,type VerifiedOriginal} from './core/originals';
+import {measureOriginals,deleteOriginals,recordVerified,verifiedOriginals,type ImportVerified,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
 
@@ -543,7 +543,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  const signal=control.signal;
  const request='review' in input?undefined:input;job.excluded=request?.exclude;
  // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
- const verified:Record<string,{sha256:string;identity:string}>={};
+ const verified:Record<string,ImportVerified>={};
  try{
   // A cleanup in progress stops first. The phase changes before this wait, so pump() never takes this job again.
   if('review' in input){
@@ -579,7 +579,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
   job.phase='copying';
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
@@ -604,8 +604,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
-   const entries=plans.flatMap(item=>destinationEntries(item)),files:VerifiedOriginal[]=[];
-   for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,identity:found.identity,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
+   const files=verifiedOriginals(verified,plans.flatMap(item=>destinationEntries(item)));
    if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');

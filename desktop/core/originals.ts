@@ -33,6 +33,24 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
   }
   return {files:count,bytes,kept};
 }
+/** What an import verified for one source: its checksum, the source identity it was hashed under, and whether this
+ * job read the source for it (a copy it streamed) rather than matching a file already in the backup by a checksum
+ * from planning. */
+export interface ImportVerified {sha256:string;identity:string;streamed:boolean;}
+/** Note one verification; a source copied to one destination and found in another counts as read by this job. */
+export function recordVerified(verified:Record<string,ImportVerified>,source:string,sha256:string,identity:string,streamed:boolean):void {
+  verified[source]={sha256,identity,streamed:streamed||verified[source]?.streamed===true};
+}
+/** The originals a finished import may offer to delete, with every place it put each. Only a source this job read
+ * itself carries its identity, which lets deleteOriginals skip reading it again; a planning checksum never does. */
+export function verifiedOriginals(verified:Record<string,ImportVerified>,entries:{source:string;destination:string;size:number}[]):VerifiedOriginal[] {
+  const files:VerifiedOriginal[]=[];
+  for(const [source,found] of Object.entries(verified)) {
+    const matching=entries.filter(entry=>entry.source===source);
+    if(matching.length) files.push({source,size:matching[0]!.size,sha256:found.sha256,...(found.streamed?{identity:found.identity}:{}),destinations:[...new Set(matching.map(entry=>entry.destination))]});
+  }
+  return files;
+}
 type Outcome={deleted:true}|{kept:KeptReason;error?:string};
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that
  * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays.

@@ -152,7 +152,7 @@ test('deleting originals keeps a source whose backup differs, even when the sour
 test('a stopped import still remembers its checksums, and the next plan does not read those files',async t=>{
  const {readFileSync}=await import('node:fs'),{rememberImported,loadImported}=await import('../platform/scan-memory');
  const main=readFileSync(new URL('../main.ts',import.meta.url),'utf8');
- assert.match(main,/const verified:Record<string,\{sha256:string;identity:string\}>=\{\};\n try\{/);
+ assert.match(main,/const verified:Record<string,ImportVerified>=\{\};\n try\{/);
  assert.match(main,/\}\}\n finally\{\n  const volume=[^\n]*\n  if\(volume&&!qa&&Object\.keys\(verified\)\.length\)await rememberImported\(/);
  const base=await folder(t,'verify-once-stopped-'),card=path.join(base,'card'),root=path.join(base,'backup'),store=path.join(base,'store');
  const first=path.join(card,'A.bin'),second=path.join(card,'B.bin');await photo(first,Buffer.alloc(SIZE,1));await photo(second,Buffer.alloc(SIZE,2));await fs.mkdir(root);
@@ -194,4 +194,25 @@ test('on exFAT the destination is still read twice per job that skips it',async 
   const {result,reads}=await job();
   assert.deepEqual({skipped:result.skipped,reads},{skipped:1,reads:2});
  }
+});
+
+// Only a source this job read itself (a streamed copy) carries its identity into Delete originals. A file found
+// already in the backup was matched by a checksum from planning, so its source is read again before deletion.
+test('delete originals reads the source of a file the import found already in the backup',async t=>{
+ const {deleteOriginals,recordVerified,verifiedOriginals}=await import('../core/originals');
+ const base=await folder(t,'verify-once-skipped-'),card=path.join(base,'card'),root=path.join(base,'backup'),source=path.join(card,'A.JPG');
+ await photo(source,Buffer.alloc(SIZE,7));await fs.mkdir(root);
+ const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const job=async()=>{
+  const {plans:[transfer]}=await core.plan(card,[root],options,none),verified={};
+  const result=await core.execute(transfer!,undefined,undefined,{onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed)});
+  return {result,files:verifiedOriginals(verified,transfer!.entries)};
+ };
+ const copied=await job(),skipped=await job();
+ assert.equal(copied.result.copied,1);assert.equal(skipped.result.skipped,1);
+ assert.equal(typeof copied.files[0]!.identity,'string');assert.equal(skipped.files[0]!.identity,undefined);
+ const reads=countReads(t,file=>file===source?'source':undefined);
+ assert.equal((await deleteOriginals(card,skipped.files)).deleted.length,1);
+ reads.stop();
+ assert.deepEqual(reads.files(),{source:1});
 });
