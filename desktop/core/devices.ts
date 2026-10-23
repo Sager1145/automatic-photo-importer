@@ -108,6 +108,10 @@ export class DeviceStreams {
 /** The process-wide slots: every whole-file stream of every job goes through them. */
 export const streams=new DeviceStreams();
 
+/** Metadata reads in flight while checking or scanning: enough to fill ExifTool's multi-file requests (platform/metadata.ts)
+ * on every process; the device's own limit still caps the requests running at once. */
+export const CHECK_CONCURRENCY=32;
+
 /** CPU worker count for a pool wanting up to `cap`: leaves two cores for the app, never below one. */
 export function cpuWorkers(cap:number):number {
   return Math.max(1,Math.min(availableParallelism()-2,cap));

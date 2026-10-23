@@ -10,6 +10,7 @@ import { LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './recovery';
 import { PROBLEM_FILES_FOLDER } from '../shared';
 import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
 import type { DestinationIndex } from './destination-index';
+import { CHECK_CONCURRENCY } from './devices';
 
 /** The per-library record of what duplicate detection found: visible, never hidden, and ignored by inventories. */
 export const DUPLICATES_PREFIX='photo-importer-duplicates';
@@ -155,7 +156,7 @@ export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanO
   // Look at every file: reuse a record whose stat is unchanged, otherwise read its EXIF fingerprint.
   const edited=options.editedFolder??'editied',items:DuplicateFile[]=[],stats=new Map<DuplicateFile,BigIntStats>();
   let done=0;const total=media.length;
-  await parallel(media,6,async item=>{
+  await parallel(media,CHECK_CONCURRENCY,async item=>{
     const relative=relativeOf(root,item.path),stat=await fs.lstat(item.path,{bigint:true});
     if(!stat.isFile()) return;
     let record=store.files.get(relative);

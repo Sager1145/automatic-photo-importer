@@ -14,7 +14,7 @@ import { beneath, checkAbort, code, contained, digest, directory, identity, isAb
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
-import { streams } from './devices';
+import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
 import { confirmCandidates, type PlanDuplicates } from './duplicates';
 import { buildGroups } from '../duplicate-rules';
@@ -26,9 +26,6 @@ export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalizati
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
 const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
-/** Metadata reads in flight while checking: enough to fill ExifTool's multi-file requests (platform/metadata.ts)
- * on every process; the device's own limit still caps the requests running at once. */
-const CHECK_CONCURRENCY=32;
 /** Whole files hashed or copied at once by one job; each device's own limit (devices.ts) still
  * applies, so a spinning disk serves them one at a time. */
 const STREAM_CONCURRENCY=4;
