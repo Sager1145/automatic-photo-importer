@@ -8,6 +8,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary} from './shared';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning} from './shared';
+import {organizesAfterImport} from './after-import';
 import {ruleOptions} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
@@ -408,7 +409,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size||dupl
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
  organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);misplacedControl?.abort();residueControl?.abort();const control=startJob(job);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
- void settle(withJob(job.id,()=>run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(job.useFileDate?{useFileDate:true}:{}),...(job.unknownConfirmed?{confirmed:true}:{}),...skip}))).finally(()=>{if(job.phase==='error')job.retryable=true;if(!organization&&job.phase==='complete')organizeAfterImport=true;finishJob(job);});
+ void settle(withJob(job.id,()=>run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(job.useFileDate?{useFileDate:true}:{}),...(job.unknownConfirmed?{confirmed:true}:{}),...skip}))).finally(()=>{if(job.phase==='error')job.retryable=true;if(organizesAfterImport(job,!!organization))organizeAfterImport=true;finishJob(job);});
  if(organization)break;
 }}
 // Nothing here may touch a drive once the work is done, so macOS can eject it at once. exiftool and the
@@ -786,7 +787,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // A planning error about one file can be skipped by hand: never for a mirror (the copy would read as removed) or a USB camera (staged anew each time).
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&!(job.backup&&prefs?.backupMode==='mirror')&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail);}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
-await writeExcerpt(job,reporting?path.join(app.getPath('userData'),'operation-reports',job.id):undefined,[prepared?.review.id,prepared?.origin?.jobId]);
+ await writeExcerpt(job,reporting?path.join(app.getPath('userData'),'operation-reports',job.id):undefined,[prepared?.review.id,prepared?.origin?.jobId]);
  if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();emit();
 }
 /** The job's own lines of the diagnostic log, at the level now set, saved with its operation report. Never fails the job. */
@@ -839,7 +840,7 @@ async function applyReview(){
  const prepared=reviewed;reviewed=undefined;state.review=undefined;
  const job:Job={id:randomUUID(),source:prepared.review.source,phase:'verifying',detail:message('job.revalidating'),errors:[],backup:prepared.review.backup,unknownConfirmed:true,...(prepared.useFileDate?{useFileDate:true}:{}),...(prepared.origin?.organization?{organization:true,...(prepared.origin.folders?{folders:prepared.origin.folders}:{})}:{})};state.jobs.unshift(job);if(prepared.origin?.organization)organizationRuns.set(job.id,{...prepared.request,confirmed:true});const control=startJob(job);if(prepared.review.kind==='reorganize')organizationJobIds.add(job.id);
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
- log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error'&&(prepared.review.kind!=='reorganize'||organizationRuns.has(job.id)))job.retryable=true;finishJob(job);});
+ log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error'&&(prepared.review.kind!=='reorganize'||organizationRuns.has(job.id)))job.retryable=true;if(organizesAfterImport(job,prepared.review.kind==='reorganize'))organizeAfterImport=true;finishJob(job);});
 }
 // ---- Remove duplicates: scan one library, review, set the chosen copies aside (recovery store, with undo).
 let duplicateGroups:DuplicateGroup[]=[],duplicateCompanions=new Map<string,string[]>(),duplicateControl:AbortController|undefined;
@@ -948,9 +949,9 @@ async function removeOriginals(jobId:string){
   const gone=new Set(result.deleted.map(item=>item.source));
   kept.files=kept.files.filter(file=>!gone.has(file.source));
   job.verifiedOriginals=kept.files.length||undefined;if(!kept.files.length)importedOriginals.delete(jobId);
-  job.originalsDeleted={files:result.deleted.length,bytes:result.bytes,kept:result.kept.length,folders:result.folders};
-  await writeReport(job.id,`originals-deleted-${Date.now()}.json`,{producer:'desktop-app',jobId:job.id,source:job.source.path,finished:new Date().toISOString(),deleted:result.deleted,kept:result.kept,foldersRemoved:result.folders,errors:result.errors});
-  addHistory(text(job.source.name),message('job.originalsDeleted',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length,folders:result.folders}));
+  job.originalsDeleted={files:result.deleted.length,bytes:result.bytes,kept:result.kept.length,folders:result.folders,...(result.stopped?{stopped:true}:{})};
+  await writeReport(job.id,`originals-deleted-${Date.now()}.json`,{producer:'desktop-app',jobId:job.id,source:job.source.path,finished:new Date().toISOString(),deleted:result.deleted,kept:result.kept,foldersRemoved:result.folders,stopped:result.stopped===true,errors:result.errors});
+  addHistory(text(job.source.name),result.stopped?message('job.originalsStopped',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length}):message('job.originalsDeleted',{count:result.deleted.length,size:gigabytes(result.bytes),kept:result.kept.length,folders:result.folders}));
   if(result.errors.length)state.error=message('error.originalsDelete',{count:result.errors.length,error:result.errors[0]!});
  }catch(error){if(!control.signal.aborted)state.error=toMessage(error);}
  finally{originalsControls.delete(job.id);delete job.deletingOriginals;await updateFolderCapacity(job.source).catch(()=>{});emit();void releaseIfIdle();}
@@ -1191,7 +1192,7 @@ async function boot(){
  function trusted(event:Electron.IpcMainInvokeEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
  ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{await action(value);}catch(e){state.error=toMessage(e);emit();}});
-ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});

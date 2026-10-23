@@ -144,3 +144,15 @@ test('the summary line and the history message count the removed folders in ever
   }
   assert.equal(createTranslator('en')('Removing empty folders: {completed} of {total}', { completed: 2, total: 5 }), 'Removing empty folders: 2 of 5');
 });
+
+test('a stopped Delete originals has its own history line and finish message in every language', () => {
+  for (const language of ['en', 'zh-Hans', 'zh-Hant', 'ja'] as const) {
+    const t = createTranslator(language);
+    const line = formatMessage(message('job.originalsStopped', { count: 3, size: '1 GB', kept: 2 }), language);
+    assert.ok(line.includes('3') && line.includes('2') && !line.includes('{'), `${language}: ${line}`);
+    assert.notEqual(line, formatMessage(message('job.originalsDeleted', { count: 3, size: '1 GB', kept: 2, folders: 0 }), language));
+    const finish = t('Stopped after {count} originals deleted ({size}); {kept} left in place', { count: 3, size: '1 MB', kept: 2 });
+    assert.ok(finish.includes('3') && !finish.includes('{'), `${language}: ${finish}`);
+    if (language !== 'en') assert.notEqual(finish, 'Stopped after 3 originals deleted (1 MB); 2 left in place');
+  }
+});

@@ -17,7 +17,7 @@ export interface VerifiedOriginal {source:string;size:number;sha256:string;desti
 /** stopped: Stop was pressed before this file was removed. */
 export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error'|'stopped';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
-/** stopped: the run was stopped; files it had already removed are still listed in `deleted`, and no folder was removed. */
+/** stopped: the run was stopped; files it had already removed are still listed in `deleted`. A stop before the emptied-folder pass removes no folder; one during it ends the pass early. */
 export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];/** Source folders removed because this run left them empty. */folders:number;stopped?:boolean;}
 
 async function regular(file:string) {
