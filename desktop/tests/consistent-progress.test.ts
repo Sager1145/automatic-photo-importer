@@ -28,6 +28,7 @@ const operations:Operation[]=[
  {name:'import checking',step:'checking',phase:'planning',unit:'files',count:/files checked/,file:true,at:s=>({...base,phase:'planning',step:'checking',...files(s)})},
  {name:'import reading',step:'reading',phase:'planning',unit:'bytes',count:/files read/,file:true,at:s=>({...base,phase:'planning',step:'reading',bytes:s*100e6,completed:s*5})},
  {name:'import comparing',step:'comparing',phase:'planning',unit:'bytes',count:/Checking the destination/,file:true,at:s=>({...base,phase:'planning',step:'comparing',bytes:s*100e6,completed:s*5})},
+ {name:'import locating',step:'locating',phase:'planning',unit:'files',count:/Looking for files already in the backup/,file:true,at:s=>({...base,phase:'planning',step:'locating',...files(s)})},
  {name:'import existing',step:'existing',phase:'planning',unit:'files',count:/already on the destination/,file:true,at:s=>({...base,phase:'planning',step:'existing',...files(s)})},
  {name:'earlier organization',step:'earlier',phase:'verifying',unit:'files',count:/earlier organization/,file:true,at:s=>({...base,phase:'verifying',step:'earlier',...files(s)})},
  {name:'organization history',step:'history',phase:'verifying',unit:'files',count:/organization history/,file:true,at:s=>({...base,phase:'verifying',step:'history',...files(s)})},
@@ -270,4 +271,14 @@ test('the recovery listing reports its share as it reads',async t=>{
  await core.getOrganizationRecovery(root,{includeEnded:true,onProgress:update=>updates.push(update)});
  assert.ok(updates.length>=2&&updates.every(update=>update.share>=0&&update.share<=1));
  assert.ok(updates.at(-1)!.looked>=1);
+});
+
+test('looking for files already in the backup first counts the files listed (no total), then files of the total',()=>{
+ const t=createTranslator('en'),format=(value:number)=>String(value);
+ const listing:Progress={...base,phase:'planning',step:'locating',completed:1200,total:0,totalBytes:0};
+ assert.match(progressCount(listing,t,format,false,value=>`${value} B`),/1200 files found/);
+ assert.equal(progressFraction(listing),0);
+ const counting:Progress={...listing,completed:300,total:1200};
+ assert.match(progressCount(counting,t,format,false,value=>`${value} B`),/Looking for files already in the backup: 300 of 1200/);
+ assert.equal(progressFraction(counting),.25);
 });

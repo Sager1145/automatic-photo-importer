@@ -90,7 +90,7 @@ export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>
   switch (progress.step) {
     case 'listing': case 'scanning': return 'scan';
     case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'converting': case 'preparing': case 'index': return 'read';
-    case 'comparing': case 'existing': case 'confirming': case 'mirroring': return 'compare';
+    case 'comparing': case 'locating': case 'existing': case 'confirming': case 'mirroring': return 'compare';
     case 'moving': return 'move';
     case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': case 'cleaning': case 'measuring': return 'tidy';
     case 'deleting': return 'delete';
@@ -1327,6 +1327,8 @@ export function progressFraction(progress: NonNullable<Job['progress']>): number
   const basis = copyBasis(progress);
   // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
   const files = basis.total ? basis.completed / basis.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
+  // Looking for files elsewhere in the backup first lists it: no total yet.
+  if (progress.phase === 'planning' && progress.step === 'locating' && !progress.total) return 0;
   // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
   if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning' || progress.step === 'measuring')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
@@ -1371,6 +1373,7 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'index') return t("Loading the destination index: {size} of {totalSize}", { size: formatBytes ? formatBytes(progress.bytes) : counts.completed, totalSize: formatBytes ? formatBytes(progress.totalBytes) : counts.total });
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
+  if (progress.step === 'locating') return progress.total ? t("Looking for files already in the backup: {completed} of {total}", counts) : t("{completed} files found", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   // Verifying also shows how many bytes of the copied files are published.
@@ -1479,7 +1482,7 @@ export function importFraction(job: Job, verify = true): number | undefined {
   if (!progress) return undefined;
   if (job.fraction !== undefined) return job.fraction;
   const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
-  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
+  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' || progress.step === 'locating' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
   return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
 }
 /** What a running job is doing, for the dashboard's total. */

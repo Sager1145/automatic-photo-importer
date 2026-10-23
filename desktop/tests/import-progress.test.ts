@@ -31,11 +31,12 @@ test('after the metadata check, planning reports the destination comparison up t
  const comparing=events.slice(lastChecking+1).filter(event=>event.step==='comparing');
  // Before the fix nothing followed the last metadata check, so the card stayed at 100%.
  assert.ok(comparing.length>0,'the destination comparison reports progress');
- assert.ok(comparing.every(event=>event.step==='comparing'));
+ assert.ok(comparing.every(event=>event.step==='comparing'||event.step==='locating'));
  const total=plans.reduce((sum,item)=>sum+item.entries.length,0);
- assert.ok(comparing.every(event=>event.total===total));
- assert.equal(comparing[0]!.count,0);assert.equal(comparing.at(-1)!.count,total);
- for(let index=1;index<comparing.length;index++)assert.ok(comparing[index]!.count>=comparing[index-1]!.count);
+ assert.ok(comparing.every(event=>event.step==='locating'||event.total===total));
+ const counted=comparing.filter(event=>event.step==='comparing');
+ assert.equal(counted[0]!.count,0);assert.equal(counted.at(-1)!.count,total);
+ for(let index=1;index<counted.length;index++)assert.ok(counted[index]!.count>=counted[index-1]!.count);
 });
 
 test('comparing reports the bytes it reads when a same-size file already sits at the destination',async t=>{
