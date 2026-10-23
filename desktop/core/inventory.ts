@@ -5,6 +5,8 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
+/** Entries of a folder looked at (lstat) at once. */
+const LISTING_STATS=8;
 const sidecars=new Set('xmp aae thm xml moi wav m4a mp3 aac srt dop cos'.split(' '));
 const videoOnly=new Set('xml moi srt thm wav m4a mp3 aac'.split(' '));
 /** Low-resolution proxies: real video, kept with their original or imported alone. */
@@ -89,14 +91,22 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     listedFolders.push([relative,key,names]);
     entries.sort((a,b)=>a.name.localeCompare(b.name));
     if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name)).length;
-    for(const entry of entries) {
+    // The entries that need a look, in name order. Their lstats run LISTING_STATS at a time (one at a time
+    // leaves a drive idle between calls); each is judged in order, and an error is raised at its own turn.
+    const wanted=entries.filter(entry=>!(ignoredName(entry.name) || entry.isSymbolicLink() || (!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name))));
+    for(let start=0;start<wanted.length;start+=LISTING_STATS) {
       checkAbort(signal);
-      if(ignoredName(entry.name) || entry.isSymbolicLink()) continue;
-      if(!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name)) continue;
-      const file=path.join(folder,entry.name), stat=await fs.lstat(file);
-      if(stat.isSymbolicLink()) continue;
-      if(stat.isDirectory()){await walk(file);if(isRoot){topDone++;report(true);}}
-      else if(stat.isFile()) add(file,stat.size);
+      const chunk=wanted.slice(start,start+LISTING_STATS);
+      const looked=await Promise.allSettled(chunk.map(entry=>fs.lstat(path.join(folder,entry.name))));
+      for(const [position,entry] of chunk.entries()) {
+        checkAbort(signal);
+        const outcome=looked[position]!;
+        if(outcome.status==='rejected') throw outcome.reason;
+        const file=path.join(folder,entry.name), stat=outcome.value;
+        if(stat.isSymbolicLink()) continue;
+        if(stat.isDirectory()){await walk(file);if(isRoot){topDone++;report(true);}}
+        else if(stat.isFile()) add(file,stat.size);
+      }
     }
   }
   if(options.folders){

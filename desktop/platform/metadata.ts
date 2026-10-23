@@ -241,6 +241,28 @@ const routingTags=[
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();
+/** Most results kept. A library of hundreds of thousands of files fits, so a later check does not read it all again. */
+let routingLimit=500000;
+/** Least recently used results go first (a Map iterates in insertion order; a hit moves its entry to the end). */
+function remember(key:string,value:Metadata):void {
+  routingCache.delete(key);routingCache.set(key,value);
+  while(routingCache.size>routingLimit){const oldest=routingCache.keys().next();if(oldest.done)break;routingCache.delete(oldest.value);}
+}
+function recall(key:string):Metadata|undefined {
+  const value=routingCache.get(key);
+  if(value){routingCache.delete(key);routingCache.set(key,value);}
+  return value;
+}
+/** Smaller limit for tests. */
+export function setRoutingLimit(limit:number):void {routingLimit=Math.max(1,Math.floor(limit)||1);}
+export function routingCacheSize():number {return routingCache.size;}
+/** A file moved from `from` (reviewed as `reviewed`) to `to` (now `now`) keeps its bytes, so its routing result
+ * carries over to the new path and stat. Only under the same name: the result depends on the name (DJI, Insta360). */
+export function carryRouting(from:string,reviewed:{dev:string;ino:string;size:string;mtime:string;ctime:string},to:string,now:import('node:fs').BigIntStats):void {
+  if(path.basename(from)!==path.basename(to))return;
+  const cached=routingCache.get(`${path.resolve(from)}\0${reviewed.dev}:${reviewed.ino}:${reviewed.size}:${reviewed.mtime}:${reviewed.ctime}`);
+  if(cached)remember(statKey(path.resolve(to),now),structuredClone(cached));
+}
 const statKey=(file:string,info:import('node:fs').BigIntStats)=>`${file}\0${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
 /** Routing results from this process, keyed by path and exact stat, so a scan's
  * reads can be handed to the import that follows it. */
@@ -250,8 +272,7 @@ export function primeRouting(entries:[string,Metadata][]):void {
   for(const entry of Array.isArray(entries)?entries:[]) {
     const [key,value]=Array.isArray(entry)?entry:[];
     if(typeof key!=='string'||!key.includes('\0')||!value||typeof value!=='object'||typeof value.fields!=='object')continue;
-    if(routingCache.size>=50000)routingCache.clear();
-    routingCache.set(key,structuredClone(value));
+    remember(key,structuredClone(value));
   }
 }
 /** Files read by one ExifTool request. ExifTool re-parses its arguments and filters for every request,
@@ -331,13 +352,13 @@ async function readRouting(file:string,dev:bigint,key:string):Promise<RawTags> {
 export async function metadata(filename:string, options:{preview?:boolean;details?:boolean}={}):Promise<Metadata> {
   const absolute=path.resolve(filename),before=await stat(absolute,{bigint:true});if(!before.isFile())throw new Error('Choose a media file to inspect.');
   const routing=options.details===false&&options.preview===false,key=statKey(absolute,before);
-  if(routing){const cached=routingCache.get(key);if(cached)return structuredClone(cached);}
+  if(routing){const cached=recall(key);if(cached)return structuredClone(cached);}
   // Routing skips RequestAll's per-file macOS stat/mdls/xattr subprocesses and
   // trailer scans (-fast keeps maker notes). Full inspection keeps everything.
   // Grouped raw values preserve duplicate tags and the camera's recorded clock.
   const tags=options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']});
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
-  if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key){if(routingCache.size>=50000)routingCache.clear();routingCache.set(key,structuredClone(result));}
+  if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key)remember(key,structuredClone(result));
   if(options.preview!==false)result.preview=await preview(absolute);
   if(options.preview!==false && !result.preview)result.fields.PreviewStatus='No supported embedded image preview is available for this file.';
   return result;

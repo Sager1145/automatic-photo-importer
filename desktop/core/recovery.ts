@@ -156,7 +156,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
  // Identities recorded under an earlier mount are read as this mount's, like the manifest's.
  const mount=mountDevices.get(m),rebased=(record:Record<string,unknown>)=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));};
- const job=jobPath(folder,m.id),names=await fs.readdir(job);let read=0;
+ const job=jobPath(folder,m.id);await contained(path.join(job,'.event-check'),folder);const names=await fs.readdir(job);let read=0;
  const legacyNames=names.filter(name=>legacyEvent.test(name)),own=await fs.lstat(job,{bigint:true});
  const logStat=await fs.lstat(path.join(job,eventLog),{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
  const cacheKey=`${folder}\0${m.id}\0${m.rootIdentity}\0${mountDevices.get(m)??''}`,cached=finishedJournals.get(cacheKey);
@@ -180,8 +180,9 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   }finally{await handle.close();}
  };
  const readLegacy=async(name:string)=>{
-  const file=path.join(job,name);await contained(file,folder);const handle=await regularHandle(file);
-  try{if((await handle.stat()).size>2048)throw new Error('Invalid recovery event');return (await handle.readFile('utf8')).trim();}finally{await handle.close();}
+  // The job folder was checked once above; the file itself is opened without following a link and judged by its handle.
+  const file=path.join(job,name);
+  return readEventFile(file,()=>new Error('Invalid recovery event'));
  };
  // A finished journal read before in this session: only what was added since is read. Anything an
  // append cannot explain (another folder or log, a shorter log, a file gone whose record is not in
@@ -222,7 +223,7 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   else if(legacyEvent.test(name)){const text=await readLegacy(name);legacy.set(name,text);texts[position]=text;}
   onRead?.(++read,names.length,name);
  };
- await Promise.all(Array.from({length:Math.min(32,names.length)},async()=>{while(next<names.length)await readOne(next++);}));
+ await Promise.all(Array.from({length:Math.min(journalReaders,names.length)},async()=>{while(next<names.length)await readOne(next++);}));
  for(const text of texts){
   if(Array.isArray(text)){for(const line of text)once(line);}
   else if(text!==undefined)once(text);
@@ -679,14 +680,20 @@ const earliestStorableDate=new Date(1980,0,2).getTime();
  * Created/Modified, as copies get. The bytes, and so the EXIF data, are never rewritten.
  * A date the filesystem cannot store (exFAT before 1980, a file with other hard links)
  * leaves the file with its original dates instead of failing a move already made. */
+/** Told after a file was moved by rename: where it was (path and reviewed identity), where it is, and its final identity.
+ * Lets a cache keyed by path and stat follow the file (same bytes, so same metadata) instead of reading it again. */
+export type MoveObserver=(from:string,reviewed:FileIdentity,to:string,now:BigIntStats)=>void;
+let moveObserver:MoveObserver|undefined;
+export function setMoveObserver(observer:MoveObserver|undefined):void{moveObserver=observer;}
 async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void):Promise<void> {
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
  await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
  const handle=await fs.open(entry.destination,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
-  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:snapshot(stat)});state.renamed.set(index,snapshot(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
+  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:snapshot(stat)});final=stat;state.renamed.set(index,snapshot(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
   if(!movedIdentity(current,entry,state.dated.get(index)))throw new Error(`Moved file changed; it stays where it is: ${entry.destination}`);
   await remember('renamed',current);
   if(entry.captureTimeMs===undefined||String(current.mtimeNs)!==entry.stat.mtime)return;
@@ -703,6 +710,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
  } finally { await handle.close(); }
+ if(final){try{moveObserver?.(entry.source,entry.stat,entry.destination,final);}catch{/* A cache hint never fails a move. */}}
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */
@@ -900,7 +908,7 @@ async function compactLegacyEvents(m:Manifest,signal?:AbortSignal):Promise<void>
   const file=path.join(folder,name);await contained(file,m.root);const handle=await regularHandle(file);
   try{if((await handle.stat()).size>2048)throw new Error(`Invalid recovery event: ${file}`);texts[position]=(await handle.readFile('utf8')).trim();}finally{await handle.close();}
  };
- await Promise.all(Array.from({length:Math.min(32,files.length)},async()=>{while(next<files.length)await readOne(next++);}));
+ await Promise.all(Array.from({length:Math.min(journalReaders,files.length)},async()=>{while(next<files.length)await readOne(next++);}));
  const records:string[]=[];
  for(const [position,text] of texts.entries()){
   // A file cut short by an interrupted write carries no event (reading skips it too): nothing to keep.
@@ -1164,11 +1172,24 @@ export interface RecoveryDeletion {files:number;bytes:number;released:number;}
  * deletion stopped before it was gone. */
 export const deletingPattern=new RegExp(`^deleting-${UUID_PATTERN}-${UUID_PATTERN}$`);
 const journalFile=/^(?:manifest\.json|event-log\.jsonl|event-[a-f0-9-]+\.json|stage-[0-9a-f-]{36}\.partial|incomplete-[0-9a-f-]{36}|originals)$/;
+/** Readers at once. Node has 4 threads for file calls: more only queue behind each other and starve the listing that runs beside. */
+const journalReaders=4;
+/** One small per-event file: opened without following a link, judged by its own handle (regular, at most 2048 bytes), read once. */
+async function readEventFile(file:string,tooBig:()=>Error):Promise<string>{
+ const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ try{
+  const stat=await handle.stat();if(!stat.isFile())throw new Error(`Unsafe non-regular source: ${file}`);
+  if(stat.size>2048)throw tooBig();
+  const bytes=Buffer.alloc(stat.size);let filled=0;
+  while(filled<bytes.length){const {bytesRead}=await handle.read(bytes,filled,bytes.length-filled,filled);if(!bytesRead)break;filled+=bytesRead;}
+  return bytes.subarray(0,filled).toString('utf8').trim();
+ }finally{await handle.close();}
+}
 /** Files and bytes under `folder`; links are counted, not followed. */
 async function tally(folder:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
  let files=0,bytes=0;const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
  // Several at a time: a journal from an earlier version holds tens of thousands of small files.
- await Promise.all(Array.from({length:Math.min(32,entries.length)},async()=>{while(next<entries.length){
+ await Promise.all(Array.from({length:Math.min(journalReaders,entries.length)},async()=>{while(next<entries.length){
   checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);
   if(entry.isDirectory()){const inner=await tally(file,signal);files+=inner.files;bytes+=inner.bytes;}
   else{const stat=await maybeStat(file);if(stat){files++;bytes+=Number(stat.size);}}
