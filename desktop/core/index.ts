@@ -254,8 +254,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // files library organization will move or when a same-size file already occupies a destination.
   // Metadata reads overlap (ExifTool runs several processes); issues keep file order.
   const issues:{path:string;message:string}[][]=files.map(()=>[]);let done=0,next=0,failure:unknown;
-  // A library check skips files remembered as in place. A changed file is checked with its neighbours (same folder or
-  // the one above it), so families and companions still see each other's metadata.
+  // A library check skips files remembered as in place. A changed file is checked with its family (same stem), so
+  // the files that pair with it still see each other's metadata.
   const trusted=new Set<string>();let trustedFiles:InventoryFile[]=[];
   if(options.misplacedOnly&&options.inPlace) {
     let at=0;
@@ -266,9 +266,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         catch(error) {if(isAbort(error))throw error;}
       }
     }));
+    // Only the changed file's family (same folder and stem: RAW, JPG, sidecars) is read again with it.
     const hot=new Set<string>();
-    for(const file of files) if(!trusted.has(file.path)) {const dir=path.dirname(file.path);hot.add(dir);hot.add(path.dirname(dir));}
-    for(const file of files) if(trusted.has(file.path)) {const dir=path.dirname(file.path);if(hot.has(dir)||hot.has(path.dirname(dir)))trusted.delete(file.path);}
+    for(const file of files) if(!trusted.has(file.path)) hot.add(stem(file.path));
+    for(const file of files) if(trusted.has(file.path)&&hot.has(stem(file.path))) trusted.delete(file.path);
   }
   async function examine(file:InventoryFile,position:number):Promise<void> {
     await contained(file.path,sourceRoot);

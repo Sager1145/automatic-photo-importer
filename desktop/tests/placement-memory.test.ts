@@ -49,6 +49,16 @@ test('only a new file in the library goes to metadata',async t=>{
   assert.equal(again.reads,1);
 });
 
+test('one new file beside 1,000 remembered ones re-reads only its own family',async t=>{
+  const {put,check}=await fixture(t);
+  for(let n=0;n<1000;n++) await put(`2024/202402/Sony A7/JPEG/IMG_${n}.JPG`);
+  const scope=scopeOf(options.template);
+  await check(scope);
+  await put('2024/202402/Sony A7/JPEG/NEW.JPG');await put('2024/202402/Sony A7/JPEG/NEW.RAF');
+  const again=await check(scope);
+  assert.ok(again.reads>=1&&again.reads<=3,`reads ${again.reads}`);
+});
+
 test('a file moved by hand is still flagged',async t=>{
   const {root,put,check}=await fixture(t);
   await put('2024/202402/Sony A7/JPEG/A.JPG');await put('2024/202402/Sony A7/JPEG/B.JPG');
