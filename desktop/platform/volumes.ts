@@ -107,8 +107,32 @@ export function rememberVolumes(mounts:string[],results:PromiseSettledResult<Mou
     return fingerprint&&remembered?.fingerprint===fingerprint?remembered.volume:{path:mount,name:path.basename(mount)};
   });
 }
+/** Free bytes of a mount from statfs, which is cheap; diskutil's figure is only as fresh as its last run. */
+async function freeBytes(mount:string):Promise<number|undefined> {
+  try { const space=await statfs(mount,{bigint:true}); return Number(space.bavail*space.bsize); } catch { return undefined; }
+}
+/** Ask `describe` (diskutil) only for mounts that are new or whose fingerprint changed since they were described;
+ * an unchanged mount keeps its remembered description with its free space read afresh. */
+export async function describeChanged(mounts:string[],fingerprints:(string|undefined)[],describe:(mount:string)=>Promise<MountedVolume>,free:(mount:string)=>Promise<number|undefined>,memory=describedVolumes):Promise<PromiseSettledResult<MountedVolume>[]> {
+  return Promise.all(mounts.map(async(mount,index):Promise<PromiseSettledResult<MountedVolume>>=>{
+    const remembered=memory.get(mount),fingerprint=fingerprints[index];
+    if(fingerprint&&remembered?.fingerprint===fingerprint){
+      const now=await free(mount);
+      return {status:'fulfilled',value:now===undefined?remembered.volume:{...remembered.volume,free:now}};
+    }
+    return describe(mount).then(value=>({status:'fulfilled',value}) as PromiseSettledResult<MountedVolume>,reason=>({status:'rejected',reason}) as PromiseSettledResult<MountedVolume>);
+  }));
+}
+/** The APFS container map changes only when the set of mounts does. */
+let physicalMemory:{key:string;stores:Map<string,string>}|undefined;
+export async function physicalStores(mounts:string[],fingerprints:(string|undefined)[],list:()=>Promise<Map<string,string>>):Promise<Map<string,string>> {
+  const key=JSON.stringify(mounts.map((mount,index)=>[mount,fingerprints[index]]).sort());
+  if(physicalMemory?.key===key)return physicalMemory.stores;
+  const stores=await list();physicalMemory={key,stores};return stores;
+}
 async function describeVolumes(mounts:string[]):Promise<MountedVolume[]> {
-  const [results,fingerprints]=await Promise.all([Promise.allSettled(mounts.map(macVolume)),Promise.all(mounts.map(mountFingerprint))]);
+  const fingerprints=await Promise.all(mounts.map(mountFingerprint));
+  const results=await describeChanged(mounts,fingerprints,macVolume,freeBytes);
   // One retry, one mount at a time, for calls that failed while many ran together.
   for(const [index,result] of results.entries()) if(result.status==='rejected') results[index]=await macVolume(mounts[index]!).then(value=>({status:'fulfilled',value}),reason=>({status:'rejected',reason}));
   return rememberVolumes(mounts,results,fingerprints);
@@ -131,8 +155,11 @@ async function enumerateVolumes():Promise<MountedVolume[]> {
     if(!volumes.some(v=>v.path==='/')){const [root]=await describeVolumes(['/']);if(root?.volumeId)volumes.push(root);}
     let physical=new Map<string,string>();
     try {
-      const {stdout}=await exec('/usr/sbin/diskutil',['apfs','list','-plist'],commandOptions);
-      physical=parseMacPhysicalStores(await plistJSON(stdout));
+      const all=volumes.map(volume=>volume.path);
+      physical=await physicalStores(all,await Promise.all(all.map(mountFingerprint)),async()=>{
+        const {stdout}=await exec('/usr/sbin/diskutil',['apfs','list','-plist'],commandOptions);
+        return parseMacPhysicalStores(await plistJSON(stdout));
+      });
     }catch{/* A virtual filesystem without physical-store resolution cannot prove drive independence. */}
     for(const volume of volumes)volume.physicalId=resolveMacPhysicalIdentity(volume,physical);
     return volumes;
