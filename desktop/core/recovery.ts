@@ -279,6 +279,13 @@ async function targetMatches(entry:Entry,m:Manifest,signal?:AbortSignal,verifyCo
  if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(expected.size)||(verifyContents&&await digest(entry.destination,signal)!==expected.digest))throw new Error(`Destination changed; original retained: ${entry.destination}`);
  return true;
 }
+/** Runs `check` (which reads `file`) and returns the file's stat when it was the same before and after, so the
+ * bytes just read belong to that stat; undefined when the file changed meanwhile. */
+async function proven(file:string,check:()=>Promise<void>):Promise<BigIntStats|undefined> {
+ const before=await fs.lstat(file,{bigint:true});await check();const after=await fs.lstat(file,{bigint:true});
+ return sameStat(before,after)&&before.birthtimeNs===after.birthtimeNs?after:undefined;
+}
+const unchangedSince=(proof:BigIntStats|undefined,now:BigIntStats)=>!!proof&&sameStat(proof,now)&&proof.birthtimeNs===now.birthtimeNs;
 function validateManifest(value:unknown,root:string,id:string):Manifest {
  const m=value as Manifest;
  if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.kind!==undefined&&m.kind!=='duplicates')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source)))))throw new Error('Invalid or unsafe organization recovery journal');
@@ -386,14 +393,19 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
  try {
   const before=await source.stat({bigint:true}),hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);
   for(;;){checkAbort(signal);const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to write recovery stage');offset+=bytesWritten;}onBytes?.(bytesRead);}
-  if(hash.digest('hex')!==entry.digest||!matches(await source.stat({bigint:true}),snapshot(before))||await digest(input,signal)!==entry.digest)throw new Error(`Source changed while copying: ${input}`);
+  // The bytes hashed are the bytes staged: the source is not read a second time.
+  if(hash.digest('hex')!==entry.digest||!matches(await source.stat({bigint:true}),snapshot(before)))throw new Error(`Source changed while copying: ${input}`);
   await applyFileTimestamps(output,before,entry.captureTimeMs);await output.sync();
  } finally {await source.close();await output.close();}
- if(await digest(staged,signal)!==entry.digest)throw new Error('Recovery stage verification failed');
+ const stage=await proven(staged,async()=>{if(await digest(staged,signal)!==entry.digest)throw new Error('Recovery stage verification failed');});
  checkAbort(signal);await roots(m);await contained(entry.destination,m.root);await checkpoint(m,'publish-intent',index);
- try{await fs.link(staged,entry.destination);}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
+ let linked=false;
+ try{await fs.link(staged,entry.destination);linked=true;}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
- if(!await targetMatches(entry,m,signal))throw new Error('Destination disappeared after publication');
+ // A hard link is the verified stage itself (the link only moves its change time); a streamed copy is read back.
+ const published=linked&&stage?await maybeStat(entry.destination):undefined;
+ const same=!!published&&!!stage&&published.dev===stage.dev&&published.ino===stage.ino&&published.size===stage.size&&published.mtimeNs===stage.mtimeNs;
+ if(!await targetMatches(entry,m,signal,!same))throw new Error('Destination disappeared after publication');
  // Retained originals are never unlinked; only the stage is.
  await contained(staged,m.root);await fs.unlink(staged);await checkpoint(m,'published',index);
 }
@@ -832,9 +844,12 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    }
    const contents=stash&&state.complete?await deep(index,entry,saved):true;
    if(stash){if(!entry.move||source)throw new Error(`Recovery original collision: ${entry.source}`);await validateOriginal(saved!,entry,m.root,true,signal,contents);result.moved++;}
-   else {if(!source)throw new Error(`Original is unavailable; reconnect and recheck: ${entry.source}`);await validateOriginal(entry.source,entry,m.source,false,signal);}
+   // The original's identity now; its bytes are proven below, by a read when the copy is already there, or by the
+   // copy itself, which hashes every byte it streams against the reviewed checksum.
+   else {if(!source)throw new Error(`Original is unavailable; reconnect and recheck: ${entry.source}`);await validateOriginal(entry.source,entry,m.source,false,signal,false);}
    let present:boolean;try{present=await targetMatches(entry,m,signal,contents);}catch(error){if(!await preserveIncomplete(entry,index,m,stash?saved!:entry.source,state,signal))throw error;present=false;}
    if(!present&&entry.kept)throw new Error(`The copy to keep is missing; the duplicate stays where it is: ${entry.destination}`);
+   if(present&&!stash)await validateOriginal(entry.source,entry,m.source,false,signal);
    if(!present){await copy(entry,index,m,stash?saved!:entry.source,signal,count=>{bytes+=count;progress(path.basename(entry.source));});result.copied++;}else result.skipped++;
    await tidyCopied(entry);completed++;progress(path.basename(entry.source));
   }
@@ -847,7 +862,10 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index))continue;await roots(m);stashed++;stashedBytes+=entry.size;stash_(path.basename(entry.source));let saved=await savedOriginal(m,index,state);
    // Unchanged since its last verified pass (decided in the loop above): sizes and identities only.
    if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,m.root,true,signal,contents);if(await maybeStat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents))throw new Error('Destination unavailable');continue;}
-   await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal);if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable');
+   await parents(entry,m);
+   // What was read here, by stat: unchanged when the original is set aside, neither is read again.
+   const sourceProof=await proven(entry.source,()=>validateOriginal(entry.source,entry,m.source,false,signal));
+   const destinationProof=await proven(entry.destination,async()=>{if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable');});
    await syncFile(entry.destination);await syncParents(entry.destination,m.root);
    await ensureDirectory(path.join(jobPath(m.root,m.id),'originals'),m.root);
    const entryDirectory=path.join(jobPath(m.root,m.id),'originals',String(index));await ensureDirectory(entryDirectory,m.root);
@@ -857,12 +875,14 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await fs.mkdir(path.dirname(saved),{mode:0o700});await syncDirectory(entryDirectory);
    await checkpoint(m,'stash-intent',index,{slot});state.slots.set(index,[...(state.slots.get(index)??[]),slot]);checkAbort(signal);await roots(m);await parents(entry,m);await contained(saved,m.root);
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
-   await parents(entry,m);await validateOriginal(entry.source,entry,m.source,false,signal);if(!await targetMatches(entry,m,signal)||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed before retaining original');
+   await parents(entry,m);const reread=!unchangedSince(sourceProof,await fs.lstat(entry.source,{bigint:true}))||!unchangedSince(destinationProof,destinationStat);
+   await validateOriginal(entry.source,entry,m.source,false,signal,reread);if(!await targetMatches(entry,m,signal,reread)||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed before retaining original');
    if(await maybeStat(saved))throw new Error(`Recovery original collision: ${saved}`);
    // Same-filesystem rename preserves the original inode; its contents are never
    // deleted, even when the process exits immediately after this operation.
    await fs.rename(entry.source,saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
-   await validateOriginal(saved,entry,m.root,true,signal);await checkpoint(m,'stashed',index);result.moved++;
+   // Renamed by this process just after the check above: its identity (all but the change time) is the proof.
+   await validateOriginal(saved,entry,m.root,true,signal,false);await checkpoint(m,'stashed',index);result.moved++;
    await sidecars?.besideGone(entry.source,m.source);
   }
   // Closing the journal, then the emptied folders: each counted, the journal last.
