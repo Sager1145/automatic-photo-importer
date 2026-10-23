@@ -14,7 +14,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
@@ -856,6 +856,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         <div className="settings-row readability-settings"><label htmlFor="text-size">{t("Text size")}</label><div className="text-size-control"><input id="text-size" aria-label={t("Text size")} type="range" min="100" max="200" step="5" value={Math.round(p.textScale*100)} onChange={event=>act({type:'preferences',patch:{textScale:Number(event.target.value)/100}})} /><strong>{Math.round(p.textScale * 100)}%</strong>{p.textScale !== 1.25 && <Button kind="quiet" onClick={()=>act({type:'preferences',patch:{textScale:1.25}})}>{t("Reset text size")}</Button>}</div><small className="settings-row-note">{t("Large sizes shrink to fit small windows.")}</small></div>
         <div className="settings-row"><span>{t("Appearance")}</span><AppearanceControls preferences={p} act={act}/></div>
       </div></section>
+      <SettingsSection title={t("Diagnostics")} icon={Activity}><DiagnosticsSettings state={state} act={act} /></SettingsSection>
       <SettingsSection title={t("Import desk")} icon={Gauge}><div data-testid="show-dashboard"><Switch checked={p.showDashboard !== false} onChange={showDashboard => act({ type: 'preferences', patch: { showDashboard } })} label={t("Show the import overview")} detail={t("Totals, speed and progress at the top of the Import desk.")} /></div></SettingsSection>
     </>,
   };
@@ -1675,6 +1676,22 @@ export function PerformanceSettings({ state, act }: { state: AppState; act: Disp
     <div className="settings-row"><label htmlFor="settings-memory-limit">{t("Memory limit")}</label><div className="text-size-control"><input id="settings-memory-limit" data-testid="settings-memory-limit" type="range" min={512} max={memoryMax} step={256} value={Math.min(memory, memoryMax)} onChange={event => act({ type: 'preferences', patch: { memoryLimitMB: Number(event.target.value) } })} /><strong>{t("{count} MB", { count: formatNumber(memory) })}</strong></div><p className="settings-row-note">{t("A soft budget for buffers, caches and the app itself. Near the limit new files wait for running ones; nothing is stopped. Applies to the next import.")}</p></div>
     <div className="settings-row"><span className="performance-readout" data-testid="performance-readout" role="status">{use ? t("Using up to {threads} threads · {used} MB of {limit} MB", { threads: formatNumber(use.threads), used: formatNumber(use.memoryMB), limit: formatNumber(use.limitMB) }) : ''}</span><Button kind="quiet" icon={RotateCcw} data-testid="performance-reset" disabled={atDefaults} onClick={() => use && act({ type: 'preferences', patch: { maxCpuThreads: use.defaultThreads, memoryLimitMB: use.defaultMemoryMB } })}>{t("Reset to defaults")}</Button></div>
     {use?.warning && <p className="source-notice" data-testid="memory-warning"><Icon icon={Info} size={14} />{t("Memory use is above the limit. New files wait until it drops; running work continues.")}</p>}
+  </>;
+}
+/** The diagnostic log: how much it records (applies at once, even while jobs run), where it is, and how to hand it over. */
+export function DiagnosticsSettings({ state, act }: { state: AppState; act: Dispatch }) {
+  const { t, formatBytes } = useTranslation();
+  const level: LogLevel = state.preferences.logLevel ?? 'normal', info = state.logInfo;
+  const labels: Record<LogLevel, string> = { off: t("Off"), normal: t("Normal"), detailed: t("Detailed"), trace: t("Trace") };
+  const explanations: Record<LogLevel, string> = { off: t("Nothing is recorded."), normal: t("Records settings changes, job phases, every file the app deletes, and errors."), detailed: t("Also records each file's steps and decisions, drives, memory and timing."), trace: t("Also records every routing decision and journal entry. Large; for troubleshooting.") };
+  return <>
+    <div className="settings-row"><label htmlFor="settings-log-level">{t("Log detail")}</label><div className="select-wrap"><select id="settings-log-level" data-testid="settings-log-level" value={level} onChange={event => act({ type: 'preferences', patch: { logLevel: event.target.value as LogLevel } })}>{(Object.keys(labels) as LogLevel[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}</select><Icon icon={ChevronDown} size={15} /></div><p className="settings-row-note" data-testid="log-level-explanation">{explanations[level]}</p></div>
+    <div className="settings-row"><span data-testid="log-size" role="status">{t("Log size: {size}", { size: formatBytes(info?.bytes ?? 0) })}</span><div className="text-size-control">
+      <Button icon={FolderOpen} data-testid="log-open-folder" onClick={() => act({ type: 'logOpenFolder' })}>{t("Open log folder")}</Button>
+      <Button icon={Copy} data-testid="log-copy-path" onClick={() => act({ type: 'logCopyPath' })}>{t("Copy latest log path")}</Button>
+      <Button icon={ArrowUpRight} data-testid="log-export" onClick={() => act({ type: 'logExport' })}>{t("Export logs…")}</Button>
+    </div></div>
+    <p className="settings-row-note diagnostics-note">{t("Logs stay on this Mac. They never include file contents or recovery keys.")}</p>
   </>;
 }
 function SettingsSection({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
