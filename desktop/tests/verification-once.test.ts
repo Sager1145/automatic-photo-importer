@@ -110,3 +110,39 @@ test('removing a duplicate reads it and the copy kept once each',async t=>{
  assert.deepEqual(reads.files(),{keeper:1,removed:1});
  await assert.rejects(fs.lstat(removed),{code:'ENOENT'});
 });
+
+// The import read the source under the identity it recorded; while the source keeps that exact, provable identity
+// it is not read again. Every backup copy is always read, and a change of identity means the source is read too.
+async function originals(t:test.TestContext,name:string){
+ const {statKey}=await import('../core/paths');
+ const base=await folder(t,name),source=path.join(base,'card','A.JPG'),backups=[path.join(base,'one','A.JPG'),path.join(base,'two','A.JPG')],data=Buffer.alloc(SIZE,8);
+ await photo(source,data);for(const backup of backups)await photo(backup,data);
+ const {createHash}=await import('node:crypto');
+ const file={source,size:SIZE,sha256:createHash('sha256').update(data).digest('hex'),destinations:backups,identity:statKey(await fs.lstat(source,{bigint:true}))};
+ return {root:path.join(base,'card'),source,backups,file,role:(name:string)=>name===source?'source':backups.includes(name)?'backup':undefined};
+}
+test('deleting originals reads an unchanged source not at all and every backup once',async t=>{
+ const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-');
+ const totals:number[]=[],reads=countReads(t,f.role);
+ const result=await deleteOriginals(f.root,[f.file],{onProgress:(_done,_total,_file,_bytes,total)=>{if(total!==undefined)totals.push(total);}});
+ reads.stop();
+ assert.deepEqual(result.deleted,[{source:f.source,size:SIZE}]);
+ assert.deepEqual(reads.files(),{backup:2});
+ assert.equal(totals.at(-1),2*SIZE);
+});
+test('deleting originals reads a source whose change time moved',async t=>{
+ const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-ctime-');
+ await new Promise(resolve=>setTimeout(resolve,20));await fs.chmod(f.source,0o600);
+ const reads=countReads(t,f.role);
+ const result=await deleteOriginals(f.root,[f.file]);
+ reads.stop();
+ assert.equal(result.deleted.length,1);
+ assert.deepEqual(reads.files(),{source:1,backup:2});
+});
+test('deleting originals keeps a source whose backup differs, even when the source is unchanged',async t=>{
+ const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-differs-');
+ await fs.writeFile(f.backups[1]!,Buffer.alloc(SIZE,9));
+ const result=await deleteOriginals(f.root,[f.file]);
+ assert.deepEqual(result.kept,[{source:f.source,reason:'destination-differs'}]);
+ await fs.lstat(f.source);
+});

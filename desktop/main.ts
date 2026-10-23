@@ -606,7 +606,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
    const entries=plans.flatMap(item=>destinationEntries(item)),files:VerifiedOriginal[]=[];
-   for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
+   for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,identity:found.identity,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
    if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');

@@ -1,12 +1,13 @@
 import * as fs from 'node:fs/promises';
-import { beneath, checkAbort, code, contained, digest } from './paths';
+import { beneath, checkAbort, code, contained, digest, statKey } from './paths';
 import { mapPool } from './devices';
 
 /** Files checked at once; each device's own stream limit (devices.ts) still caps the reads. */
 const VERIFY_CONCURRENCY=4;
 
-/** A source file an import copied and verified: its checksum and every place the import put it. */
-export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];}
+/** A source file an import copied and verified: its checksum and every place the import put it.
+ * identity: the source's statKey when the import read it for that checksum. */
+export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];identity?:string;}
 export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
 export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];}
@@ -35,16 +36,18 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
 type Outcome={deleted:true}|{kept:KeptReason;error?:string};
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that
  * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays.
- * Files are checked through a small pool: the source is hashed, then every backup copy at once, so the reads
+ * Files are checked through a small pool: the source is hashed (unless it is unchanged since the import read it), then every backup copy at once, so the reads
  * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
  * the report is assembled in input order afterwards. */
-export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** bytesDone/bytesTotal: what is re-read, counting the source and each backup copy of every file. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
+export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
   let completed=0,bytesDone=0;
-  const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length),bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
+  const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length);
+  let bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
     checkAbort(options.signal);
     options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
+    let read=reads(file);
     try {
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
       if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
@@ -52,7 +55,11 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       const before=await regular(file.source).catch(error=>{if(code(error)==='ENOENT')return null;throw error;});
       if(before===null) return {kept:'missing'};
       if(!before||before.size!==BigInt(file.size)) return {kept:'changed'};
-      if(await digest(file.source,options.signal)!==file.sha256) return {kept:'changed'};
+      // Still the very file the import hashed, on a filesystem that keeps a real change time (not FAT or exFAT): it is
+      // not read again. Every backup copy below always is.
+      const known=file.identity!==undefined&&statKey(before)===file.identity&&before.ctimeNs!==before.mtimeNs;
+      if(known){read-=file.size;bytesTotal-=file.size;}
+      else if(await digest(file.source,options.signal)!==file.sha256) return {kept:'changed'};
       const found=await Promise.all(file.destinations.map(destination=>regular(destination).catch(error=>{if(code(error)==='ENOENT')return null;throw error;})));
       const same=await Promise.all(found.map((stat,index)=>stat&&stat.size===BigInt(file.size)?digest(file.destinations[index]!,options.signal).then(value=>value===file.sha256):false));
       for(let index=0;index<found.length;index++) {
@@ -61,7 +68,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       }
       // The file read for the checksum must still be the one removed.
       const after=await regular(file.source);
-      if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs) return {kept:'changed'};
+      if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs||known&&after.ctimeNs!==before.ctimeNs) return {kept:'changed'};
       await fs.unlink(file.source);
       return {deleted:true};
     } catch(error) {
@@ -69,7 +76,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       return {kept:'error',error:`${file.source}: ${error instanceof Error?error.message:String(error)}`};
     } finally {
       // Counted when this file's checks end, so the byte progress never runs ahead of the reads.
-      bytesDone+=reads(file);
+      bytesDone+=read;
     }
   };
   const outcomes=await mapPool(files,VERIFY_CONCURRENCY,check);
