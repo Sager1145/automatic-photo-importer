@@ -5,7 +5,7 @@ export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
 /** An error failed or stopped something. A warning is informational: nothing was left undone. */
 export type Severity='error'|'warning';
 /** Message keys that are only ever warnings. Every other key is an error. */
-const warningKeys=new Set<string>(['error.userSkipped','error.folderCleanup','job.appleDouble','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped']);
+const warningKeys=new Set<string>(['error.userSkipped','job.appleDouble','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped']);
 /** The severity a message has by itself: informational notes are warnings, anything that failed or stopped a job is an error.
  * A file skipped on purpose (by the user) is a warning; a file skipped because it failed is an error. Metadata problems (kind 'metadata') are warnings: the file is still handled. */
 export function severityOf(value:Message,kind?:ErrorKind):Severity{
@@ -14,7 +14,7 @@ export function severityOf(value:Message,kind?:ErrorKind):Severity{
  return kind==='metadata'?'warning':'error';
 }
 /** Codes for messages that carry none of their own, derived from the message key. Raw text keeps the code 'text'. */
-const keyCodes:Record<string,string>={'error.fileSkipped':'file-skipped','error.userSkipped':'user-skipped','error.folderCleanup':'folder-cleanup','inventory.emptyFile':'zero-byte','inventory.emptySkipped':'zero-byte','inventory.emptyPrimaryFile':'zero-byte','inventory.emptyPrimarySkipped':'zero-byte','error.residueCleanup':'residue-cleanup'};
+const keyCodes:Record<string,string>={'error.fileSkipped':'file-skipped','error.userSkipped':'user-skipped','inventory.emptyFile':'zero-byte','inventory.emptySkipped':'zero-byte','inventory.emptyPrimaryFile':'zero-byte','inventory.emptyPrimarySkipped':'zero-byte','error.residueCleanup':'residue-cleanup'};
 /** The stable code of a message: the one it carries, else one derived from its key. */
 export function codeOf(value:Message):string{const own=value.params?.code;return typeof own==='string'&&own?own:keyCodes[value.key]??value.key;}
 /** The path a message names, when it carries one. */

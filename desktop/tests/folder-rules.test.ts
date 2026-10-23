@@ -75,9 +75,11 @@ test('one folder name rule: unknown-files folder and edited folder share it',()=
 test('folder names are checked when saved: what saves can be planned',()=>{
   const error=(changed:Partial<Preferences>)=>{try{checkFolderSettings({...prefs,...changed});return undefined;}catch(thrown){assert.ok(thrown instanceof MessageError);return thrown.key;}};
   assert.equal(error({}),undefined);
-  assert.equal(error({basePath:''}),undefined);assert.equal(error({basePath:'backups/photos'}),undefined);
+  assert.equal(error({mediaLayout:'format',basePath:''}),undefined,'an empty backup folder is the destination itself');assert.equal(error({basePath:'backups/photos'}),undefined);
   assert.equal(error({basePath:'../out'}),'error.backupFolderPath');assert.equal(error({basePath:'CON'}),'error.backupFolderPath');assert.equal(error({basePath:'Photo Importer Data'}),'error.backupFolderPath');
   assert.equal(error({mediaLayout:'video-root',videoBasePath:'a//b'}),'error.videoFolderPath');
+  assert.equal(error({mediaLayout:'video-root',basePath:'photobackup',videoBasePath:'photobackup/videos'}),'error.videoFolderPath','a video folder inside the photo folder');
+  assert.equal(error({mediaLayout:'video-root',basePath:'',videoBasePath:'videobackup'}),'error.videoFolderPath','the video layout needs a photo folder');
   assert.equal(error({mediaLayout:'format',videoBasePath:''}),undefined,'a video folder the layout does not use');
   assert.equal(error({editedFolder:'CON'}),'error.editedFolderName');assert.equal(error({editedFolder:'a/b'}),'error.editedFolderName');
   assert.equal(error({noMetadataFolder:'2024'}),'error.noMetadataFolderName');

@@ -23,8 +23,8 @@ test('parameters interpolate with locale numbers, nested messages and joined par
   const detail = joined(message('job.copied', { copied: 1234, skipped: 5 }), 0, message('job.errors', { count: 0 }));
   assert.equal(formatMessage(detail, 'en'), '1,234 copied · 5 verified · 0 errors');
   assert.equal(formatMessage(detail, 'zh-Hans'), '已复制 1,234 个 · 已验证 5 个 · 0 个错误');
-  const nested = message('error.folderCleanup', { error: text('EBUSY: resource busy') });
-  assert.equal(formatMessage(nested, 'ja'), 'フォルダーの整理：EBUSY: resource busy');
+  const nested = message('error.backupFolderCheck', { error: text('EBUSY: resource busy') });
+  assert.equal(formatMessage(nested, 'ja'), 'バックアップフォルダーの確認：EBUSY: resource busy');
   const parts = joined(detail, message('job.mirrorVerified'));
   assert.equal(formatMessage(parts, 'en'), '1,234 copied · 5 verified · 0 errors · Both destinations verified');
   for (const language of languages) assert.ok(!formatMessage(parts, language).includes('{'), `${language}: no placeholder left`);

@@ -25,7 +25,7 @@ async function run() {
     const pending = (await core.getOrganizationRecovery(library,{verifyContents:false})).filter(job=>job.status==='pending');
     if (pending.length) return core.resumeOrganization(library,pending[0]!.id,undefined,value=>progress(value.completed));
     const {plans:[transfer]} = await core.plan(library,[library],organization,metadata);
-    return core.executeReorganization(transfer!,undefined,value=>progress(value.completed),{strategy:'rename'});
+    return core.executeReorganization(transfer!,undefined,value=>progress(value.completed));
   }
   if (mode === 'undo') {
     let restored = 0;

@@ -10,7 +10,7 @@ const job=(extra:Partial<Job>):Job=>({id:'j1',source:card,phase:'error',errors:[
 const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',...extra});
 
 // Message keys that can reach All errors, with their severity. Any other key defaults to an error.
-const warnings:MessageKey[]=['error.userSkipped','error.folderCleanup','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped'];
+const warnings:MessageKey[]=['error.userSkipped','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped'];
 const errorKeys:MessageKey[]=['error.sourceDisconnected','error.sourceChanged','error.alreadyInBackup','error.cameraScan','error.busy','error.mirrorReview','error.organizeSpace','error.destinationUnavailable','error.destinationReadOnly','error.fileFailed','error.residueCleanup'];
 
 test('each known message key has the severity the table says',()=>{
@@ -24,14 +24,14 @@ test('each known message key has the severity the table says',()=>{
 });
 
 test('gathered items carry a severity: metadata notes are warnings, failures are errors',()=>{
- const value=state({jobs:[job({errors:[text('ENOSPC'),message('error.folderCleanup',{error:text('busy')})],inventory:{issues:[{path:'/Volumes/Card/A.NEF',message:'Bad EXIF'}],files:[],media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0}})]});
+ const value=state({jobs:[job({errors:[text('ENOSPC'),message('inventory.emptyFile')],inventory:{issues:[{path:'/Volumes/Card/A.NEF',message:'Bad EXIF'}],files:[],media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0}})]});
  const found=gatherErrors(value).map(item=>`${item.kind}:${item.severity}`).sort();
  assert.deepEqual(found,['metadata:warning','source:error','source:warning']);
 });
 
 test('clearing one severity never clears the other',()=>{
  const log=new ErrorLog();
- const value=state({error:text('Busy'),jobs:[job({phase:'copying',errors:[text('E1'),message('error.userSkipped'),message('error.folderCleanup',{error:text('x')})]})]});
+ const value=state({error:text('Busy'),jobs:[job({phase:'copying',errors:[text('E1'),message('error.userSkipped'),message('inventory.emptyFile')]})]});
  const all=gatherErrors(value),errors=all.filter(item=>item.severity==='error'),warns=all.filter(item=>item.severity==='warning');
  assert.equal(errors.length,2);assert.equal(warns.length,2);
  log.update(all);
@@ -65,7 +65,7 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
  const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
  const {I18nProvider,createTranslator,languages}=await import('../renderer/i18n');
  const {ActivityPanel,TitlebarControls,SidebarSources,collectErrors}=await import('../renderer/RootApp');
- const value=state({jobs:[job({errors:[text('EIO: read A'),message('error.userSkipped'),message('error.folderCleanup',{error:text('x')})]})]});
+ const value=state({jobs:[job({errors:[text('EIO: read A'),message('error.userSkipped'),message('inventory.emptyFile')]})]});
  value.errorLog=new ErrorLog().update(gatherErrors(value));
  const errors=collectErrors(value);
  assert.deepEqual([errors.filter(item=>item.severity==='error').length,errors.filter(item=>item.severity==='warning').length],[1,2]);
@@ -97,7 +97,7 @@ test('the dashboard counts the warnings All errors shows: a cleared warning is n
  const {I18nProvider}=await import('../renderer/i18n');
  const {ImportDashboard}=await import('../renderer/RootApp');
  const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
- const value=state({jobs:[job({errors:[message('error.userSkipped'),message('error.folderCleanup',{error:text('x')})]})]});
+ const value=state({jobs:[job({errors:[message('error.userSkipped'),message('inventory.emptyFile')]})]});
  value.errorLog=new ErrorLog().update(gatherErrors(value));
  assert.match(render(value),/2 warnings/);
  const [first]=gatherErrors(value).filter(item=>item.severity==='warning');

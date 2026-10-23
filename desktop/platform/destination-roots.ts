@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type {DestinationStatus,Preferences,Source} from '../shared';
 import {makeParent,syncParents,within} from '../core/paths';
-import {validFolderPath} from '../routing-options';
+import {checkBackupFolders} from '../routing-options';
 import {mountedVolumes,validateDestination,type MountedVolume} from './volumes';
 import {message,MessageError,type Message} from '../messages';
 
@@ -22,10 +22,8 @@ export function libraryRoots(destination:string,prefs:Pick<Preferences,'basePath
 export async function destinationRoots(prefs:Preferences,sources:Source[],importing?:Source):Promise<{roots:string[];videoRoots?:string[];infos:DestinationStatus[];volumes:MountedVolume[]}>{
  const chosen=prefs.copyMode==='single'?prefs.destinations.slice(0,1):prefs.destinations.slice(0,2);
  if(chosen.length!==(prefs.copyMode==='single'?1:2))throw new MessageError('error.chooseDestinations');
- if(prefs.basePath&&!validFolderPath(prefs.basePath))throw new MessageError('error.backupFolderPath');
+ checkBackupFolders(prefs);
  const folders=backupFolders(prefs),video=folders.length>1;
- // Neither backup folder may hold the other: each is organized and checked as its own library.
- if(video&&(!validFolderPath(prefs.videoBasePath)||!prefs.basePath||within(prefs.videoBasePath,prefs.basePath)||within(prefs.basePath,prefs.videoBasePath)))throw new MessageError('error.videoFolderPath');
  const volumes=await mountedVolumes(),infos=[],roots=[],videoRoots=[];
  for(const [index,chosenPath] of chosen.entries()){const info=await validateDestination(chosenPath,sources,{identity:prefs.destinationIds?.[index]??'',volumes});infos.push(info);const chosenRoot=await fs.realpath(chosenPath);
   // A backup folder inside a source is fine: planning leaves it out of that source.
