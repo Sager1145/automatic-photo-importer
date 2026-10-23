@@ -72,9 +72,25 @@ function recordedCamera(entries:TagEntries):string|undefined {
       if(/[\p{L}]/u.test(model)&&!/^(?:unknown(?: camera)?|not (?:available|recorded)|n\/a)$/i.test(model))return model;
     }
   }
+  // Samsung phone videos: the trailer's model code, or the phone's marketing name when UserData:Author
+  // carries it (matching IFD0:Model of its photos). Author is never a camera without that trailer.
+  const clean=(value:unknown)=>typeof value==='string'?value.trim().replace(/\s+/g,' '):'';
+  const samsung=entries.filter(([key])=>tagName(key)==='SamsungModel').map(([,value])=>clean(value)).find(Boolean);
+  if(samsung)return entries.filter(([key])=>tagName(key)==='Author').map(([,value])=>clean(value)).find(value=>/^Galaxy\b/i.test(value))??samsung;
   // Newer DJI video names its product only in the item list ("DJI OsmoPocket3", "DJI Mini4 Pro").
   // Older drones write a codec name there ("Dji AVC Encoder"), and other software (Lavf) is never a camera.
   for(const [key,value] of entries)if(['ItemList','UserData'].includes(tagGroup(key))&&tagName(key)==='Encoder'&&typeof value==='string'&&/^DJI\b/i.test(value.trim())&&!/encoder|\b(?:avc|hevc|h\.?26[45])\b/i.test(value))return value.trim().replace(/\s+/g,' ');
+  // CinemaDNG frames carry only this DNG tag; a real Model above always wins.
+  return entries.filter(([key])=>tagGroup(key)==='IFD0'&&tagName(key)==='UniqueCameraModel').map(([,value])=>clean(value)).find(value=>/[\p{L}]/u.test(value));
+}
+/** Where a cameraless file came from, when its tags or name say so. */
+function sourceFolder(entries:TagEntries,file?:string):string|undefined {
+  const name=file?path.basename(file):'';
+  const text=(names:string[])=>entries.filter(([key])=>names.includes(tagName(key))).map(([,value])=>typeof value==='string'?value.trim():'');
+  const notes=text(['UserComment','ImageDescription','Comment','Description']);
+  if(notes.some(value=>/^screenshot$/i.test(value))||/^(?:Screenshot[_ ]|截屏|屏幕截图)/i.test(name))return 'Screenshots';
+  if(text(['Author']).includes('ReplayKitRecording')||/^(?:RPReplay_|ScreenRecording_)/i.test(name))return 'Screen Recordings';
+  if(text(['Copyright']).some(value=>/^wxmm/i.test(value))||notes.some(value=>value.includes('"WXVer"'))||name.includes('_WC-EditVideo_')||/^mmexport/i.test(name))return 'WeChat';
 }
 /** A DJI photo's camera code and its videos' encoder name become the product's one folder name.
  * Insta360 keeps its model in a trailer that routing does not read, so its files fall back to the brand. */
@@ -204,6 +220,7 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries));
   const fields:Record<string,unknown>={};
   const result:Metadata={camera,date,fields,fingerprint:duplicateFingerprint(entries,camera,date)};
+  if(!camera){const origin=sourceFolder(entries,options.file);if(origin)result.origin=origin;}
   if(editorProvenance(entries))result.edited=true;
   if(options.details===false){for(const [key,value] of entries)if(tagName(key)==='Error'&&value!==undefined)fields[key]=String(value);const lens=lensModel(entries);if(lens)result.exposure={lens};return result;}
   function flatten(key:string,value:unknown) {
@@ -282,7 +299,7 @@ export async function embeddedPreview(filename:string):Promise<Buffer|undefined>
 // Routing reads only what camera, capture date, editor provenance, lens and
 // read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
-  'Make','Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel',
+  'Make','Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel','SamsungModel','Author','UniqueCameraModel','UserComment','ImageDescription','Copyright','Comment','Description',
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',
