@@ -11,9 +11,9 @@ interface Recorded {dev:string;ino:string;size:string;mtime:string;ctime:string;
 const fingerprint=(stat:BigIntStats)=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 /** FAT and exFAT report ctime equal to mtime and reuse entry numbers as inodes, so
  * there an unchanged stat proves nothing; such files are always hashed. */
-const provable=(stat:BigIntStats)=>stat.ctimeNs!==stat.mtimeNs;
+export const provable=(stat:BigIntStats)=>stat.ctimeNs!==stat.mtimeNs;
 /** Every stat field, birth time included: what a short-lived, in-memory reuse is bound to. */
-const full=(stat:BigIntStats)=>`${statKey(stat)}:${stat.birthtimeNs}`;
+export const full=(stat:BigIntStats)=>`${statKey(stat)}:${stat.birthtimeNs}`;
 /** What the duplicate checks need: a destination file's SHA-256. */
 export interface Digests {digestOf(file:string,signal?:AbortSignal):Promise<string>;}
 /** Reuse a digest while the file's whole stat is unchanged; `memo` decides how long. */

@@ -9,7 +9,7 @@ import {addAppleDoubleReport,emptyAppleDoubleReport} from './appledouble';
  * settled as part of that destination. */
 export async function executeDestinations(plans:TransferPlan[],options:{
  signal:AbortSignal;reorganize:boolean;strategy?:OrganizationStrategy;verify?:boolean;removeAppleDouble?:boolean;keepSourceFolders?:boolean;releaseDuplicates?:boolean;
- onVerified?:(source:string,sha256:string,identity:string)=>void;
+ onVerified?:(source:string,sha256:string,identity:string,streamed:boolean)=>void;
  validate(index:number):Promise<void>;
  progress(index:number,value:Progress,pendingBytes:number):void;
  settled(index:number):void;

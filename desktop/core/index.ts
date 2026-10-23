@@ -915,7 +915,8 @@ export interface ExecutionOptions {
   verify?:boolean;
   /** Called for every file whose copy is verified or confirmed already present, with the
    * plan-time source identity, so a later plan can recognise the unchanged source. */
-  onVerified?:(source:string,sha256:string,identity:string)=>void;
+  /** streamed: this job read the source for the checksum (a copy it made), not a file already in the backup matched by a checksum from planning. */
+  onVerified?:(source:string,sha256:string,identity:string,streamed:boolean)=>void;
   /** Remove the macOS "._" file beside each published file (see appledouble.ts); results are in ExecutionResult.appleDouble. */
   removeAppleDouble?:boolean;
 }
@@ -1132,13 +1133,13 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){log('detailed','exec','already-present',{source:entry.source,destination:item.destination,sha256:entry.digest});await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){log('detailed','exec','already-present',{source:entry.source,destination:item.destination,sha256:entry.digest});await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity,false);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
               if(run.appleDouble)await run.appleDouble.noteExisting(item.destination);
-              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal,bytes=>{run.hashedBytes+=bytes;progress(position,path.basename(entry.source));});if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
+              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal,bytes=>{run.hashedBytes+=bytes;progress(position,path.basename(entry.source));});if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity,true);result.copied++;i++;}
               catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);

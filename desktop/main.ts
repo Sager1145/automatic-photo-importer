@@ -22,7 +22,7 @@ import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
 import {deviceHasRoom} from './core/devices';
-import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
+import {loadScanMemory,saveScanMemory,loadImported,rememberImported,rememberingVerified} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {loadPlacement,placedMatches,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
@@ -48,7 +48,7 @@ import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
 import {sourcePolicy,freshOrganizeOptions} from './run-policy';
-import {measureOriginals,deleteOriginals,type VerifiedOriginal} from './core/originals';
+import {measureOriginals,deleteOriginals,recordVerified,verifiedOriginals,type ImportVerified,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
@@ -632,13 +632,14 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
   job.phase='copying';
-  const verified:Record<string,{sha256:string;identity:string}>={};
-  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
+  // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
+  const verified:Record<string,ImportVerified>={},volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
+  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await rememberingVerified(verified,async()=>{if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,verified);},()=>executeDestinations(plans,{
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
-  });job.errors.push(...errors.map(text));recordIssues(job,warnings);
+  }));job.errors.push(...errors.map(text));recordIssues(job,warnings);
   for(const error of errors)log('normal','job','error',{message:text(error)});for(const issue of warnings)log('normal','job',issue.severity==='error'?'error':'warning',{...issue});
   // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
   const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];
@@ -649,8 +650,6 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // Files actually verified where an older rule filed them (a family that failed is not counted).
   const olderRules=routed??0;
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,...(prepared.elsewhere?{olderRules:{files:olderRules,partialFamilies:prepared.elsewhere.partialFamilies,skippedSizeGroups:prepared.elsewhere.skipped.map(item=>({...item,reason:'skipped: too many same-size files'})),paths:olderRulesPaths(plans)}}:{}),skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
-  const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
-  if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
@@ -666,8 +665,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
-   const entries=plans.flatMap(item=>destinationEntries(item)),files:VerifiedOriginal[]=[];
-   for(const [file,found] of Object.entries(verified)){const matching=entries.filter(entry=>entry.source===file);if(matching.length)files.push({source:file,size:matching[0]!.size,sha256:found.sha256,destinations:[...new Set(matching.map(entry=>entry.destination))]});}
+   const files=verifiedOriginals(verified,plans.flatMap(item=>destinationEntries(item)));
    if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
@@ -794,7 +792,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=recordsDetail(progress)??message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,index:await destinationIndex(real,await identity(real)),onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):(recordsDetail(progress)??message('job.removingDuplicates'));progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
@@ -826,7 +824,9 @@ async function removeOriginals(jobId:string){
  emit();
  const control=new AbortController();
  try{
-  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}}));
+  // Only APFS and HFS+ keep change times that prove an unchanged source; on any other volume every source is read.
+  const changeTimes=['apfs','hfs'].includes(etaDrive(await mountedVolumes(),kept.root,'folder').fsType??'');
+  const result=await withJob(jobId,()=>deleteOriginals(kept.root,kept.files,{signal:control.signal,changeTimes,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}}));
   const gone=new Set(result.deleted.map(item=>item.source));
   kept.files=kept.files.filter(file=>!gone.has(file.source));
   job.verifiedOriginals=kept.files.length||undefined;if(!kept.files.length)importedOriginals.delete(jobId);
