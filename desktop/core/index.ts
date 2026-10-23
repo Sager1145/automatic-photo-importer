@@ -33,6 +33,8 @@ const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
 /** Whole files hashed or copied at once by one job; each device's own limit (devices.ts) still
  * applies, so a spinning disk serves them one at a time. */
 const STREAM_CONCURRENCY=4;
+/** Direct families in flight: more than the device's stream slots (devices.ts), because a family that is reading back, setting dates or flushing holds no slot, so these steps overlap other files' streaming. */
+const DIRECT_WORKERS=8;
 /** Bounded worker pool in input order; the first failure stops new work and is rethrown. */
 async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Promise<void> {
   let next=0,failure:unknown;
@@ -1080,7 +1082,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     // Direct destinations: each family is written to its final names, checked and finished in place.
     for(const [position,run] of runs.entries()) {
       if(run.error||!run.direct) continue;
-      await pool(run.batches.filter(batch=>batch.mode==='direct'&&!batch.failed),STREAM_CONCURRENCY,async batch=>{
+      await pool(run.batches.filter(batch=>batch.mode==='direct'&&!batch.failed),DIRECT_WORKERS,async batch=>{
         checkAbort(signal);
         const hooks={bytes:(count:number)=>{run.bytes+=count;progress(position,path.basename(batch.family[0]!.source));},done:(entry:PlanEntry)=>{if(!run.counted.has(entry.id)){run.counted.add(entry.id);run.completed++;}progress(position,path.basename(entry.source));}};
         try { if(await directFamily(run,batch.family,options,signal,hooks)==='staged') batch.mode='staged'; }
