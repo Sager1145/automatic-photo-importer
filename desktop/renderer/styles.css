@@ -1347,3 +1347,10 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .sidebar-activity>small{flex:none;font-size:var(--text-caption);color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .sidebar-activity-bar{flex:1;min-width:1.5rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
 .sidebar-activity-bar>span{display:block;height:100%;background:var(--accent);transform-origin:left;transition:transform var(--slow) var(--ease-out)}
+/* Grouped errors: expanding is instant and stays inside the panel (no transform, no z-index, no animation). */
+.error-group-actions{flex-wrap:wrap;margin-top:.35rem}
+.error-group-items{list-style:none;margin:.5rem 0 0;padding:0;max-height:18rem;overflow:auto;contain:content}
+.error-group-item{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;padding:.25rem 0;border-top:1px solid var(--separator)}
+.error-group-item .error-path{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere;font-size:.8rem}
+.error-more{color:var(--label-secondary);font-size:.8rem}
+.job-skipped-note summary{cursor:pointer;color:var(--label-secondary)}
