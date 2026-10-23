@@ -82,8 +82,18 @@ export async function contained(file:string,root:string):Promise<void> {
  * Folders this call created are removed again (empty only) when it fails. */
 export async function makeParent(file:string,root:string,rootIdentity?:string):Promise<void> {
   await contained(file,root);
+  const rootDevice=rootIdentity?.split(':')[0];
+  // Fast path: the folder already exists as a plain directory on the root's device, and contained() has just
+  // checked every component above it, so there is nothing to create and no per-part check to repeat.
+  // It never creates anything; any other case runs the full loop below.
+  const existing=await fs.lstat(path.dirname(file),{bigint:true}).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink()&&(!rootIdentity||String(stat.dev)===rootDevice),()=>false);
+  if(existing) {
+    if(rootIdentity) await rootUnchanged(root,rootIdentity);
+    await contained(file,root);
+    return;
+  }
   const parts=path.relative(root,path.dirname(file)).split(path.sep).filter(Boolean);
-  const rootDevice=rootIdentity?.split(':')[0],created:string[]=[];
+  const created:string[]=[];
   let current=root;
   try {
     for(const part of parts) {
