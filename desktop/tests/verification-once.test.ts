@@ -146,3 +146,25 @@ test('deleting originals keeps a source whose backup differs, even when the sour
  assert.deepEqual(result.kept,[{source:f.source,reason:'destination-differs'}]);
  await fs.lstat(f.source);
 });
+
+// A stopped import keeps the checksums of the files it verified: main.ts remembers them in the job's finally, so the
+// next plan of the same card recognises those files by identity without reading them.
+test('a stopped import still remembers its checksums, and the next plan does not read those files',async t=>{
+ const {readFileSync}=await import('node:fs'),{rememberImported,loadImported}=await import('../platform/scan-memory');
+ const main=readFileSync(new URL('../main.ts',import.meta.url),'utf8');
+ assert.match(main,/const verified:Record<string,\{sha256:string;identity:string\}>=\{\};\n try\{/);
+ assert.match(main,/\}\}\n finally\{\n  const volume=[^\n]*\n  if\(volume&&!qa&&Object\.keys\(verified\)\.length\)await rememberImported\(/);
+ const base=await folder(t,'verify-once-stopped-'),card=path.join(base,'card'),root=path.join(base,'backup'),store=path.join(base,'store');
+ const first=path.join(card,'A.bin'),second=path.join(card,'B.bin');await photo(first,Buffer.alloc(SIZE,1));await photo(second,Buffer.alloc(SIZE,2));await fs.mkdir(root);
+ const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const {plans:[transfer]}=await core.plan(card,[root],options,none);
+ const control=new AbortController(),verified:Record<string,{sha256:string;identity:string}>={};
+ await core.execute(transfer!,control.signal,undefined,{onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};control.abort();}}).catch(error=>{if(error?.name!=='AbortError')throw error;});
+ assert.equal(control.signal.aborted,true);assert.ok(Object.keys(verified).length>0);
+ await rememberImported(store,'card-volume',card,verified);
+ const other=path.join(base,'other');await fs.mkdir(other);
+ const reads=countReads(t,file=>file===first?'first':file===second?'second':undefined);
+ await core.plan(card,[other],{...options,sourceDigest:await loadImported(store,'card-volume',card)},none);
+ reads.stop();
+ assert.deepEqual(reads.files(),Object.fromEntries([['first',first],['second',second]].filter(([,file])=>!verified[file!]).map(([name])=>[name,1])));
+});

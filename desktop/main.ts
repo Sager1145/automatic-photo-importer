@@ -542,6 +542,8 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  const saveReport=async(name:string,value:unknown)=>{if(!reportDirectory)return;const file=await fs.open(path.join(reportDirectory,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}};
  const signal=control.signal;
  const request='review' in input?undefined:input;job.excluded=request?.exclude;
+ // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
+ const verified:Record<string,{sha256:string;identity:string}>={};
  try{
   // A cleanup in progress stops first. The phase changes before this wait, so pump() never takes this job again.
   if('review' in input){
@@ -576,7 +578,6 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
   job.phase='copying';
-  const verified:Record<string,{sha256:string;identity:string}>={};
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await executeDestinations(plans,{
    signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
@@ -588,8 +589,6 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await recordDuplicates(plans,prepared.duplicates,reorganize);
   rememberPlaced(plans,prefs);
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
-  const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
-  if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
@@ -614,6 +613,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)job.errors.push(job.detail);
   // A planning error about one file can be skipped by hand: never for a mirror (the copy would read as removed) or a USB camera (staged anew each time).
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&!(job.backup&&prefs?.backupMode==='mirror')&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail);}}
+ finally{
+  const volume=!prepared||prepared.review.kind==='reorganize'||prepared.stage?undefined:memoryVolume(job.source);
+  if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
+ }
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();emit();
 }
