@@ -189,6 +189,30 @@ async function corruptWrites(t:test.TestContext,root:string,names:string[]) {
   return ()=>{proto.write=write;t.mock.restoreAll();syncBuiltinESMExports();};
 }
 
+test('a read-back that sees only the file\'s modified time change under it (a flush assigning its real inode) is read again, not failed',async t=>{
+  const env=await ready(t);if(!env) return;
+  const probe=await fs.open(env.root,'r');await probe.close();
+  const proto=Object.getPrototypeOf(probe) as {stat:(...args:unknown[])=>Promise<{mtimeNs:bigint}>},stat=proto.stat,open=fsPatchable.open.bind(fsPatchable);
+  const reading=new WeakMap<object,{stats:number}>();let fired=0;
+  t.mock.method(fsPatchable,'open',async(...args:Parameters<typeof fsPatchable.open>)=>{
+    const handle=await open(...args),file=String(args[0]);
+    // The first read-only handle on a backup file is the read-back; its second stat is the one taken after reading.
+    if(typeof args[1]==='number'&&file.startsWith(env.root+path.sep)&&/^DSC_/.test(path.basename(file))&&!fired) reading.set(handle,{stats:0});
+    return handle;
+  });
+  syncBuiltinESMExports();
+  proto.stat=async function(this:object,...args:unknown[]){
+    const result=await stat.apply(this,args),mine=reading.get(this);
+    if(mine&&++mine.stats===2&&!fired){fired++;return {...result,mtimeNs:result.mtimeNs+490_000_000n};}
+    return result;
+  };
+  t.after(()=>{proto.stat=stat;t.mock.restoreAll();syncBuiltinESMExports();});
+  const result=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!);
+  proto.stat=stat;t.mock.restoreAll();syncBuiltinESMExports();
+  assert.equal(fired,1,'the change was injected once');
+  assert.deepEqual(result,{copied:FILES,skipped:0,errors:[]});
+});
+
 test('a read-back mismatch removes a file this run created, with its receipts, and reports the error',async t=>{
   const env=await ready(t);if(!env) return;
   const restore=await corruptWrites(t,env.root,['DSC_0003.NEF']);

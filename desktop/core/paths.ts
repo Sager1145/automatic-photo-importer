@@ -215,7 +215,7 @@ export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:num
         }
         const after=await handle.stat({bigint:true});
         const pathname=await fs.lstat(file,{bigint:true});
-        if(!sameStat(before,after) || !sameStat(after,pathname)) throw new Error(`File changed while reading; scan again: ${file}`);
+        if(!sameStat(before,after) || !sameStat(after,pathname)) throw Object.assign(new Error(`File changed while reading; scan again: ${file}`),{changedWhileReading:true});
         return await hash.digest();
       } finally { hash.drop(); }
     } finally { await handle.close(); }

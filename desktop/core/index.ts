@@ -1011,7 +1011,13 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     if(entry.digest!==undefined&&streamed!==entry.digest) throw sourceChanged(entry);
     // Phase 3: read back with no slot held (digest takes its own).
     if(options.verify!==false) {
-      const check=await digest(destination,signal);
+      // exFAT gives a fresh file its real inode (and a new modified time) when a flush - maybe another file's folder flush - first reaches it,
+      // which can land in the middle of this read; the bytes are unaffected, so a read that saw only that is repeated (twice at most).
+      let check:string;
+      for(let attempt=0;;attempt++) {
+        try { check=await digest(destination,signal);break; }
+        catch(error) { if(attempt>=2||!(error as {changedWhileReading?:boolean})?.changedWhileReading) throw error; }
+      }
       if(check!==streamed) {
         // Only a file this run created with O_EXCL and still holds is ever removed; a resumed one may hold bytes that are not ours.
         const held=await output.stat({bigint:true}),named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
