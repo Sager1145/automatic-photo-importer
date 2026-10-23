@@ -221,6 +221,9 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   const fields:Record<string,unknown>={};
   const result:Metadata={camera,date,fields,fingerprint:duplicateFingerprint(entries,camera,date)};
   if(!camera){const origin=sourceFolder(entries,options.file);if(origin)result.origin=origin;}
+  const contentId=find(entries,['ContentIdentifier']),make=find(entries,['Make']);
+  if(typeof contentId==='string'&&contentId.trim())result.contentId=contentId.trim();
+  if(typeof make==='string'&&make.trim())result.make=make.trim();
   if(editorProvenance(entries))result.edited=true;
   if(options.details===false){for(const [key,value] of entries)if(tagName(key)==='Error'&&value!==undefined)fields[key]=String(value);const lens=lensModel(entries);if(lens)result.exposure={lens};return result;}
   function flatten(key:string,value:unknown) {
@@ -303,7 +306,7 @@ const routingTags=[
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
   'CreateDate','SubSecCreateDate','SubSecTimeDigitized','OffsetTimeDigitized','CreationDate','CreationDateValue','TimeZone',
   'Software','ProcessingSoftware','CreatorTool','ImageEditingSoftware','RAWDevelopingSoftware','HistorySoftwareAgent','History',
-  'Encoder','LensModel','Error','Warning',
+  'Encoder','LensModel','ContentIdentifier','Error','Warning',
   'SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber','ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3','ImageNumber','FileNumber',
   'ExifImageWidth','ExifImageHeight','ImageWidth','ImageHeight','SourceImageWidth','SourceImageHeight',
   'ExposureTime','FNumber','ISO','ExposureCompensation',

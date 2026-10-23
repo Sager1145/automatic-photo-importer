@@ -9,7 +9,7 @@ import { mediaKindForPath } from '../media-formats';
  * every mount. Nothing here is trusted as-is: folders are reused only when their entry
  * names still match, and EXIF results only when a file's inode, size and times match. */
 interface Stored {
-  /** 4: routing metadata reads Samsung, CinemaDNG and source (screenshot, screen recording, WeChat) tags. */
+  /** 4: routing metadata reads ContentIdentifier, Make, Samsung, CinemaDNG and source tags. */
   version:4;volume:string;saved:string;backup:boolean;
   folders:[string,string[]][];
   files:[string,number][];

@@ -116,3 +116,34 @@ test('the unknown-file default decides files without an explicit rule',async t=>
  const explicit=await plan(source,[root],{...options,unknownDefault:'skip',unknownRules:{zip:'Archives'}},metadata);
  assert.equal(explicit.plans[0]!.entries.find(entry=>entry.source===zip)?.destination,path.join(root,'Archives','backup.zip'));
 });
+
+test('whitelist system patterns match their vendor layouts and nothing else',()=>{
+ const system:[string,string][]=[
+  ['2024/111SWART/NC_FLLST.DAT','nikon-file-list'],['NC_FLLST.DAT','nikon-file-list'],
+  ['CANONMSC/M0001.CTG','canon-catalog'],['MISC/AUTPRINT.MRK','dpof-print-order'],
+  ['PRIVATE/M4ROOT/THMBNL/C0001T01.JPG','sony-xavc-thumbnail'],
+  ['CONTENTS/ICON/C0001.BMP','p2-icon'],['CONTENTS/LASTCLIP.TXT','p2-last-clip'],
+  ['PRIVATE/AVCHD/BDMV/CLIPINF/00000.CPI','avchd-index'],['PRIVATE/AVCHD/BDMV/PLAYLIST/00000.MPL','avchd-index'],
+  ['PRIVATE/AVCHD/BDMV/INDEX.BDM','avchd-index'],['PRIVATE/AVCHD/BDMV/MOVIEOBJ.BDM','avchd-index'],
+  ['PRIVATE/AVCHD/BDMV/BACKUP/INDEX.BDM','avchd-index'],['PRIVATE/AVCHD/BDMV/BACKUP/CLIPINF/00000.CPI','avchd-index'],
+  ['CONTENTS/CLIPS001/A001C001.CIF','canon-xf-index'],['CONTENTS/CLIPS001/A001C001.SIF','canon-xf-index'],['CONTENTS/INDEX.MIF','canon-xf-index'],
+ ];
+ for(const [relative,id] of system)assert.equal(knownSystemFile(relative)?.id,id,relative);
+ for(const relative of ['notes/data.dat','notes/data.mrk','Photos/C0001T01.JPG','Pictures/ICON/a.bmp','notes/LASTCLIP.TXT','Docs/INDEX.BDM','Docs/a.cif','Docs/INDEX.MIF'])assert.equal(knownSystemFile(relative),undefined,relative);
+});
+
+test('a Sony thumbnail JPG is a system file, not a photo; backup still includes it',async t=>{
+ const {source,put}=await fixture(t);
+ await put('PRIVATE/M4ROOT/THMBNL/C0001T01.JPG');await put('DCIM/100MSDCF/DSC0001.JPG');
+ const scan=await inventory(source,{});
+ const thumb=byName(scan,'PRIVATE/M4ROOT/THMBNL/C0001T01.JPG')!;
+ assert.equal(thumb.system?.id,'sony-xavc-thumbnail');assert.equal(thumb.included,false);assert.equal(thumb.kind,'Other');
+ assert.equal(scan.media,1);
+ const backup=await inventory(source,{backup:true});
+ assert.equal(byName(backup,'PRIVATE/M4ROOT/THMBNL/C0001T01.JPG')?.included,true);
+});
+
+test('a MISC/*.MRK file is a DPOF file only at the card root',()=>{
+ assert.equal(knownSystemFile('MISC/AUTPRINT.MRK')?.id,'dpof-print-order');
+ assert.equal(knownSystemFile('Projects/MISC/edit.mrk'),undefined);
+});

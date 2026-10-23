@@ -5,7 +5,7 @@ import type { SystemFile } from '../shared';
 // anchored to the vendor's folder layout, so the same extension elsewhere on a
 // card (a user's .dat, .db or .xml) stays an unknown file the user decides on.
 const catalog:(SystemFile & {pattern:RegExp})[]=[
-  {id:'nikon-file-list',vendor:'Nikon',label:'Nikon folder file list',pattern:/(?:^|\/)DCIM\/[^/]+\/NC_FLLST\.DAT$/i},
+  {id:'nikon-file-list',vendor:'Nikon',label:'Nikon folder file list',pattern:/(?:^|\/)NC_FLLST\.DAT$/i},
   {id:'nikon-card-index',vendor:'Nikon',label:'Nikon card index',pattern:/(?:^|\/)NIKON\d{3}\.DSC$/i},
   {id:'sony-body-data',vendor:'Sony',label:'Sony camera body data',pattern:/(?:^|\/)BODYDATA\.DAT$/i},
   {id:'sony-avf-info',vendor:'Sony',label:'Sony AVCHD/still index',pattern:/(?:^|\/)AVF_INFO\/AVIN\d{4}\.(?:BNP|INP|INT)$/i},
@@ -14,7 +14,13 @@ const catalog:(SystemFile & {pattern:RegExp})[]=[
   {id:'sony-clip-catalog',vendor:'Sony',label:'Sony XAVC clip catalog',pattern:/(?:^|\/)(?:PRIVATE\/)?M4ROOT\/MEDIAPRO\.XML$/i},
   {id:'fujifilm-transfer',vendor:'Fujifilm',label:'Fujifilm transfer list',pattern:/(?:^|\/)FFDB\/FFXFER\.DAT$/i},
   {id:'fujifilm-database',vendor:'Fujifilm',label:'Fujifilm camera database',pattern:/(?:^|\/)FFDB\/FFDB_[^/]+\.db$/i},
-  {id:'canon-catalog',vendor:'Canon',label:'Canon card catalog',pattern:/(?:^|\/)EOSMISC\/[^/]+\.CTG$/i},
+  {id:'canon-catalog',vendor:'Canon',label:'Canon card catalog',pattern:/(?:^|\/)(?:EOSMISC|CANONMSC)\/[^/]+\.CTG$/i},
+  {id:'dpof-print-order',vendor:'Other device',label:'Print order (DPOF)',pattern:/^MISC\/[^/]+\.MRK$/i},
+  {id:'sony-xavc-thumbnail',vendor:'Sony',label:'Sony XAVC clip thumbnail',pattern:/(?:^|\/)PRIVATE\/M4ROOT\/THMBNL\/[^/]*T01\.JPG$/i},
+  {id:'p2-icon',vendor:'Panasonic',label:'Panasonic P2 clip icon',pattern:/(?:^|\/)CONTENTS\/ICON\/[^/]+\.BMP$/i},
+  {id:'p2-last-clip',vendor:'Panasonic',label:'Panasonic P2 last clip',pattern:/(?:^|\/)CONTENTS\/LASTCLIP\.TXT$/i},
+  {id:'avchd-index',vendor:'AVCHD',label:'AVCHD playlist and clip index',pattern:/(?:^|\/)BDMV\/(?:BACKUP\/)?(?:CLIPINF\/[^/]+\.CPI|PLAYLIST\/[^/]+\.MPL|INDEX\.BDM|MOVIEOBJ\.BDM)$/i},
+  {id:'canon-xf-index',vendor:'Canon',label:'Canon XF clip index',pattern:/(?:^|\/)CONTENTS\/(?:CLIPS\d+\/[^/]+\.(?:CIF|SIF)|INDEX\.MIF)$/i},
   {id:'device-license',vendor:'Other device',label:'Device license text',pattern:/(?:^|\/)PMHOME\/LICENSE\/[^/]+\.(?:TXT|RST)$/i},
 ];
 const finderAlias:SystemFile={id:'macos-alias',vendor:'macOS',label:'Finder alias'};
