@@ -5,11 +5,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { findMisplaced } from '../core/index';
-import { addPlacement, loadPlacement, placedMatches, placementId, placementScope, rememberEntries, replacePlacement } from '../platform/placement-memory';
+import { addPlacement, loadPlacement, placedMatches, placementId, rememberEntries, replacePlacement } from '../platform/placement-memory';
+import { ruleOptions, rulesScope } from '../routing-options';
+import { defaultPreferences } from '../preferences';
 import type { Metadata } from '../shared';
 
 const options = {backup:false, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
-const scopeOf = (template:string) => placementScope({template, layout:'format', basePaths:['photos']});
+const scopeOf = (template:string) => rulesScope(ruleOptions({...defaultPreferences, template, mediaLayout:'format', unknownRules:{}}));
 async function fixture(t:test.TestContext) {
   const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-placement-')));
   t.after(async()=>{await fs.rm(base,{recursive:true,force:true});});

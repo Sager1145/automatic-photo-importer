@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,executeReorganization,findMisplaced,configureOrganizationRecovery} from '../core/index';
 import {validNoMetadataFolder} from '../no-metadata';
-import {safeComponent} from '../core/paths';
+import {safeComponent} from '../folder-template';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');

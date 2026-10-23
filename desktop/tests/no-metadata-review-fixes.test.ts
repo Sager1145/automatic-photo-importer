@@ -5,10 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,executeReorganization,findMisplaced,getOrganizationRecovery,undoOrganization,configureOrganizationRecovery} from '../core/index';
 import {defaultPreferences} from '../preferences';
-import {ruleOptions} from '../routing-options';
+import {ruleOptions,rulesScope} from '../routing-options';
 import {unknownDecision} from '../unknown-confirm';
-import {routingScope} from '../platform/routing-memory';
-import {placementScope} from '../platform/placement-memory';
 import {validNoMetadataFolder} from '../no-metadata';
 import type {Metadata} from '../shared';
 
@@ -31,7 +29,7 @@ test('one builder gives every caller the same rules, and each rule changes the r
   const rules=ruleOptions(defaultPreferences);
   assert.equal(rules.noMetadata,'keep');assert.equal(rules.noMetadataFolder,'Unknown files');
   assert.equal(ruleOptions(defaultPreferences,true).noMetadata,'fileDate');
-  const scopes=(prefs:typeof defaultPreferences,fileDate=false)=>{const r=ruleOptions(prefs,fileDate);return [routingScope(r),placementScope({...r,basePaths:[]})];};
+  const scopes=(prefs:typeof defaultPreferences,fileDate=false)=>rulesScope(ruleOptions(prefs,fileDate));
   const original=scopes(defaultPreferences);
   for(const changed of [{...defaultPreferences,noMetadataHandling:'folder' as const},{...defaultPreferences,noMetadataFolder:'Other name'}])assert.notDeepEqual(scopes(changed),original);
   assert.notDeepEqual(scopes(defaultPreferences,true),original);
