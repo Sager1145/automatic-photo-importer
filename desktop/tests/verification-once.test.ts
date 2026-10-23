@@ -19,6 +19,9 @@ function countReads(t:test.TestContext,role:(file:string)=>string|undefined){
  const stop=()=>{t.mock.restoreAll();syncBuiltinESMExports();};t.after(stop);
  return {stop,files:()=>Object.fromEntries(Object.entries(read).filter(([,bytes])=>bytes).map(([kind,bytes])=>[kind,bytes/SIZE]))};
 }
+// A file whose dates were set (as a copied photo's are) has a change time apart from its modified time, which is
+// what lets a proof be held for it on APFS; a file just written has both equal, like every file on exFAT.
+async function photo(file:string,data:Buffer){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,data);await fs.utimes(file,new Date('2024-02-03T10:00:00Z'),new Date('2024-02-03T10:00:00Z'));}
 async function folder(t:test.TestContext,name:string){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),name)));t.after(()=>fs.rm(base,{recursive:true,force:true}));return base;
 }
@@ -31,22 +34,22 @@ const recovery=(file:string)=>file.includes(`${path.sep}Photo Importer Recovery$
 // verified inode: neither the published name nor the original set aside is read again.
 test('an organization copy reads its source once and its destination not at all after a link',async t=>{
  const root=await folder(t,'verify-once-organize-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
- await fs.mkdir(path.dirname(original));await fs.writeFile(original,data);
+ await photo(original,data);
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
  const destination=transfer!.entries[0]!.destination;
  const reads=countReads(t,file=>file===original?'source':file===destination?'destination':file.endsWith('.partial')?'stage':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined);
  const result=await core.executeReorganization(transfer!);
  reads.stop();
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
- assert.deepEqual(reads.files(),{source:2,stage:1,destination:1});
+ assert.deepEqual(reads.files(),{source:1,stage:1});
  assert.deepEqual(await fs.readFile(destination),data);
 });
 
 // Between the check and setting the original aside, a copy rewritten in place (same size, so only a read can tell)
-// is read again, found different, and the original stays where it is.
+// is read again, found different, and the original stays where it is. Its first check was the linked stage's proof.
 test('a destination changed after its check is read again and the original is kept',async t=>{
  const root=await folder(t,'verify-once-changed-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
- await fs.mkdir(path.dirname(original));await fs.writeFile(original,data);
+ await photo(original,data);
  const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
  const destination=transfer!.entries[0]!.destination,mkdir=fs.mkdir.bind(fs);let changed=false;
  // The slot for the original is made after the check and before the original is set aside.
@@ -58,6 +61,35 @@ test('a destination changed after its check is read again and the original is ke
  const result=await core.executeReorganization(transfer!);
  reads.stop();
  assert.equal(changed,true);assert.equal(result.errors.length,1);assert.match(result.errors[0]!,/Destination changed/);
- assert.deepEqual(reads.files(),{destination:2});
+ assert.deepEqual(reads.files(),{destination:1});
  assert.deepEqual(await fs.readFile(original),data);
+});
+
+async function organized(t:test.TestContext,name:string){
+ const root=await folder(t,name),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
+ await photo(original,data);
+ const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
+ assert.deepEqual((await core.executeReorganization(transfer!)).errors,[]);
+ const [id]=(await fs.readdir(path.join(root,'Photo Importer Recovery'))).filter(name=>/^[0-9a-f-]{36}$/.test(name));
+ const role=(file:string)=>file===original?'source':file===transfer!.entries[0]!.destination?'destination':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined;
+ return {root,id:id!,original,data,destination:transfer!.entries[0]!.destination,role};
+}
+// Every file is checked before the first release; the release itself re-reads nothing unchanged since.
+test('releasing kept originals reads each file once',async t=>{
+ const f=await organized(t,'verify-once-release-');
+ const reads=countReads(t,f.role);
+ const released=await core.finalizeOrganization(f.root,f.id);
+ reads.stop();
+ assert.equal(released.removed,1);
+ assert.deepEqual(reads.files(),{stash:1,destination:1});
+});
+// The kept original is read in the check before anything changes; put back by this undo, it is not read again.
+test('an undo reads the kept original once and the copy it removes once',async t=>{
+ const f=await organized(t,'verify-once-undo-');
+ const reads=countReads(t,f.role);
+ const undone=await core.undoOrganization(f.root,f.id);
+ reads.stop();
+ assert.deepEqual(undone,{restored:1,removed:1,handedOff:0});
+ assert.deepEqual(reads.files(),{stash:1,destination:1});
+ assert.deepEqual(await fs.readFile(f.original),f.data);
 });
