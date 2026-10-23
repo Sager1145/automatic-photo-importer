@@ -85,9 +85,9 @@ function Preview({ file, outcome }: { file: DuplicateFile; outcome?: Outcome<Thu
 }
 
 function FullExif({ outcome }: { outcome?: Outcome<Metadata> }) {
-  const { t, formatBytes } = useTranslation();
+  const { t, formatBytes, language } = useTranslation();
   const metadata = outcome && 'value' in outcome ? outcome.value : undefined;
-  const categories = useMemo(() => metadata ? categorize(metadata.fields, formatBytes) : [], [metadata, formatBytes]);
+  const categories = useMemo(() => metadata ? categorize(metadata, language, formatBytes) : [], [metadata, language, formatBytes]);
   return <details className="duplicate-full-exif" data-testid="full-exif">
     <summary>{t("Full EXIF")}</summary>
     {outcome && 'error' in outcome ? <p className="muted">{t("This file's EXIF could not be read.")}</p> : !metadata ? <p className="muted">{t("Loading…")}</p> : categories.length === 0 ? <p className="muted">{t("No EXIF found")}</p> : categories.map(category => <section key={category.id} data-category={category.id}>

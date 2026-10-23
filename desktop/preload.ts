@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('importer',{
   return()=>ipcRenderer.removeListener('importer:updated',callback);
  },
  thumbnail:(path:string):Promise<Thumbnail>=>ipcRenderer.invoke('importer:thumbnail',path),
+ summary:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:summary',path),
  exif:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:exif',path),
  duplicateGroups:():Promise<DuplicateGroup[]>=>ipcRenderer.invoke('importer:duplicates'),
  errorPaths:(jobId:string,code:string):Promise<string[]>=>ipcRenderer.invoke('importer:errorPaths',jobId,code)

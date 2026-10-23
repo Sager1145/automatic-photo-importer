@@ -1,45 +1,44 @@
 /** A curated, readable view of a file's full EXIF. Tags are ExifTool's documented names (exiftool.org/TagNames) read
  * with -G1 groups and -n (numbers, not print conversions); only the tags below are shown, under friendly labels and
  * units. Binary data, thumbnails, internal bookkeeping and repeated copies of a tag are never shown. Labels and
- * titles are English catalog keys: the caller translates them. */
+ * titles are English catalog keys: the caller translates them. Exposure and capture time are the interpreter's
+ * values (Metadata.exposure and .date) in the summary card's format, so the two views never disagree. */
+import type { Language, Metadata } from '../shared';
+import { formatCaptureDateTime, formatExposure, type ExposureDisplay } from './metadata-display';
 
 export type ExifCategoryId = 'exposure' | 'camera' | 'datetime' | 'location' | 'image' | 'maker' | 'file';
 export interface ExifRow { label: string; value: string; tag: string; }
 export interface ExifCategory { id: ExifCategoryId; title: string; rows: ExifRow[]; }
-type Formatter = (value: unknown, all: Map<string, unknown>) => string | undefined;
+type Formatter = (value: unknown) => string | undefined;
+/** The interpreted values: the summary card's exposure and capture time. */
+interface Interpreted { exposure: ExposureDisplay; captured?: string }
 
 const text: Formatter = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() || undefined : undefined;
 const number = (value: unknown) => { const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN; return Number.isFinite(n) ? n : undefined; };
 const trim = (n: number, digits = 2) => String(Number(n.toFixed(digits)));
 const unit = (suffix: string, digits = 1): Formatter => value => { const n = number(value); return n === undefined ? undefined : `${trim(n, digits)} ${suffix}`; };
-const shutter: Formatter = value => {
-  const n = number(value);
-  if (n === undefined || n <= 0) return undefined;
-  return n >= 0.5 ? `${trim(n, 1)} s` : `1/${Math.round(1 / n)} s`;
-};
-const fNumber: Formatter = value => { const n = number(value); return n === undefined || n <= 0 ? undefined : `ƒ/${trim(n, 1)}`; };
-const compensation: Formatter = value => { const n = number(value); return n === undefined ? undefined : `${n > 0 ? '+' : ''}${trim(n, 2)} EV`; };
 const lookup = (names: Record<number, string>): Formatter => value => { const n = number(value); return n === undefined ? undefined : names[n] ?? String(n); };
 const flash: Formatter = value => { const n = number(value); return n === undefined ? undefined : n & 1 ? 'Flash fired' : 'No flash'; };
 const degrees: Formatter = value => { const n = number(value); return n === undefined ? undefined : `${n.toFixed(5)}°`; };
 const meters: Formatter = value => { const n = number(value); return n === undefined ? undefined : `${trim(n, 1)} m`; };
-/** ExifTool prints dates as 2024:05:06 07:08:09 (with optional fraction and zone); show them as ISO-like text. */
+/** ExifTool prints other dates as 2024:05:06 07:08:09 (with optional fraction and zone); show them as ISO-like text. */
 const date: Formatter = value => typeof value === 'string' && value.trim() ? value.trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3') : undefined;
 const pixels: Formatter = value => { const n = number(value); return n === undefined ? undefined : `${Math.round(n)} px`; };
 const megapixels: Formatter = value => { const n = number(value); return n === undefined ? undefined : `${trim(n, 1)} MP`; };
 
-interface Spec { tag: string; label: string; format?: Formatter; /** Show only when it differs from these tags' values (a repeat otherwise). */ groups?: string[]; }
+interface Spec { tag: string; label: string; format?: Formatter; /** Shown from the interpreted values instead of the tag's own. */ interpreted?: (values: Interpreted) => string | undefined; }
 const spec = (tag: string, label: string, format: Formatter = text): Spec => ({ tag, label, format });
+const interpreted = (tag: string, label: string, value: (values: Interpreted) => string | undefined): Spec => ({ tag, label, interpreted: value });
 
 export const categories: { id: ExifCategoryId; title: string; tags: Spec[] }[] = [
   { id: 'exposure', title: 'Exposure', tags: [
-    spec('ExposureTime', 'Shutter speed', shutter), spec('FNumber', 'Aperture', fNumber), spec('ISO', 'ISO'),
-    spec('ExposureCompensation', 'Exposure compensation', compensation),
+    interpreted('ExposureTime', 'Shutter speed', values => values.exposure.shutterSpeed), interpreted('FNumber', 'Aperture', values => values.exposure.aperture),
+    interpreted('ISO', 'ISO', values => values.exposure.iso), interpreted('ExposureCompensation', 'Exposure compensation', values => values.exposure.exposureCompensation),
     spec('ExposureProgram', 'Exposure program', lookup({ 0: 'Not defined', 1: 'Manual', 2: 'Program', 3: 'Aperture priority', 4: 'Shutter priority', 5: 'Creative', 6: 'Action', 7: 'Portrait', 8: 'Landscape' })),
     spec('ExposureMode', 'Exposure mode', lookup({ 0: 'Auto', 1: 'Manual', 2: 'Auto bracket' })),
     spec('MeteringMode', 'Metering mode', lookup({ 0: 'Unknown', 1: 'Average', 2: 'Center-weighted', 3: 'Spot', 4: 'Multi-spot', 5: 'Multi-segment', 6: 'Partial', 255: 'Other' })),
     spec('WhiteBalance', 'White balance', lookup({ 0: 'Auto', 1: 'Manual' })), spec('Flash', 'Flash', flash),
-    spec('FocalLength', 'Focal length', unit('mm')), spec('FocalLengthIn35mmFormat', '35 mm equivalent', unit('mm')),
+    interpreted('FocalLength', 'Focal length', values => values.exposure.focalLength), spec('FocalLengthIn35mmFormat', '35 mm equivalent', unit('mm')),
     spec('SubjectDistance', 'Subject distance', meters), spec('DigitalZoomRatio', 'Digital zoom', text), spec('SceneCaptureType', 'Scene type', lookup({ 0: 'Standard', 1: 'Landscape', 2: 'Portrait', 3: 'Night' })),
   ] },
   { id: 'camera', title: 'Camera & Lens', tags: [
@@ -48,7 +47,7 @@ export const categories: { id: ExifCategoryId; title: string; tags: Spec[] }[] =
     spec('Software', 'Software'), spec('FirmwareVersion', 'Firmware'), spec('Artist', 'Photographer'), spec('Copyright', 'Copyright'),
   ] },
   { id: 'datetime', title: 'Date & Time', tags: [
-    spec('DateTimeOriginal', 'Captured', date), spec('SubSecTimeOriginal', 'Sub-seconds'), spec('OffsetTimeOriginal', 'Time zone offset'),
+    interpreted('DateTimeOriginal', 'Captured', values => values.captured), spec('SubSecTimeOriginal', 'Sub-seconds'), spec('OffsetTimeOriginal', 'Time zone offset'),
     spec('CreateDate', 'Created', date), spec('ModifyDate', 'Modified', date), spec('CreationDate', 'Creation date', date), spec('TimeZone', 'Time zone'),
   ] },
   { id: 'location', title: 'Location', tags: [
@@ -81,8 +80,10 @@ const groupOf = (key: string) => key.split(':').filter(part => !/^Copy\d+$/.test
 const nameOf = (key: string) => key.split(':').at(-1)!;
 const rank = (key: string) => { const index = preferred.indexOf(groupOf(key)); return index < 0 ? preferred.length : index; };
 
-/** `fields` is Metadata.fields: flattened -G1 keys such as `ExifIFD:FNumber`. `formatBytes` formats FileSize. */
-export function categorize(fields: Record<string, unknown>, formatBytes: (bytes: number) => string = bytes => `${bytes} B`): ExifCategory[] {
+/** `metadata` is the full read: `fields` holds flattened -G1 keys such as `ExifIFD:FNumber`. `formatBytes` formats FileSize. */
+export function categorize(metadata: Pick<Metadata, 'fields' | 'exposure' | 'date'>, language: Language, formatBytes: (bytes: number) => string = bytes => `${bytes} B`): ExifCategory[] {
+  const { fields } = metadata, when = formatCaptureDateTime(metadata.date, language);
+  const values: Interpreted = { exposure: formatExposure(metadata.exposure, language), captured: when.time ? [when.date, when.time, when.timezone].filter(Boolean).join(' ') : when.date };
   // One value per tag name: the preferred group's, first copy.
   const byName = new Map<string, { key: string; value: unknown }[]>();
   for (const [key, value] of Object.entries(fields)) {
@@ -95,12 +96,14 @@ export function categorize(fields: Record<string, unknown>, formatBytes: (bytes:
   const result: ExifCategory[] = [];
   for (const category of categories) {
     const rows: ExifRow[] = [], shownLabels = new Set<string>();
-    for (const { tag, label, format } of category.tags) {
-      let value = best.get(tag);
-      if (value === undefined || shownLabels.has(label)) continue;
+    for (const { tag, label, format, interpreted } of category.tags) {
+      if (shownLabels.has(label)) continue;
+      if (interpreted) { const shown = interpreted(values); if (shown !== undefined) { shownLabels.add(label); rows.push({ label, value: shown, tag }); } continue; }
+      const value = best.get(tag);
+      if (value === undefined) continue;
       // A maker tag is shown only when it came from a maker group (or a documented standard group).
       if (category.id === 'maker' && !(byName.get(tag) ?? []).some(item => makerGroups.test(groupOf(item.key)) || groupOf(item.key) === 'Composite')) continue;
-      const shown = tag === 'FileSize' ? (number(value) === undefined ? undefined : formatBytes(number(value)!)) : format!(value, best);
+      const shown = tag === 'FileSize' ? (number(value) === undefined ? undefined : formatBytes(number(value)!)) : format!(value);
       if (shown === undefined) continue;
       shownLabels.add(label);
       rows.push({ label, value: shown, tag });

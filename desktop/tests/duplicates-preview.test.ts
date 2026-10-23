@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { thumbnail, pruneThumbnails, type ThumbnailDecoders } from '../platform/thumbnails';
 import { categorize } from '../renderer/exif-categories';
+import { metadataFromTags } from '../platform/metadata';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 async function scratch(t: test.TestContext) {
@@ -34,16 +35,17 @@ test('with no decoder and no embedded preview only the message remains; a decoda
   assert.equal(calls, 1);
 });
 test('full EXIF is grouped into curated categories with friendly units and no binary or repeated tags', () => {
-  const categories = categorize({
-    'ExifIFD:ExposureTime': 0.004, 'ExifIFD:FNumber': 2.8, 'ExifIFD:ISO': 400, 'ExifIFD:FocalLength': 50, 'ExifIFD:Flash': 16,
+  // Exposure and capture time are the interpreter's values in the summary card's format, not formatted again here.
+  const categories = categorize(metadataFromTags({
+    'ExifIFD:ExposureTime': 0.004, 'ExifIFD:FNumber': 2.8, 'ExifIFD:ISO': 400, 'ExifIFD:FocalLength': 50, 'ExifIFD:ExposureCompensation': -0.3, 'ExifIFD:Flash': 16,
     'IFD0:Model': 'NIKON Z f', 'IFD0:Copy1:Model': 'NIKON Z f', 'ExifIFD:LensModel': 'NIKKOR Z 50mm', 'ExifIFD:DateTimeOriginal': '2024:05:06 07:08:09',
     'GPS:GPSLatitude': 35.12345678, 'ExifIFD:ExifImageWidth': 6048, 'ExifIFD:ExifImageHeight': 4032, 'File:FileSize': 2048,
     'IFD1:ThumbnailImage': '(Binary data 5000 bytes)', 'ExifIFD:ComponentsConfiguration': '1 2 3 0', 'Nikon:ShutterCount': 1234, 'Nikon:LensData0100': 'x',
-  }, bytes => `${bytes / 1024} KB`);
+  }), 'en', bytes => `${bytes / 1024} KB`);
   const by = Object.fromEntries(categories.map(c => [c.id, Object.fromEntries(c.rows.map(r => [r.label, r.value]))]));
-  assert.deepEqual(by.exposure, { 'Shutter speed': '1/250 s', Aperture: 'ƒ/2.8', ISO: '400', 'Focal length': '50 mm', Flash: 'No flash' });
+  assert.deepEqual(by.exposure, { 'Shutter speed': '1/250 s', Aperture: 'f/2.8', ISO: '400', 'Exposure compensation': '-0.3 EV', Flash: 'No flash', 'Focal length': '50 mm' });
   assert.deepEqual(by.camera, { 'Camera model': 'NIKON Z f', Lens: 'NIKKOR Z 50mm' });
-  assert.deepEqual(by.datetime, { Captured: '2024-05-06 07:08:09' });
+  assert.deepEqual(by.datetime, { Captured: 'May 6, 2024 07:08:09' });
   assert.deepEqual(by.location, { Latitude: '35.12346°' });
   assert.deepEqual(by.image, { Width: '6048 px', Height: '4032 px' });
   assert.deepEqual(by.maker, { 'Shutter count': '1234' });

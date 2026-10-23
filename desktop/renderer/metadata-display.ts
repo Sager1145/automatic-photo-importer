@@ -1,20 +1,34 @@
-import type { Exposure, Language } from '../shared';
+import type { Exposure, Language, ShutterNote } from '../shared';
+import { parseCapture } from '../capture-time';
 
 export interface CaptureDateTime {date?:string;time?:string;timezone?:string;}
 /** Format recorded components without converting the capture offset or using the host timezone. */
 export function formatCaptureDateTime(value:string|undefined, language:Language):CaptureDateTime {
-  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/);
-  if (!match) return {};
-  const [,year,month,day,hour,minute,second,fraction='',offset] = match;
+  const capture = parseCapture(value);
+  if (!capture) return {};
+  const [year,month,day,hour=0,minute=0,second=0] = (capture.clock ?? capture.day).split(/[-T:]/).map(Number) as number[];
   const calendar = new Date(0);
-  calendar.setUTCFullYear(Number(year),Number(month)-1,Number(day));
-  calendar.setUTCHours(Number(hour),Number(minute),Number(second),0);
-  if (calendar.getUTCFullYear() !== Number(year) || calendar.getUTCMonth() !== Number(month)-1 || calendar.getUTCDate() !== Number(day)
-    || calendar.getUTCHours() !== Number(hour) || calendar.getUTCMinutes() !== Number(minute) || calendar.getUTCSeconds() !== Number(second)) return {};
-  if (offset && offset !== 'Z' && (Number(offset.slice(1,3)) > 23 || Number(offset.slice(4)) > 59)) return {};
+  calendar.setUTCFullYear(year!,month!-1,day!);
+  calendar.setUTCHours(hour,minute,second,0);
   const date = new Intl.DateTimeFormat(language,{dateStyle:'medium',calendar:'gregory',timeZone:'UTC'}).format(calendar);
-  const time = new Intl.DateTimeFormat(language,{hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23',timeZone:'UTC'}).format(calendar)+fraction;
-  return {date,time,...(offset ? {timezone:offset === 'Z' || offset === '+00:00' ? 'UTC' : `UTC${offset}`} : {})};
+  if (!capture.clock) return {date};
+  const time = new Intl.DateTimeFormat(language,{hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23',timeZone:'UTC'}).format(calendar)+(capture.fraction ? '.'+capture.fraction : '');
+  return {date,time,...(capture.zone ? {timezone:capture.zone === 'Z' || capture.zone === '+00:00' ? 'UTC' : `UTC${capture.zone}`} : {})};
+}
+
+/** What a shutter count means, as an English catalog key the caller translates. */
+export function shutterNoteText(note:ShutterNote):string {
+  switch (note) {
+    case 'mechanical': return 'Reported mechanical shutter actuations at capture time. Total exposures can be higher.';
+    case 'mechanical-total-conflict': return 'Reported mechanical shutter actuations at capture time. Total exposures can be higher. The separate total ShutterCount values disagree.';
+    case 'mechanical-conflict': return 'Conflicting mechanical shutter counters were found. Review the individual metadata values.';
+    case 'total': return 'Reported ShutterCount at capture time. Its meaning varies by camera and may include electronic exposures; it is not necessarily mechanical actuations.';
+    case 'sony-total': return 'Reported ShutterCount at capture time, read with the corrected Sony decoder; not necessarily mechanical actuations.';
+    case 'total-conflict': return 'Conflicting ShutterCount values were found across metadata sources.';
+    case 'sony-unverified': return 'Shutter count unavailable for this ILCE-7M5 photo: validating its Sony counter requires ExifTool 13.44 or newer and an identified Sony tag.';
+    case 'image-count': return 'Shutter count unavailable. Image count is shown separately and does not establish mechanical shutter actuations.';
+    case 'none': return 'Shutter count unavailable: no supported counter was exposed in this file’s metadata.';
+  }
 }
 
 export interface ExposureDisplay {lens?:string;aperture?:string;iso?:string;shutterSpeed?:string;focalLength?:string;exposureCompensation?:string;}

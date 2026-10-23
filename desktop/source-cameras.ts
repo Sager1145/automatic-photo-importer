@@ -88,8 +88,9 @@ export async function analyzeSourceCameras(
       if (signal?.aborted) break;
       failures += 1; issues.push({path:file.path,message:error instanceof Error?error.message:String(error)});
     }
-    const name = metadata?.camera?.trim().replace(/\s+/g,' ');
-    if (name && !/^(unknown(?: camera)?|not (available|recorded)|n\/a)$/i.test(name)) {
+    // The interpreter already rejects placeholder names and normalizes spacing.
+    const name = metadata?.camera;
+    if (name) {
       const key = name.toLowerCase();
       const model = models.get(key) ?? {name,files:0,bytes:0};
       model.files += 1; model.bytes += file.size; models.set(key,model);

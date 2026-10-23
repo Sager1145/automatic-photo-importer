@@ -86,10 +86,10 @@ export const importChecks=(ctx:Context):Check[]=>[
  }},
  {id:'import-metadata',stage:'imports',title:'Photo metadata is readable and collapsed; video summaries omit shutter count in every language',covers:['per-file review preview','metadata sheet','4 locales'],run:async h=>{
   // Fixture-only: the real preview UI runs through its bridge, without native dialogs or user files.
-  const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:'123',shutterNote:'Fixture shutter note',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
+  const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:123,shutterNote:'total',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
   let selected={path:path.join(ctx.root,'source-1','photo.png'),metadata:photo};
   // Through the QA hook when there is one, so the real handler stays for later checks; else replaced for the rest of the run.
-  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:exif');ipcMain.handle('importer:exif',()=>selected.metadata);}
+  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else for(const channel of ['importer:summary','importer:exif']){ipcMain.removeHandler(channel);ipcMain.handle(channel,()=>selected.metadata);}
   const open=async(name:string)=>{await h.js(`Array.from(document.querySelectorAll('.review-source-button')).find(button=>button.textContent.includes(${JSON.stringify(name)})).click()`);await h.until('metadata dialog',"document.querySelector('.metadata-dialog')?.open===true");};
   const close=async()=>{await h.click('[data-testid=metadata-close]');await h.until('animated metadata close',"document.querySelector('.metadata-dialog')===null");};
   try{
@@ -107,7 +107,7 @@ export const importChecks=(ctx:Context):Check[]=>[
    assert.equal(await h.js<boolean>("document.querySelector('[data-testid=metadata-details]').open"),true);
    await h.until('full metadata fields after animated expansion',"document.querySelector('.metadata-fields').checkVisibility()");
    await h.shot('photo-metadata-expanded');await close();
-   selected={path:path.join(ctx.root,'source-1','clip.mp4'),metadata:{...photo,shutterCount:'999',shutterNote:'Video shutter note'}};
+   selected={path:path.join(ctx.root,'source-1','clip.mp4'),metadata:{...photo,shutterCount:999,shutterNote:'mechanical'}};
    for(const language of ['en','zh-Hans','zh-Hant','ja'] as const){
     await h.prefs({language});await open('clip.mp4');
     assert.equal(await h.js<boolean>("document.querySelector('[data-testid=metadata-details]').open"),false);

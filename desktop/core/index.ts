@@ -9,7 +9,8 @@ import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, nkscEdit, captureOneEdit, unknownRule, type RuleDefaults } from './inventory';
 import { destinationIndex, flushIndex, provable, type DestinationIndex, type Digests } from './destination-index';
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
-import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
+import {applyFileTimestamps} from '../platform/file-timestamps';
+import {captureTimestamp,parseCapture} from '../capture-time';
 import { formatFolder, layoutFolders } from '../media-formats';
 import { destinationParts } from './allocation';
 import { editedTemplate, expandTemplate, safeComponent, templateValues, validateRelative, validFolderName } from '../folder-template';
@@ -107,12 +108,10 @@ interface Media {video:boolean;format:string;}
 function folder(info:Metadata,mtime:Date,media:Media|undefined,options:FolderRules):{root:'photos'|'videos';camera:string;sub:string} {
   // Capture dates describe the camera's calendar day. Converting an EXIF
   // offset to UTC can move a midnight photo into the previous folder.
-  const calendar=info.date?.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
-  const candidate=calendar ? new Date(`${calendar[1]}-${calendar[2]}-${calendar[3]}T00:00:00Z`):null;
-  const validCalendar=!!candidate && Number.isFinite(candidate.getTime()) && candidate.toISOString().slice(0,10)===calendar![0].slice(0,10);
+  const day=parseCapture(info.date)?.day;
   // Without a capture date, the file's modified time is read on this Mac's calendar, as
   // the camera's clock would have shown it, not in UTC.
-  const capture=validCalendar?candidate!:new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
+  const capture=day?new Date(day+'T00:00:00Z'):new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
   const values=templateValues(capture,safeComponent(info.camera?.trim()||info.origin||options.noMetadataFolder?.trim()||UNKNOWN_FILES_FOLDER));
   const editedFolder=options.editedFolder??'editied';
   if(!validFolderName(editedFolder))throw new MessageError('error.editedFolderName');
@@ -189,19 +188,16 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
 }
 function contradicts(a:Metadata,b:Metadata):boolean {
   if(a.camera?.trim() && b.camera?.trim() && a.camera.trim().toLowerCase()!==b.camera.trim().toLowerCase()) return true;
-  const capture=/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/;
-  const left=a.date?.match(capture),right=b.date?.match(capture);
-  if(!left || !right || !!left[3]!==!!right[3]) return false;
+  const left=parseCapture(a.date),right=parseCapture(b.date);
+  if(!left?.clock || !right?.clock || !!left.zone!==!!right.zone) return false;
   // Missing offsets describe a wall clock, so the host timezone must never
   // supply an instant. Compare explicit offsets only when both are known.
-  if(left[3] && right[3]) {
-    const leftSecond=Date.parse(left[1]+left[3]),rightSecond=Date.parse(right[1]+right[3]);
-    if(!Number.isFinite(leftSecond) || !Number.isFinite(rightSecond)) return false;
-    if(leftSecond!==rightSecond) return true;
-  } else if(left[1]!==right[1]) return true;
+  if(left.zone && right.zone) {
+    if(captureTimestamp(left.clock+left.zone)!==captureTimestamp(right.clock+right.zone)) return true;
+  } else if(left.clock!==right.clock) return true;
   // Absent fractional digits are unknown precision rather than recorded zeros.
-  const precision=Math.min(left[2]?.length??0,right[2]?.length??0);
-  return (left[2]??'').slice(0,precision)!==(right[2]??'').slice(0,precision);
+  const precision=Math.min(left.fraction.length,right.fraction.length);
+  return left.fraction.slice(0,precision)!==right.fraction.slice(0,precision);
 }
 /** What an import found already in the backup outside the folders the rules now choose: files (skipped there), and families copied whole because only some members were found. */
 export interface Elsewhere {files:number;partialFamilies:number;/** Same-size groups not searched because they held too many candidates to read. */skipped:{size:number;candidates:number}[];}
@@ -456,12 +452,11 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     if(file.kind==='Other') continue;
     const info=infos.get(file.path),camera=info?.camera?.trim();
     if(!camera) continue;
-    const date=info?.date?.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/)?.[1],calendar=date?new Date(date+'T00:00:00Z'):null;
-    const validDate=!!calendar && Number.isFinite(calendar.getTime()) && calendar.toISOString().slice(0,10)===date;
+    const date=parseCapture(info?.date)?.day;
     for(let ancestor=path.dirname(file.path);;ancestor=path.dirname(ancestor)) {
       const context=contexts.get(ancestor)??new Map<string,{camera:string;dates:Set<string>}>(),key=camera.toLowerCase();
       const known=context.get(key)??{camera,dates:new Set<string>()};
-      if(validDate) known.dates.add(date!);
+      if(date) known.dates.add(date);
       context.set(key,known);contexts.set(ancestor,context);
       if(ancestor===sourceRoot) break;
     }
@@ -487,13 +482,12 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   // Unknown files: no capture date, no camera and no known origin, or metadata that could not be read. A family is
   // decided by its primary, so it is kept or filed apart whole.
   const unknownFiles:NoMetadataFile[]=[],unknownCounts:Record<NoMetadataReason,number>={noDate:0,noCamera:0,unreadable:0};
-  const validCapture=(date:string|undefined)=>{const day=date?.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/)?.[1],calendar=day?new Date(day+'T00:00:00Z'):null;return !!calendar&&Number.isFinite(calendar.getTime())&&calendar.toISOString().slice(0,10)===day;};
   const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean,context?:Metadata):NoMetadataReason|undefined=>{
     if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf&&!cameraRule))return undefined;
     const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=cameraRule?context:infos.get(root.path);
     if(root.kind==='Other'&&!cameraRule)return undefined;
     if(unreadableMeta.has(root.path))return 'unreadable';
-    if(!validCapture(info?.date))return 'noDate';
+    if(!parseCapture(info?.date))return 'noDate';
     return !info?.camera?.trim()&&!info?.origin?'noCamera':undefined;
   };
   const libraryParts=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
