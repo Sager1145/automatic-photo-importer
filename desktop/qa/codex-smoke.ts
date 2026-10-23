@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import type {Action,AppState,Metadata} from '../shared';
 import {createStateReceiver,type StateUpdate} from '../state-channel';
 import {formatMessage,type Message} from '../messages';
+import {threadpoolExceeds} from './thread-pool';
 const english=(message?:Message)=>message?formatMessage(message,'en'):'';
 
 export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=false,organizationOnly=false):Promise<boolean>{
@@ -35,6 +36,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const previousTheme=nativeTheme.themeSource;
  let failure:unknown;
  try{
+  await check('The main process runs with a libuv thread pool of at least 16 threads (file reads and lstat must not queue behind fsync)',async()=>{assert.ok(Number(process.env.UV_THREADPOOL_SIZE)>=16,'UV_THREADPOOL_SIZE is '+process.env.UV_THREADPOOL_SIZE);if(process.platform!=='win32')assert.equal(await threadpoolExceeds(15),true);});
   await check('Fresh launch follows System, Automatic is off, and only fixture sources are present',async()=>{const s=await state();assert.equal(s.preferences.appearance,'system');assert.equal(s.preferences.automatic,false);assert.equal(s.sources.length,6);assert.ok(s.sources.every(s=>s.id.startsWith('fixture:')&&s.path.startsWith(root+path.sep)));});
   await check('macOS uses native window controls instead of HTML replicas',async()=>{if(process.platform==='darwin'){assert.deepEqual(window.getWindowButtonPosition(),{x:18,y:15});assert.equal(window.isFullScreenable(),true);assert.equal(await js<boolean>("document.querySelector('.window-controls')!==null"),false);}});
   await check('System appearance responds live to OS light and dark changes',async()=>{nativeTheme.themeSource='dark';await theme('dark');nativeTheme.themeSource='light';await theme('light');await shot('system');});

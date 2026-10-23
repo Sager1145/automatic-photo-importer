@@ -35,6 +35,9 @@
       "category": "public.app-category.photography",
       "identity": null,
       "extendInfo": {
+        "LSEnvironment": {
+          "UV_THREADPOOL_SIZE": "16"
+        },
         "NSCameraUsageDescription": "Import originals from connected cameras.",
         "NSRemovableVolumesUsageDescription": "Read camera cards and write verified copies to selected backup drives."
       },

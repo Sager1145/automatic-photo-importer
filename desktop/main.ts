@@ -1,3 +1,4 @@
+import './threadpool';
 import {app,BrowserWindow,dialog,ipcMain,shell,session,nativeTheme,powerMonitor,powerSaveBlocker} from 'electron';
 import {keepAwake} from './keep-awake';
 import fs from 'node:fs/promises';
