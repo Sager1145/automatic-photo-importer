@@ -285,7 +285,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Duplicate detection, stage 1: files with the same name or EXIF identity are hashed now to confirm or
   // reject them. The hashes are reused below, so the plan never reads those files twice. Only recorded.
   const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
-  if(options.duplicates&&!options.backup&&!options.misplacedOnly) {
+  if(options.duplicates&&!options.backup&&!options.reorganize&&!options.misplacedOnly) {
     const edited=options.editedFolder??'editied';
     const items:DuplicateFile[]=files.filter(file=>file.kind!=='Other'&&!file.companionOf&&sourceStats.has(file.path)&&file.size>0).map(file=>{
       const stat=sourceStats.get(file.path)!,info=infos.get(file.path),exif=info?.fingerprint;
@@ -293,6 +293,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     });
     try {
       await confirmCandidates(items,async item=>{
+        // A hash remembered for this exact file (identity unchanged) is reused; planning reuses the result below.
+        const stat=sourceStats.get(item.path)!,known=options.sourceDigest?.(item.path,statKey(stat));
+        if(known) return known;
         const sha=await digest(item.path,signal);
         if(!sameStat(sourceStats.get(item.path)!,await fs.lstat(item.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:item.path});
         return sha;

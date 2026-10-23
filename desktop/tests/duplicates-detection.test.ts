@@ -170,3 +170,20 @@ test('recordPlanDuplicates keeps what planning found per library and never delet
   await recordPlanDuplicates(other, planned.duplicates!, () => undefined);
   assert.equal((await duplicateStore(await fs.realpath(other), await identity(other))).groups.length, 0);
 });
+
+test('stage 1 runs for imports only, and reuses a hash remembered for the source file', async t => {
+  const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'backup');
+  await fs.mkdir(root);
+  await write(source, 'DCIM/A_0001.JPG', 'one'); await write(source, 'DCIM/B_9999.JPG', 'two');
+  const table = { 'A_0001.JPG': exif(), 'B_9999.JPG': exif() };
+  const options = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {}, duplicates: true };
+  // Remembered hashes are used as they are (the files differ, the memory says they do not): nothing was read again.
+  const asked: string[] = [];
+  const imported = await plan(source, [root], { ...options, sourceDigest: file => { asked.push(path.basename(file)); return 'a'.repeat(64); } }, reader(table));
+  assert.deepEqual(imported.duplicates!.groups.map(group => group.strength), ['sha']);
+  assert.ok(asked.includes('A_0001.JPG') && asked.includes('B_9999.JPG'));
+  // An organization of a library never hashes name or EXIF candidates.
+  await fs.cp(source, root, { recursive: true });
+  const organized = await plan(root, [root], { ...options, reorganize: true }, reader(table));
+  assert.equal(organized.duplicates, undefined);
+});

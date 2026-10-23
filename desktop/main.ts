@@ -457,7 +457,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
-  const {inventory,plans,failures,problems,duplicates}=await plan(sourcePath,roots,{backup,duplicates:!backup,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
+  const {inventory,plans,failures,problems,duplicates}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
   // A same-drive organization moves files; it never needs room for a second library.
@@ -515,7 +515,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));
-  await recordDuplicates(job,plans,prepared.duplicates,reorganize);
+  await recordDuplicates(plans,prepared.duplicates,reorganize);
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
@@ -544,19 +544,18 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if((prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))&&!recoveryRefresh)recoveryRefresh=refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{recoveryRefresh=undefined;void releaseIfIdle();});emit();
 }
-/** Duplicate detection, recorded only: stage 1 findings of the plan, then stage 2 (SHA collisions from the hashes
- * verification already stored). Best effort; it never fails or changes a job and never deletes a file. */
-async function recordDuplicates(job:Job,plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+/** Duplicate detection, recorded only: the stage 1 findings of the plan, for the files this job placed. It never
+ * scans the library (stage 2 runs only from the Remove duplicates page), so the drive is not held after the
+ * copy. Best effort; it never fails or changes a job and never deletes a file. */
+async function recordDuplicates(plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+ if(!found)return;
  try{
   for(const part of plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])])){
    const moves=new Map(part.entries.map(entry=>[entry.source,entry.destination]));
    // An organization leaves a file where it is when it already is where the rules put it.
-   if(found)await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
-   job.phase='verifying';
-   await scanDuplicates(part.root,{metadata:p=>metadata(p,{preview:false,details:false}),index:await destinationIndex(part.root,await identity(part.root))},{mode:'recorded',onProgress:progress=>{job.progress={...progress,phase:'verifying',step:'collisions'};progressEmit();}});
+   await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
   }
  }catch{/* Only a record. */}
- job.phase='copying';job.progress=undefined;
 }
 async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;state.reviewSourceId=undefined;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean){
