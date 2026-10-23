@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
-import {NoMetadataNotice,groupInfo} from '../renderer/RootApp';
+import {NoMetadataNotice,NoMetadataSettings,groupInfo} from '../renderer/RootApp';
+import {defaultPreferences} from '../preferences';
 import type {NoMetadataSummary,Review} from '../shared';
 
 const files=(count:number)=>Array.from({length:count},(_,index)=>({path:`/x/f${index}.png`,relative:`DCIM/f${index}.png`,reason:index%2?'noCamera' as const:'noDate' as const}));
@@ -51,9 +52,16 @@ test('the prompt and the warning groups are translated in all four languages',()
   assert.match(info('filed-no-metadata').title,/3/);
 });
 
-test('the setting control exists in Settings and the prompt layers below error layers',()=>{
-  const source=readFileSync(new URL('../renderer/RootApp.tsx',import.meta.url),'utf8');
-  assert.match(source,/<NoMetadataSettings preferences=\{p\}/);
+test('the Settings control renders its three choices and folder name in every language',()=>{
+  const settings=(language:'en'|'zh-Hans'|'zh-Hant'|'ja',folder?:string)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(NoMetadataSettings,{preferences:{...defaultPreferences,...(folder?{noMetadataFolder:folder}:{})},act:()=>{}})}));
+  const html=settings('en');
+  for(const label of ['Leave where they are','Move to a folder','Use file date','Unknown files folder name'])assert.match(html,new RegExp(label));
+  assert.match(html,/aria-pressed="true">Leave where they are/);assert.match(html,/value="Unknown files"/);assert.doesNotMatch(html,/no-metadata-folder-error/);
+  assert.match(settings('en','2024'),/data-testid="no-metadata-folder-error"/);
+  for(const language of languages.filter(item=>item!=='en'))assert.doesNotMatch(settings(language),/Leave where they are|Move to a folder|Unknown files folder name/,language);
+});
+
+test('the prompt layers below error layers',()=>{
   const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');
   const block=css.match(/\.no-metadata-notice\{[^}]*\}/)![0];
   assert.doesNotMatch(block,/z-index|position:(fixed|absolute)/);

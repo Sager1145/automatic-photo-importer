@@ -11,7 +11,7 @@ const MAX_SCOPES=200,MAX_BYTES=1024*1024;
 export const ROUTING_VERSION=1;
 const memoryFile=(store:string)=>path.join(store,'routing-memory.json');
 /** Everything that decides which folder a file is filed in. */
-export const routingScope=(parts:{template:string;layout:string;videoTemplate?:string;editedFolder?:string})=>createHash('sha256').update(JSON.stringify([ROUTING_VERSION,parts.template,parts.layout,parts.videoTemplate??'',parts.editedFolder??''])).digest('hex').slice(0,32);
+export const routingScope=(parts:{template:string;layout:string;videoTemplate?:string;editedFolder?:string;noMetadata?:string;noMetadataFolder?:string})=>createHash('sha256').update(JSON.stringify([ROUTING_VERSION,parts.template,parts.layout,parts.videoTemplate??'',parts.editedFolder??'',parts.noMetadata??'',parts.noMetadataFolder??''])).digest('hex').slice(0,32);
 async function read(store:string):Promise<Stored['scopes']> {
   try {
     const file=memoryFile(store);

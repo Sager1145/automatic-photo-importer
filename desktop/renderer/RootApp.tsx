@@ -22,6 +22,7 @@ import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
+import { validNoMetadataFolder } from '../no-metadata';
 import { listingShare } from '../listing-estimate';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
 import { BrandLogo } from './BrandLogo';
@@ -1099,7 +1100,7 @@ export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }:
 }
 
 // What to do with files that have no capture date, no camera and no known origin, or unreadable metadata.
-function NoMetadataSettings({ preferences: p, act }: { preferences: Preferences; act: Dispatch }) {
+export function NoMetadataSettings({ preferences: p, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
   const current = p.noMetadataHandling ?? 'keep', folder = p.noMetadataFolder ?? 'Unknown files';
   const [draft, setDraft] = useState(folder);
@@ -1109,12 +1110,12 @@ function NoMetadataSettings({ preferences: p, act }: { preferences: Preferences;
     { value: 'folder', label: t("Move to a folder"), detail: t("Organized or copied into one folder directly under your library, keeping their subfolders.") },
     { value: 'fileDate', label: t("Use file date"), detail: t("Filed by the file's modified date, in a camera folder with the folder name below.") },
   ];
-  const valid = draft.length > 0 && draft.trim() === draft && !/[\\/:\x00-\x1f\x7f<>"|?*{}]/.test(draft) && draft !== '.' && draft !== '..' && !/[. ]$/.test(draft);
+  const valid = validNoMetadataFolder(draft);
   return <div className="backup-mode" data-testid="no-metadata-settings">
     <span className="field-label">{t("Files with unknown metadata")}</span>
     <div className="segmented" role="group" aria-label={t("Files with unknown metadata")}>{choices.map(choice => <button key={choice.value} type="button" aria-pressed={current === choice.value} onClick={() => act({ type: 'preferences', patch: { noMetadataHandling: choice.value } })}>{choice.label}</button>)}</div>
     <p className="settings-explanation">{choices.find(choice => choice.value === current)!.detail}</p>
-    <div className="settings-row"><label htmlFor="settings-no-metadata-folder">{t("Unknown files folder name")}</label><input id="settings-no-metadata-folder" value={draft} aria-invalid={!valid} onChange={event => setDraft(event.target.value)} onBlur={() => valid ? draft !== folder && act({ type: 'preferences', patch: { noMetadataFolder: draft } }) : setDraft(folder)} /></div>
+    <div className="settings-row"><label htmlFor="settings-no-metadata-folder">{t("Unknown files folder name")}</label><input id="settings-no-metadata-folder" value={draft} aria-invalid={!valid} onChange={event => setDraft(event.target.value)} onBlur={() => { if (valid && draft !== folder) act({ type: 'preferences', patch: { noMetadataFolder: draft } }); }} />{!valid && <p className="settings-explanation field-error" role="alert" data-testid="no-metadata-folder-error">{t("Use one folder name: no slashes or special characters, not a date or year, and not a folder the app uses. The saved name stays in use until this is fixed.")}</p>}</div>
   </div>;
 }
 
@@ -2067,7 +2068,7 @@ export function NoMetadataNotice({ review, act, busy = false, defaultOpen = fals
     found.counts.unreadable > 0 && t("{count} unreadable", { count: formatNumber(found.counts.unreadable) }),
   ].filter(Boolean).join(', ');
   const reasonName = (reason: 'noDate' | 'noCamera' | 'unreadable') => reason === 'noDate' ? t("No capture date") : reason === 'noCamera' ? t("No camera") : t("Could not be read");
-  const useFileDate = () => act(organizing ? { type: 'previewOrganization', destinationIndex: review.destinationIndex!, collectProblemFiles: review.collectProblemFiles, useFileDate: true } : { type: 'preview', sourceId: review.source.id, useFileDate: true });
+  const useFileDate = () => act({ type: 'reviewFileDate' });
   return <section className="no-metadata-notice" role="alert" data-testid="no-metadata-notice">
     <div className="no-metadata-heading"><Icon icon={CircleAlert} size={18} /><div><strong>{headline}</strong><p>{reasons}</p><p>{t("They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you continue.")}</p></div></div>
     <div className="no-metadata-actions">

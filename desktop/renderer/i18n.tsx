@@ -915,6 +915,7 @@ Move to a folder|移动到文件夹|移動到資料夾|フォルダーに移動
 Organized or copied into one folder directly under your library, keeping their subfolders.|整理或复制到资料库下的同一个文件夹中，并保留其子文件夹结构。|整理或複製到資料庫下的同一個資料夾中，並保留其子資料夾結構。|ライブラリ直下の1つのフォルダーに、サブフォルダー構成を保ったまま整理またはコピーします。
 Use file date|使用文件日期|使用檔案日期|ファイルの日付を使う
 Filed by the file's modified date, in a camera folder with the folder name below.|按文件修改日期归档，放入以下方文件夹名称命名的相机文件夹。|依檔案修改日期歸檔，放入以下方資料夾名稱命名的相機資料夾。|ファイルの更新日で整理し、下のフォルダー名のカメラフォルダーに入れます。
+Use one folder name: no slashes or special characters, not a date or year, and not a folder the app uses. The saved name stays in use until this is fixed.|请使用单一的文件夹名称：不含斜杠或特殊字符，不是日期或年份，也不是应用使用的文件夹。在修正之前仍使用已保存的名称。|請使用單一的資料夾名稱：不含斜線或特殊字元，不是日期或年份，也不是 App 使用的資料夾。在修正之前仍使用已儲存的名稱。|フォルダー名は1つだけにしてください。スラッシュや特殊文字、日付や年、アプリが使うフォルダー名は使えません。修正するまで保存済みの名前を使います。
 Unknown files folder name|未知文件文件夹名称|未知檔案資料夾名稱|不明ファイル用フォルダー名
 All errors|所有错误|所有錯誤|すべてのエラー
 {count} errors|{count} 个错误|{count} 個錯誤|エラー {count} 件

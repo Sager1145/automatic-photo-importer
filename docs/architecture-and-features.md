@@ -166,3 +166,8 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 - `npm run codex:test -- --no-build`：Electron 23/23 通过（`codex-test.log`、`codex-report.json`），包括一键整理、选择任一目的地整理、源原件逐字节不变。
 
 未验证：本轮没有用真实相机卡、真实双盘或 Windows/Linux 机器重测，也没有做物理断电测试。
+
+
+## Release note: files without metadata
+
+Files with no capture date, no camera and no known origin, or with unreadable metadata, are left where they are by default (Settings > Importing > Files without metadata); imports do not copy them and Delete originals never removes them. Choose "Move to a folder" to file them under one folder directly under the library (default `Unknown files`, also under the video root for videos), or "Use file date" for the old routing. The `Unknown Camera` folder is no longer created. Under "Use file date" a file without a camera is filed as `<date>/Unknown files/` where it used to go to `<date>/Unknown Camera/`. A job someone starts (Start, Import now, Organize now, Organize backup, Organize folder) stops at the review and shows a warning when it finds such files; automatic imports record the warning in the job's issues instead.

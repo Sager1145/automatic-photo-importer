@@ -10,11 +10,9 @@ test('unknown files default to being kept, with a folder named Unknown files, jo
  assert.deepEqual(acceptedPreferences({noMetadataHandling:'folder'},false),{noMetadataHandling:'folder'});
 });
 
-test('the handling and folder name are validated, and the earlier yes/no setting migrates',()=>{
+test('the handling and folder name are validated',()=>{
  const loaded=normalizePreferences({noMetadataHandling:'delete',noMetadataFolder:'a/b'});
  assert.equal(loaded.noMetadataHandling,'keep');assert.equal(loaded.noMetadataFolder,'Unknown files');
  assert.equal(normalizePreferences({noMetadataHandling:'folder',noMetadataFolder:'Ohne Datum'}).noMetadataFolder,'Ohne Datum');
- assert.equal(normalizePreferences({keepUndatedInPlace:true}).noMetadataHandling,'keep');
- assert.equal(normalizePreferences({keepUndatedInPlace:false}).noMetadataHandling,'fileDate');
- assert.equal(normalizePreferences({keepUndatedInPlace:false,noMetadataHandling:'folder'}).noMetadataHandling,'folder');
+ assert.equal(normalizePreferences({noMetadataFolder:'2024'}).noMetadataFolder,'Unknown files');
 });

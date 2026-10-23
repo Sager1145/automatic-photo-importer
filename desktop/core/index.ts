@@ -278,7 +278,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new MessageError('error.sourceChanged',{path:file.path});
     mtimes.set(file.path,originalStat.mtime);
     if(!options.backup && file.kind!=='Other' && !trusted.has(file.path)) {
-      try {const info=await metadata(file.path);for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string))){issues[position]!.push({path:file.path,message});unreadableMeta.add(file.path);}infos.set(file.path,{camera:info.camera,origin:info.origin,date:info.date,edited:info.edited,contentId:info.contentId,make:info.make,fingerprint:info.fingerprint,fields:{}});} catch(error) {if(isAbort(error)) throw error;unreadableMeta.add(file.path);issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
+      try {const info=await metadata(file.path);let complained=false;for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string))){issues[position]!.push({path:file.path,message});complained=true;}
+      // A complaint alone is not unreadable (many files carry a harmless one); with no date, camera or origin as well, nothing could be read.
+      if(complained&&!info.date&&!info.camera?.trim()&&!info.origin)unreadableMeta.add(file.path);infos.set(file.path,{camera:info.camera,origin:info.origin,date:info.date,edited:info.edited,contentId:info.contentId,make:info.make,fingerprint:info.fingerprint,fields:{}});} catch(error) {if(isAbort(error)) throw error;unreadableMeta.add(file.path);issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
     }
     if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:file.path});
     sourceStats.set(file.path,originalStat);
@@ -420,10 +422,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // decided by its primary, so it is kept or filed apart whole.
   const unknownFiles:NoMetadataFile[]=[],unknownCounts:Record<NoMetadataReason,number>={noDate:0,noCamera:0,unreadable:0};
   const validCapture=(date:string|undefined)=>{const day=date?.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/)?.[1],calendar=day?new Date(day+'T00:00:00Z'):null;return !!calendar&&Number.isFinite(calendar.getTime())&&calendar.toISOString().slice(0,10)===day;};
-  const unknownReason=(file:InventoryFile,primary:InventoryFile):NoMetadataReason|undefined=>{
-    if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf))return undefined;
+  const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean):NoMetadataReason|undefined=>{
+    if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf&&!cameraRule))return undefined;
     const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=infos.get(root.path);
-    if(root.kind==='Other')return undefined;
+    if(root.kind==='Other'&&!cameraRule)return undefined;
     if(unreadableMeta.has(root.path))return 'unreadable';
     if(!validCapture(info?.date))return 'noDate';
     return !info?.camera?.trim()&&!info?.origin?'noCamera':undefined;
@@ -444,7 +446,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let relative:string,place:ReturnType<typeof folder>|undefined,forcedRoot:'photos'|'videos'|undefined;
-    const unknown=unknownReason(file,primary);
+    const unknown=unknownReason(file,primary,file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera');
     if(unknown) {
       unknownFiles.push({path:file.path,relative:file.relative,reason:unknown});unknownCounts[unknown]++;
       log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(unknownMode==='folder'?{destination:unknownRelative(file)}:{})});

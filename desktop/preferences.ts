@@ -70,8 +70,7 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt']),
   deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:history(value.deviceHistory),
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
-  // Saved by an earlier build as a yes/no choice: on kept such files in place, off filed them by file time.
-  noMetadataHandling:oneOf(value.noMetadataHandling??(typeof value.keepUndatedInPlace==='boolean'?(value.keepUndatedInPlace?'keep':'fileDate'):undefined),noMetadataModes,base.noMetadataHandling??'keep'),
+  noMetadataHandling:oneOf(value.noMetadataHandling,noMetadataModes,base.noMetadataHandling??'keep'),
   noMetadataFolder:validNoMetadataFolder(value.noMetadataFolder)?value.noMetadataFolder:validNoMetadataFolder(base.noMetadataFolder)?base.noMetadataFolder:UNKNOWN_FILES_FOLDER,
   logLevel:oneOf(value.logLevel,logLevelValues,base.logLevel??'normal'),
   editedFolder:text(value.editedFolder,base.editedFolder??'editied'),
