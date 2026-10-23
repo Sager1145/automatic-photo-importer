@@ -561,7 +561,8 @@ Run this job again, including files that had errors|重新运行此任务，包�
 This job ended with errors.|此任务完成时有错误。|此工作完成時有錯誤。|このジョブはエラーがある状態で終了しました。
 Show in Finder|在访达中显示|在 Finder 中顯示|Finder で表示
 Review what Mirror will move to continue.|请先审核镜像将移动的文件再继续。|請先審核鏡像將移動的檔案再繼續。|続行するには、ミラーで移動するファイルを確認してください。
-Locked while an import is running. Change it after the job finishes or is paused.|导入进行时已锁定。请在任务完成或暂停后再更改。|匯入進行時已鎖定。請在工作完成或暫停後再變更。|読み込み中はロックされています。ジョブの完了または一時停止後に変更してください。
+Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.|导入、整理或审核进行期间（包括已暂停或排队中的）已锁定。请先完成或停止它们再更改。|匯入、整理或審核進行期間（包括已暫停或排隊中的）已鎖定。請先完成或停止它們再變更。|読み込み・整理・レビューの実行中（一時停止中や待機中を含む）はロックされています。完了または停止してから変更してください。
+Some settings are locked while work is active.|有任务进行时，部分设置已锁定。|有工作進行時，部分設定已鎖定。|作業中は一部の設定がロックされています。
 Showing 500 matches. Search to narrow.|显示 500 个匹配项，可搜索以缩小范围。|顯示 500 個符合項目，可搜尋以縮小範圍。|500件を表示中。検索で絞り込めます。
 This deletes the kept originals. Undo won't be possible.|这会删除保留的原始文件，之后将无法撤销。|這會刪除保留的原始檔案，之後將無法復原。|保持している元のファイルを削除します。元に戻せなくなります。
 Unknown files are not copied.|未知文件不会被复制。|未知檔案不會被複製。|不明なファイルはコピーしません。

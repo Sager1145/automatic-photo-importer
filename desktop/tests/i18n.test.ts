@@ -859,7 +859,7 @@ test('Settings › Organization shows leftover temporary files with a Clean up b
   }
 });
 test('locked settings use a hover explanation in every language, never an error', () => {
-  const key = 'Locked while an import is running. Change it after the job finishes or is paused.';
+  const key = 'Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.';
   for (const language of languages) assert.ok(language === 'en' || createTranslator(language)(key) !== key, language);
   assert.ok(!readFileSync(new URL('../main.ts', import.meta.url), 'utf8').includes('error.settingsLocked'));
   assert.ok(!readFileSync(new URL('../messages.ts', import.meta.url), 'utf8').includes('error.settingsLocked'));
