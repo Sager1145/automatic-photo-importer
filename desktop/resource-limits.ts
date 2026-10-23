@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** The one place that knows how much CPU and memory the app may use. Everything that sizes a pool or a buffer reads it
  * here; the settings (preferences.maxCpuThreads, memoryLimitMB) are the source and take effect for the next job. */
@@ -60,6 +61,14 @@ export function savedLimits(userData: string, host: Host = hostNow()): Limits {
   } catch { return defaultLimits(host); }
 }
 
+/** The saved thread limit alone, or undefined when nothing valid is saved (a fresh install keeps the packaged 16-thread pool). */
+export function savedCpuThreads(userData: string, host: Host = hostNow()): number | undefined {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8'))?.preferences?.maxCpuThreads;
+    return Number.isFinite(Number(value)) && value !== null && value !== '' ? clampCpuThreads(value, host) : undefined;
+  } catch { return undefined; }
+}
+
 /** A soft memory governor: above 90% of the limit it stops admitting new files into the copy, verify and metadata
  * pipelines until usage drops (backpressure only; running work is never cancelled). Above 100% it also reports once
  * per episode. With nothing in flight the next file is always admitted, so work can never stall. */
@@ -69,6 +78,8 @@ export class MemoryGovernor {
   private warned = false;
   private waiting: { grant: () => void }[] = [];
   private timer?: ReturnType<typeof setInterval>;
+  /** Work started inside governed work (a copy that hashes its file) is part of it and never waits again: that could deadlock. */
+  private inside = new AsyncLocalStorage<true>();
   constructor(private readonly options: { usage: () => number; limit: () => number; onWarn?: (usageMB: number, limitMB: number) => void; onChange?: (usageMB: number, limitMB: number) => void }) {}
   /** Look at memory now: pause, resume and warn as needed. */
   check(): void {
@@ -86,7 +97,7 @@ export class MemoryGovernor {
   }
   /** Run one unit of pipeline work (a file's copy, hash or metadata read), waiting first while memory is above 90%. */
   async govern<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (this.paused && this.active > 0) {
+    if (this.paused && this.active > 0 && !this.inside.getStore()) {
       await new Promise<void>((resolve, reject) => {
         const entry = { grant: () => { signal?.removeEventListener?.('abort', stop); resolve(); } };
         const stop = () => { const at = this.waiting.indexOf(entry); if (at >= 0) { this.waiting.splice(at, 1); reject(new DOMException('Import stopped', 'AbortError')); } };
@@ -96,7 +107,7 @@ export class MemoryGovernor {
       });
     }
     this.active++;
-    try { return await work(); } finally { this.active--; if (this.paused && this.active === 0) this.wake(); }
+    try { return await this.inside.run(true, work); } finally { this.active--; if (this.paused && this.active === 0) this.wake(); }
   }
 }
 /** Extra memory held by child processes (the scan worker), supplied by the main process. */
