@@ -124,7 +124,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   // Camera bookkeeping that looks like media (a thumbnail JPG) is a system file, never a photo.
   for(const file of files) if(file.kind!=='Other') {const system=knownSystemFile(file.relative);if(system){file.system=system;file.kind='Other';}}
   const media=new Map<string,InventoryFile[]>(),byPath=new Map<string,InventoryFile>();
-  for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); media.set(key,[...(media.get(key)??[]),file]); byPath.set(pathKey(file.path),file); }
+  for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); {const list=media.get(key);if(list)list.push(file);else media.set(key,[file]);} byPath.set(pathKey(file.path),file); }
   for(const file of files) {
     checkAbort(signal);
     if(file.kind==='Other') try { file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size); } catch(error) { if(!options.onError) throw error; options.onError(file.path,error); }

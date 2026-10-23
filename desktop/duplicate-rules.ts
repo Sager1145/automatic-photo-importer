@@ -2,6 +2,8 @@ import type { DuplicateExif, DuplicateFile, DuplicateGroup, DuplicateLevel, Dupl
 
 /** Pure duplicate rules, shared by the main process and the renderer (no Node imports). */
 
+/** Get-or-create then push: linear, and keeps first-seen key order and member order. */
+function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); }
 const base = (file: string) => file.split('/').at(-1)!;
 /** `jpg` and `jpeg`, `tif` and `tiff`, `heic` and `heif` are one format. */
 export function extensionClass(file: string): string {
@@ -50,7 +52,7 @@ export function candidates<T extends DuplicateFile>(files: T[]): T[] {
   for (const members of classes(files)) {
     for (const key of [(file: T) => base(file.path).toLowerCase(), (file: T) => exifKey(file.exif)]) {
       const seen = new Map<string, T[]>();
-      for (const file of members) { const value = key(file); if (value) seen.set(value, [...seen.get(value) ?? [], file]); }
+      for (const file of members) { const value = key(file); if (value) pushTo(seen, value, file); }
       for (const same of seen.values()) if (same.length > 1) for (const file of same) picked.add(file);
     }
   }
@@ -59,7 +61,7 @@ export function candidates<T extends DuplicateFile>(files: T[]): T[] {
 function classes<T extends DuplicateFile>(files: T[]): T[][] {
   const map = new Map<string, T[]>();
   // Empty files all share one SHA and prove nothing.
-  for (const file of files) if (file.kind !== 'Other' && file.size > 0) { const key = `${file.edited ? 1 : 0}|${extensionClass(file.path)}`; map.set(key, [...map.get(key) ?? [], file]); }
+  for (const file of files) if (file.kind !== 'Other' && file.size > 0) { const key = `${file.edited ? 1 : 0}|${extensionClass(file.path)}`; pushTo(map, key, file); }
   return [...map.values()].filter(members => members.length > 1);
 }
 /** How sure a set of files linked by SHA-256 or EXIF is. sha: one SHA-256 for all; exif: one trusted EXIF key and
@@ -86,7 +88,7 @@ export function buildGroups(files: DuplicateFile[]): DuplicateGroup[] {
       }
     });
     const components = new Map<number, DuplicateFile[]>();
-    members.forEach((file, index) => components.set(find(index), [...components.get(find(index)) ?? [], file]));
+    members.forEach((file, index) => pushTo(components, find(index), file));
     const leftover: DuplicateFile[] = [];
     for (const component of components.values()) {
       if (component.length > 1) groups.push({ id: groupId(component), strength: classify(component), files: component });
@@ -94,7 +96,7 @@ export function buildGroups(files: DuplicateFile[]): DuplicateGroup[] {
     }
     // The same name and capture time alone is only a hint: the user decides.
     const named = new Map<string, DuplicateFile[]>();
-    for (const file of leftover) if (file.exif?.date) { const key = `${base(file.path).toLowerCase()}|${file.exif.date}`; named.set(key, [...named.get(key) ?? [], file]); }
+    for (const file of leftover) if (file.exif?.date) { const key = `${base(file.path).toLowerCase()}|${file.exif.date}`; pushTo(named, key, file); }
     for (const same of named.values()) if (same.length > 1) groups.push({ id: groupId(same), strength: 'similar', files: same });
   }
   return groups.sort((a, b) => a.files[0]!.path.localeCompare(b.files[0]!.path));

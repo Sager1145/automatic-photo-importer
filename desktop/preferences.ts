@@ -1,8 +1,9 @@
+import {defaultLimits,clampCpuThreads,clampMemoryLimitMB} from './resource-limits';
 import type {DriveCameraRecord,MediaLayout,Preferences} from './shared';
 
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,skipFileErrors:true,removeEmptySourceFolders:true,collectProblemFiles:true,releaseDuplicatesAfterOrganizing:true,autoOrganizeBackup:'ask',unknownDefault:'skip',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{}};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,skipFileErrors:true,removeEmptySourceFolders:true,collectProblemFiles:true,releaseDuplicatesAfterOrganizing:true,autoOrganizeBackup:'ask',unknownDefault:'skip',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -65,5 +66,8 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:history(value.deviceHistory),
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
   editedFolder:text(value.editedFolder,base.editedFolder??'editied'),
+  // Out of range or unreadable values fall back to the saved ones, then to this machine's defaults.
+  maxCpuThreads:clampCpuThreads(value.maxCpuThreads??base.maxCpuThreads),
+  memoryLimitMB:clampMemoryLimitMB(value.memoryLimitMB??base.memoryLimitMB),
  };
 }

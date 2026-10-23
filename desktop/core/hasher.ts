@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { createHash } from 'node:crypto';
+import { cpuWorkers, scaledByBudget } from '../resource-limits';
 
 /** SHA-256 of a stream of chunks, computed off the main thread when it can be. */
 export interface Hasher {
@@ -18,7 +19,9 @@ parentPort.on('message',message=>{
  else if(message.drop)hashes.delete(message.id);
 });`;
 /** Chunks queued per hash before update waits. */
-const PENDING=4;
+const PENDING_DESIGN=4;
+/** Scaled by the memory budget (4 at the 2 GB default), at least one so a hash always progresses. */
+export const pendingChunks=():number=>scaledByBudget(PENDING_DESIGN,1,8);
 interface Waiting {acked:()=>void;done?:(hex:string)=>void;fail:(error:Error)=>void;}
 /** Each message posted expects one reply: a worker stays referenced while any are due. */
 function expect(slot:{worker:Worker;busy:number}):void {if(slot.busy++===0)slot.worker.ref();}
@@ -26,10 +29,10 @@ function settle(slot:{worker:Worker;busy:number}):void {if(slot.busy>0&&--slot.b
 class Pool {
   private workers:{worker:Worker;waiting:Map<number,Waiting>;busy:number}[]=[];
   private next=0;private id=0;private failed=false;
-  constructor(private readonly size:number) {}
+  constructor(private readonly size:()=>number) {}
   private worker() {
     if(this.failed) return undefined;
-    if(this.workers.length<this.size) try {
+    if(this.workers.length<this.size()) try {
       const worker=new Worker(SOURCE,{eval:true}),waiting=new Map<number,Waiting>(),slot={worker,waiting,busy:0};
       worker.on('message',(message:{id:number;ack?:boolean;hex?:string})=>{settle(slot);const item=waiting.get(message.id);if(!item)return;if(message.ack)item.acked();else if(message.hex!==undefined){waiting.delete(message.id);item.done?.(message.hex);}});
       // A worker that dies fails its hashes (the copy reports an error and can be retried);
@@ -58,7 +61,7 @@ class Pool {
         if(failure) throw failure;
         const copy=new Uint8Array(chunk.byteLength);copy.set(chunk);
         pending++;expect(slot);slot.worker.postMessage({id,chunk:copy.buffer},[copy.buffer]);
-        while(pending>=PENDING&&!failure) await new Promise<void>(resolve=>{wake=resolve;});
+        while(pending>=pendingChunks()&&!failure) await new Promise<void>(resolve=>{wake=resolve;});
         if(failure) throw failure;
       },
       digest:()=>new Promise<string>((resolve,fail)=>{if(failure){fail(failure);return;}finished=true;item.done=resolve;reject=fail;expect(slot);slot.worker.postMessage({id,final:true});}),
@@ -66,7 +69,9 @@ class Pool {
     };
   }
 }
-const pool=new Pool(Math.max(1,Math.min(4,Math.floor(availableParallelism()/2))));
+/** Hash threads: half the cores up to 4, and never more than the CPU thread limit. */
+export const hasherWorkerCount=():number=>cpuWorkers(Math.max(1,Math.min(4,Math.floor(availableParallelism()/2))));
+const pool=new Pool(hasherWorkerCount);
 export const hasher=():Hasher=>pool.hasher();
 /** Release the hashing threads while idle; they restart on demand. */
 export const terminateHasher=():Promise<void>=>pool.terminate();

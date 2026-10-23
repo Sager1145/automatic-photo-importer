@@ -1,5 +1,9 @@
 import * as fs from 'node:fs/promises';
 import { beneath, checkAbort, code, contained, digest } from './paths';
+import { mapPool } from './devices';
+
+/** Files checked at once; each device's own stream limit (devices.ts) still caps the reads. */
+const VERIFY_CONCURRENCY=4;
 
 /** A source file an import copied and verified: its checksum and every place the import put it. */
 export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];}
@@ -28,40 +32,48 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
   }
   return {files:count,bytes,kept};
 }
+type Outcome={deleted:true}|{kept:KeptReason;error?:string};
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that
- * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays. */
+ * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays.
+ * Files are checked through a small pool: the source is hashed, then every backup copy at once, so the reads
+ * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
+ * the report is assembled in input order afterwards. */
 export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;onProgress?:(completed:number,total:number,file:string)=>void}={}):Promise<OriginalsResult> {
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
   let completed=0;
-  for(const file of files) {
+  const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
     checkAbort(options.signal);
     options.onProgress?.(completed++,files.length,file.source);
-    const keep=(reason:KeptReason,error?:string)=>{result.kept.push({source:file.source,reason});if(error)result.errors.push(error);};
     try {
-      if(!file.sha256||!file.destinations.length) {keep('unverified');continue;}
-      if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) {keep('unsafe');continue;}
+      if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
+      if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
       await contained(file.source,sourceRoot);
       const before=await regular(file.source).catch(error=>{if(code(error)==='ENOENT')return null;throw error;});
-      if(before===null) {keep('missing');continue;}
-      if(!before||before.size!==BigInt(file.size)) {keep('changed');continue;}
-      if(await digest(file.source,options.signal)!==file.sha256) {keep('changed');continue;}
-      let reason:KeptReason|undefined;
-      for(const destination of file.destinations) {
-        const found=await regular(destination).catch(error=>{if(code(error)==='ENOENT')return null;throw error;});
-        if(!found) {reason='destination-missing';break;}
-        if(found.size!==BigInt(file.size)||await digest(destination,options.signal)!==file.sha256) {reason='destination-differs';break;}
+      if(before===null) return {kept:'missing'};
+      if(!before||before.size!==BigInt(file.size)) return {kept:'changed'};
+      if(await digest(file.source,options.signal)!==file.sha256) return {kept:'changed'};
+      const found=await Promise.all(file.destinations.map(destination=>regular(destination).catch(error=>{if(code(error)==='ENOENT')return null;throw error;})));
+      const same=await Promise.all(found.map((stat,index)=>stat&&stat.size===BigInt(file.size)?digest(file.destinations[index]!,options.signal).then(value=>value===file.sha256):false));
+      for(let index=0;index<found.length;index++) {
+        if(!found[index]) return {kept:'destination-missing'};
+        if(!same[index]) return {kept:'destination-differs'};
       }
-      if(reason) {keep(reason);continue;}
       // The file read for the checksum must still be the one removed.
       const after=await regular(file.source);
-      if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs) {keep('changed');continue;}
+      if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs) return {kept:'changed'};
       await fs.unlink(file.source);
-      result.deleted.push({source:file.source,size:file.size});result.bytes+=file.size;
+      return {deleted:true};
     } catch(error) {
       if(options.signal?.aborted) throw error;
-      keep('error',`${file.source}: ${error instanceof Error?error.message:String(error)}`);
+      return {kept:'error',error:`${file.source}: ${error instanceof Error?error.message:String(error)}`};
     }
-  }
+  };
+  const outcomes=await mapPool(files,VERIFY_CONCURRENCY,check);
+  outcomes.forEach((outcome,index)=>{
+    const file=files[index]!;
+    if('deleted' in outcome) {result.deleted.push({source:file.source,size:file.size});result.bytes+=file.size;}
+    else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
+  });
   options.onProgress?.(completed,files.length,'');
   return result;
 }

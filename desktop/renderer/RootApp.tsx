@@ -737,6 +737,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
           <Switch checked={p.skipFileErrors !== false} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
           <Switch checked={p.allowFolderSource} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} label={t("Enable media folder selection")} detail={t("Lets you choose a folder of photos as a source.")} />
         </SettingsSection>
+        <SettingsSection title={t("Performance")} icon={Gauge}><PerformanceSettings state={state} act={act} /></SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
         <SettingsSection title={t("Other file rules")} icon={FileQuestion}><FileRules preferences={p} act={act} /></SettingsSection>
       </fieldset>
@@ -1517,6 +1518,20 @@ function UnknownRules({ extensions, act }: { extensions: Record<string, number>;
 
 export function CardHeader({ icon, title, id, detail, children }: { icon: LucideIcon; title: string; id?: string; detail?: ReactNode; children?: ReactNode }) {
   return <div className="card-header"><span className="card-icon"><Icon icon={icon} size={17} /></span><div className="card-title"><h3 id={id}>{title}</h3>{detail && <p>{detail}</p>}</div>{children && <div className="card-actions">{children}</div>}</div>;
+}
+/** CPU thread and memory limits: defaults keep the importer from taking over the machine; a change applies to the next import. */
+export function PerformanceSettings({ state, act }: { state: AppState; act: Dispatch }) {
+  const { t, formatNumber } = useTranslation();
+  const p = state.preferences, use = state.resources;
+  const cores = use?.cores ?? Math.max(p.maxCpuThreads ?? 1, 16), memoryMax = use ? Math.max(512, Math.floor(use.totalMemMB * 0.75)) : Math.max(p.memoryLimitMB ?? 512, 16384);
+  const threads = p.maxCpuThreads ?? use?.defaultThreads ?? 2, memory = p.memoryLimitMB ?? use?.defaultMemoryMB ?? 2048;
+  const atDefaults = !use || (threads === use.defaultThreads && memory === use.defaultMemoryMB);
+  return <>
+    <div className="settings-row"><label htmlFor="settings-cpu-threads">{t("CPU threads")}</label><div className="text-size-control"><input id="settings-cpu-threads" data-testid="settings-cpu-threads" type="range" min={1} max={cores} step={1} value={Math.min(threads, cores)} onChange={event => act({ type: 'preferences', patch: { maxCpuThreads: Number(event.target.value) } })} /><strong>{t("{count} threads", { count: formatNumber(threads) })}</strong></div><p className="settings-row-note">{t("The most processors the importer uses at once for checksums and reading photo details. Lower it to keep the Mac responsive. Applies to the next import; file reading adjusts after you restart the app.")}</p></div>
+    <div className="settings-row"><label htmlFor="settings-memory-limit">{t("Memory limit")}</label><div className="text-size-control"><input id="settings-memory-limit" data-testid="settings-memory-limit" type="range" min={512} max={memoryMax} step={256} value={Math.min(memory, memoryMax)} onChange={event => act({ type: 'preferences', patch: { memoryLimitMB: Number(event.target.value) } })} /><strong>{t("{count} MB", { count: formatNumber(memory) })}</strong></div><p className="settings-row-note">{t("A soft budget for buffers, caches and the app itself. Near the limit new files wait for running ones; nothing is stopped. Applies to the next import.")}</p></div>
+    <div className="settings-row"><span className="performance-readout" data-testid="performance-readout" role="status">{use ? t("Using up to {threads} threads · {used} MB of {limit} MB", { threads: formatNumber(use.threads), used: formatNumber(use.memoryMB), limit: formatNumber(use.limitMB) }) : ''}</span><Button kind="quiet" icon={RotateCcw} data-testid="performance-reset" disabled={atDefaults} onClick={() => use && act({ type: 'preferences', patch: { maxCpuThreads: use.defaultThreads, memoryLimitMB: use.defaultMemoryMB } })}>{t("Reset to defaults")}</Button></div>
+    {use?.warning && <p className="source-notice" data-testid="memory-warning"><Icon icon={Info} size={14} />{t("Memory use is above the limit. New files wait until it drops; running work continues.")}</p>}
+  </>;
 }
 function SettingsSection({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return <section className="settings-section"><CardHeader icon={icon} title={title} /><div className="settings-section-content">{children}</div></section>;

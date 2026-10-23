@@ -1,6 +1,7 @@
 import {utilityProcess} from 'electron';
 import path from 'node:path';
 import {stopScanChild} from './scan-stop';
+import {resourceLimits,scanHeapMB} from './resource-limits';
 import type {Source,Inventory,SourceCameraInfo,Preferences,Metadata} from './shared';
 
 /** Scans still running or stopping; quitting waits for them so no process still reads a card. */
@@ -14,7 +15,7 @@ export function scanSourceInWorker(...args:Parameters<typeof startScan>):Promise
 function startScan(source:Source,signal:AbortSignal,onInventory:(value:Inventory)=>void,onCameras:(value:SourceCameraInfo)=>void,options:{unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}={},onListing?:(files:number,bytes:number,file?:string,top?:{done:number;total:number})=>void,onRouting?:(entries:[string,Metadata][])=>void,memory:{reuse?:Inventory;routing?:[string,Metadata][]}={}):Promise<void>{
  signal.throwIfAborted();
  return new Promise((resolve,reject)=>{
-  const child=utilityProcess.fork(path.join(__dirname,'scan-worker.cjs'),[JSON.stringify(source),JSON.stringify(options)],{serviceName:'Photo Importer read-only scan',stdio:'ignore',env:process.env});
+  const child=utilityProcess.fork(path.join(__dirname,'scan-worker.cjs'),[JSON.stringify(source),JSON.stringify(options)],{serviceName:'Photo Importer read-only scan',stdio:'ignore',env:{...process.env,IMPORTER_LIMITS:JSON.stringify(resourceLimits())},execArgv:[`--max-old-space-size=${scanHeapMB()}`]});
   let settled=false;
   let exit:()=>void=()=>{};const exited=new Promise<void>(resolve=>{exit=resolve;});
   // Resolves or rejects only after the child has exited, so the card is released when the scan reports.

@@ -4,6 +4,9 @@ import {inventory} from './core';
 import {metadata,closeMetadata,routingEntries,primeRouting} from './platform/metadata';
 import {analyzeSourceCameras} from './source-cameras';
 import type {Source,Preferences,Inventory,Metadata} from './shared';
+import {setResourceLimits} from './resource-limits';
+// The user's CPU and memory limits, from the parent (this process has its own copy of the module).
+try{setResourceLimits(JSON.parse(process.env.IMPORTER_LIMITS??'{}'));}catch{/* Defaults. */}
 const source:Source=JSON.parse(process.argv[2]);
 const options: {unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}=JSON.parse(process.argv[3]??'{}');
 const signal=new AbortController();

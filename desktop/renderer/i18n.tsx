@@ -6,6 +6,16 @@ export const localeNames: Record<Language, string> = { en: 'English', 'zh-Hans':
 export const languages = Object.keys(localeNames) as Language[];
 // English keys are also the fallback. Placeholder names and user data never pass through translation.
 const rows = `
+Performance|性能|效能|パフォーマンス
+CPU threads|CPU 线程数|CPU 執行緒數|CPU スレッド数
+{count} threads|{count} 个线程|{count} 個執行緒|{count} スレッド
+Memory limit|内存上限|記憶體上限|メモリ上限
+{count} MB|{count} MB|{count} MB|{count} MB
+The most processors the importer uses at once for checksums and reading photo details. Lower it to keep the Mac responsive. Applies to the next import; file reading adjusts after you restart the app.|导入器同时用于校验和读取照片信息的最大处理器数量。调低可让 Mac 保持流畅。下次导入时生效；文件读取线程在重启应用后调整。|匯入器同時用於校驗和讀取照片資訊的最大處理器數量。調低可讓 Mac 保持流暢。下次匯入時生效；檔案讀取執行緒在重新啟動 App 後調整。|チェックサムと写真情報の読み取りに同時に使うプロセッサーの最大数です。下げると Mac の動作が軽くなります。次回の読み込みから適用され、ファイル読み取りはアプリの再起動後に調整されます。
+A soft budget for buffers, caches and the app itself. Near the limit new files wait for running ones; nothing is stopped. Applies to the next import.|缓冲区、缓存和应用本身的内存软预算。接近上限时，新文件会等待正在处理的文件；不会停止任何任务。下次导入时生效。|緩衝區、快取和 App 本身的記憶體軟預算。接近上限時，新檔案會等待進行中的檔案；不會停止任何工作。下次匯入時生效。|バッファー、キャッシュ、アプリ自体のためのメモリの目安です。上限に近づくと新しいファイルは処理中のファイルを待ちますが、何も停止しません。次回の読み込みから適用されます。
+Using up to {threads} threads · {used} MB of {limit} MB|最多使用 {threads} 个线程 · 已用 {used} MB／上限 {limit} MB|最多使用 {threads} 個執行緒 · 已用 {used} MB／上限 {limit} MB|最大 {threads} スレッド · {used} MB／{limit} MB を使用中
+Reset to defaults|恢复默认值|恢復預設值|初期設定に戻す
+Memory use is above the limit. New files wait until it drops; running work continues.|内存用量已超过上限。新文件会等待用量下降；正在进行的任务会继续。|記憶體用量已超過上限。新檔案會等待用量下降；進行中的工作會繼續。|メモリ使用量が上限を超えています。使用量が下がるまで新しいファイルは待機し、処理中の作業は続行されます。
 Copying files|正在复制文件|正在複製檔案|ファイルをコピー中
 Moving files|正在移动文件|正在移動檔案|ファイルを移動中
 Stopping…|正在停止…|正在停止…|停止しています…

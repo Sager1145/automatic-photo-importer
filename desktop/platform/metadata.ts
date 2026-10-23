@@ -6,9 +6,11 @@ import path from 'node:path';
 import type { DuplicateExif, Exposure, Metadata } from '../shared';
 import { djiProduct } from './dji-models';
 import { streams, STREAMS } from '../core/devices';
+import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
 
 let reader:ExifTool|undefined;
-const exiftoolProcs=()=>Math.max(2,Math.min(6,Math.floor(availableParallelism()/2)));
+/** Today's formula (2 to 6, half the cores), capped by the CPU thread limit. */
+export const exiftoolProcs=()=>cpuWorkers(Math.max(2,Math.min(6,Math.floor(availableParallelism()/2))));
 function exiftool():ExifTool {
   return reader ??= new ExifTool({maxProcs:exiftoolProcs(),taskTimeoutMillis:12000,spawnTimeoutMillis:12000});
 }
@@ -318,13 +320,15 @@ let routingLimit=500000;
 /** Least recently used results go first (a Map iterates in insertion order; a hit moves its entry to the end). */
 function remember(key:string,value:Metadata):void {
   routingCache.delete(key);routingCache.set(key,value);
-  while(routingCache.size>routingLimit){const oldest=routingCache.keys().next();if(oldest.done)break;routingCache.delete(oldest.value);}
+  while(routingCache.size>routingCacheLimit()){const oldest=routingCache.keys().next();if(oldest.done)break;routingCache.delete(oldest.value);}
 }
 function recall(key:string):Metadata|undefined {
   const value=routingCache.get(key);
   if(value){routingCache.delete(key);routingCache.set(key,value);}
   return value;
 }
+/** The routing cache holds 500k results at the 2 GB budget design point, in proportion to the budget (and never more than the test limit). */
+export const routingCacheLimit=():number=>Math.min(routingLimit,scaledByBudget(500000,20000));
 /** Smaller limit for tests. */
 export function setRoutingLimit(limit:number):void {routingLimit=Math.max(1,Math.floor(limit)||1);}
 export function routingCacheSize():number {return routingCache.size;}
@@ -428,7 +432,8 @@ export async function metadata(filename:string, options:{preview?:boolean;detail
   // Routing skips RequestAll's per-file macOS stat/mdls/xattr subprocesses and
   // trailer scans (-fast keeps maker notes). Full inspection keeps everything.
   // Grouped raw values preserve duplicate tags and the camera's recorded clock.
-  const tags=options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']});
+  // Admitted through the memory governor: above 90% of the limit a new read waits for the running ones.
+  const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
   if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key)remember(key,structuredClone(result));
   if(options.preview!==false)result.preview=await preview(absolute);

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { cpuWorkers, governor, memoryBudgetBytes, type MemoryGovernor } from '../resource-limits';
 
 /** What a storage device is, as far as streaming it is concerned. */
 export type DeviceKind='hdd'|'ssd'|'card'|'unknown';
@@ -49,7 +50,7 @@ export class DeviceStreams {
   private kinds=new Map<bigint,Promise<DeviceKind>>();
   private known=new Map<bigint,DeviceKind>();
   private slots=new Map<bigint,{busy:number;limit:number;waiting:(()=>void)[]}>();
-  constructor(private readonly kindOf?:Classify) {}
+  constructor(private readonly kindOf?:Classify,private readonly gate:MemoryGovernor=governor) {}
   /** The device `file` lives on, or for a file not yet created its nearest existing folder. */
   private async device(file:string):Promise<bigint> {
     for(let current=file;;current=path.dirname(current)) {
@@ -91,7 +92,11 @@ export class DeviceStreams {
    * two callers can never wait on each other). `chunk` is the read size suited to them; with
    * `signal`, Stop ends the wait for a slot at once. Classifying a device can take a second
    * under load (diskutil), so until it answers its streams use the middle setting. */
-  async run<T>(files:string[],work:(chunk:number)=>Promise<T>,signal?:AbortSignal):Promise<T> {
+  run<T>(files:string[],work:(chunk:number)=>Promise<T>,signal?:AbortSignal):Promise<T> {
+    // Memory governor: while the app is above 90% of its memory limit, a new file waits here (work already running is untouched).
+    return this.gate.govern(()=>this.stream(files,work,signal),signal);
+  }
+  private async stream<T>(files:string[],work:(chunk:number)=>Promise<T>,signal?:AbortSignal):Promise<T> {
     const devices=new Map<bigint,string>();
     for(const file of files) {const dev=await this.device(file);if(!devices.has(dev))devices.set(dev,file);}
     const order=[...devices.keys()].sort((a,b)=>a<b?-1:a>b?1:0);
@@ -100,9 +105,31 @@ export class DeviceStreams {
     const held:bigint[]=[];
     try {
       for(const dev of order) {await this.acquire(dev,signal);held.push(dev);}
-      return await work(Math.max(...kinds.map(kind=>CHUNK[kind])));
+      // Read buffers shrink with a small memory budget (1/256 of it per stream; the tuned sizes stand at the 2 GB default).
+      return await work(Math.min(Math.max(...kinds.map(kind=>CHUNK[kind])),Math.max(256*1024,Math.floor(memoryBudgetBytes()/256))));
     } finally { for(const dev of held.reverse()) this.release(dev); }
   }
 }
 /** The process-wide slots: every whole-file stream of every job goes through them. */
 export const streams=new DeviceStreams();
+
+/** Metadata reads in flight while checking or scanning: enough to fill ExifTool's multi-file requests (platform/metadata.ts)
+ * on every process; the device's own limit still caps the requests running at once. */
+export const CHECK_CONCURRENCY=32;
+
+/** CPU worker count for a pool wanting up to `cap`: never above the user's thread limit, never below one. */
+export {cpuWorkers};
+/** Run `work` over `items` with at most `limit` in flight, results in input order (by index). The first
+ * failure stops new work and is rethrown once the running ones settle. */
+export async function mapPool<T,R>(items:readonly T[],limit:number,work:(item:T,index:number)=>Promise<R>):Promise<R[]> {
+  const results=new Array<R>(items.length);
+  let next=0,failure:unknown,failed=false;
+  await Promise.all(Array.from({length:Math.min(items.length,Math.max(1,limit))},async()=>{
+    while(!failed&&next<items.length) {
+      const index=next++;
+      try { results[index]=await work(items[index]!,index); } catch(error) { if(!failed){failed=true;failure=error;} }
+    }
+  }));
+  if(failed) throw failure;
+  return results;
+}

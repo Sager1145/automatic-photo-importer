@@ -700,6 +700,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .settings-row>.button{justify-self:start}
 .text-size-control{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;min-width:0}
 .settings-row-note{grid-column:2;font-size:var(--text-caption);color:var(--label-secondary)}
+.performance-readout{grid-column:1;color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums}
 .text-size-control input{flex:1 1 6rem;min-width:6rem}
 .text-size-control strong{font-variant-numeric:tabular-nums;color:var(--accent);min-width:3ch}
 .settings-row .appearance-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem 1rem}
@@ -1205,9 +1206,11 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .dashboard-hide>svg{width:14px;height:14px}
 
 /* Sidebar drive status: the running step flashes. Reduced motion keeps a steady filled dot. */
-.mini-steps i[data-state=active]{position:relative;isolation:isolate;background:var(--accent-soft);animation:step-flash 1.2s var(--ease-out) infinite}
+.mini-steps i[data-state=active]{position:relative;isolation:isolate;background:var(--accent-soft)}
+/* The flash is an opacity-only fill on a pseudo-element behind the glyph, isolated inside the dot so it never paints above popovers, menus, sticky headers or toasts. */
+.mini-steps i[data-state=active]::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:50%;background:var(--accent-fill);opacity:0;pointer-events:none;animation:step-flash 1.2s var(--ease-out) infinite}
 .mini-steps i[data-state=active]::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 1.5px var(--accent-fill);opacity:0;pointer-events:none;animation:step-ping 1.2s var(--ease-out) infinite}
-@keyframes step-flash{0%,100%{background-color:var(--accent-soft)}45%{background-color:var(--accent-fill);color:var(--on-accent)}}
+@keyframes step-flash{0%,100%{opacity:0}45%{opacity:.55}}
 @keyframes step-ping{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.9)}}
 
 /* Settings: category list beside the open panel; a scrolling tab strip when narrow. */
