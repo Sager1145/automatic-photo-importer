@@ -11,6 +11,7 @@ import {promisify} from 'node:util';
 import {createHash, randomBytes} from 'node:crypto';
 import {plan, execute, configureOrganizationRecovery} from '../core/index';
 import {findResidue, cleanResidue} from '../core/residue';
+import {recordPartial} from '../core/import-recovery';
 import {STREAMS, mountOf, volumeOf} from '../core/devices';
 import {directCapable, identity} from '../core/paths';
 import {applyFileTimestamps} from '../platform/file-timestamps';
@@ -266,6 +267,24 @@ test('files the preflight found already present count as done only once each is 
   assert.ok(result.errors.some(error=>/Destination changed after copy preparation; retry/.test(error)),result.errors.join(' | '));
   assert.equal(await fs.lstat(gone).then(()=>true,()=>false),false,'it was not copied again');
   assert.equal(result.skipped,FILES-1);
+});
+
+test('a direct run that finds a file already in place also releases a whole stale staged copy of it',async t=>{
+  const env=await ready(t);if(!env) return;
+  const small=path.join(base,`stale-${counter}`);await fs.mkdir(small);
+  await fs.writeFile(path.join(small,'DSC_0001.NEF'),randomBytes(2*1024*1024));
+  const reviewed=(await plan(small,[env.root],options,metadata)).plans[0]!,entry=reviewed.entries[0]!;
+  assert.equal(entry.digest,undefined,'planned before the file existed, so without a checksum');
+  // The file arrives by another route, and an interrupted older run left a whole staged copy and its receipt.
+  await fs.mkdir(path.dirname(entry.destination),{recursive:true});
+  await fs.copyFile(path.join(small,'DSC_0001.NEF'),entry.destination);
+  const stage=path.join(path.dirname(entry.destination),'photo-importer-6f1c9a3e-1b2d-4c5e-8f70-123456789abc.partial');
+  await fs.copyFile(path.join(small,'DSC_0001.NEF'),stage);
+  await recordPartial('stage',stage,await fs.lstat(stage,{bigint:true}),entry,reviewed,new Map());
+  const result=await execute(reviewed);
+  assert.deepEqual(result.errors,[]);assert.equal(result.skipped,1);
+  assert.equal(await fs.lstat(stage).then(()=>true,()=>false),false,'the stale stage is released');
+  assert.deepEqual(await leftovers(env.root),[]);
 });
 
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{

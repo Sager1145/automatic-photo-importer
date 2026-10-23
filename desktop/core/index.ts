@@ -21,7 +21,7 @@ import { buildGroups } from '../duplicate-rules';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
-import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,openPartial,clearPartialRecord,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,directReceiptExists,openPartial,clearPartialRecord,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {constants} from 'node:fs';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
@@ -855,6 +855,8 @@ async function finishDirect(entry:PlanEntry,destination:string,sha:string,transf
   const root=transfer.root,found=await findPublication({...entry,destination},root,recovery,signal);
   if(!found) {
     if(await unboundDirect({...entry,destination},root,recovery)) throw new MessageError('error.unboundReceipt',{path:destination});
+    // A direct receipt that binds the file but was not accepted just now (a race, a transient error): not skipped and not released, or its dates would never be set.
+    if(await directReceiptExists({...entry,destination},root,recovery)) throw new MessageError('error.copyNotConfirmed',{path:destination});
     return false;
   }
   const output=await fs.open(destination,constants.O_RDWR|(constants.O_NOFOLLOW??0));
@@ -903,12 +905,12 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
   const present=async(entry:PlanEntry,destination:string)=>{
     const sha=await resolve(entry);
-    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination},root,recovery,signal);result.copied++;}
+    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);result.copied++;}
     else {
       await syncFile(destination);await syncParents(destination,root);
       if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
       const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
-      await releaseCreations({...entry,destination},root,recovery);await releaseStaleStage({...entry,destination},root,recovery,signal);
+      await releaseCreations({...entry,destination},root,recovery);await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);
       result.skipped++;
     }
     hooks.done(entry);

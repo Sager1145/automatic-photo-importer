@@ -157,6 +157,12 @@ export async function unboundDirect(entry:PlanEntry,root:string,index:RecoveryIn
  }
  return false;
 }
+/** Whether any authenticated direct-copy receipt (not the one written before the name existed) names this destination. */
+export async function directReceiptExists(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
+ const records=await receiptNames(path.dirname(entry.destination),root,index);
+ for(const record of publicationNames(records,entry).values())if(record.mode==='direct'&&record.fileIdentity!==CREATING&&record.file===entry.destination&&record.root===root)return true;
+ return false;
+}
 async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal:AbortSignal|undefined,finish:boolean):Promise<OwnedPartial|undefined>{
  const folder=path.dirname(entry.destination),records=await receiptNames(folder,root,index);
  // A stage partial is bound to its source by stat identity and a byte-prefix

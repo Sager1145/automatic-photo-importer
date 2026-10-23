@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import fsPatchable from 'node:fs/promises';
+import {syncBuiltinESMExports} from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import {plan, execute, configureOrganizationRecovery} from '../core/index';
@@ -81,6 +83,50 @@ test('a receipt that still binds its file is never refused because the source or
   assert.deepEqual(result.errors,[]);
   assert.deepEqual(await receipts(f.root),[],'finished, so its receipt is released');
   assert.ok(Math.abs((await fs.stat(f.file)).mtimeMs-Date.parse('2024-02-03T12:00:00Z'))<2000,'the capture date was applied');
+});
+
+test('a receipt that binds its file still lets it be finished after the destination folder or the card folder was replaced by another folder',async t=>{
+  for(const change of ['destination folder','card folder'] as const) {
+    const f=await fixture(t,'exact');
+    if(change==='destination folder') {
+      const folder=path.dirname(f.file),aside=folder+'.aside';
+      await fs.rename(folder,aside);await fs.mkdir(folder);
+      for(const name of await fs.readdir(aside)) await fs.rename(path.join(aside,name),path.join(folder,name));
+      await fs.rmdir(aside);
+    } else {
+      const aside=f.card+'.aside';
+      await fs.rename(f.card,aside);await fs.mkdir(f.card);
+      for(const name of await fs.readdir(aside)) await fs.copyFile(path.join(aside,name),path.join(f.card,name));
+      await fs.rm(aside,{recursive:true});
+    }
+    assert.equal((await findResidue([f.root])).items.some(item=>item.kind==='unbound'),false,change);
+    const result=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);
+    assert.deepEqual(result.errors,[],change);
+    assert.deepEqual(await receipts(f.root),[],`${change}: finished, so its receipt is released`);
+    assert.ok(Math.abs((await fs.stat(f.file)).mtimeMs-Date.parse('2024-02-03T12:00:00Z'))<2000,`${change}: the capture date was applied`);
+  }
+});
+
+test('a receipt the finish could not confirm just now, though it is not unbound, is kept and the family is told to try again - no dates are skipped',async t=>{
+  const f=await fixture(t,'exact');
+  // Once, the file seems to change between the two looks the finish takes at it (a race with another writer).
+  const lstat=fsPatchable.lstat.bind(fsPatchable);let looks=0;
+  t.mock.method(fsPatchable,'lstat',async(...args:Parameters<typeof fsPatchable.lstat>)=>{
+    const result=await lstat(...args);
+    if(String(args[0])===f.file&&new Error().stack?.includes('import-recovery')&&++looks===2) return {...result,mtimeNs:(result as import('node:fs').BigIntStats).mtimeNs+1n} as typeof result;
+    return result;
+  });
+  syncBuiltinESMExports();
+  const reviewed=(await plan(f.card,[f.root],options,metadata)).plans[0]!;
+  looks=0;
+  const first=await execute(reviewed);
+  t.mock.restoreAll();syncBuiltinESMExports();
+  assert.ok(first.errors.some(error=>/try again/i.test(error)&&error.includes(f.file)),first.errors.join(' | '));
+  assert.equal((await receipts(f.root)).length,1,'its receipt is kept');
+  const second=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);
+  assert.deepEqual(second.errors,[]);
+  assert.deepEqual(await receipts(f.root),[]);
+  assert.ok(Math.abs((await fs.stat(f.file)).mtimeMs-Date.parse('2024-02-03T12:00:00Z'))<2000,'dated by the retry');
 });
 
 test('finishing a file on the staged path also releases a stale staged copy of it',async t=>{
