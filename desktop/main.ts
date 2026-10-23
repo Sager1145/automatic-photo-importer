@@ -12,14 +12,15 @@ import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
-import {destinationEntries,destinationParts,destinationSpace,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
+import {destinationEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,validateDestination,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
 import {backupFolders,destinationRoots} from './platform/destination-roots';
 import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
-import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
+import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
+import {deviceHasRoom} from './core/devices';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {loadPlacement,placedMatches,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
@@ -327,7 +328,9 @@ function enqueue(source:Source,backup=false,automatic=false){
  const finished=state.jobs.filter(j=>['complete','stopped','error'].includes(j.phase));if(finished.length>30){const remove=new Set(finished.slice(30).map(j=>j.id));state.jobs=state.jobs.filter(j=>!remove.has(j.id));}
 }
 function pump(){if(state.review||state.busyReview||organizationJobIds.size||duplicateControl)return;while(active.size<state.preferences.parallel){
- const job=nextQueued(state.jobs,sourceOrder);if(!job)break;
+ const running=state.jobs.filter(item=>active.has(item.id)).map(item=>item.source.drive);
+ // Folders on one physical device share its stream limit; jobs on other devices still run in parallel.
+ const job=nextRunnable(state.jobs,sourceOrder,item=>deviceHasRoom(item.source.drive,running));if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
  organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
@@ -493,7 +496,7 @@ function snapshotPreferences(organizationDestination?:number):Preferences{
  * direct imports differ only in when the result is executed. */
 /** Free space per destination after other jobs' reservations. */
 function availableFor(owner:string,infos:DestinationStatus[]):number[]{
- return infos.map(info=>{let free=info.free??0;for(const [id,held] of reservations)if(id!==owner)for(const item of held)if(item.volume===(info.volumeId??info.path))free-=item.bytes;return Math.max(0,free);});
+ return freeAfterReservations(owner,infos,reservations);
 }
 async function prepare(owner:string,source:Source,backup:boolean,request:RunRequest,signal:AbortSignal,onCamera:(done:number,total:number)=>void,onProgress:PlanProgress,onPlanning?:()=>void):Promise<Prepared>{
  const {prefs,reorganize,sourceFolders}=request;
@@ -527,7 +530,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const needed=reorganize?plans.map((item,index)=>{const bytes=requiredOrganizationSpace(item);if(bytes>available[index]!)throw new MessageError('error.organizeSpace',{index:index+1,size:gigabytes(bytes)});return bytes;}):allocateDestinations(plans,available,prefs.copyMode);
   reservations.set(owner,infos.map((info,index)=>({volume:info.volumeId??info.path,bytes:needed[index]})));
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
-  const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!));
+  const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
   if(!reorganize&&!stage&&!backup)rememberScan(source,inventory);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
   return {eta,problems,review:{id:owner,source,backup,plans,problems,...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{})};
@@ -627,6 +630,15 @@ async function recordDuplicates(plans:TransferPlan[],found:PlanDuplicates|undefi
  }catch{/* Only a record. */}
 }
 async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;state.reviewSourceId=undefined;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
+/** Queue an in-place organization of `folder`; `known` are the sources it must not overlap. */
+async function organizeFolderInPlace(folder:string,known:Source[]){
+ const root=await fs.realpath(folder),info=await validateDestination(root,known);
+ if(!info.volumeId)throw new MessageError('error.folderUnidentified');
+ approved.add(root);
+ const prefs=snapshotPreferences();prefs.copyMode='single';prefs.destinations=[root];prefs.destinationIds=[info.volumeId];prefs.basePath='';
+ if(prefs.mediaLayout==='video-root')throw new MessageError('error.organizeFolderVideo');
+ queueOrganization(root,`Organize ${path.basename(root)}`,{prefs,reorganize:true,options:takeOrganizeOptions()});
+}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean){
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);if(reorganize&&collectProblemFiles!==undefined){prefs.collectProblemFiles=collectProblemFiles;if(state.review?.options)state.organizeOptions={...state.review.options};}
@@ -818,12 +830,15 @@ async function action(input:Action):Promise<void>{
    assertOrganizationIdle();
    const result=await dialog.showOpenDialog(window!,{title:'Choose a folder to organize in place',properties:['openDirectory']});
    if(result.canceled||!result.filePaths[0])break;
-   const root=await fs.realpath(result.filePaths[0]),info=await validateDestination(root,state.sources);
-   if(!info.volumeId)throw new MessageError('error.folderUnidentified');
-   approved.add(root);
-   const prefs=snapshotPreferences();prefs.copyMode='single';prefs.destinations=[root];prefs.destinationIds=[info.volumeId];prefs.basePath='';
-   if(prefs.mediaLayout==='video-root')throw new MessageError('error.organizeFolderVideo');
-   queueOrganization(root,`Organize ${path.basename(root)}`,{prefs,reorganize:true,options:takeOrganizeOptions()});break;
+   await organizeFolderInPlace(result.filePaths[0],state.sources);break;
+  }
+  case 'organizeSourceFolder':{
+   // A folder source on the destination's drive: move its files into the structure instead of copying them.
+   assertOrganizationIdle();
+   const source=state.sources.find(item=>item.id===input.sourceId&&item.transport==='folder');if(!source)throw new MessageError('error.selectDrive');
+   if(state.jobs.some(job=>!job.organization&&job.source.id===source.id&&['queued','discovering','verifying','copying'].includes(job.phase)))throw new MessageError('error.busy');
+   if(state.review?.source.id===source.id)await discardReview();else if(state.review||state.busyReview)throw new MessageError('error.busy');
+   await organizeFolderInPlace(source.path,state.sources.filter(item=>item.id!==source.id));pump();break;
   }
   case 'organizeBackup':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');queueBackupOrganization(index);break;}
   case 'previewOrganization':{const root=snapshotPreferences(input.destinationIndex).destinations[0];await previewSource({id:'library:'+root,path:root,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined);break;}

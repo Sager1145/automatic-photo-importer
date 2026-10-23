@@ -19,10 +19,10 @@ export function requiredTransferSpace(plan:TransferPlan):number{
 /** Sizes in space errors; the renderer formats the same figures for display. */
 const size=(bytes:number)=>bytes>=1e9?`${(bytes/1e9).toFixed(1)} GB`:bytes>=1e6?`${(bytes/1e6).toFixed(1)} MB`:bytes>=1e3?`${(bytes/1e3).toFixed(1)} KB`:`${bytes} B`;
 /** What an import needs on one destination once duplicates are known: only files the plan writes count. */
-export function destinationSpace(plan:TransferPlan,free:number):DestinationSpace{
+export function destinationSpace(plan:TransferPlan,free:number,sameDrive=false):DestinationSpace{
  let existing=0,existingFiles=0,newFiles=0;
  for(const entry of destinationEntries(plan)){if(entry.skip){existing+=entry.size;existingFiles++;}else newFiles++;}
- return {needed:requiredTransferSpace(plan),free,existing,existingFiles,newFiles};
+ return {needed:requiredTransferSpace(plan),free,existing,existingFiles,newFiles,...(sameDrive?{sameDrive:true}:{})};
 }
 
 /** Allocate against free space after other jobs' reservations. Sequential mode
@@ -58,4 +58,11 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
  * published, one at a time: room for the largest file twice covers it. */
 export function requiredOrganizationSpace(plan:TransferPlan):number{
  return 2*destinationEntries(plan).reduce((largest,entry)=>Math.max(largest,entry.size),0);
+}
+
+/** Free space per destination volume after the space other jobs have claimed on it. A source on a
+ * destination's own drive claims nothing extra: its files already sit in the used space, and the
+ * copy draws on the same free space every other job writing to that drive shares. */
+export function freeAfterReservations(owner:string,infos:{free?:number;volumeId?:string;path:string}[],reservations:ReadonlyMap<string,readonly {volume:string;bytes:number}[]>):number[]{
+ return infos.map(info=>{let free=info.free??0;for(const [id,held] of reservations)if(id!==owner)for(const item of held)if(item.volume===(info.volumeId??info.path))free-=item.bytes;return Math.max(0,free);});
 }

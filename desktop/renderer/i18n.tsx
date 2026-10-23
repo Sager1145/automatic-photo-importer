@@ -205,6 +205,12 @@ Stopped|已停止|已停止|停止済み
 Needs attention|需要处理|需要處理|確認が必要
 Queued|已排队|已排隊|待機中
 Folder backup|文件夹备份|資料夾備份|フォルダーバックアップ
+Same drive|同一驱动器|同一個磁碟|同じドライブ
+Same drive as {name}|与 {name} 同一驱动器|與 {name} 同一個磁碟|{name} と同じドライブ
+Same drive as {name}. Its capacity is shown there.|与 {name} 同一驱动器，容量显示在该处。|與 {name} 同一個磁碟，容量顯示在該處。|{name} と同じドライブです。容量はそちらに表示されます。
+This folder is on the same drive as your backup. Importing copies the files, which uses space on this drive.|此文件夹与备份位于同一驱动器。导入会复制文件，这会占用该驱动器的空间。|此資料夾與備份位於同一個磁碟。匯入會複製檔案，這會佔用該磁碟的空間。|このフォルダーはバックアップと同じドライブにあります。読み込むとファイルがコピーされ、このドライブの容量を使います。
+Organize instead (move, no extra space)|改为整理（移动文件，不占用额外空间）|改為整理（移動檔案，不佔用額外空間）|代わりに整理する（移動のみ、追加容量なし）
+Needs {needed} of {free} free on this same drive|需要 {needed}，此驱动器可用 {free}|需要 {needed}，此磁碟可用 {free}|必要 {needed}／このドライブの空き {free}
 Connected USB camera|已连接的 USB 相机|已連接的 USB 相機|接続中のUSBカメラ
 Review files before copying|复制前审核文件|複製前審核檔案|コピー前にファイルを確認
 Review|审核|審核|確認

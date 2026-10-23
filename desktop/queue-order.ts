@@ -25,3 +25,9 @@ export function nextQueued<T extends QueuedJob>(jobs:T[],sourceOrder:string[]):T
   const [first]=queueOrder(jobs,sourceOrder);
   return jobs.find(job=>job.id===first);
 }
+/** The first queued job in start order that `canStart` accepts, so a job held back (its drive is
+ * busy) lets the next one go. */
+export function nextRunnable<T extends QueuedJob>(jobs:T[],sourceOrder:string[],canStart:(job:T)=>boolean):T|undefined {
+  for(const id of queueOrder(jobs,sourceOrder)){const job=jobs.find(item=>item.id===id);if(job&&canStart(job))return job;}
+  return undefined;
+}

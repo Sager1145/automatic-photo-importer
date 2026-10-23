@@ -1394,3 +1394,9 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
   html[data-boot=reveal] .brand-logo{visibility:visible}
   html[data-boot=reveal] .app-shell,html[data-boot=reveal] .main-content{animation:none!important}
 }
+
+.source-drive{display:inline-flex;align-items:center;gap:.3rem;max-width:100%;min-width:0;font-size:var(--text-caption);color:var(--label-secondary)}
+.source-drive>span:not(.small-tag){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-drive svg{flex:none}
+.source-same-drive{flex-wrap:wrap;justify-content:space-between}
+.source-same-drive p{display:flex;align-items:center;gap:.45rem;margin:0;flex:1 1 16rem}

@@ -245,6 +245,15 @@ export async function folderCapacity(folder:string):Promise<{total?:number;free?
   try {const capacity=await statfs(folder);return {total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};}
   catch {return {};}
 }
+/** The volume and physical disk a chosen folder lives on, found from the mounted volumes (the
+ * filesystem id stands in when no volume describes it). */
+export async function folderDrive(folder:string, volumes?:MountedVolume[]):Promise<NonNullable<Source['drive']>> {
+  const resolved=await realpath(folder),dev=(await stat(resolved,{bigint:true})).dev;
+  let volume:MountedVolume|undefined;
+  try {volume=(volumes??await mountedVolumes()).filter(v=>within(resolved,v.path)).sort((a,b)=>b.path.length-a.path.length)[0];} catch {}
+  const volumeId=volume?.volumeId ?? `filesystem:${dev}`,mount=volume?.path ?? path.parse(resolved).root;
+  return {volumeId,name:volume?.name || path.basename(mount) || mount,mount,...(volume?.physicalId?{physicalId:volume.physicalId}:{}),device:volume?.physicalId ?? volumeId,sameAsDestination:false};
+}
 export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promise<DestinationStatus> {
   try {
     await requireMountedRoot(target);
