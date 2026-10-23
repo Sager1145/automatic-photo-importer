@@ -830,6 +830,177 @@ Counting verified originals…|正在统计已验证的原文件…|正在統計
 {count} files will stay where they are.|有 {count} 个文件会保留在原处。|有 {count} 個檔案會保留在原處。|{count} 件のファイルはそのまま残ります。
 {count} originals deleted ({size}); {kept} left in place|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残しました
 Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
+Level 1: you decide|级别 1：由你决定|層級 1：由你決定|レベル1：すべて自分で決める
+You decide every group. Nothing is removed until you choose which file to keep.|每一组都由你决定。在你选择要保留的文件之前，不会删除任何内容。|每一組都由你決定。在你選擇要保留的檔案之前，不會移除任何內容。|すべてのグループを自分で決めます。残すファイルを選ぶまで何も削除されません。
+Level 2: identical files|级别 2：完全相同的文件|層級 2：完全相同的檔案|レベル2：完全に同一のファイル
+Files that are exactly the same (same SHA-256) are removed automatically, keeping the copy in your organized folders. You decide all other groups.|完全相同（SHA-256 相同）的文件会自动移除，并保留已整理文件夹中的那一份。其他分组由你决定。|完全相同（SHA-256 相同）的檔案會自動移除，並保留已整理資料夾中的那一份。其他群組由你決定。|完全に同一（SHA-256 が同じ）のファイルは自動で削除され、整理済みフォルダー内のものが残ります。それ以外のグループは自分で決めます。
+Level 3: automatic|级别 3：自动|層級 3：自動|レベル3：自動
+Exactly identical files, and files with identical EXIF and size, are removed automatically. You decide only the groups with the same EXIF but a different size, or the same name and time.|完全相同的文件，以及 EXIF 和大小都相同的文件，会自动移除。只有 EXIF 相同但大小不同，或仅名称和时间相同的分组由你决定。|完全相同的檔案，以及 EXIF 和大小都相同的檔案，會自動移除。只有 EXIF 相同但大小不同，或僅名稱和時間相同的群組由你決定。|完全に同一のファイル、および EXIF とサイズが同じファイルは自動で削除されます。EXIF は同じでサイズが異なるグループや、名前と時刻だけが同じグループは自分で決めます。
+Removal level|移除级别|移除層級|削除レベル
+Identical files|完全相同的文件|完全相同的檔案|同一のファイル
+Same EXIF and size|EXIF 和大小相同|EXIF 和大小相同|EXIF とサイズが同じ
+Same EXIF, different size|EXIF 相同，大小不同|EXIF 相同，大小不同|EXIF は同じでサイズが異なる
+Same name and time|名称和时间相同|名稱和時間相同|名前と時刻が同じ
+Dimensions|尺寸|尺寸|サイズ（ピクセル）
+File size|文件大小|檔案大小|ファイルサイズ
+Path|路径|路徑|パス
+SHA identical|SHA 相同|SHA 相同|SHA 一致
+EXIF identical|EXIF 相同|EXIF 相同|EXIF 一致
+Size differs|大小不同|大小不同|サイズが異なる
+In organized structure|在整理后的结构中|在整理後的結構中|整理済みの構造内
+Suggested keep|建议保留|建議保留|おすすめの保持
+No preview available|无可用预览|沒有可用預覽|プレビューはありません
+Loading preview…|正在加载预览…|正在載入預覽…|プレビューを読み込み中…
+This Mac can't decode this RAW format yet, so the camera's embedded preview is shown. Updating macOS or converting the files with Adobe DNG Converter adds support.|这台 Mac 暂时无法解码此 RAW 格式，因此显示相机内嵌的预览。更新 macOS 或用 Adobe DNG Converter 转换文件即可获得支持。|這台 Mac 暫時無法解碼此 RAW 格式，因此顯示相機內嵌的預覽。更新 macOS 或用 Adobe DNG Converter 轉換檔案即可獲得支援。|この Mac はこの RAW 形式をまだデコードできないため、カメラ内蔵のプレビューを表示しています。macOS を更新するか、Adobe DNG Converter で変換すると対応できます。
+This file's preview could not be read.|无法读取此文件的预览。|無法讀取此檔案的預覽。|このファイルのプレビューを読み込めませんでした。
+Full EXIF|完整 EXIF|完整 EXIF|すべての EXIF
+Loading…|正在加载…|正在載入…|読み込み中…
+No EXIF found|未找到 EXIF|找不到 EXIF|EXIF が見つかりません
+Group {number}|第 {number} 组|第 {number} 組|グループ {number}
+Group|分组|群組|グループ
+Removed automatically|自动移除|自動移除|自動で削除
+Choose a file to keep|请选择要保留的文件|請選擇要保留的檔案|残すファイルを選んでください
+Keep all|全部保留|全部保留|すべて残す
+Will be removed|将被移除|將被移除|削除されます
+Remove duplicates from {name}?|要从 {name} 移除重复文件吗？|要從 {name} 移除重複檔案嗎？|{name} から重複ファイルを削除しますか？
+Remove {files} files?|要移除 {files} 个文件吗？|要移除 {files} 個檔案嗎？|{files} 件のファイルを削除しますか？
+{files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.|{groups} 组中的 {files} 个文件将移到恢复区域，释放后可腾出 {size}。|{groups} 組中的 {files} 個檔案將移到復原區域，釋放後可騰出 {size}。|{groups} グループの {files} 件が復元用の領域に移動し、解放すると {size} が空きます。
+Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.|目前不会删除任何内容。你可以撤销，只有在释放已移除的文件后才会腾出空间。|目前不會刪除任何內容。你可以復原，只有在釋放已移除的檔案後才會騰出空間。|まだ何も削除されません。元に戻せます。削除したファイルを解放したときに初めて空き容量が増えます。
+The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.|会先检查每组保留的文件。其余 {files} 个文件（{size}）会移到恢复区域，可用“撤销”放回。|會先檢查每組保留的檔案。其餘 {files} 個檔案（{size}）會移到復原區域，可用「復原」放回。|各グループの残すファイルを先に確認します。残りの {files} 件（{size}）は復元用の領域に移動し、「元に戻す」で戻せます。
+Remove {files} files|移除 {files} 个文件|移除 {files} 個檔案|{files} 件を削除
+Removed duplicates|已移除的重复文件|已移除的重複檔案|削除した重複ファイル
+Set aside with undo. The space is freed when you release them.|已搁置，可撤销。释放后才会腾出空间。|已擱置，可復原。釋放後才會騰出空間。|元に戻せる状態で退避しています。解放すると空き容量が増えます。
+No removed duplicates in this library.|此资料库中没有已移除的重复文件。|此資料庫中沒有已移除的重複檔案。|このライブラリに削除した重複ファイルはありません。
+Removed|已移除|已移除|削除済み
+Undo|撤销|復原|元に戻す
+Pages|页面|頁面|ページ
+Previous page|上一页|上一頁|前のページ
+Page {page} of {pages}|第 {page}/{pages} 页|第 {page}/{pages} 頁|{pages} ページ中 {page} ページ目
+Next page|下一页|下一頁|次のページ
+Where to look|查找位置|尋找位置|探す場所
+Pick a backup library or any folder. Copies are compared only inside it.|选择备份资料库或任意文件夹。只会在其内部比较副本。|選擇備份資料庫或任意資料夾。只會在其內部比較副本。|バックアップのライブラリまたは任意のフォルダーを選びます。その中だけで比較します。
+Library|资料库|資料庫|ライブラリ
+Library to look through|要查找的资料库|要尋找的資料庫|調べるライブラリ
+Choose a library…|选择资料库…|選擇資料庫…|ライブラリを選択…
+No library available|没有可用的资料库|沒有可用的資料庫|利用できるライブラリがありません
+Looking through|正在查找|正在尋找|調査対象
+Scan again|重新扫描|重新掃描|再スキャン
+Scan for duplicates|扫描重复文件|掃描重複檔案|重複ファイルをスキャン
+Duplicate scan progress|重复文件扫描进度|重複檔案掃描進度|重複ファイルのスキャンの進行状況
+Removing duplicates|正在移除重复文件|正在移除重複檔案|重複ファイルを削除中
+{count} duplicates set aside ({size}).|已搁置 {count} 个重复文件（{size}）。|已擱置 {count} 個重複檔案（{size}）。|{count} 件の重複ファイルを退避しました（{size}）。
+Before you remove|移除之前|移除之前|削除する前に
+{groups} groups of duplicates found in {files} files.|在 {files} 个文件中找到 {groups} 组重复文件。|在 {files} 個檔案中找到 {groups} 組重複檔案。|{files} 件のファイルから {groups} グループの重複が見つかりました。
+Remove duplicates…|移除重复文件…|移除重複檔案…|重複ファイルを削除…
+Groups to clean up|要清理的分组|要清理的群組|整理するグループ
+Files to remove|要移除的文件|要移除的檔案|削除するファイル
+Space to free|可腾出的空间|可騰出的空間|空き容量の増加
+Waiting for your choice|等待你的选择|等待你的選擇|選択待ち
+Removed files go to a recovery area first. Nothing is deleted until you release them.|移除的文件会先放入恢复区域。释放之前不会删除任何内容。|移除的檔案會先放入復原區域。釋放之前不會刪除任何內容。|削除したファイルはまず復元用の領域に移動します。解放するまで何も削除されません。
+Groups|分组|群組|グループ
+Keep the suggested file in every group|每组都保留建议的文件|每組都保留建議的檔案|すべてのグループでおすすめのファイルを残す
+Show groups|显示分组|顯示群組|表示するグループ
+All ({count})|全部（{count}）|全部（{count}）|すべて（{count}）
+You decide ({count})|由你决定（{count}）|由你決定（{count}）|自分で決める（{count}）
+Automatic ({count})|自动（{count}）|自動（{count}）|自動（{count}）
+No duplicates found.|未找到重复文件。|找不到重複檔案。|重複ファイルは見つかりませんでした。
+Scan to look for duplicates in this library.|扫描以查找此资料库中的重复文件。|掃描以尋找此資料庫中的重複檔案。|スキャンして、このライブラリの重複ファイルを探します。
+Remove duplicates|移除重复文件|移除重複檔案|重複ファイルの削除
+Duplicates|重复文件|重複檔案|重複
+Remove duplicates controls|移除重复文件控制|移除重複檔案控制|重複ファイル削除の操作
+Exposure|曝光|曝光|露出
+Exposure program|曝光程序|曝光程式|露出プログラム
+Exposure mode|曝光模式|曝光模式|露出モード
+Metering mode|测光模式|測光模式|測光モード
+White balance|白平衡|白平衡|ホワイトバランス
+Flash|闪光灯|閃光燈|フラッシュ
+35 mm equivalent|35 毫米等效|35 毫米等效|35mm 換算
+Subject distance|拍摄距离|拍攝距離|被写体距離
+Digital zoom|数码变焦|數位變焦|デジタルズーム
+Scene type|场景类型|場景類型|シーンタイプ
+Camera & Lens|相机和镜头|相機與鏡頭|カメラとレンズ
+Camera make|相机品牌|相機品牌|カメラメーカー
+Camera model|相机型号|相機型號|カメラモデル
+Camera serial number|相机序列号|相機序號|カメラのシリアル番号
+Internal serial number|内部序列号|內部序號|内部シリアル番号
+Lens make|镜头品牌|鏡頭品牌|レンズメーカー
+Lens ID|镜头 ID|鏡頭 ID|レンズ ID
+Lens serial number|镜头序列号|鏡頭序號|レンズのシリアル番号
+Software|软件|軟體|ソフトウェア
+Firmware|固件|韌體|ファームウェア
+Photographer|摄影师|攝影師|撮影者
+Copyright|版权|版權|著作権
+Date & Time|日期和时间|日期與時間|日付と時刻
+Sub-seconds|亚秒|亞秒|サブ秒
+Time zone offset|时区偏移|時區偏移|タイムゾーンのオフセット
+Created|创建时间|建立時間|作成日時
+Modified|修改时间|修改時間|変更日時
+Creation date|创建日期|建立日期|作成日
+Location|位置|位置|場所
+Latitude|纬度|緯度|緯度
+Longitude|经度|經度|経度
+Altitude|海拔|海拔|高度
+City|城市|城市|市区町村
+State or province|州或省|州或省|都道府県・州
+Country|国家或地区|國家或地區|国・地域
+Image|图像|影像|画像
+Width|宽度|寬度|幅
+Height|高度|高度|高さ
+Resolution|分辨率|解析度|解像度
+Orientation|方向|方向|向き
+Color space|色彩空间|色彩空間|色空間
+Bits per sample|每样本位数|每樣本位元數|サンプルあたりのビット数
+Compression|压缩|壓縮|圧縮
+Maker Notes|厂商备注|廠商備註|メーカーノート
+Mechanical shutter count|机械快门次数|機械快門次數|メカシャッター回数
+Image count|图像计数|影像計數|画像カウント
+File number|文件编号|檔案編號|ファイル番号
+Focus mode|对焦模式|對焦模式|フォーカスモード
+Autofocus area|自动对焦区域|自動對焦區域|AF エリア
+Vibration reduction|防抖|防震|手ぶれ補正
+Picture style|照片风格|照片風格|ピクチャースタイル
+Quality|画质|畫質|画質
+Noise reduction|降噪|降噪|ノイズ低減
+Active D-Lighting|动态 D-Lighting|動態 D-Lighting|アクティブ D-ライティング
+Drive mode|驱动模式|驅動模式|ドライブモード
+Release mode|释放模式|釋放模式|レリーズモード
+File name|文件名|檔案名稱|ファイル名
+MIME type|MIME 类型|MIME 類型|MIME タイプ
+File modified|文件修改时间|檔案修改時間|ファイルの更新日時
+Not defined|未定义|未定義|未定義
+Program|程序自动|程式自動|プログラム
+Aperture priority|光圈优先|光圈優先|絞り優先
+Shutter priority|快门优先|快門優先|シャッター優先
+Creative|创意|創意|クリエイティブ
+Portrait|人像|人像|ポートレート
+Landscape|风景|風景|風景
+Auto|自动|自動|オート
+Auto bracket|自动包围|自動包圍|オートブラケット
+Unknown|未知|未知|不明
+Average|平均|平均|平均
+Center-weighted|中央重点|中央重點|中央重点
+Spot|点测光|點測光|スポット
+Multi-spot|多点测光|多點測光|マルチスポット
+Multi-segment|多区域|多區域|分割測光
+Partial|局部|局部|部分
+Standard|标准|標準|標準
+Night|夜景|夜景|夜景
+Normal|正常|正常|標準
+Mirrored|镜像|鏡像|左右反転
+Rotated 180°|旋转 180°|旋轉 180°|180° 回転
+Mirrored vertically|垂直镜像|垂直鏡像|上下反転
+Mirrored, rotated 90° left|镜像并向左旋转 90°|鏡像並向左旋轉 90°|左右反転して左に 90° 回転
+Rotated 90° right|向右旋转 90°|向右旋轉 90°|右に 90° 回転
+Mirrored, rotated 90° right|镜像并向右旋转 90°|鏡像並向右旋轉 90°|左右反転して右に 90° 回転
+Rotated 90° left|向左旋转 90°|向左旋轉 90°|左に 90° 回転
+sRGB|sRGB|sRGB|sRGB
+Adobe RGB|Adobe RGB|Adobe RGB|Adobe RGB
+Uncalibrated|未校准|未校準|未キャリブレーション
+Uncompressed|未压缩|未壓縮|非圧縮
+JPEG|JPEG|JPEG|JPEG
+Lossy JPEG (DNG)|有损 JPEG（DNG）|有損 JPEG（DNG）|非可逆 JPEG（DNG）
+Flash fired|闪光灯已闪光|閃光燈已閃光|フラッシュ発光
+No flash|未闪光|未閃光|フラッシュなし
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {
