@@ -14,7 +14,7 @@ export function scanSourceInWorker(...args:Parameters<typeof startScan>):Promise
 function startScan(source:Source,signal:AbortSignal,onInventory:(value:Inventory)=>void,onCameras:(value:SourceCameraInfo)=>void,options:{unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}={},onListing?:(files:number,bytes:number,file?:string,top?:{done:number;total:number})=>void,onRouting?:(entries:[string,Metadata][])=>void,memory:{reuse?:Inventory;routing?:[string,Metadata][]}={}):Promise<void>{
  signal.throwIfAborted();
  return new Promise((resolve,reject)=>{
-  const child=utilityProcess.fork(path.join(__dirname,'scan-worker.cjs'),[JSON.stringify(source),JSON.stringify(options)],{serviceName:'Photo Importer read-only scan',stdio:'ignore',env:{...process.env,UV_THREADPOOL_SIZE:'16'}});
+  const child=utilityProcess.fork(path.join(__dirname,'scan-worker.cjs'),[JSON.stringify(source),JSON.stringify(options)],{serviceName:'Photo Importer read-only scan',stdio:'ignore',env:process.env});
   let settled=false;
   let exit:()=>void=()=>{};const exited=new Promise<void>(resolve=>{exit=resolve;});
   // Resolves or rejects only after the child has exited, so the card is released when the scan reports.
