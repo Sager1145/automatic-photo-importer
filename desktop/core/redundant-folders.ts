@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { beneath, code, contained, syncDirectory, within } from './paths';
 import { destinationEntries, destinationParts } from './allocation';
+import { isRecordFolderName } from './legacy-names';
 import type { TransferPlan } from '../shared';
 
 /** Files the operating system creates that are not user content. The app's own recovery
@@ -25,7 +26,7 @@ export async function removeRedundantFolders(library:string,folders:string[],kee
       const child=path.join(folder,entry.name);
       if(entry.isSymbolicLink()) removable=false;
       else if(entry.isDirectory()) {
-        if(kept.some(item=>within(child,item))||['.photo-importer-recovery','photo importer recovery'].includes(entry.name.toLowerCase())) removable=false;
+        if(kept.some(item=>within(child,item))||isRecordFolderName(entry.name)) removable=false;
         else if(!await sweep(child)) removable=false;
       } else if(entry.isFile()&&serviceFile(entry.name)) service.push(child);
       else removable=false;

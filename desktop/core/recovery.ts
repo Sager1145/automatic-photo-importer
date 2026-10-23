@@ -7,6 +7,7 @@ export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { streams, STREAMS } from './devices';
 import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
+import { configureHostKey, hostKeyConfigured, requireHostKey } from './app-store';
 import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
@@ -19,12 +20,11 @@ export interface OrganizationEntry {captureTimeMs?:number;source:string;destinat
 interface FileIdentity {dev:string;ino:string;size:string;mtime:string;ctime:string;}
 interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
 interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];}
-/** Visible on purpose: the app never creates hidden folders. */
-export const RECOVERY_FOLDER='Photo Importer Recovery';
-/** Where versions before RECOVERY_FOLDER kept their journals and originals. */
-export const LEGACY_RECOVERY_FOLDER='.photo-importer-recovery';
+import {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER,isRecordFolderName} from './legacy-names';
+export {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from './legacy-names';
 const storage=RECOVERY_FOLDER;
-export const isRecoveryName=(name:string)=>[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].some(item=>item.toLowerCase()===name.toLowerCase());
+/** This app's record folders, current and earlier: never organized, listed or cleaned as user files. */
+export const isRecoveryName=isRecordFolderName;
 /** Move journals an earlier version kept in the hidden folder into the visible one, on the same volume. */
 async function adoptLegacyStorage(root:string):Promise<void>{
  const legacy=path.join(root,LEGACY_RECOVERY_FOLDER),visible=path.join(root,storage);
@@ -41,20 +41,14 @@ async function adoptLegacyStorage(root:string):Promise<void>{
  await syncDirectory(visible);await syncDirectory(legacy);
  await fs.rmdir(legacy).catch(error=>{if(code(error)!=='ENOTEMPTY'&&code(error)!=='EEXIST')throw error;});await syncDirectory(root);
 }
-let hostKey:Buffer|undefined;
 /** Configure once from the host's private application data, never from a drive journal. */
-export function configureOrganizationRecovery(secret:Buffer|string):void {
- const key=Buffer.isBuffer(secret)?Buffer.from(secret):Buffer.from(secret,'utf8');
- if(key.length<32)throw new Error('Recovery authentication requires a host key of at least 32 bytes');
- if(hostKey&&!hostKey.equals(key))throw new Error('Recovery host key is already configured');
- hostKey=key;
-}
+export function configureOrganizationRecovery(secret:Buffer|string):void {configureHostKey(secret);}
+/** Records before v5: an HMAC over the plain JSON. Read by the migrator only; never written for journals. */
 function signed(value:Record<string,unknown>):Record<string,unknown> {
- if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');
- return {...value,seal:createHmac('sha256',hostKey).update(JSON.stringify(value)).digest('hex')};
+ return {...value,seal:createHmac('sha256',requireHostKey()).update(JSON.stringify(value)).digest('hex')};
 }
 function authenticated(value:unknown):Record<string,unknown> {
- if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');
+ requireHostKey();
  if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid recovery authentication record');
  const {seal,...unsigned}=value as Record<string,unknown>;
  if(typeof seal!=='string'||!/^([a-f0-9]{64})$/.test(seal)||!timingSafeEqual(Buffer.from(seal,'hex'),Buffer.from(signed(unsigned).seal as string,'hex')))throw new Error('Recovery journal authentication failed; originals retained');
@@ -62,8 +56,8 @@ function authenticated(value:unknown):Record<string,unknown> {
 }
 // Import journals share the private host key. An unsigned legacy intent can
 // explain an interruption, but can never authorize writing an existing file.
-export function importRecoveryAvailable():boolean {return !!hostKey;}
-export function sealImportRecord(value:Record<string,unknown>):Record<string,unknown> {return hostKey?signed(value):value;}
+export function importRecoveryAvailable():boolean {return hostKeyConfigured();}
+export function sealImportRecord(value:Record<string,unknown>):Record<string,unknown> {return hostKeyConfigured()?signed(value):value;}
 export function authenticateImportRecord(value:unknown):Record<string,unknown> {return authenticated(value);}
 const UUID_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',uuid=new RegExp(`^${UUID_PATTERN}$`);
 const locks=new Map<string,Promise<unknown>>();
@@ -899,7 +893,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  return result;
 }
 export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,strategy:OrganizationStrategy='copy',keepFolders=false,libraries:string[]=[],releaseDuplicates=false,appleDouble?:AppleDoubleCleaner):Promise<ReorganizationResult> {
- checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
+ checkAbort(signal);requireHostKey();await rootUnchanged(transfer.root,transfer.rootIdentity);
  const id=randomUUID(),manifest:Manifest={version:1,id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,sourceIdentity:await identity(transfer.source),entries:[],...(strategy==='rename'?{strategy:'rename' as const}:{}),...(keepFolders?{keepFolders:true as const}:{}),...(libraries.length?{libraries}:{})};
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.source;folder=path.dirname(folder)){if(!beneath(folder,transfer.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
  validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
@@ -921,7 +915,7 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  * the copy kept. Nothing is copied unless an entry has no `kept` (a companion carried next to the kept file).
  * `root` is the library; the journal lives in its recovery folder, like an organization's. */
 export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'rootIdentity'>,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<{id:string;result:ReorganizationResult}> {
- checkAbort(signal);if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');await rootUnchanged(transfer.root,transfer.rootIdentity);
+ checkAbort(signal);requireHostKey();await rootUnchanged(transfer.root,transfer.rootIdentity);
  const id=randomUUID(),manifest:Manifest={version:1,kind:'duplicates',id,root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.root,sourceIdentity:transfer.rootIdentity,entries:[],keepFolders:true};
  for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==transfer.root;folder=path.dirname(folder)){if(!beneath(folder,transfer.root))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}manifest.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
  validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);

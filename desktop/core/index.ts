@@ -18,7 +18,7 @@ import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
 import { confirmCandidates, type PlanDuplicates } from './duplicates';
 import { buildGroups } from '../duplicate-rules';
-import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, type OrganizationEntry } from './recovery';
+import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, APP_DATA_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
 import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
@@ -764,7 +764,7 @@ export interface ExecutionOptions {
 /** The file just published: unlinking a hard-linked stage moves its ctime, so identity here is device, inode (birth time where no inode is reliable), size and modification time. */
 const samePlaced=(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStats)=>a.dev===b.dev&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&(unreliableIno(a)&&unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino);
 /** Folders no "._" cleanup touches: recovery storage, Problem files and Drive backups. */
-export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
+export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
 async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal):Promise<import('node:fs').BigIntStats|undefined> {

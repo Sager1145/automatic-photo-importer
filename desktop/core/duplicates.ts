@@ -6,7 +6,7 @@ import type { DuplicateExif, DuplicateFile, DuplicateGroup, InventoryFile, Media
 import { buildGroups, candidates, groupId } from '../duplicate-rules';
 import { inventory } from './inventory';
 import { DRIVE_BACKUPS } from './drive-backup';
-import { LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './recovery';
+import { APP_DATA_FOLDER, LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './legacy-names';
 import { PROBLEM_FILES_FOLDER } from '../shared';
 import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
 import type { DestinationIndex } from './destination-index';
@@ -15,7 +15,7 @@ import { CHECK_CONCURRENCY } from './devices';
 /** The per-library record of what duplicate detection found: visible, never hidden, and ignored by inventories. */
 export const DUPLICATES_PREFIX='photo-importer-duplicates';
 /** Folders the app owns, skipped at any depth: mirrors of other drives, the recovery store and collected problem files. */
-export const APP_FOLDERS=[DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
+export const APP_FOLDERS=[DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
 /** The destination libraries a chosen folder is, contains or sits inside. More than one means the scan would mix
  * libraries (or pair a library with another), so the folder is refused. */
 export function overlappingLibraries(folder:string,libraries:string[]):string[] {
