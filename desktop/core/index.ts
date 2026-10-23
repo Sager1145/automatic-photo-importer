@@ -10,7 +10,7 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
-import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameStat, statKey, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 export { allocateDestinations } from './allocation';
@@ -722,9 +722,9 @@ export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:
     await contained(staged.file,root);
     const current=await fs.lstat(staged.file,{bigint:true});
     if(!current.isFile()) return;
-    const exact=current.dev===staged.dev&&current.ino===staged.ino&&current.birthtimeNs===staged.birthtime;
+    const exact=current.dev===staged.dev&&current.ino===staged.ino&&sameBirth(staged.birthtime,current.birthtimeNs);
     // A temporary (negative) inode is replaced by the real one on exFAT; device and birth time still name the file.
-    const temporary=staged.ino<0n&&current.dev===staged.dev&&current.birthtimeNs===staged.birthtime&&current.nlink===1n;
+    const temporary=staged.ino<0n&&current.dev===staged.dev&&sameBirth(staged.birthtime,current.birthtimeNs)&&current.nlink===1n;
     if(exact||temporary) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
     else{
       const detail=`expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`;

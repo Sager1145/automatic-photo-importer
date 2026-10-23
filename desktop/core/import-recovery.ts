@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
 import {MessageError} from '../messages';
-import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameStat,syncDirectory,syncParents} from './paths';
+import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,syncDirectory,syncParents} from './paths';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
@@ -41,7 +41,14 @@ const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JS
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
 /** exFAT names a file without a start cluster by a temporary (negative) inode, replaced when data
  * first reaches the disk or the volume is mounted again: such a receipt binds by device and birth time. */
-const binds=(s:BigIntStats,recorded:string)=>{if(recorded===CREATING)return s.size===0n&&s.nlink===1n;if(fileIdentity(s)===recorded)return true;const [dev,ino,birth]=recorded.split(':');return !!ino&&ino.startsWith('-')&&String(s.dev)===dev&&String(s.birthtimeNs)===birth;};
+const binds=(s:BigIntStats,recorded:string)=>{
+ if(recorded===CREATING)return s.size===0n&&s.nlink===1n;
+ const [dev,ino,birth,...extra]=recorded.split(':');
+ if(!ino||!birth||extra.length||String(s.dev)!==dev)return false;
+ let expected:bigint;try{expected=BigInt(birth);}catch{return false;}
+ // A whole-second birth time recorded after the date helper matches within that second (exFAT re-reads the stored 10 ms value).
+ return sameBirth(expected,s.birthtimeNs)&&(String(s.ino)===ino||ino.startsWith('-'));
+};
 /** A device number names a mount, not a disk: after a re-attach the recorded dev is read as the
  * current one while the recorded root/source folder is still the same inode at the same path. */
 const sourceRebased=new WeakSet<RecordData>();

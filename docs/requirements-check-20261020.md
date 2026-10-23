@@ -190,7 +190,7 @@ Existing drive backups made before this change sit directly under the backup fol
 | SAFE-02 | MET | `.partial` staging, then publish with `link` / `wx` (never overwrites), then re-hash. |
 | SAFE-03 | PARTIAL | See the summary. |
 | SAFE-04, SAFE-05 | MET (process kill) | Sealed stage and intent journals. A partial is resumed only after a prefix check (`process-crash.test.ts`, `import-recovery.test.ts`). |
-| SAFE-06 | MET | Resume needs an authenticated journal, the same inode and birthtime, `nlink==1`, and the bytes must be a prefix of the source. A different complete file becomes a conflict and is never overwritten. |
+| SAFE-06 | MET | Resume needs an authenticated journal, the same inode and birthtime (a whole-second birthtime recorded after the date helper also matches within that second, because exFAT re-reads the stored 10 ms value), `nlink==1`, and the bytes must be a prefix of the source. A different complete file becomes a conflict and is never overwritten. |
 | SAFE-07, SAFE-08 | MET | Name and content are checked separately. Different content goes to `<camera>/Conflicts/<hash>/…`. "Newer" means arrival order. |
 | SAFE-09 | EVIDENCE | `docs/failure-modes-20261020.md`. |
 | SAFE-10 | Respected | The docs do not claim completion. The final audit is still open. |
