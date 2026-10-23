@@ -3,7 +3,6 @@ import {constants,type BigIntStats} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
-import {authenticateImportRecord} from './recovery';
 import {MessageError} from '../messages';
 import {appendLines,holdLog,LINE_CAPS,maybeLstat,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
 import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat} from './paths';
@@ -306,32 +305,4 @@ export async function removeSegmentIfDone(store:Store,file:string,signal?:AbortS
   logDeletion('residue',file,'receipt log segment every receipt of which is closed','oldest segment, not the one appends go to; read again while no append could start: every receipt it opens is closed, none it closes is opened later, no line fails its seal',{bytes:Number(now.size)});
   return true;
  });
-}
-
-// ---- The earlier version's per-file receipts: read by the converter, and by Clean up for what it leaves ----
-interface LegacyRecord extends RecordData {version:1;}
-const legacyRecordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.json$/;
-export const isLegacyReceiptName=(name:string)=>legacyRecordPattern.test(name);
-export async function readLegacyReceipt(journal:string,root:string):Promise<{record:LegacyRecord;journalStat:BigIntStats}>{
- await contained(journal,root);const handle=await regularHandle(journal);
- try {const journalStat=await handle.stat({bigint:true});if(journalStat.size>32768n)throw new Error('Import receipt is too large');
-  const record=authenticateImportRecord(JSON.parse(await handle.readFile('utf8'))) as unknown as LegacyRecord;
-  if(!sameStat(journalStat,await handle.stat({bigint:true})))throw new Error('Import receipt changed');return {record,journalStat};
- }finally{await handle.close();}
-}
-/** An earlier version's receipt, authenticated with this host's key (it throws otherwise): whether its file is still
- * there and bound, and for a stage, whether that copy could continue (resumable), is dead (stale) or holds every byte
- * (complete). owned: it names a file in its own folder. */
-export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;complete:boolean;unbound:boolean;record:LegacyRecord;journalStat:BigIntStats}>{
- const read=await readLegacyReceipt(journal,root),record=await rebaseMount(read.record);
- const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
- const stat=file?await fs.lstat(file,{bigint:true}).catch(absentOnly):undefined;
- const bound=!!stat?.isFile()&&binds(stat,record.fileIdentity);
- const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
- const sourceNow=cardPresent&&record.kind==='stage'&&record.sourceStat?await fs.lstat(record.source,{bigint:true}).catch(absentOnly):undefined;
- const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||!!sourceNow?.isFile()&&sourceMatches(sourceNow,record.sourceStat));
- const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&(!sourceNow?.isFile()||String(sourceNow.size)!==record.sourceStat.size||String(sourceNow.mtimeNs)!==record.sourceStat.mtime);
- const complete=!!stat&&!!record.sourceStat&&String(stat.size)===record.sourceStat.size;
- const unbound=directUnbound(record,stat);
- return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,complete,unbound,record:read.record,journalStat:read.journalStat};
 }

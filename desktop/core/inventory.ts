@@ -3,6 +3,8 @@ import path from 'node:path';
 import type { Inventory, InventoryFile, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
+import { isOldReceiptName } from './legacy-names';
+import { noteOldReceipt } from './old-records';
 import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
 /** Entries of a folder looked at (lstat) at once. */
@@ -98,6 +100,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name)).length;
     // The entries that need a look, in name order. Their lstats run LISTING_STATS at a time (one at a time
     // leaves a drive idle between calls); each is judged in order, and an error is raised at its own turn.
+    // An earlier version's receipt is never listed; it is only noted, so the library can say old records are there.
+    for(const entry of entries)if(entry.isFile()&&isOldReceiptName(entry.name))noteOldReceipt(path.join(folder,entry.name));
     const wanted=entries.filter(entry=>!(ignoredName(entry.name) || entry.isSymbolicLink() || (!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name))));
     for(let start=0;start<wanted.length;start+=LISTING_STATS) {
       checkAbort(signal);

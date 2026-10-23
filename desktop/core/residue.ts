@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
 import { APP_DATA_FOLDER, maybeLstat, storesFor, storeUnchanged, type Store } from './app-store';
 import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
-import { assessReceipt, closeReceipts, IMPORTS, isLegacyReceiptName, leftoverReceipt, openReceipts, readSegment, receiptSegments, removeSegmentIfDone, STAGING, stagePattern as stageName } from './import-recovery';
+import { assessReceipt, closeReceipts, IMPORTS, openReceipts, readSegment, receiptSegments, removeSegmentIfDone, STAGING, stagePattern as stageName } from './import-recovery';
 import { deleteOrganizationRecovery, deletingPattern, endedJournal, isRecoveryName, journalTerminal, ORGANIZATIONS, POINTERS, removeTree, storeJournals, storePointerLeftover } from './recovery';
 import { log, logDeletion } from '../logger';
 import { LIBRARIES } from './destination-index';
@@ -14,11 +14,11 @@ import { checkAbort, code, contained, digest, sameStat } from './paths';
  * proven dead (identity drift, no or unauthenticated receipt, card absent); only Clean up removes it.
  * recoverable: a complete staged copy whose card file changed or vanished: it may be the only copy, so
  * nothing removes it. partial: a staged copy whose authenticated receipt shows its source gone or changed.
- * receipt: an earlier version's receipt file, or (with `rid`) an open receipt to close. segment: a receipt log
+ * receipt: an open receipt to close (`rid`). segment: a receipt log
  * segment every receipt of which is closed. journal: an ended organization's records, deleted whole.
  * sidecar: a macOS "._" file in the records folder holding only bookkeeping.
  * unbound: only a receipt - of a direct copy - that no longer matches the whole file at its name; the file is never touched, only Clean up
- * (or removeUnboundReceipt, for one item) removes the receipt (an earlier version's receipt file) or closes it (with `rid`). */
+ * (or removeUnboundReceipt, for one item) closes the receipt (`rid`). */
 export type ResidueKind='partial'|'resumable'|'kept'|'recoverable'|'receipt'|'index'|'organization'|'folder'|'temporary'|'segment'|'journal'|'sidecar'|'unbound';
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat?:BigIntStats;/** unbound: the file the receipt names and its stat when found. */file?:string;fileStat?:BigIntStats;
  /** Records v5: the store it is in, and the receipt to close once it is handled. */store?:Store;rid?:string;
@@ -27,8 +27,7 @@ export interface Residue {items:ResidueItem[];files:number;bytes:number;resumabl
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const legacyStage=new RegExp(`^(?:\\.import|photo-importer)-${UUID}\\.partial$`);
-const legacyIndexTemporary=new RegExp(`^\\.?(?:photo-importer-index|photo-importer-duplicates)-${UUID}\\.tmp$`),uuid=new RegExp(`^${UUID}$`);
+const uuid=new RegExp(`^${UUID}$`);
 const storeIndexTemporary=new RegExp(`^(?:index|duplicates)-${UUID}\\.tmp$`);
 const journalScratch=new RegExp(`^(?:stage-${UUID}\\.partial|incomplete-${UUID})$`);
 const temporaryFolder=/^photo-importer-(?:camera|preview)-[A-Za-z0-9]{6}$/;
@@ -197,65 +196,14 @@ async function storeLeftovers(store:Store,items:ResidueItem[],signal?:AbortSigna
   if(besideStat)items.push({path:beside,kind:'sidecar',bytes:Number(besideStat.size),root:store.base,stat:besideStat});
 }
 
-/** The earlier version's leftovers in one folder (Clean up only): staged copies, receipts and index files. A staged
- * copy is the app's by its name alone; a receipt only when it authenticates with this host's key. */
-async function legacyImportLeftovers(folder:string,entries:Dirent[],root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
-  const resumable=new Set<string>(),dead=new Set<string>(),recoverable=new Set<string>(),pending:{file:string;stat:BigIntStats;target?:string;resumable:boolean}[]=[];
-  for(const entry of entries) {
-    if(!entry.isFile()||!isLegacyReceiptName(entry.name)) continue;
-    checkAbort(signal);
-    const file=path.join(folder,entry.name),stat=await regular(file);
-    if(!stat) continue;
-    let receipt;
-    // A receipt that cannot be read or authenticated (cut short by a kill, or altered) names nothing reliably: kept.
-    try { receipt=await leftoverReceipt(file,root); } catch { items.push({path:file,kind:'kept',bytes:Number(stat.size),root,stat});continue; }
-    // A publication receipt names a media path: while that file is there, the receipt is how a
-    // re-import finishes it, and it is kept even when it no longer binds the file.
-    if(receipt.unbound&&receipt.file) {
-      const named=await regular(receipt.file);
-      if(named) {items.push({path:file,kind:'unbound',bytes:Number(stat.size),root,stat,file:receipt.file,fileStat:named});continue;}
-    }
-    if(receipt.kind==='publication'&&receipt.present) continue;
-    if(receipt.resumable&&receipt.file) resumable.add(receipt.file);
-    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) (receipt.complete?recoverable:dead).add(receipt.file);
-    pending.push({file,stat,resumable:receipt.resumable,...(receipt.kind==='stage'&&receipt.owned&&receipt.present&&receipt.file?{target:receipt.file}:{})});
-  }
-  // A receipt goes with its copy: kept while the copy is kept, removed once the copy is dead or gone.
-  for(const {file,stat,target,resumable:binds} of pending)
-    items.push({path:file,kind:binds?'resumable':target&&recoverable.has(target)?'recoverable':target&&!dead.has(target)?'kept':'receipt',bytes:Number(stat.size),root,stat});
-  for(const entry of entries) {
-    if(!entry.isFile()) continue;
-    const file=path.join(folder,entry.name),staged=legacyStage.test(entry.name);
-    if(!staged&&!legacyIndexTemporary.test(entry.name)) continue;
-    const stat=await regular(file);
-    if(stat) items.push({path:file,kind:!staged?'index':resumable.has(file)?'resumable':recoverable.has(file)?'recoverable':dead.has(file)?'partial':'kept',bytes:Number(stat.size),root,stat});
-  }
-}
-/** The earlier version's import leftovers under a backup folder (Clean up only). Record folders, old and new, are
- * skipped: the converter owns the old ones, and the store is looked at on its own. */
-async function legacyWalk(folder:string,root:string,items:ResidueItem[],signal?:AbortSignal,scan?:Scan,top=false):Promise<void> {
-  checkAbort(signal);
-  const entries=await list(folder);
-  saw(scan,entries.length,path.relative(root,folder)||path.basename(root));
-  await legacyImportLeftovers(folder,entries,root,items,signal);
-  if(scan&&top){scan.state.done++;scan.emit();}
-  for(const entry of entries) {
-    if(!entry.isDirectory()) continue;
-    const child=path.join(folder,entry.name);
-    // Other hidden folders (.Trashes, .Spotlight-V100, .mirror-removed…) are not this app's to clean.
-    if(!isRecoveryName(entry.name)&&!entry.name.startsWith('.')) await legacyWalk(child,root,items,signal,scan);
-    if(scan&&top){scan.state.done++;scan.state.file=path.relative(root,child);scan.emit();}
-  }
-}
-
 /** Folders in the temporary folder being used now; asked again right before each removal. */
 type InUse=()=>string[];
 const used=async(folder:string,inUse?:InUse)=>!!inUse&&(await Promise.all(inUse().map(item=>fs.realpath(item).catch(()=>item)))).includes(folder);
 /** Read-only: the app's leftovers in the records folders of the backup folders in `roots` (every store readers
  * consult for them), and its camera and preview folders in `temporary` (the system temporary folder) other than
- * those `inUse`. With `legacy` (Clean up), also what the earlier version left in the backup folders themselves.
+ * those `inUse`.
  * User files are never listed, whatever their names. */
-export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal;legacy?:boolean;/** Hears how far the look has come, as it goes (the caller throttles). */onProgress?:(scan:ResidueScan)=>void}={}):Promise<Residue> {
+export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal;/** Hears how far the look has come, as it goes (the caller throttles). */onProgress?:(scan:ResidueScan)=>void}={}):Promise<Residue> {
   const items:ResidueItem[]=[];
   // Canonical paths, as removal checks every item is still inside its root (macOS /var is /private/var).
   const canonical=(folder:string)=>fs.realpath(folder).catch(()=>undefined);
@@ -265,16 +213,14 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
   for(const real of reals)for(const store of await storesFor(real).catch(()=>[] as Store[]))stores.set(store.path,store);
   const temporary=options.temporary&&await canonical(options.temporary);
   const temporaryNames=temporary?(await list(temporary)).filter(entry=>entry.isDirectory()&&temporaryFolder.test(entry.name)).map(entry=>entry.name):[];
-  // Units: each store, (with legacy) each backup folder's own files and each folder directly inside it, each leftover folder in the temporary folder.
-  const top=options.legacy?await Promise.all(reals.map(async real=>1+(await list(real)).filter(entry=>entry.isDirectory()).length)):[];
-  const state:ResidueScan={looked:0,done:0,total:stores.size+top.reduce((sum,count)=>sum+count,0)+temporaryNames.length,file:''};
+  // Units: each store, each leftover folder in the temporary folder.
+  const state:ResidueScan={looked:0,done:0,total:stores.size+temporaryNames.length,file:''};
   const scan=options.onProgress&&{state,emit:()=>options.onProgress!({...state})};
   scan?.emit();
   for(const store of stores.values()){
     await storeLeftovers(store,items,options.signal,scan).catch(error=>{if((error as Error)?.name==='AbortError')throw error;/* A store that changed or cannot be read is looked at again next time. */});
     state.done++;state.file=path.basename(store.base);scan?.emit();
   }
-  if(options.legacy)for(const real of reals)await legacyWalk(real,real,items,options.signal,scan,true);
   if(temporary) for(const entry of await list(temporary)) {
     checkAbort(options.signal);
     const folder=path.join(temporary,entry.name);
@@ -323,7 +269,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
         // Logged by removeSegmentIfDone, which deletes it.
         if(await removeSegmentIfDone(item.store,item.path,options.signal)){left.pop();removed.files++;removed.bytes+=item.bytes;}
       } else if(item.kind==='unbound'){
-        // Only the receipt goes (a line closing it, or an earlier version's receipt file); the file it names is never touched.
+        // Only the receipt goes (a line closing it); the file it names is never touched.
         if(await removeUnboundReceipt(item)){left.pop();removed.files++;removed.bytes+=item.bytes;}
       } else if(item.kind==='receipt'&&item.rid){
         // Close only while what made it closable still holds: its file gone, or the complete file found unchanged.
@@ -361,22 +307,13 @@ export async function removeUnboundReceipt(item:ResidueItem):Promise<boolean> {
     await contained(item.file,item.root);
     const file=await fs.lstat(item.file,{bigint:true});
     if(!file.isFile()||!sameStat(file,item.fileStat)) return false;
-    if(item.store&&item.rid) {
-      // Records v5: the receipt is a line in the store's log; it is closed, not deleted.
-      const record=(await openReceipts(item.store)).get(item.rid);if(!record) return false;
-      const again=await assessReceipt(item.store,record);
-      if(!again.unbound||again.file!==item.file) return false;
-      await closeReceipts(item.store,[item.rid]);
-      log('normal','residue','receipt-closed',{rid:item.rid,file:item.file,reason:'receipt no longer matches its kept file; closed by user/Clean up; the file it names is unchanged and was not touched'});
-      return true;
-    }
-    await contained(item.path,item.root);
-    const now=await fs.lstat(item.path,{bigint:true});
-    if(!now.isFile()||!item.stat||!sameStat(now,item.stat)) return false;
-    const again=await leftoverReceipt(item.path,item.root);
+    if(!item.store||!item.rid) return false;
+    // The receipt is a line in the store's log; it is closed, not deleted.
+    const record=(await openReceipts(item.store)).get(item.rid);if(!record) return false;
+    const again=await assessReceipt(item.store,record);
     if(!again.unbound||again.file!==item.file) return false;
-    await fs.unlink(item.path);
-    logDeletion('residue',item.path,'receipt no longer matches its kept file; removed by user/Clean up','receipt still the one found by the scan (same device, inode, size and times), still binds nothing, and the file it names is unchanged and was not touched',{kind:'unbound',file:item.file,bytes:item.bytes});
+    await closeReceipts(item.store,[item.rid]);
+    log('normal','residue','receipt-closed',{rid:item.rid,file:item.file,reason:'receipt no longer matches its kept file; closed by user/Clean up; the file it names is unchanged and was not touched'});
     return true;
   } catch { return false; }
 }
