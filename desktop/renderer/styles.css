@@ -46,6 +46,8 @@
   /* Status */
   --success:#1f7a45;--success-soft:#e4f4ea;--warning:#a35a00;--warning-soft:#fff3df;--warning-border:#f3d5a4;
   --danger:#c4152a;--danger-soft:#fdeaec;--danger-border:#f4c1c7;
+  /* One color per progress step; red and amber stay reserved for errors and warnings. */
+  --step-scan:#0a6893;--step-read:#4b4fd0;--step-compare:#8239b8;--step-copy:#086b60;--step-verify:#346c10;--step-move:#a82a7f;--step-tidy:#2458c9;--step-delete:#a0305f;
   --storage-used:#a1a1a6;
 
   /* Elevation */
@@ -76,6 +78,7 @@
   --accent-soft:#3c2725;--accent-border:#6d3f39;--accent-ring:rgba(255,123,107,.32);
   --success:#5fd38a;--success-soft:#1f3328;--warning:#ffb547;--warning-soft:#3a2f1c;--warning-border:#6a5229;
   --danger:#ff6b61;--danger-soft:#3e2326;--danger-border:#70383c;
+  --step-scan:#5cc2ee;--step-read:#a0a4ff;--step-compare:#c79bf2;--step-copy:#4fd8c4;--step-verify:#a6dd62;--step-move:#f08cd0;--step-tidy:#7fa8ff;--step-delete:#f08aa8;
   --storage-used:#6e6e73;
   --shadow-1:0 1px 2px rgba(0,0,0,.3);
   --shadow-2:0 2px 10px rgba(0,0,0,.32),0 1px 2px rgba(0,0,0,.3);
@@ -1304,3 +1307,25 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .duplicate-pager{display:flex;align-items:center;justify-content:center;gap:.75rem}
 .settings-fieldset:disabled .settings-section,.segmented[title]:has(button:disabled){opacity:.5;cursor:not-allowed}
 .settings-fieldset:disabled :disabled,.segmented[title] button:disabled{cursor:not-allowed}
+
+/* Step colors: the same step has the same color in the card, the step list, the sidebar and the dashboard. */
+[data-step=scan]{--step:var(--step-scan)}[data-step=read]{--step:var(--step-read)}[data-step=compare]{--step:var(--step-compare)}[data-step=copy]{--step:var(--step-copy)}
+[data-step=verify]{--step:var(--step-verify)}[data-step=move]{--step:var(--step-move)}[data-step=tidy]{--step:var(--step-tidy)}[data-step=delete]{--step:var(--step-delete)}
+.progress-display[data-step] .progress-track>span{background:var(--step)}
+.progress-display[data-step] .progress-count,.progress-display[data-step] .progress-percent,.progress-display[data-step] .progress-speed{color:var(--step)}
+.progress-display[data-step] .progress-count{font-weight:550}
+.progress-display[data-step] .progress-speed{font-weight:600}
+.source-progress-calm[data-step] .progress-track>span{background:var(--success)}
+.source-steps li[data-step][data-state=active]{color:var(--step);font-weight:700}
+.source-steps li[data-step][data-state=active] .step-mark{box-shadow:inset 0 0 0 1.5px var(--step);color:var(--step)}
+.source-steps li[data-step][data-state=active] .step-percent{color:var(--step)}
+.source-steps li[data-step][data-state=done]{color:color-mix(in srgb,var(--step) 78%,var(--label-secondary))}
+.source-steps li[data-step][data-state=done] .step-mark{background:color-mix(in srgb,var(--step) 80%,var(--surface))}
+.source-steps li[data-step][data-state=pending]{color:color-mix(in srgb,var(--step) 45%,var(--label-tertiary))}
+.mini-steps i[data-step][data-state=active]{color:var(--step);box-shadow:inset 0 0 0 1.5px var(--step)}
+.mini-steps i[data-step][data-state=done]{background:color-mix(in srgb,var(--step) 80%,var(--surface))}
+
+/* The file name has its own full-width line under the stats: its length never moves or resizes them. */
+.progress-display>.progress-file{display:block;width:100%;max-width:100%;min-width:0;height:1.3em;line-height:1.3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.progress-count,.progress-speed,.progress-elapsed,.progress-eta{font-variant-numeric:tabular-nums}
+.progress-percent{min-width:3.6ch;text-align:right;font-variant-numeric:tabular-nums}
