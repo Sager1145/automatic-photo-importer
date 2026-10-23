@@ -881,6 +881,7 @@ export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Disp
     <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
     {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
+    {!!residue?.recoverable?.files && <p className="settings-row-note" data-testid="residue-recoverable">{t("{count} complete copies whose card file changed are kept: {folder}", { count: formatNumber(residue.recoverable.files), folder: residue.recoverable.folder ?? '' })}</p>}
     {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
     <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
   </div>;

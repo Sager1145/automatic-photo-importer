@@ -740,6 +740,7 @@ Not checked yet.|尚未检查。|尚未檢查。|まだ確認していません�
 No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファイルはありません。
 Clean up|清理|清理|クリーンアップ
 {count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
+{count} complete copies whose card file changed are kept: {folder}|{count} 个完整副本的存储卡文件已更改，已保留：{folder}|{count} 個完整副本的記憶卡檔案已變更，已保留：{folder}|カード上のファイルが変わった完全なコピー {count} 個を保管しています：{folder}
 Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
 Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
