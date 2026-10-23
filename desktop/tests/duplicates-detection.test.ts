@@ -9,7 +9,7 @@ import { destinationIndex, dropDestinationIndexes } from '../core/destination-in
 import { identity } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
 import { buildGroups, candidates, classify, comparable, exifKey } from '../duplicate-rules';
-import type { DuplicateExif, DuplicateFile, Metadata } from '../shared';
+import type { DuplicateExif, DuplicateFile, DuplicateGroup, Metadata } from '../shared';
 
 const exif = (patch: Partial<DuplicateExif> = {}): DuplicateExif => ({ date: '2024-05-06T07:08:09.12', camera: 'Nikon Z f', serial: '3000123', shutterCount: '1001', width: 6048, height: 4032, lens: '24-70mm', ...patch });
 const file = (name: string, patch: Partial<DuplicateFile> = {}): DuplicateFile => ({ path: name, size: 1000, kind: 'JPEG', edited: false, birth: 1, ctime: 1, ...patch });
@@ -257,4 +257,16 @@ test('duplicate MOVs of two copies of one Live Photo are found at import time', 
   assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.MOV')) && (names as string[]).length === 2), `MOV pair grouped: ${JSON.stringify(groups)}`);
   assert.ok(groups.some(([, names]) => (names as string[]).every(name => name.endsWith('.HEIC')) && (names as string[]).length === 2), `HEIC pair grouped: ${JSON.stringify(groups)}`);
   assert.equal(groups.length, 2, 'a still and its own movie are never grouped together');
+});
+
+test('buildGroups scales linearly: 100k files in one class group in under 2 s with a stable order', () => {
+  const files: DuplicateFile[] = [];
+  for (let i = 0; i < 100_000; i++) files.push(file(`/lib/d${i % 500}/IMG_${String(i >> 1).padStart(6, '0')}.jpg`, { sha256: `sha${i >> 1}` }));
+  // CPU time of this process, best of three: wall time is noisy on a busy machine, and the old quadratic code took minutes.
+  let elapsed = Infinity, groups: DuplicateGroup[] = [];
+  for (let run = 0; run < 3 && elapsed >= 2000; run++) { const started = process.cpuUsage(); groups = buildGroups(files); const used = process.cpuUsage(started); elapsed = Math.min(elapsed, (used.user + used.system) / 1000); }
+  assert.equal(groups.length, 50_000);
+  assert.ok(groups.every(group => group.files.length === 2));
+  assert.deepEqual(groups[0]!.files.map(f => f.sha256), ['sha0', 'sha0']);
+  assert.ok(elapsed < 2000, `buildGroups took ${Math.round(elapsed)} ms`);
 });
