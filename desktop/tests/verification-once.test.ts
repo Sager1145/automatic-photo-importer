@@ -6,6 +6,7 @@ import path from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
 import * as core from '../core/index';
 import {organizeByCopy} from './fixtures/records';
+import type {DestinationOutcome} from '../core/destinations';
 
 // Each file is read whole, so reads are counted in whole files: what each flow reads, by role.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -207,7 +208,7 @@ test('a stopped import still remembers its checksums, and the next plan does not
  const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const {plans:[transfer]}=await core.plan(card,[root],options,none);
  const control=new AbortController(),verified:Record<string,{sha256:string;identity:string}>={};
- const stopped=await rememberingVerified(verified,()=>rememberImported(store,'card-volume',card,verified),()=>core.execute(transfer!,control.signal,undefined,{onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};control.abort();}})).then(()=>false,error=>{if(error?.name!=='AbortError')throw error;return true;});
+ const stopped=await rememberingVerified(verified,()=>rememberImported(store,'card-volume',card,verified),()=>core.execute(transfer!,control.signal,undefined,{onFileOutcome:outcome=>{verified[outcome.source]={sha256:outcome.sha256,identity:outcome.sourceIdentity!};control.abort();}})).then(()=>false,error=>{if(error?.name!=='AbortError')throw error;return true;});
  assert.equal(stopped,true);assert.ok(Object.keys(verified).length>0);
  const other=path.join(base,'other');await fs.mkdir(other);
  const reads=countReads(t,file=>file===first?'first':file===second?'second':undefined);
@@ -238,14 +239,14 @@ test('on exFAT the destination is still read twice per job that skips it',async 
 // Only a source this job read itself (a streamed copy) carries its identity into Delete originals. A file found
 // already in the backup was matched by a checksum from planning, so its source is read again before deletion.
 test('delete originals reads the source of a file the import found already in the backup',async t=>{
- const {deleteOriginals,recordVerified,verifiedOriginals}=await import('../core/originals');
+ const {deleteOriginals,verifiedOriginals}=await import('../core/originals');
  const base=await folder(t,'verify-once-skipped-'),card=path.join(base,'card'),root=path.join(base,'backup'),source=path.join(card,'A.JPG');
  await photo(source,Buffer.alloc(SIZE,7));await fs.mkdir(root);
  const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const job=async()=>{
-  const {plans:[transfer]}=await core.plan(card,[root],options,none),verified={};
-  const result=await core.execute(transfer!,undefined,undefined,{onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed)});
-  return {result,files:verifiedOriginals(verified,transfer!.entries)};
+  const {plans:[transfer]}=await core.plan(card,[root],options,none),outcomes=new Map<string,DestinationOutcome[]>();
+  const result=await core.execute(transfer!,undefined,undefined,{onFileOutcome:outcome=>{outcomes.set(outcome.source,[{...outcome,destinationSlot:0}]);}});
+  return {result,files:verifiedOriginals(outcomes,[transfer!]).files};
  };
  const copied=await job(),skipped=await job();
  assert.equal(copied.result.copied,1);assert.equal(skipped.result.skipped,1);

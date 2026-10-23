@@ -7,7 +7,7 @@ import { plan } from '../core/index';
 import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
 import { destinationIndex, dropDestinationIndexes, indexTarget, provablySame, statRecord } from '../core/destination-index';
 import type { BigIntStats } from 'node:fs';
-import { identity } from '../core/paths';
+import { identity, statKey } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
 import { buildGroups, candidates, classify, comparable, exifKey } from '../duplicate-rules';
 import type { DuplicateExif, DuplicateFile, DuplicateGroup, Metadata } from '../shared';
@@ -181,10 +181,15 @@ test('recordPlanDuplicates keeps what planning found per library and never delet
   const planned = await plan(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, reader(table));
   const entries = planned.plans[0]!.entries;
   await write(root, '2024/202405/Nikon Z f/A.JPG', bytes); await write(root, '2024/202405/Nikon Z f/B.JPG', bytes);
-  const destinationOf = (from: string) => entries.find(entry => entry.source === from)?.destination;
-  await recordPlanDuplicates(root, planned.duplicates!, destinationOf);
+  const placed = async (from: string) => { const destination = entries.find(entry => entry.source === from)!.destination; return [from, { destination, identity: statKey(await fs.lstat(destination, { bigint: true })) }] as const; };
+  const verified = new Map(await Promise.all(entries.map(entry => placed(entry.source))));
+  // B changes after the import verified it: it gets nothing.
+  const changed = verified.get(entries.find(entry => entry.source.endsWith('B.JPG'))!.source)!;
+  await write(root, '2024/202405/Nikon Z f/B.JPG', 'other bytes');
+  await recordPlanDuplicates(root, planned.duplicates!, from => verified.get(from));
   const store = await duplicateStore(await fs.realpath(root), await identity(root));
-  assert.deepEqual([...store.files.keys()].sort(), ['2024/202405/Nikon Z f/A.JPG', '2024/202405/Nikon Z f/B.JPG']);
+  assert.deepEqual([...store.files.keys()].sort(), ['2024/202405/Nikon Z f/A.JPG']);
+  assert.notEqual(statKey(await fs.lstat(changed.destination, { bigint: true })), changed.identity);
   assert.ok([...store.files.values()].every(record => record.exif && !('sha256' in record)), 'EXIF is recorded; digests belong to the destination index');
   assert.equal((await fs.readdir(path.join(root, '2024/202405/Nikon Z f'))).length, 2, 'nothing was removed');
   // A second library gets nothing from the first.

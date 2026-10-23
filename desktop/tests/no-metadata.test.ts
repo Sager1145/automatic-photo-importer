@@ -42,7 +42,7 @@ test('import keep: unknown files are not copied, known origins are, and nothing 
   assert.equal(found.noMetadata?.handling,'keep');
   assert.ok(entries(found).find(entry=>entry.source.endsWith('SHOT_4.PNG'))!.destination.includes(path.join('2021','202103','Screenshots')));
   const verified:string[]=[];
-  const result=await execute(found.plans[0]!,undefined,undefined,{verify:true,onVerified:source=>verified.push(path.basename(source))});
+  const result=await execute(found.plans[0]!,undefined,undefined,{verify:true,onFileOutcome:outcome=>verified.push(path.basename(outcome.source))});
   assert.deepEqual(result.errors,[]);
   assert.deepEqual(verified.sort(),['IMG_1.JPG','SHOT_4.PNG']);
   for(const name of ['NOCAM_2.JPG','SNAP_3.PNG','BROKEN_5.JPG'])assert.equal(await exists(path.join(f.source,'DCIM',name)),true);

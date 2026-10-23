@@ -113,7 +113,7 @@ test('a skipped file is reported verified at the old path',async t=>{
  await f.put(path.join(f.source,'A.JPG'),data);const existing=await f.put(path.join(f.old,'A.JPG'),data);
  const {plans}=await plan(f.source,[f.root],options,metadata);
  const seen:string[]=[];
- await execute(plans[0]!,undefined,undefined,{onVerified:source=>{seen.push(source);}});
+ await execute(plans[0]!,undefined,undefined,{onFileOutcome:outcome=>{seen.push(outcome.source);}});
  assert.deepEqual(seen,[path.join(f.source,'A.JPG')]);
  assert.equal(plans[0]!.entries.find(entry=>entry.source===seen[0])!.destination,existing);
 });

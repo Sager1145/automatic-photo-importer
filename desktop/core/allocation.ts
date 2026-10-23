@@ -1,5 +1,6 @@
 import type {DestinationSpace,PlanEntry,Preferences,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
+import {volumeOf} from '../platform/volumes';
 
 /** A destination's plans: its backup folder and, in the video-root layout, its video folder. */
 export function destinationParts(plan:TransferPlan):TransferPlan[]{return plan.videos?[plan,plan.videos]:[plan];}
@@ -72,9 +73,12 @@ export function requiredOrganizationSpace(plan:TransferPlan):number{
  return 2*destinationEntries(plan).reduce((largest,entry)=>Math.max(largest,entry.size),0);
 }
 
+/** The key space is reserved under: the mounted volume of the snapshot that holds `target`, so every folder on one
+ * physical volume, with a UUID or without, draws on the same free space. A path outside every listed mount is its own. */
+export function reservationVolume(volumes:readonly {path:string}[],target:string):string{return volumeOf(volumes,target)?.path??target;}
 /** Free space per destination volume after the space other jobs have claimed on it. A source on a
  * destination's own drive claims nothing extra: its files already sit in the used space, and the
  * copy draws on the same free space every other job writing to that drive shares. */
-export function freeAfterReservations(owner:string,infos:{free?:number;volumeId?:string;path:string}[],reservations:ReadonlyMap<string,readonly {volume:string;bytes:number}[]>):number[]{
- return infos.map(info=>{let free=info.free??0;for(const [id,held] of reservations)if(id!==owner)for(const item of held)if(item.volume===(info.volumeId??info.path))free-=item.bytes;return Math.max(0,free);});
+export function freeAfterReservations(owner:string,infos:{free?:number;path:string}[],volumes:readonly {path:string}[],reservations:ReadonlyMap<string,readonly {volume:string;bytes:number}[]>):number[]{
+ return infos.map(info=>{const volume=reservationVolume(volumes,info.path);let free=info.free??0;for(const [id,held] of reservations)if(id!==owner)for(const item of held)if(item.volume===volume)free-=item.bytes;return Math.max(0,free);});
 }

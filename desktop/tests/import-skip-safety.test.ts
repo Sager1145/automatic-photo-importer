@@ -110,7 +110,7 @@ test('a Live Photo whose MOV sits in the video root runs through both plans of a
  const {dropDestinationIndexes}=await import('../core/destination-index');dropDestinationIndexes();
  const {plans}=await plan(f.source,[f.root],video,live);
  const verified:string[]=[];
- const result=await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:()=>{},settled:()=>{},onVerified:source=>{verified.push(source);}});
+ const result=await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:()=>{},settled:()=>{},onFileOutcome:outcome=>{verified.push(outcome.source);}});
  assert.deepEqual(result.errors,[]);assert.equal(result.copied,0);assert.equal(result.skipped,2);assert.equal(result.routed,1);
  assert.deepEqual(verified.sort(),[path.join(f.source,'IMG_1.HEIC'),path.join(f.source,'IMG_1.MOV')]);
  assert.deepEqual(olderRulesPaths(plans).map(item=>item.existing),[existing]);
@@ -136,7 +136,7 @@ test('Delete originals for a file found under an older rule re-hashes the old pa
  const original=await f.put(path.join(f.source,'A.JPG'),data);const existing=await f.put(path.join(f.old(f.root),'A.JPG'),data);
  const {plans}=await plan(f.source,[f.root],options,metadata);
  const verified:Record<string,{sha256:string}>={};
- await execute(plans[0]!,undefined,undefined,{onVerified:(file,sha256)=>{verified[file]={sha256};}});
+ await execute(plans[0]!,undefined,undefined,{onFileOutcome:outcome=>{verified[outcome.source]={sha256:outcome.sha256};}});
  const entry=plans[0]!.entries[0]!;
  const files:VerifiedOriginal[]=[{source:original,size:entry.size,sha256:verified[original]!.sha256,destinations:[entry.destination]}];
  assert.deepEqual(files[0]!.destinations,[existing]);

@@ -8,7 +8,7 @@ import { inventory } from './inventory';
 import { DRIVE_BACKUPS } from './drive-backup';
 import { APP_DATA_FOLDER, LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './legacy-names';
 import { PROBLEM_FILES_FOLDER } from '../shared';
-import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
+import { checkAbort, code, directory, identity, statKey, syncDirectory, within } from './paths';
 import { indexLocations, indexTarget, provablySame, statRecord, type StatRecord } from './destination-index';
 import { toMessage, type Message } from '../messages';
 import { openV5, sealV5 } from './app-store';
@@ -206,14 +206,16 @@ export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanO
  * computed for candidates. Paths are the source files'. */
 export interface PlanDuplicates {files:DuplicateFile[];groups:DuplicateGroup[];}
 /** Record the EXIF a finished plan read, for the files it placed in this library, so a later scan does not read it
- * again. `destinationOf` maps a source path to its path in this library (absent: not in it). Never deletes anything. */
-export async function recordPlanDuplicates(root:string,found:PlanDuplicates,destinationOf:(source:string)=>string|undefined):Promise<void> {
+ * again. `placed` maps a source path to where the import verified it in this library and that file's identity then (absent:
+ * not there); a file changed since gets nothing. Never deletes anything. */
+export async function recordPlanDuplicates(root:string,found:PlanDuplicates,placed:(source:string)=>{destination:string;identity:string}|undefined):Promise<void> {
   const library=await directory(root),rootIdentity=await identity(library),store=await duplicateStore(library,rootIdentity);
   for(const item of found.files) {
-    const destination=destinationOf(item.path);if(!destination) continue;
-    const relative=relativeOf(library,destination);if(relative.startsWith('..')) continue;
-    const stat=await fs.lstat(destination,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
-    if(!stat?.isFile()) continue;
+    const at=placed(item.path);if(!at) continue;
+    const relative=relativeOf(library,at.destination);if(relative.startsWith('..')) continue;
+    const stat=await fs.lstat(at.destination,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
+    // Only the very file the import verified there gets the source's kind and EXIF.
+    if(!stat?.isFile()||statKey(stat)!==at.identity) continue;
     store.files.set(relative,{stat:statRecord(stat),kind:item.kind,edited:item.edited,...(item.exif?{exif:item.exif}:{})});store.mark();
   }
   await store.flush();

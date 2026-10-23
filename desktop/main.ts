@@ -16,9 +16,9 @@ import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type Organi
 import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
-import {executeDestinations} from './core/destinations';
+import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {routingChanged,rememberRouting} from './platform/routing-memory';
-import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,placedEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
+import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
@@ -27,7 +27,7 @@ import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
 import {deviceHasRoom} from './core/devices';
-import {loadScanMemory,saveScanMemory,loadImported,rememberImported,rememberingVerified} from './platform/scan-memory';
+import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {loadPlacement,placedMatches,placementId,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
@@ -57,7 +57,7 @@ import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
 import {sourcePolicy,freshOrganizeOptions} from './run-policy';
-import {measureOriginals,deleteOriginals,recordVerified,verifiedOriginals,type ImportVerified,type VerifiedOriginal} from './core/originals';
+import {measureOriginals,deleteOriginals,verifiedOriginals,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
@@ -464,7 +464,11 @@ function rememberRouted(plans:TransferPlan[],prefs:Preferences,useFileDate=false
  if(qa||plans.some(plan=>plan.drive))return;
  void rememberRouting(app.getPath('userData'),plans.flatMap(plan=>destinationParts(plan).map(part=>part.rootIdentity)),routingOf(prefs,useFileDate)).catch(()=>{/* Only a cache: the next import looks. */});
 }
-function rememberPlaced(plans:TransferPlan[],prefs:Preferences,useFileDate=false){
+/** Outcomes of one job, by source: what each file actually came to at each destination. */
+type Outcomes=Map<string,DestinationOutcome[]>;
+/** Remembers where an import's files actually are as in place; an organization's memory is dropped instead (its
+ * plan is not where files ended up), and the next folder check reads that library again. */
+function rememberPlaced(plans:TransferPlan[],prefs:Preferences,outcomes:Outcomes|undefined,useFileDate=false){
  if(qa)return;
  inspecting++;
  const work=placementWork.then(async()=>{
@@ -472,7 +476,10 @@ function rememberPlaced(plans:TransferPlan[],prefs:Preferences,useFileDate=false
    for(const [index,plan] of plans.entries()){
     if(plan.drive||!prefs.destinations[index])continue;
     const {library,id,scope}=placementOf(prefs,index,useFileDate);
-    await rememberEntries(app.getPath('userData'),id,scope,library.source,[library.root,...(library.videoRoot?[library.videoRoot]:[])],placedEntries(plan));
+    if(!outcomes){await replacePlacement(app.getPath('userData'),id,scope,[]);continue;}
+    // A file found where older rules filed it is not where the rules put it.
+    const placed=[...outcomes.values()].flat().filter(item=>item.destinationSlot===index&&item.disposition!=='routed');
+    await rememberEntries(app.getPath('userData'),id,scope,library.source,[library.root,...(library.videoRoot?[library.videoRoot]:[])],placed);
    }
   }finally{inspecting--;void releaseIfIdle();}
  }).catch(()=>{/* Only a cache: the next check reads everything. */});
@@ -633,8 +640,8 @@ function snapshotPreferences(organizationDestination?:number):Preferences{
 /** The single path from a source to reserved destination plans. Reviews and
  * direct imports differ only in when the result is executed. */
 /** Free space per destination after other jobs' reservations. */
-function availableFor(owner:string,infos:DestinationStatus[]):number[]{
- return freeAfterReservations(owner,infos,reservations);
+function availableFor(owner:string,infos:DestinationStatus[],volumes:MountedVolume[]):number[]{
+ return freeAfterReservations(owner,infos,volumes,reservations);
 }
 async function prepare(owner:string,source:Source,backup:boolean,request:RunRequest,signal:AbortSignal,onCamera:(done:number,total:number)=>void,onProgress:PlanProgress,onPlanning?:()=>void):Promise<Prepared>{
  const {prefs,reorganize,sourceFolders}=request;
@@ -665,13 +672,13 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
   const {inventory,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,lookElsewhere:identities=>qa?true:routingChanged(app.getPath('userData'),identities,routingOf(prefs,request.useFileDate)),...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},...ruleOptions(prefs,request.useFileDate),...(videoRoots?{videoRoots}:{}),reuse:reusableScan(source),reorganize,sourceFolders,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
    // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.
-   const {kept,bytes}=fillFirst(first,availableFor(owner,infos)[0]!);reservations.set(owner,[{volume:infos[0]!.volumeId??infos[0]!.path,bytes}]);return kept;
+   const {kept,bytes}=fillFirst(first,availableFor(owner,infos,volumes)[0]!);reservations.set(owner,[{volume:reservationVolume(volumes,infos[0]!.path),bytes}]);return kept;
   }}:{}),...listing},p=>metadata(p,{details:false}),signal,onProgress);
   signal.throwIfAborted();
-  const available=availableFor(owner,infos);
+  const available=availableFor(owner,infos,volumes);
   // A same-drive organization moves files; it never needs room for a second library.
   const needed=reorganize?plans.map((item,index)=>{const bytes=requiredOrganizationSpace(item);if(bytes>available[index]!)throw new MessageError('error.organizeSpace',{index:index+1,size:gigabytes(bytes)});return bytes;}):allocateDestinations(plans,available,prefs.copyMode);
-  reservations.set(owner,infos.map((info,index)=>({volume:info.volumeId??info.path,bytes:needed[index]})));
+  reservations.set(owner,infos.map((info,index)=>({volume:reservationVolume(volumes,info.path),bytes:needed[index]})));
   log('detailed','plan','space-check',{destinations:infos.map((info,index)=>({path:info.path,freeBytes:info.free,availableAfterReservations:available[index],neededBytes:needed[index]})),reorganize});
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
   const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
@@ -714,7 +721,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    await stopResidueCheck();
    prepared=input;
    // A review can sit open while other jobs fill the disk; recheck before writing.
-   const available=availableFor(job.id,await Promise.all(prepared.review.plans.map(item=>volumeInfo(item.root))));
+   const volumes=await mountedVolumes(),available=availableFor(job.id,await Promise.all(prepared.review.plans.map(item=>volumeInfo(item.root,volumes))),volumes);
    const required=prepared.review.kind==='reorganize'?requiredOrganizationSpace:requiredTransferSpace;
    if(prepared.review.plans.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
@@ -752,20 +759,26 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
   job.phase='copying';
-  // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails.
-  const verified:Record<string,ImportVerified>={},volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
-  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=await rememberingVerified(verified,async()=>{if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,verified);},()=>executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity,streamed)=>recordVerified(verified,file,sha256,identity,streamed),
+  // What each file actually came to at each destination: the one record duplicates, placement, the source checksums and Delete originals use.
+  const outcomes:Outcomes=new Map(),volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
+  let executed;
+  try{executed=await executeDestinations(plans,{
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onFileOutcome:outcome=>{const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
-  }));addErrors(job,...errors.map(text));recordIssues(job,warnings);
+  });}finally{
+   // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails. Only a cache.
+   if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,importedSums(outcomes)).catch(()=>{});
+  }
+  const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=executed;
+  addErrors(job,...errors.map(text));recordIssues(job,warnings);
   for(const error of errors)log('normal','job','error',{message:text(error)});for(const issue of warnings)log('normal','job',issue.severity==='error'?'error':'warning',{...issue});
   // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
   const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];
   if(appleDouble)log('normal','appledouble','summary',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,warnings:appleDouble.warnings,folderWarnings:appleDouble.folderWarnings,failures:appleDouble.failures.slice(0,50),keptFiles:appleDouble.keptFiles.slice(0,50)});recordIssues(job,sidecarIssues);
-  await recordDuplicates(plans,prepared.duplicates,reorganize);
-  rememberPlaced(plans,prefs,prepared.useFileDate);
+  await recordDuplicates(plans,prepared.duplicates,outcomes);
+  rememberPlaced(plans,prefs,reorganize?undefined:outcomes,prepared.useFileDate);
   if(errors.length===0)rememberRouted(plans,prefs,prepared.useFileDate);
   // Files actually verified where an older rule filed them (a family that failed is not counted).
   const olderRules=routed??0;
@@ -779,8 +792,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&job.source.transport==='folder'&&!prepared.stage){
-   const files=verifiedOriginals(verified,plans.flatMap(item=>destinationEntries(item)));
-   if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;await saveReport('verified-originals.json',{root:job.source.path,files});}
+   const {files,withheld}=verifiedOriginals(outcomes,plans);
+   for(const item of withheld)log('detailed','originals','withheld',{path:item.source,reason:item.reason},job.id);
+   if(files.length){importedOriginals.set(job.id,{root:job.source.path,files});job.verifiedOriginals=files.length;}
+   if(files.length||withheld.length)await saveReport('verified-originals.json',{root:job.source.path,files,withheld});
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:gigabytes(releasedBytes??0)}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message('job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),removed&&message('job.mirrorRemoved',{count:removed}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail);
@@ -796,16 +811,22 @@ async function writeExcerpt(job:Job,directory:string|undefined,alsoIds:(string|u
  if(!directory)return;const logger=activeLogger();if(!logger)return;
  try{phaseLog.observe(state.jobs,Date.now());await logger.excerpt(job.id,path.join(directory,'log-excerpt.jsonl'),{...(job.startedAt?{since:Date.parse(job.startedAt)-60000}:{}),...(alsoIds.some(Boolean)?{alsoIds:alsoIds.filter((id):id is string=>!!id)}:{})});}catch{/* Logging never changes a job. */}
 }
-/** Duplicate detection, recorded only: the stage 1 findings of the plan, for the files this job placed. It never
- * scans the library (stage 2 runs only from the Remove duplicates page), so the drive is not held after the
- * copy. Best effort; it never fails or changes a job and never deletes a file. */
-async function recordDuplicates(plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+/** The source checksums this job verified, for the next plan to recognise unchanged sources: never a copy it did not read back. */
+function importedSums(outcomes:Outcomes):Record<string,{sha256:string;identity:string}>{
+ const sums:Record<string,{sha256:string;identity:string}>={};
+ for(const [source,list] of outcomes){const found=list.find(item=>item.verification==='content-verified'&&item.sourceIdentity!==undefined);if(found)sums[source]={sha256:found.sha256,identity:found.sourceIdentity!};}
+ return sums;
+}
+/** Duplicate detection, recorded only: the stage 1 findings of the plan, for the files this job verified where they
+ * actually are. It never scans the library (stage 2 runs only from the Remove duplicates page), so the drive is not held
+ * after the copy. Best effort; it never fails or changes a job and never deletes a file. */
+async function recordDuplicates(plans:TransferPlan[],found:PlanDuplicates|undefined,outcomes:Outcomes){
  if(!found)return;
  try{
-  for(const part of plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])])){
-   const moves=new Map(part.entries.map(entry=>[entry.source,entry.destination]));
-   // An organization leaves a file where it is when it already is where the rules put it.
-   await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
+  for(const part of plans.flatMap(item=>destinationParts(item))){
+   const placed=new Map<string,{destination:string;identity:string}>();
+   for(const [source,list] of outcomes){const item=list.find(outcome=>outcome.root===part.root&&outcome.finalIdentity!==undefined);if(item)placed.set(source,{destination:item.destination,identity:item.finalIdentity!});}
+   await recordPlanDuplicates(part.root,found,source=>placed.get(source));
   }
  }catch{/* Only a record. */}
 }

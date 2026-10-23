@@ -25,7 +25,7 @@ async function imported(t:test.TestContext){
  for(const name of ['A','B','C'])await fs.writeFile(path.join(source,'DCIM',name+'.JPG'),name.repeat(100+name.charCodeAt(0)));
  const verified=new Map<string,string>();
  const [transfer]=(await plan(source,[root],options,metadata)).plans;
- await execute(transfer!,undefined,undefined,{onVerified:(file,sha256)=>{verified.set(file,sha256);}});
+ await execute(transfer!,undefined,undefined,{onFileOutcome:outcome=>{verified.set(outcome.source,outcome.sha256);}});
  const files:VerifiedOriginal[]=destinationEntries(transfer!).map(entry=>({source:entry.source,size:entry.size,sha256:verified.get(entry.source)??'',destinations:[entry.destination]}));
  return {base,source,root,files};
 }
