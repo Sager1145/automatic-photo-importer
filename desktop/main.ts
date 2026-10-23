@@ -21,7 +21,7 @@ import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
-import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting} from './platform/metadata';
+import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
