@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { thumbnail, type ThumbnailDecoders } from '../platform/thumbnails';
+import { thumbnail, pruneThumbnails, type ThumbnailDecoders } from '../platform/thumbnails';
 import { categorize } from '../renderer/exif-categories';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
@@ -49,4 +49,21 @@ test('full EXIF is grouped into curated categories with friendly units and no bi
   assert.deepEqual(by.maker, { 'Shutter count': '1234' });
   assert.deepEqual(by.file, { 'File size': '2 KB' });
   assert.deepEqual(categories.map(c => c.title), ['Exposure', 'Camera & Lens', 'Date & Time', 'Location', 'Image', 'Maker Notes', 'File']);
+});
+
+test('the thumbnail cache is pruned least recently used first down to its cap', async t => {
+  const base = await scratch(t), cache = path.join(base, 'cache');
+  await fs.mkdir(cache);
+  const now = Date.now() / 1000;
+  for (const [index, name] of ['a', 'b', 'c', 'd', 'e'].entries()) {
+    await fs.writeFile(path.join(cache, `${name}.jpg`), Buffer.alloc(100));
+    await fs.utimes(path.join(cache, `${name}.jpg`), now - (5 - index) * 100, now - (5 - index) * 100);
+  }
+  await fs.writeFile(path.join(cache, 'note.txt'), Buffer.alloc(1000));
+  // `a` is the oldest but was used just now (a cache hit touches the file), so `b` and `c` go first.
+  await fs.utimes(path.join(cache, 'a.jpg'), now, now);
+  assert.deepEqual(await pruneThumbnails(cache, 1000), { removed: 0, bytes: 0 });
+  assert.deepEqual(await pruneThumbnails(cache, 300), { removed: 2, bytes: 200 });
+  assert.deepEqual((await fs.readdir(cache)).sort(), ['a.jpg', 'd.jpg', 'e.jpg', 'note.txt']);
+  assert.deepEqual(await pruneThumbnails(path.join(base, 'missing'), 1), { removed: 0, bytes: 0 });
 });
