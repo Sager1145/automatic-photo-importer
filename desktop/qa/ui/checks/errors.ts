@@ -50,6 +50,8 @@ export const errorChecks=():Check[]=>[
   for(const layers of during)for(const layer of layers)assert.deepEqual(layer,{...layer,topLayer:true,misses:[],transition:false});
  }},
  {id:'errors-above-sheets-and-animations',stage:'errors',title:'Running animations never paint above an error toast, and the toast stays above a sheet opened before or after it',covers:['animation layering','error toasts always on top','popovers and sheets'],skip:needsHook,run:async h=>{
+  // The review for the sheet is built first: a real preview would wait behind synthetic jobs that never finish.
+  await h.action({type:'preview',sourceId:'fixture:1'});await h.until('per-file review preview',"document.querySelector('.review-source-button')");
   // Spinners, indeterminate bars and meters animate on the desk while the toast is up.
   h.hooks!.addJobs([...manyRunningJobs(4),syntheticJob('discovering',{phase:'discovering'})]);
   // With reduced motion nothing animates; the toast must still win every hit test.
@@ -60,7 +62,6 @@ export const errorChecks=():Check[]=>[
   // A sheet opened after the toast goes beneath it, and a toast raised over an open sheet goes above it. A modal sheet
   // makes the rest of the page inert, so hit tests pass through the toast: the paint order is read from the order
   // elements entered the top layer instead.
-  await h.action({type:'preview',sourceId:'fixture:1'});await h.until('per-file review preview',"document.querySelector('.review-source-button')");
   h.notes.qaTopLayer=true;
   try{for(const order of ['toast first','sheet first']){
    await h.closeOverlays();

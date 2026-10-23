@@ -43,8 +43,9 @@ Each check is a named entry (`id`, `stage`, `title`, `covers`) and runs on its o
   not run; the report is always written.
 - **Failures don't stop the run.** The failure is recorded with a screenshot and the state, the baseline is restored
   and the next check runs.
-- **Features not on this build skip themselves** (`skip`, or `SkipCheck` when only the page can tell): paused bar
-  colour, layered bars and detailed logging today. They start checking as soon as the feature is merged.
+- **Features not on this build skip themselves** (`skip`, or `SkipCheck` when only the page can tell): detailed logging
+  today. It starts checking as soon as the feature is merged. Paused bar colour and layered bars are on `main` and are
+  hard checks.
 
 ## Stages and standing rules
 
@@ -60,20 +61,20 @@ Each check is a named entry (`id`, `stage`, `title`, `covers`) and runs on its o
 | recovery | recovery journal recheck, leftover files counter, window reload |
 | rules | sweep of buttons and clipping, dashboard file name, stable stats, paused colours, stage colours, layered bars, live counters, locales, themes and gallery |
 | stress | 50,000 grouped errors, 60 running jobs, long file names: navigation under 500 ms |
-| final | heartbeat, originals untouched |
+| final | heartbeat, stall watch, originals untouched |
 
 | Standing rule | Checks |
 |---|---|
 | No super-wide buttons, at text sizes 1, 1.25, 1.5, 1.6, 1.75, 2 | `rules-sweep` (3 viewports × 6 sizes × 6 pages and 6 categories) |
 | Bars shrink and never clip | `rules-sweep`, `rules-locales`, `import-storage-strips`, `import-review-footer`, `rules-layered-bars` |
 | Animations stay below popovers and `[data-error-layer]`; errors always on top | `boot-splash-gone`, `nav-transition-layers`, `errors-on-top-200`, `errors-above-sheets-and-animations` |
-| Every long step shows a live, moving counter | `final-heartbeat` (samples every 250 ms, fails a real step frozen for more than 10 s), `recovery-leftovers-counter`, `organization-review-progress` |
+| Every long step shows a live, moving counter | `final-heartbeat` (samples the main process every 250 ms and fails a real step frozen for more than 10 s; a gap between samples is a blocked main thread and counts as frozen time), `final-stall-watch` (`desktop/qa/stall-watch.ts`, fed every state the window receives, polled each second), `recovery-leftovers-counter`, `organization-review-progress` |
 | Everything updates (no frozen counters) | `rules-live-counters` (each update must reach the card, the overview total and files, the organization and the sidebar) |
 | No file name in the overall dashboard | `rules-dashboard-no-file-name` |
 | The file-name row never moves the stats | `rules-file-row-stable` |
 | Locked settings greyed out with a tooltip, no error | `settings-locked` |
 | Paused bars turn yellow | `rules-paused-steps`, `rules-paused-bar` |
-| Stage-coloured (layered) bars | `rules-stage-colours`, `rules-layered-bars` |
+| Stage-coloured (layered) bars | `rules-stage-colours` (an organization stepped through all eight stages: one layer per stage, the top in its colour), `rules-layered-bars` |
 | Light and dark mode | `settings-system-appearance`, `settings-explicit-appearance`, `rules-stage-colours`, `rules-themes-gallery` |
 | Reduced motion | `nav-reduced-motion-emulated` (every run), `nav-transitions` and `nav-motion-preference` with `--reduced-motion` |
 | Four locales without missing keys or overflow | `rules-locales`, `settings-languages`, `import-scan`, `import-metadata` |

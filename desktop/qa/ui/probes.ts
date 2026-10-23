@@ -87,8 +87,9 @@ export function latinPhrases(): string[] {
  return [...out];
 }
 
-/** Each visible progress display: its step colour, the painted fill colour and the warning colour, as rgb strings. */
-export function progressDisplays(): {testid:string;step:string;paused:boolean;fill:string;stepColor:string;warning:string;layers:{step:string;fill:string}[];cardText:string}[] {
+/** Each visible progress display: its step colour, the painted colour of its top (last) layer, every layer with its own
+ * step colour, and the warning colour, as rgb strings. */
+export function progressDisplays(): {testid:string;step:string;paused:boolean;fill:string;stepColor:string;warning:string;layers:{step:string;fill:string;stepColor:string}[];cardText:string}[] {
  const probe=document.createElement('i');document.body.append(probe);
  const resolve=(value:string)=>{probe.style.color='';probe.style.color=value;return getComputedStyle(probe).color;};
  const warning=resolve('var(--warning)');
@@ -97,16 +98,10 @@ export function progressDisplays(): {testid:string;step:string;paused:boolean;fi
   const step=display.dataset.step??'';
   const card=display.closest<HTMLElement>('article,li,section');
   return {testid:display.dataset.testid??'',step,paused:!!display.closest('[data-paused],.is-paused,[data-state=paused]')||display.dataset.state==='paused',
-   fill:fills[0]?getComputedStyle(fills[0]).backgroundColor:'',stepColor:step?resolve(`var(--step-${step})`):'',warning,
-   layers:fills.map(f=>({step:f.dataset.step??'',fill:getComputedStyle(f).backgroundColor})),cardText:(card?.textContent??'').slice(0,160)};
+   fill:fills.length?getComputedStyle(fills.at(-1)!).backgroundColor:'',stepColor:step?resolve(`var(--step-${step})`):'',warning,
+   layers:fills.map(f=>({step:f.dataset.step??'',fill:getComputedStyle(f).backgroundColor,stepColor:f.dataset.step?resolve(`var(--step-${f.dataset.step})`):''})),cardText:(card?.textContent??'').slice(0,160)};
  });
  probe.remove();return out;
-}
-
-/** True when any style rule mentions every given word in its selector (feature detection for styles not on every branch). */
-export function styleRuleMentions(words: string[]): boolean {
- const walk=(rules:CSSRuleList):boolean=>[...rules].some(rule=>rule instanceof CSSStyleRule?words.every(word=>rule.selectorText.includes(word)):'cssRules' in rule&&walk((rule as CSSGroupingRule).cssRules));
- return [...document.styleSheets].some(sheet=>{try{return walk(sheet.cssRules);}catch{return false;}});
 }
 
 /** Text that fails the minimum contrast against the background painted behind it. Disabled and faded controls are left out. */

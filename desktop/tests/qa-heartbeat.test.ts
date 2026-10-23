@@ -33,16 +33,23 @@ test('synthetic jobs injected by checks are never watched',()=>{
  assert.deepEqual(beat.freezes,[]);
 });
 
-test('time the sampler itself was starved is not counted as frozen',()=>{
+test('a blocked main thread counts as frozen time: a long gap between samples is a freeze, and is totalled as starved',()=>{
  const beat=new Heartbeat(10000,1500),job=real('a',{phase:'copying'});
- beat.sample(pulses(state([job])),0);beat.sample(pulses(state([job])),20000);beat.sample(pulses(state([job])),20500);
- assert.deepEqual(beat.freezes,[]);
+ beat.sample(pulses(state([job])),0);beat.sample(pulses(state([job])),20000);
+ assert.equal(beat.freezes.length,1);
  assert.equal(beat.starved,20000);
 });
 
-test('reviews, scans, duplicate scans and leftover checks are watched too',()=>{
- const keys=pulses(state([],{busyReview:true,scanningSources:['s'],duplicates:{scopes:[],status:'scanning',revision:0,groups:0,files:0},residue:{files:0,bytes:0,resumable:{files:0,bytes:0},checking:true}})).map(item=>item.key);
- assert.deepEqual(keys,['review','scan s','duplicates','leftover files']);
+test('a counter that moved across a long gap is not frozen',()=>{
+ const beat=new Heartbeat(10000,1500),job=real('a',{phase:'copying',completed:1});
+ beat.sample(pulses(state([job])),0);job.progress!.completed++;beat.sample(pulses(state([job])),20000);
+ assert.deepEqual(beat.freezes,[]);
+});
+
+test('reviews, scans, duplicate scans, leftover checks, the recovery list and recovery size are watched too',()=>{
+ const keys=pulses(state([],{busyReview:true,scanningSources:['s'],duplicates:{scopes:[],status:'scanning',revision:0,groups:0,files:0},residue:{files:0,bytes:0,resumable:{files:0,bytes:0},checking:true},organizationRecoveryLoading:true,recoverySize:{root:'/r',id:'x'}})).map(item=>item.key);
+ assert.deepEqual(keys,['review','scan s','duplicates','leftover files','recovery list','recovery size']);
+ assert.deepEqual(pulses(state([],{organizationRecoveryLoading:true,organizationRecoveryPaused:true})),[],'a paused listing is waiting, not stuck');
 });
 
 test('grouped error jobs carry fifty thousand grouped errors with paths capped per group',()=>{

@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {AppState,Job,Progress} from '../../../shared';
-import {pages,settingsCategories,SkipCheck,type Check,type Harness,type Page} from '../harness';
-import {brokenText,clippedControls,latinPhrases,lowContrast,progressDisplays,statsGeometry,styleRuleMentions,wideButtons} from '../probes';
+import {pages,settingsCategories,type Check,type Harness,type Page} from '../harness';
+import {brokenText,clippedControls,latinPhrases,lowContrast,progressDisplays,statsGeometry,wideButtons} from '../probes';
 import {groupedErrorJobs,LONG_NAME,syntheticJob} from '../synthetic';
 
 const needsHook=async(h:Harness)=>h.hooks?undefined:'needs the QA injection hook';
@@ -98,33 +98,37 @@ export const ruleChecks=():Check[]=>[
   await busyDesk(h);
   const displays=(await h.probe(progressDisplays)).filter(display=>display.cardText.includes('Fixture card 4'));
   assert.ok(displays.length,'the paused card shows its bar');
-  if(displays[0]!.fill!==displays[0]!.warning&&!await h.probe(styleRuleMentions,['paused','progress']))throw new SkipCheck('paused bar colour is not on this build yet');
-  assert.ok(displays.every(display=>display.fill===display.warning||display.layers.some(layer=>layer.fill===display.warning)),`paused bar is not yellow: ${JSON.stringify(displays)}`);
+  assert.ok(displays.every(display=>display.paused&&display.layers.length>0&&display.layers.every(layer=>layer.fill===display.warning)),`paused bar is not yellow: ${JSON.stringify(displays)}`);
  }},
- {id:'rules-stage-colours',stage:'rules',title:'Each step colours its bar with its own stage colour, in light and dark',covers:['per-step colours','light and dark mode'],skip:needsHook,run:async h=>{
-  const [copying]=await busyDesk(h);
-  const steps:[Progress['phase'],Progress['step']|undefined,string][]=[['planning','listing','scan'],['planning','checking','read'],['planning','comparing','compare'],['copying',undefined,'copy'],['verifying',undefined,'verify'],['copying','moving','move'],['copying','tidying','tidy'],['copying','deleting','delete']];
+ {id:'rules-stage-colours',stage:'rules',title:'Each step colours its bar with its own stage colour, in light and dark, and the passed steps stay layered beneath it',covers:['per-step colours','stage-coloured layered bars','light and dark mode'],skip:needsHook,run:async h=>{
+  // An organization runs through every stage (an import card shows only scan, copy and verify), so its card is stepped through them.
+  const organizing=(await busyDesk(h))[3]!,orgCard=`article.source-row[data-source-id=${JSON.stringify(organizing.source.id)}]`;
+  const steps:[Progress['phase'],Progress['step']|undefined,string][]=[['planning','listing','scan'],['planning','checking','read'],['planning','comparing','compare'],['copying','moving','move'],['copying',undefined,'copy'],['verifying',undefined,'verify'],['copying','tidying','tidy'],['copying','deleting','delete']];
   for(const appearance of ['light','dark'] as const){
    await h.prefs({appearance});
    const fills=new Map<string,string>();
-   for(const [phase,step,kind] of steps){
-    h.hooks!.mutate(state=>{const progress=progressOf(state,copying!.id);progress.phase=phase;if(step)progress.step=step;else delete progress.step;});
-    await h.until(`step ${kind}`,`document.querySelector('${card(2)} [data-progress-display]')?.dataset.step===${JSON.stringify(kind)}`);
-    const display=(await h.probe(progressDisplays)).find(item=>item.cardText.includes('Fixture card 2'))!;
-    assert.equal(display.fill,display.stepColor,`${appearance} ${kind} bar colour`);
-    fills.set(kind,display.fill);
+   for(const [index,[phase,step,kind]] of steps.entries()){
+    h.hooks!.mutate(state=>{const progress=progressOf(state,organizing.id);progress.phase=phase;if(step)progress.step=step;else delete progress.step;});
+    await h.until(`step ${kind}`,`document.querySelector(${JSON.stringify(orgCard+' [data-progress-display]')})?.dataset.step===${JSON.stringify(kind)}`);
+    const display=(await h.probe(progressDisplays)).find(item=>item.cardText.includes('QA synthetic/organizing'))!;
+    const top=display.layers.at(-1);
+    assert.ok(top&&top.step===kind&&top.fill===top.stepColor,`${appearance} ${kind}: the top layer is ${JSON.stringify(top)} (${JSON.stringify(display.layers)})`);
+    assert.equal(display.layers.length,index+1,`${appearance} ${kind}: one layer per stage so far: ${JSON.stringify(display.layers)}`);
+    fills.set(kind,top!.fill);
    }
    assert.equal(new Set(fills.values()).size,steps.length,`${appearance}: two steps share a colour ${JSON.stringify([...fills])}`);
   }
  }},
  {id:'rules-layered-bars',stage:'rules',title:'Layered bars stack one stage-coloured layer per step inside the track',covers:['stage-coloured layered bars'],skip:needsHook,run:async h=>{
   await busyDesk(h);
+  // The verifying card stacks its copy and verify layers.
   const displays=await h.probe(progressDisplays),layered=displays.filter(display=>display.layers.length>1);
-  if(!layered.length)throw new SkipCheck('layered bars are not on this build yet');
+  assert.ok(layered.some(display=>display.cardText.includes('Fixture card 3')),`no layered bar on the verifying card: ${JSON.stringify(displays.map(display=>({card:display.cardText.slice(0,30),layers:display.layers})))}`);
   for(const display of layered){
    const stepped=display.layers.filter(layer=>layer.step);
-   assert.ok(stepped.length,`layers carry their step: ${JSON.stringify(display)}`);
-   assert.equal(new Set(stepped.map(layer=>layer.fill)).size,new Set(stepped.map(layer=>layer.step)).size,`each step layer has its own colour: ${JSON.stringify(display.layers)}`);
+   assert.equal(stepped.length,display.layers.length,`every layer carries its step: ${JSON.stringify(display)}`);
+   if(!display.paused)for(const layer of stepped)assert.equal(layer.fill,layer.stepColor,`the ${layer.step} layer has its stage colour: ${JSON.stringify(display.layers)}`);
+   if(!display.paused)assert.equal(new Set(stepped.map(layer=>layer.fill)).size,new Set(stepped.map(layer=>layer.step)).size,`each step layer has its own colour: ${JSON.stringify(display.layers)}`);
   }
   assert.deepEqual(await h.probe(clippedControls),[],'a layer spills out of its track');
  }},

@@ -23,10 +23,15 @@ export const organizationChecks=(ctx:Context):Check[]=>[
   await seed(ctx);
   const seen:{file:string;total:number;share?:number;eta?:number;speed:number;fileRate?:number}[]=[];
   const shown:{speed:boolean;file:boolean;count:boolean}[]=[];
+  // A state sample and the bar drawn right after it: what the backend reported must be on screen.
+  const paired:{timed:boolean;named:boolean;layout:{speed:boolean;file:boolean;count:boolean}}[]=[];
   let done=false;const pending=h.action({type:'previewOrganization',destinationIndex:0}).finally(()=>{done=true;});
   while(!done){
    const progress=(await h.state()).reviewProgress;
-   if(progress){shown.push(await h.js("(()=>{const d=document.querySelector('[data-progress-display]');return {speed:!!d?.querySelector('[data-testid=speed]'),file:!!d?.querySelector('[data-testid=progress-file]'),count:!!d?.querySelector('[data-testid=progress-count]')}})()"));seen.push({file:progress.file,total:progress.total,share:progress.share,eta:progress.eta,speed:progress.speed,fileRate:progress.fileRate});}
+   // The review's own bar (the overview above it has no file row by design).
+   const layout=progress?await h.js<{speed:boolean;file:boolean;count:boolean}|null>("(()=>{const d=document.querySelector('[data-testid=planning-progress]');return d?{speed:!!d.querySelector('[data-testid=speed]'),file:!!d.querySelector('[data-testid=progress-file]'),count:!!d.querySelector('[data-testid=progress-count]')}:null})()"):null;
+   if(layout)shown.push(layout);
+   if(progress){seen.push({file:progress.file,total:progress.total,share:progress.share,eta:progress.eta,speed:progress.speed,fileRate:progress.fileRate});if(layout)paired.push({timed:progress.speed>0||(progress.fileRate??0)>0,named:!!progress.file,layout});}
    await h.frames(1);
   }
   await pending;await h.waitFor('organization review ready',async()=>(await h.state()).review!==undefined);
@@ -35,7 +40,7 @@ export const organizationChecks=(ctx:Context):Check[]=>[
   const timed=seen.filter(sample=>sample.eta!==undefined||sample.speed>0||(sample.fileRate??0)>0);
   if(timed.length)assert.ok(timed.every(sample=>sample.file!==''),'progress with a speed or time left also names its file');
   assert.ok(shown.every(layout=>layout.count),'every progress display shows its count');
-  if(timed.length)assert.ok(shown.some(layout=>layout.speed&&layout.file),'speed and file appear in the shared progress display');
+  for(const pair of paired){if(pair.timed)assert.ok(pair.layout.speed,`a reported speed is shown: ${JSON.stringify(paired)}`);if(pair.named)assert.ok(pair.layout.file,`a reported file is shown: ${JSON.stringify(paired)}`);}
  }},
  {id:'organization-apply',stage:'organization',suite:'organization',title:'Organization applies changed folder settings once, even when Apply is clicked twice',covers:['organization flow end to end','double-click safety'],budgetMs:120000,run:async h=>withBasePath(h,'organized-library',async()=>{
   await seed(ctx);

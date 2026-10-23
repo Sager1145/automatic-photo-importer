@@ -11,6 +11,10 @@ export const finalChecks=(ctx:Context):Check[]=>[
   assert.ok(beat.samples>0,'the heartbeat never sampled');
   assert.deepEqual(beat.freezes,[],'frozen counters');
  }},
+ {id:'final-stall-watch',stage:'final',title:'No running job, listing or recheck kept the same progress for more than 10 s in the states the window received',covers:['everything must update (no frozen counters)','every long step shows a live, moving counter'],run:async h=>{
+  await fs.writeFile(path.join(h.report,'stalls.json'),JSON.stringify(h.stalls.stalls(),null,2));
+  h.stalls.assertNone();
+ }},
  {id:'final-originals',stage:'final',title:'Every source original and the existing destination markers retain their exact bytes',covers:['originals are never modified'],run:async()=>{
   for(const [file,hash] of ctx.originals)assert.equal(await digest(file),hash,file);
  }},

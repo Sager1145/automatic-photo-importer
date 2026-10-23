@@ -33,6 +33,7 @@ export const navigationChecks=():Check[]=>[
    await h.waitFor('drive activity for the destination',async()=>{const s=await h.state();const first=s.preferences.destinations[0];const entry=first?s.driveActivity?.[first]:undefined;return !!entry&&entry.utilization>=0&&entry.utilization<=100&&Array.isArray(entry.history);});
    await h.until('drive activity meters',"document.querySelector('[data-testid=sidebar-activity]')&&document.querySelector('[data-testid=drive-activity]')&&document.querySelector('.import-dashboard [data-metric=drive-activity]')");
   }
+  await h.until('the sidebar destination status line',"[...document.querySelectorAll('[data-testid=sidebar-destination]')].every(row=>row.querySelector('[data-testid=sidebar-destination-status]')?.textContent.trim().length>0)&&document.querySelector('[data-testid=sidebar-destination-status]')");
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('h2')).some(h=>h.textContent.includes('Ready for your next shoot'))"),false);
   assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog')===null"),true,'All errors stays closed until asked for');
   await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");await h.shot('all-errors');

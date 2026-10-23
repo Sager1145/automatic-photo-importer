@@ -10,6 +10,7 @@ import {createStateReceiver,type StateUpdate} from '../../state-channel';
 import {lockedPreferenceKeys,settingsLocked} from '../../settings-lock';
 import {SYNTHETIC,type QaHooks} from '../hooks';
 import {Heartbeat,pulses} from './heartbeat';
+import {createStallWatch} from '../stall-watch';
 
 export type Page='Import desk'|'Drives'|'Organization'|'Duplicates'|'History'|'Settings';
 export const pages:Page[]=['Import desk','Drives','Organization','Duplicates','History','Settings'];
@@ -42,6 +43,8 @@ export class Harness {
  /** Waits and budgets stretch with the machine's load (1 to 3 times). */
  get scale():number{return Math.min(3,Math.max(1,os.loadavg()[0]!/Math.max(1,os.cpus().length)));}
  readonly heartbeat=new Heartbeat(10000);
+ /** The stall watch sees what the renderer receives, the heartbeat what the main process holds; both use a 10 s limit. */
+ readonly stalls=createStallWatch();
  private receiver=createStateReceiver();
  /** Each check runs with its own token, carried through its awaits: a check abandoned after its budget stops at its
   * next harness call even while the next check runs. */
@@ -73,7 +76,12 @@ export class Harness {
  }
  /** Runs a probe from probes.ts in the renderer. */
  probe<T,A extends unknown[]>(fn:(...args:A)=>T,...args:A):Promise<T>{return this.js<T>(`(${fn.toString()})(...${JSON.stringify(args)})`);}
- async state():Promise<AppState>{return this.receiver.apply(await this.js<StateUpdate>('window.importer.state()'))!;}
+ async state():Promise<AppState>{
+  const current=this.receiver.apply(await this.js<StateUpdate>('window.importer.state()'))!;
+  // Synthetic jobs stand still on purpose.
+  this.stalls.observe({...current,jobs:current.jobs.filter(job=>!job.id.startsWith(SYNTHETIC))});
+  return current;
+ }
  async action(value:Action):Promise<AppState>{await this.js<void>(`window.importer.action(${JSON.stringify(value)})`);return this.state();}
  /** Polls `test` until it holds. The error names what was awaited and, when given, what was last seen. */
  async waitFor(label:string,test:()=>Promise<boolean>|boolean,options:{timeoutMs?:number;seen?:()=>Promise<unknown>|unknown;interval?:number}={}):Promise<void>{
@@ -174,9 +182,11 @@ export class Harness {
  current?:string;
  /** Samples the main process counters for the heartbeat until stopped. */
  startHeartbeat(){
-  if(!this.hooks)return()=>{};
+  // States are also polled each second, so quiet stretches between checks' own reads are seen by the stall watch.
+  const poller=setInterval(()=>{void this.state().catch(()=>{});},1000);
+  if(!this.hooks)return()=>clearInterval(poller);
   const hooks=this.hooks,timer=setInterval(()=>this.heartbeat.sample(pulses(hooks.peek(),hooks.held()),Date.now(),this.current),250);
-  return()=>clearInterval(timer);
+  return()=>{clearInterval(timer);clearInterval(poller);};
  }
  /** Runs checks in order, each from the baseline, and records the outcome of every one. */
  async run(checks:Check[],selected:(check:Check)=>string|undefined):Promise<CheckResult[]>{
