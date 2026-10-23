@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
 import { beneath, checkAbort, code, contained, digest, statKey } from './paths';
 import { mapPool } from './devices';
 
@@ -57,15 +58,27 @@ type Outcome={deleted:true}|{kept:KeptReason;error?:string};
  * Files are checked through a small pool: the source is hashed (unless it is unchanged since the import read it), then every backup copy at once, so the reads
  * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
  * the report is assembled in input order afterwards. */
-export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
+export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** The source volume keeps real change times (APFS or HFS+, by its file system type): only then may a source
+ * whose identity is unchanged since the import read it go unread. */changeTimes?:boolean;/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import; planned before the first read. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
   let completed=0,bytesDone=0;
-  const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length);
-  let bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
+  // Still the very file the import hashed (its identity is only kept for a source the import read itself), on a
+  // volume that keeps real change times: it is not read again. Every backup copy always is.
+  const unchanged=(file:VerifiedOriginal,stat:BigIntStats)=>!!options.changeTimes&&file.identity!==undefined&&statKey(stat)===file.identity&&stat.ctimeNs!==stat.mtimeNs;
+  // What each file will read, planned from a stat of each source before the first read, so the total holds still.
+  const planned=new Map<VerifiedOriginal,number>();
+  if(options.changeTimes) for(const file of files) {
+    checkAbort(options.signal);
+    const stat=file.identity!==undefined?await regular(file.source).catch(()=>undefined):undefined;
+    planned.set(file,file.size*(file.destinations.length+(stat&&unchanged(file,stat)?0:1)));
+  }
+  const reads=(file:VerifiedOriginal)=>planned.get(file)??file.size*(1+file.destinations.length);
+  const bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
     checkAbort(options.signal);
     options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
-    let read=reads(file);
+    // Counted as planned, even when the source turns out to need a read after all.
+    const read=reads(file);
     try {
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
       if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
@@ -73,11 +86,8 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       const before=await regular(file.source).catch(error=>{if(code(error)==='ENOENT')return null;throw error;});
       if(before===null) return {kept:'missing'};
       if(!before||before.size!==BigInt(file.size)) return {kept:'changed'};
-      // Still the very file the import hashed, on a filesystem that keeps a real change time (not FAT or exFAT): it is
-      // not read again. Every backup copy below always is.
-      const known=file.identity!==undefined&&statKey(before)===file.identity&&before.ctimeNs!==before.mtimeNs;
-      if(known){read-=file.size;bytesTotal-=file.size;}
-      else if(await digest(file.source,options.signal)!==file.sha256) return {kept:'changed'};
+      const known=unchanged(file,before);
+      if(!known&&await digest(file.source,options.signal)!==file.sha256) return {kept:'changed'};
       const found=await Promise.all(file.destinations.map(destination=>regular(destination).catch(error=>{if(code(error)==='ENOENT')return null;throw error;})));
       const same=await Promise.all(found.map((stat,index)=>stat&&stat.size===BigInt(file.size)?digest(file.destinations[index]!,options.signal).then(value=>value===file.sha256):false));
       for(let index=0;index<found.length;index++) {

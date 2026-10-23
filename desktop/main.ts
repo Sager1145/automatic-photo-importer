@@ -761,7 +761,9 @@ async function removeOriginals(jobId:string){
  emit();
  const control=new AbortController();
  try{
-  const result=await deleteOriginals(kept.root,kept.files,{signal:control.signal,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}});
+  // Only APFS and HFS+ keep change times that prove an unchanged source; on any other volume every source is read.
+  const changeTimes=['apfs','hfs'].includes(etaDrive(await mountedVolumes(),kept.root,'folder').fsType??'');
+  const result=await deleteOriginals(kept.root,kept.files,{signal:control.signal,changeTimes,onProgress:(completed,total,_file,bytes,totalBytes)=>{job.deletingOriginals={completed,total,bytes,totalBytes};progressEmit();}});
   const gone=new Set(result.deleted.map(item=>item.source));
   kept.files=kept.files.filter(file=>!gone.has(file.source));
   job.verifiedOriginals=kept.files.length||undefined;if(!kept.files.length)importedOriginals.delete(jobId);

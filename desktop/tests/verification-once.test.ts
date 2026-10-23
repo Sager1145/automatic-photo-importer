@@ -139,17 +139,29 @@ async function originals(t:test.TestContext,name:string){
 test('deleting originals reads an unchanged source not at all and every backup once',async t=>{
  const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-');
  const totals:number[]=[],reads=countReads(t,f.role);
- const result=await deleteOriginals(f.root,[f.file],{onProgress:(_done,_total,_file,_bytes,total)=>{if(total!==undefined)totals.push(total);}});
+ const result=await deleteOriginals(f.root,[f.file],{changeTimes:true,onProgress:(_done,_total,_file,_bytes,total)=>{if(total!==undefined)totals.push(total);}});
  reads.stop();
  assert.deepEqual(result.deleted,[{source:f.source,size:SIZE}]);
  assert.deepEqual(reads.files(),{backup:2});
- assert.equal(totals.at(-1),2*SIZE);
+ // The byte total is planned before the first read and never changes.
+ assert.ok(totals.length>1);assert.deepEqual(new Set(totals),new Set([2*SIZE]));
+});
+// Only a volume known to keep real change times (APFS, HFS+) lets an identity stand in for a read; on exFAT the
+// change time equals the modified time, and without word about the volume the source is read.
+for(const [name,exfat,changeTimes] of [['the volume is not known to keep change times',false,false],['on exFAT',true,true]] as const)test(`deleting originals reads an unchanged source when ${name}`,async t=>{
+ const {deleteOriginals}=await import('../core/originals'),{statKey}=await import('../core/paths'),f=await originals(t,'verify-once-originals-volume-');
+ if(exfat){simulateExfat(t,path.dirname(f.root));f.file.identity=statKey(await fs.lstat(f.source,{bigint:true}));}
+ const reads=countReads(t,f.role);
+ const result=await deleteOriginals(f.root,[f.file],{changeTimes});
+ reads.stop();
+ assert.equal(result.deleted.length,1);
+ assert.deepEqual(reads.files(),{source:1,backup:2});
 });
 test('deleting originals reads a source whose change time moved',async t=>{
  const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-ctime-');
  await new Promise(resolve=>setTimeout(resolve,20));await fs.chmod(f.source,0o600);
  const reads=countReads(t,f.role);
- const result=await deleteOriginals(f.root,[f.file]);
+ const result=await deleteOriginals(f.root,[f.file],{changeTimes:true});
  reads.stop();
  assert.equal(result.deleted.length,1);
  assert.deepEqual(reads.files(),{source:1,backup:2});
@@ -157,7 +169,7 @@ test('deleting originals reads a source whose change time moved',async t=>{
 test('deleting originals keeps a source whose backup differs, even when the source is unchanged',async t=>{
  const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-differs-');
  await fs.writeFile(f.backups[1]!,Buffer.alloc(SIZE,9));
- const result=await deleteOriginals(f.root,[f.file]);
+ const result=await deleteOriginals(f.root,[f.file],{changeTimes:true});
  assert.deepEqual(result.kept,[{source:f.source,reason:'destination-differs'}]);
  await fs.lstat(f.source);
 });
