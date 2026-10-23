@@ -66,8 +66,10 @@ async function convertStage(receipt:string,found:Legacy,walkRoot:string,context:
 /** One earlier-version receipt: converted, removed with what it proves dead, or kept for Clean up. */
 async function convertReceipt(receipt:string,walkRoot:string,context:MigrationContext,sets:OpenSets):Promise<void>{
  let found:Legacy;
- // Unauthenticated or unreadable: it grants nothing, and only Clean up removes it.
- try{found=await leftoverReceipt(receipt,walkRoot);}catch(error){if(passThrough(error))throw error;return;}
+ // Unauthenticated, torn or not a receipt: it grants nothing, and only Clean up removes it. Anything else (a file that
+ // cannot be looked at) proves nothing either way: kept, and reported.
+ try{found=await leftoverReceipt(receipt,walkRoot);}
+ catch(error){if(passThrough(error))throw error;if(error instanceof SyntaxError||/authentication failed|too large|changed/i.test(message(error)))return;throw error;}
  const record=found.record;
  if(found.kind==='stage'){
   if(!found.present){await removeIfSame(receipt,found.journalStat,walkRoot);return;}

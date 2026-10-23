@@ -229,3 +229,14 @@ test('R: the receipt log is read once per walk, not once per converted receipt',
  assert.equal((await openReceiptsFor(f.destination)).size,25);
  assert.ok(reads<=3,`segment reads: ${reads}`);
 });
+
+test('R: a card file that cannot be looked at (not missing) proves nothing: the staged copy and its receipt stay and are reported',async t=>{
+ const f=await card(t);
+ const partial=oldStage(f.entry);await fs.writeFile(partial,f.bytes.subarray(0,1500));
+ const receipt=await legacyReceipt(await f.record('stage',partial));
+ // The card folder itself is there, but its files cannot be looked at (EACCES, not ENOENT).
+ await fs.chmod(f.source,0o600);
+ let result;try{result=await migrateDrive([f.destination]);}finally{await fs.chmod(f.source,0o755);}
+ assert.ok(await exists(partial),'the staged copy stays');assert.ok(await exists(receipt),'its receipt stays');
+ assert.ok(result.problems.some(problem=>problem.includes(path.basename(receipt))),result.problems.join('; '));
+});

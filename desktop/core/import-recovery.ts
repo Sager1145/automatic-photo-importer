@@ -54,6 +54,8 @@ export async function rebaseMount<T extends RecordData>(record:T):Promise<T>{
  return out;
 }
 
+/** Only ENOENT means a file is gone; any other failure to look at it proves nothing and is raised. */
+const absentOnly=(error:unknown)=>{if(code(error)==='ENOENT')return undefined;throw error;};
 // ---- The receipt log ----
 const openLine=(rid:string,record:RecordData)=>{const {kind,...rest}=record;return sealedLine('receipt',{op:'open',rid,type:kind,...rest});};
 const closeLine=(rid:string)=>sealedLine('receipt',{op:'close',rid});
@@ -228,7 +230,7 @@ export async function assessReceipt(store:Store,raw:RecordData):Promise<{kind:Ki
  const stat=owned?await maybeLstat(record.file):undefined;
  const bound=!!stat?.isFile()&&binds(stat,record.fileIdentity);
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
- const sourceNow=cardPresent?await fs.lstat(record.source,{bigint:true}).catch(()=>undefined):undefined;
+ const sourceNow=cardPresent?await fs.lstat(record.source,{bigint:true}).catch(absentOnly):undefined;
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||!!sourceNow?.isFile()&&sourceMatches(sourceNow,record.sourceStat));
  const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&(!sourceNow?.isFile()||String(sourceNow.size)!==record.sourceStat.size||String(sourceNow.mtimeNs)!==record.sourceStat.mtime);
  const complete=!!stat&&!!record.sourceStat&&String(stat.size)===record.sourceStat.size;
@@ -275,11 +277,12 @@ export async function readLegacyReceipt(journal:string,root:string):Promise<{rec
 export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;complete:boolean;record:LegacyRecord;journalStat:BigIntStats}>{
  const read=await readLegacyReceipt(journal,root),record=await rebaseMount(read.record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
- const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
+ const stat=file?await fs.lstat(file,{bigint:true}).catch(absentOnly):undefined;
  const bound=!!stat?.isFile()&&binds(stat,record.fileIdentity);
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
- const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
- const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
+ const sourceNow=cardPresent&&record.kind==='stage'&&record.sourceStat?await fs.lstat(record.source,{bigint:true}).catch(absentOnly):undefined;
+ const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||!!sourceNow?.isFile()&&sourceMatches(sourceNow,record.sourceStat));
+ const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&(!sourceNow?.isFile()||String(sourceNow.size)!==record.sourceStat.size||String(sourceNow.mtimeNs)!==record.sourceStat.mtime);
  const complete=!!stat&&!!record.sourceStat&&String(stat.size)===record.sourceStat.size;
  return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,complete,record:read.record,journalStat:read.journalStat};
 }
