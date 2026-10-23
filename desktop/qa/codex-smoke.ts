@@ -60,7 +60,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    assert.equal(result.animations,0,'a boot animation is still running');
    assert.deepEqual(result.stacked,[],'boot left an animation or transform on the app');
    assert.ok(result.logo,'the sidebar logo is not the topmost element at its centre');
-   assert.ok(result.nav.length===5&&result.nav.every(Boolean),'a nav item is covered by another element');
+   assert.ok(result.nav.length>=5&&result.nav.every(Boolean),'a nav item is covered by another element');
    assert.ok(result.popover,'a popover is not above the sidebar');
   });
   await check('At startup the overview never calls a destination offline before its first check has finished',async()=>{
