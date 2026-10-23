@@ -583,13 +583,14 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));recordIssues(job,warnings);
+  // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
+  const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];recordIssues(job,sidecarIssues);
   await recordDuplicates(plans,prepared.duplicates,reorganize);
   rememberPlaced(plans,prefs);
-  await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings,notes,appleDouble,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
+  await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
   const entries=plans.reduce((sum,item)=>sum+destinationEntries(item).length,0);
-  recordIssues(job,appleDoubleIssues(appleDouble));
   // Informational (a warning, never an error): a "._" file that could not be judged or removed is simply kept.
   const appleDoubleLine=!!appleDouble&&(appleDouble.removed+appleDouble.kept+appleDouble.orphans+appleDouble.warnings.length+appleDouble.folderWarnings.length>0)&&message('job.appleDouble',{removed:appleDouble.removed,kept:appleDouble.kept,orphans:appleDouble.orphans,failed:appleDouble.warnings.length,folders:appleDouble.folderWarnings.length});
   // Folders the organized files came from that now hold only service files (or nothing).
@@ -599,7 +600,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    }catch(error){job.errors.push(message('error.folderCleanup',{error:toMessage(error)}));}
   }
   job.alreadyImported=!reorganize&&entries>0&&copied===0&&!removed&&errors.length===0&&errorTotal(job)===0;
-  await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,warnings,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
+  await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
   // A finished folder import can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
