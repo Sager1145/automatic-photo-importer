@@ -94,7 +94,7 @@ test('the streaming reader never reads more than 1 MiB at a time and handles lin
  assert.equal(seen.length,3000);assert.deepEqual(seen.slice(0,3),[0,1,2]);assert.ok(largest<=1024*1024);
 });
 
-test('group commit: concurrent appends become one write, one file sync and one folder sync',async t=>{
+test('group commit: concurrent appends become one write and one file sync; the folder is synchronized when the log is created',async t=>{
  const root=await drive(t),file=path.join(root,'group.jsonl');
  const before={...store.logStats};
  await Promise.all(Array.from({length:40},(_,i)=>store.appendLines(file,[JSON.stringify({i})])));
@@ -102,6 +102,11 @@ test('group commit: concurrent appends become one write, one file sync and one f
  assert.equal(store.logStats.fileSyncs-before.fileSyncs,1);
  assert.equal(store.logStats.folderSyncs-before.folderSyncs,1);
  assert.equal((await fs.readFile(file,'utf8')).trim().split('\n').length,40);
+ // A later group on the existing log: the file alone (design r2 T1: a synchronized file keeps its size on FSKit exFAT).
+ const later={...store.logStats};
+ await Promise.all(Array.from({length:5},(_,i)=>store.appendLines(file,[JSON.stringify({later:i})])));
+ assert.equal(store.logStats.writes-later.writes,1);assert.equal(store.logStats.fileSyncs-later.fileSyncs,1);
+ assert.equal(store.logStats.folderSyncs-later.folderSyncs,store.SYNC_LOG_FOLDER_EACH_GROUP?1:0);
  // A torn last line is closed off before the next append.
  await fs.appendFile(file,'{"torn":');await store.appendLines(file,['{"next":1}']);
  assert.match(await fs.readFile(file,'utf8'),/\{"torn":\n\{"next":1\}\n$/);

@@ -31,8 +31,9 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
   // Converted and complete already (a run stopped while removing the earlier version's files): only N8 and N9 are left.
   const folder=path.join(root,RECOVERY_FOLDER,id);
   try{
-   const committed=await journalConversion.target(root,id),holders=await journalConversion.holders(root,id);
-   if(holders.length===1&&holders[0]!.journal===committed.journal&&(await journalConversion.convertedFromOf(committed))?.path===folder&&(await journalConversion.replay(committed,committed.journal,root,id)).state.migrationComplete){
+   // Where an earlier run committed it, even if the store its library writes to has changed since.
+   const holders=await journalConversion.holders(root,id),committed=holders[0]!;
+   if(holders.length===1&&(await journalConversion.convertedFromOf(committed))?.path===folder&&(await journalConversion.replay(committed,committed.journal,root,id)).state.migrationComplete){
     const kept=await removeLegacyJournal(folder,root,context);await hit(context,'N8');journalConversion.forget(id);return kept;
    }
   }catch(error){if(passThrough(error))throw error;/* Read in full below, which reports what is wrong. */}
@@ -44,9 +45,10 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
   // N2
   let target:ConversionTarget;
   try{
-   target=await journalConversion.target(root,id);
    const holders=await journalConversion.holders(root,id);
-   if(holders.some(holder=>holder.journal!==target.journal))return problem(`Organization ${id} in ${root} has records in more than one place; nothing was changed. Use First Aid.`);
+   if(holders.length>1)return problem(`Organization ${id} in ${root} has records in more than one place; nothing was changed. Use First Aid.`);
+   // Committed by an earlier run: finished where it is (the store its library writes to may have changed since).
+   target=holders[0]??await journalConversion.target(root,id);
    if(holders.length&&(await journalConversion.convertedFromOf(target))?.path!==legacy.folder)return problem(`Organization ${id} in ${root} has records in more than one place; nothing was changed. Use First Aid.`);
    if(!holders.length){
     await storeFolder(target.store,ORGANIZATIONS,id);
@@ -86,6 +88,7 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
     const slots=[...legacy.state.slots].flatMap(([index,list])=>list.map(slot=>({index,slot}))).filter(({index,slot})=>!state.migrationMoved.has(`${index}/${slot}`));
     let done=0;report('originals',0,slots.length,'');
     for(const {index,slot} of slots){
+     context.signal?.throwIfAborted?.();
      const source=journalConversion.originalOf(legacy.manifest,index,slot),destination=journalConversion.originalOf(converted,index,slot);
      const where=await bothNames(source,destination);
      if(where==='both-same')return problem(`First Aid needed: ${source} and ${destination} name the same file.`);
@@ -102,7 +105,8 @@ export async function convertJournal(root:string,id:string,context:MigrationCont
       if(!journalConversion.isOriginal(await fs.lstat(destination,{bigint:true}),converted,index))return problem(`A kept original of organization ${id} changed after it was moved: ${destination}`);
      }
      if(where!=='none'){
-      // Its "._" file: only bookkeeping is removed; anything else goes along beside it.
+      // Its "._" file normally moves with it (the kernel renames it along, design r2 T1); one left behind is an
+      // orphan: only bookkeeping is removed, anything else goes along beside it.
       const side=path.join(path.dirname(source),'._'+path.basename(source)),besideTarget=path.join(path.dirname(destination),'._'+path.basename(destination));
       if(await maybeLstat(side)){
        if(await bookkeepingOnly(side)){await fs.unlink(side);await syncDirectory(path.dirname(side));}

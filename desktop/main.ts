@@ -499,7 +499,7 @@ function scheduleMigration(){
   for(const {drive,key,roots,walk} of drives){
    if(control.signal.aborted)return;
    if(migrationChecked.has(key))continue;
-   if(!(await Promise.all(roots.map(root=>needsConversion(root).catch(()=>false)))).some(Boolean)){migrationChecked.add(key);continue;}
+   if(!(await Promise.all(roots.map(root=>needsConversion(root,walk.includes(root)).catch(()=>false)))).some(Boolean)){migrationChecked.add(key);continue;}
    ran=true;state.migration={drive,step:'looking',completed:0,total:0,file:''};emit();
    const result=await migrateDrive(roots,{signal:control.signal,walk,onProgress:progress=>{state.migration={drive,...progress};progressEmit();}});
    changed||=result.converted>0;migrationChecked.add(key);

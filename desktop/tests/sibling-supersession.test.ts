@@ -359,6 +359,8 @@ test('a damaged pointer to an undone journal is repaired and does not block',asy
  const {drive,photos,videos,stopped,pointer}=await stoppedVideo(t);
  await core.undoOrganization(videos,stopped);
  assert.equal(await fs.stat(pointer).catch(()=>undefined),undefined,'the undo removed its pointer');
+ // The records folder (removed with its last pointer) made again, holding a damaged pointer.
+ assert.equal(path.dirname(pointer),await pointerDirFor(photos));
  await fs.mkdir(path.dirname(pointer),{recursive:true});await fs.writeFile(pointer,'');
  const result=await retemplatePhotos(drive,photos);
  assert.deepEqual(result.errors,[]);assert.ok(result.moved>0);

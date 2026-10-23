@@ -6,6 +6,7 @@ import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,undoOrganization,resumeOrganization} from '../core/index';
 import {migrateDrive,SimulatedCrash} from '../core/migrate/index';
+import {registerDestinations} from '../core/app-store';
 import {journalFolderFor,journalLines} from './fixtures/records';
 import {toLegacy,FIXTURE_KEY} from './fixtures/legacy-records';
 import type {Metadata} from '../shared';
@@ -178,5 +179,18 @@ test('a per-event record cut short, and junk an interrupted write left at the en
  await fs.writeFile(path.join(f.legacy,'event-00000000-0000-4000-8000-000000000000.json'),'{"id":"'+f.id+'","ev');
  await fs.appendFile(path.join(f.legacy,'event-log.jsonl'),'\0'.repeat(5000));
  assert.deepEqual((await migrateDrive([f.root])).problems,[]);
+ await converted(f);
+});
+
+test('a conversion committed into the library\'s store is finished there even when records now go to a destination above it',async t=>{
+ const f=await legacyLibrary(t);
+ await assert.rejects(migrateDrive([f.root],{crash:at=>{if(at==='N5')throw new SimulatedCrash(at);}}),SimulatedCrash);
+ const committed=path.join(f.root,'Photo Importer Data','Organizations',f.id,'journal.jsonl');
+ assert.ok(await exists(committed));
+ // The folder above becomes a configured destination: new records would go to its store.
+ registerDestinations([f.base]);t.after(()=>registerDestinations([]));
+ assert.deepEqual((await migrateDrive([f.root])).problems,[]);
+ assert.ok(await exists(committed),'finished where it was committed');
+ assert.equal(await exists(path.join(f.base,'Photo Importer Data','Organizations',f.id)),false);
  await converted(f);
 });

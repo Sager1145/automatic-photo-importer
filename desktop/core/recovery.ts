@@ -360,7 +360,14 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):
    if(!(await maybeStat(found.journal))?.isFile())continue;
    let root:unknown;
    // A journal whose head cannot be read may be this folder's: refused, or (for a listing) reported as it is.
-   try{root=(await readJournalHead(found.journal,store.path,false)).header.root;}catch(error){if(!unreadable)throw error;unreadable.push({id,error:error instanceof Error?error.message:String(error)});continue;}
+   try{root=(await readJournalHead(found.journal,store.path,false)).header.root;}
+   catch(error){
+    const text=error instanceof Error?error.message:String(error);
+    // Another Mac's journal was never written by this app here and cannot name its journals: it is skipped (and listed).
+    if(unreadable){unreadable.push({id,error:text});continue;}
+    if(text.startsWith('Recovery journal authentication failed'))continue;
+    throw new Error(`The organization record ${found.journal} cannot be read, so it is not known which library it belongs to: ${text}`);
+   }
    if(typeof root==='string'&&pathKey(root)===pathKey(folder))journals.push({id,root,found});
   }
  }
@@ -410,7 +417,8 @@ const eventLog='event-log.jsonl',maxEventLog=256*1024*1024;
 async function checkpoint(m:Manifest,event:string,index?:number,extra:Record<string,unknown>={}):Promise<void> {
  await roots(m);
  const line=sealedLine('event',{id:m.id,root:m.root,event,index,at:new Date().toISOString(),...extra});
- if(Buffer.byteLength(line)>LINE_CAPS.event)throw new Error('Invalid recovery event');
+ // Records stay as short as before (2048 characters), so every one the earlier version wrote also fits once converted.
+ if(line.length>2048||Buffer.byteLength(line)>LINE_CAPS.event)throw new Error('Invalid recovery event');
  await appendEvents(m,[line]);
 }
 /** A `summary` event: what a listing would show now. For display only, best effort: it never fails the operation. */
@@ -583,7 +591,8 @@ async function writePointer(folder:string,m:Pick<Manifest,'root'|'id'>,at?:{stor
  const target=path.join(directory,`journal-${m.id}.json`),temporary=path.join(directory,`journal-${m.id}-${randomUUID()}.tmp`);
  await contained(target,store.path);
  await writeNewFile(temporary,JSON.stringify(sealV5('pointer',{library:folder,root:m.root,id:m.id})));
- if((await maybeStat(target))?.isFile()){await fs.unlink(target);await syncDirectory(directory);}
+ // A torn or wrong pointer of this journal is replaced in one step, so a stop never leaves the folder without one.
+ if((await maybeStat(target))?.isFile()){await fs.rename(temporary,target);await syncDirectory(directory);return;}
  if(await renameChecked(temporary,target)!=='done')throw new Error(`Unable to write ${target}`);
 }
 /** In each pointer folder, a signed pointer naming the journal and its folder, written before

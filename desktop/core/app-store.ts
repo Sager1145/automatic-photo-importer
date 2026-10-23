@@ -52,7 +52,8 @@ export const sealedLine=(kind:SealKind,value:Record<string,unknown>)=>JSON.strin
 // ---- Streaming line reader ----
 /** Longest line of each kind. A longer line that is valid JSON is refused; one that is not is what an
  * interrupted write leaves (cut short, zero-filled) and carries nothing. No line is ever buffered past HARD_LINE_CAP. */
-export const LINE_CAPS={event:2048,header:64*1024,entries:64*1024*1024,receipt:32*1024,pointer:4096} as const;
+/** Events: the earlier version limited them to 2048 characters, which is up to 6 KiB of UTF-8 (paths in any script). */
+export const LINE_CAPS={event:8192,header:64*1024,entries:64*1024*1024,receipt:32*1024,pointer:4096} as const;
 export const HARD_LINE_CAP=64*1024*1024;
 const CHUNK=1024*1024;
 export class RecordTooLarge extends Error {constructor(file:string){super(`Record too large: ${file}`);this.name='RecordTooLarge';}}
@@ -106,12 +107,16 @@ export async function openRegular(file:string,flags=constants.O_RDONLY):Promise<
 interface Waiter {lines:string[];check?:()=>Promise<void>;resolve:()=>void;reject:(error:unknown)=>void;}
 interface Log {waiting:Waiter[];chain:Promise<void>;scheduled:boolean;create:boolean;}
 const logs=new Map<string,Log>();
+/** Whether every group also synchronizes the log's folder. The exFAT durability probe (design r2 §11 T1, 120/120 runs
+ * on FSKit exFAT) showed a synchronized file keeps its new size without it; a log's folder is still synchronized
+ * when the log is created (its name must be durable before what depends on it). */
+export const SYNC_LOG_FOLDER_EACH_GROUP=false;
 /** For tests: how many writes, file and folder synchronizations the logs made. */
 export const logStats={writes:0,fileSyncs:0,folderSyncs:0};
 const logFor=(file:string)=>{let log=logs.get(file);if(!log){log={waiting:[],chain:Promise.resolve(),scheduled:false,create:true};logs.set(file,log);}return log;};
 /** Append lines to `file` and return once they are durable. Every append waiting when a write starts goes in
- * that one write, followed by one synchronization of the file and one of its folder (the folder holds the
- * file's size on FAT and exFAT). `check` runs right before the write (containment, identities); an append
+ * that one write, followed by one synchronization of the file (and of its folder when the file is new, or when
+ * SYNC_LOG_FOLDER_EACH_GROUP is set). `check` runs right before the write (containment, identities); an append
  * whose check fails is refused alone. */
 export function appendLines(file:string,lines:string[],check?:()=>Promise<void>,options:{/** false: the log must already exist (a journal, whose first lines are written when it is created). */create?:boolean}={}):Promise<void>{
  if(lines.some(line=>line.includes('\n')))return Promise.reject(new Error('Invalid record line'));
@@ -126,6 +131,7 @@ async function flush(file:string,log:Log):Promise<void>{
  for(const waiter of batch){try{await waiter.check?.();ready.push(waiter);}catch(error){waiter.reject(error);}}
  if(!ready.length)return;
  try{
+  const created=log.create&&!await maybeLstat(file);
   const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);
   try{
    const opened=await handle.stat();if(!opened.isFile()||opened.nlink!==1)throw new Error(`Unsafe record log: ${file}`);
@@ -134,7 +140,7 @@ async function flush(file:string,log:Log):Promise<void>{
    await handle.writeFile((torn?'\n':'')+ready.flatMap(waiter=>waiter.lines).join('\n')+'\n');logStats.writes++;
    await handle.sync();logStats.fileSyncs++;
   }finally{await handle.close();}
-  await syncDirectory(path.dirname(file));logStats.folderSyncs++;
+  if(created||SYNC_LOG_FOLDER_EACH_GROUP){await syncDirectory(path.dirname(file));logStats.folderSyncs++;}
   for(const waiter of ready)waiter.resolve();
  }catch(error){for(const waiter of ready)waiter.reject(error);}
 }
@@ -252,6 +258,8 @@ async function createStore(base:string):Promise<Store>{
  const stat=await fs.lstat(folder,{bigint:true});
  if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==baseStat.dev)throw new Error(`Unsafe ${APP_DATA_FOLDER} folder: ${folder}`);
  const existing=await storeRecord(folder,base,baseStat);if(existing)return existing;
+ // Only an empty folder (a creation cut short) is adopted; one holding records without its own record is refused, as readers refuse it.
+ if((await fs.readdir(folder)).some(name=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${folder}`);
  const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
  await writeNewFile(temporary,JSON.stringify(sealV5('store',{base,baseIdentity:`${baseStat.dev}:${baseStat.ino}`,minVersion:STORE_MIN_VERSION})));
  const file=path.join(folder,'store.json');

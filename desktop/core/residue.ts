@@ -20,7 +20,7 @@ export type ResidueKind='partial'|'resumable'|'kept'|'recoverable'|'receipt'|'in
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat?:BigIntStats;
  /** Records v5: the store it is in, and the receipt to close once it is handled. */store?:Store;rid?:string;
  /** An ended organization (kind 'journal'). */journal?:{root:string;id:string};}
-export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};recoverable:{files:number;bytes:number};}
+export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -100,13 +100,15 @@ async function storeLeftovers(store:Store,items:ResidueItem[],signal?:AbortSigna
   // Segments: oldest first, while every receipt each opens is closed (later segments included), each closes only
   // what it opened, and none holds a line that is JSON but fails its seal.
   const segments=await receiptSegments(store),facts:{file:string;opened:Set<string>;closed:Set<string>;bad:boolean;bytes:number;stat:BigIntStats}[]=[];
-  for(const file of segments.slice(0,-1)){
+  for(const file of segments){
     const fact={file,opened:new Set<string>(),closed:new Set<string>(),bad:false,bytes:0,stat:(await fs.lstat(file,{bigint:true}))};fact.bytes=Number(fact.stat.size);
     await readSegment(file,line=>{if(line?.op==='bad')fact.bad=true;else if(line?.op==='open')fact.opened.add(line.rid);else if(line?.op==='close')fact.closed.add(line.rid);},signal);
     facts.push(fact);
   }
-  for(const fact of facts){
-    if(fact.bad||[...fact.closed].some(rid=>!fact.opened.has(rid))||[...fact.opened].some(rid=>open.has(rid)))break;
+  // The last segment is where appends go; a close in a segment matters only for a receipt opened in a later one.
+  for(const [position,fact] of facts.slice(0,-1).entries()){
+    const later=new Set(facts.slice(position+1).flatMap(item=>[...item.opened]));
+    if(fact.bad||[...fact.closed].some(rid=>!fact.opened.has(rid)&&later.has(rid))||[...fact.opened].some(rid=>open.has(rid)))break;
     items.push({path:fact.file,kind:'segment',bytes:fact.bytes,root,stat:fact.stat,store});
   }
   // Organization records.
@@ -278,7 +280,7 @@ function summary(items:ResidueItem[]):Residue {
   const counted=items.filter(item=>!(item.kind==='receipt'&&item.rid));
   const resumable=counted.filter(item=>item.kind==='resumable'||item.kind==='kept'),recoverable=counted.filter(item=>item.kind==='recoverable');
   const sum=(list:ResidueItem[])=>list.reduce((total,item)=>total+item.bytes,0);
-  return {items,files:counted.length,bytes:sum(counted),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:recoverable.length,bytes:sum(recoverable)}};
+  return {items,files:counted.length,bytes:sum(counted),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:recoverable.length,bytes:sum(recoverable),...(recoverable[0]?{folder:path.dirname(recoverable[0].path)}:{})}};
 }
 
 /** Remove what findResidue listed, each only while it is still the very file or folder found. Folders go only

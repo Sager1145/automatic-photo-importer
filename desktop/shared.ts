@@ -90,7 +90,7 @@ export interface MisplacedFiles {count:number;bytes:number;checkedAt:string;}
  * connected destinations and in the system temporary folder. resumable: staged copies a re-import
  * could continue, or that are not proven dead (identity drift, no or unauthenticated receipt, card
  * absent); automatic cleanup keeps them, Clean up removes them too. */
-export interface ResidueStatus {files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies whose card file changed or vanished: kept, since each may be the only copy. */recoverable?:{files:number;bytes:number};checking?:boolean;/** While the check looks (step 'scanning') or Clean up removes (step 'deleting'). */progress?:Progress;checkedAt?:string;cleaned?:{files:number;bytes:number;at:string};}
+export interface ResidueStatus {files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies whose card file changed or vanished: kept, since each may be the only copy. */recoverable?:{files:number;bytes:number;folder?:string};checking?:boolean;/** While the check looks (step 'scanning') or Clean up removes (step 'deleting'). */progress?:Progress;checkedAt?:string;cleaned?:{files:number;bytes:number;at:string};}
 /** How busy one physical drive is right now (not its capacity): percent of time spent on I/O, throughput, and the last minute of utilization. */
 export interface DriveActivity {utilization:number;readBps:number;writeBps:number;iops:number;history:number[];}
 /** Converting what an earlier version wrote on a destination into its "Photo Importer Data" folder (records v5). */

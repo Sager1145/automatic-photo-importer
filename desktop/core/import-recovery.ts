@@ -235,15 +235,19 @@ export async function assessReceipt(store:Store,raw:RecordData):Promise<{kind:Ki
  return {kind:record.kind,file:record.file,present:!!stat,bound,owned,resumable,stale,complete,...(stat?{stat}:{})};
 }
 /** For the store cleanup: whether a segment can go. Only the oldest segment, not the one appends go to, every receipt
- * it opens closed somewhere, every receipt it closes opened in it, and no line that is JSON but fails its seal
- * (an interrupted write's torn line is fine). Read again and removed while no append to it can start. */
+ * it opens closed somewhere, none it closes opened in a later segment (that close is what keeps it closed), and no
+ * line that is JSON but fails its seal (an interrupted write's torn line is fine). A close of a receipt whose open
+ * line is gone with an older segment closes nothing any more. Read again and removed while no append to it can start. */
 export async function removeSegmentIfDone(store:Store,file:string,signal?:AbortSignal):Promise<boolean>{
  const segments=await receiptSegments(store);
  if(segments[0]!==file||segments.length<2)return false;
  return holdLog(file,async()=>{
   const opened=new Set<string>(),closedHere=new Set<string>();let bad=false;
   await readSegment(file,line=>{if(line?.op==='bad')bad=true;else if(line?.op==='open')opened.add(line.rid);else if(line?.op==='close')closedHere.add(line.rid);},signal);
-  if(bad||[...closedHere].some(rid=>!opened.has(rid)))return false;
+  if(bad)return false;
+  const later=new Set<string>();
+  for(const segment of (await receiptSegments(store)).filter(item=>item!==file))await readSegment(segment,line=>{if(line?.op==='open')later.add(line.rid);},signal);
+  if([...closedHere].some(rid=>!opened.has(rid)&&later.has(rid)))return false;
   const stillOpen=await openReceipts(store,signal);
   if([...opened].some(rid=>stillOpen.has(rid)))return false;
   const before=await fs.lstat(file,{bigint:true});

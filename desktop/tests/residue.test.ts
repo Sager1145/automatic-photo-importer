@@ -236,7 +236,7 @@ test('a complete staged copy whose card file changed or vanished is recoverable:
     if(change==='size') await fs.appendFile(f.source,'more');else await fs.unlink(f.source);
     const found=await findResidue([f.root]);
     assert.equal(kindOf(found,f.copy),'recoverable',change);
-    assert.deepEqual(found.recoverable,{files:1,bytes:4000});
+    assert.deepEqual({files:found.recoverable.files,bytes:found.recoverable.bytes},{files:1,bytes:4000});assert.ok(found.recoverable.folder?.endsWith(path.join('Imports','Staging')));
     await cleanResidue(found,{keepResumable:true});await cleanResidue(await findResidue([f.root,],{legacy:true}));
     assert.ok(await exists(f.copy),change);assert.ok(await open(f.root,f.receipt.rid),change);
   }
@@ -370,4 +370,20 @@ test('the automatic check never walks the library; Clean up also removes what th
   assert.equal(kindOf(manual,oldPartial),'kept');assert.equal(kindOf(manual,receipt),'kept');
   await cleanResidue(manual);
   assert.equal(await exists(oldPartial),false);assert.equal(await exists(receipt),false);
+});
+
+test('a receipt opened in one segment and closed in the next lets both segments go, oldest first',async t=>{
+  const f=await staged(t);await closeReceipts(f.receipt.store,[f.receipt.rid]);
+  const imports=path.join(f.receipt.store.path,'Imports'),segment=(n:number)=>path.join(imports,`receipts-${String(n).padStart(6,'0')}.jsonl`);
+  for(const file of await fs.readdir(imports))if(file.startsWith('receipts-'))await fs.unlink(path.join(imports,file));
+  const {kind:_kind,...record}=f.receipt.record,a=randomUUID(),b=randomUUID();
+  // A opens in segment 1 and closes in segment 2 (an import running across a rotation); B is still open in segment 3.
+  await fs.writeFile(segment(1),sealedLine('receipt',{op:'open',rid:a,type:'stage',...record})+'\n');
+  await fs.writeFile(segment(2),sealedLine('receipt',{op:'close',rid:a})+'\n');
+  await fs.writeFile(segment(3),sealedLine('receipt',{op:'open',rid:b,type:'stage',...record})+'\n');
+  const found=await findResidue([f.root]);
+  assert.deepEqual(found.items.filter(item=>item.kind==='segment').map(item=>path.basename(item.path)),['receipts-000001.jsonl','receipts-000002.jsonl']);
+  await cleanResidue(found,{keepResumable:true});
+  assert.deepEqual((await segmentsFor(f.root)).map(file=>path.basename(file)),['receipts-000003.jsonl']);
+  assert.ok(await open(f.root,b));assert.equal(await open(f.root,a),false);
 });

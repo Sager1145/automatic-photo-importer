@@ -774,6 +774,8 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   const verified=staged.verifiedStat;
   if(!verified || !sameStat(verified,await fs.lstat(staged.file,{bigint:true}))) throw new Error(`Staged file changed: ${entry.source}`);
   const publicationEntry={...entry,destination};
+  // A conflict copy goes to another folder than planned: the Stop cleanup holds the folder actually published into.
+  staged.target=path.dirname(destination);
   let owned=await findPartial('publication',publicationEntry,transfer.root,recovery,signal);
   let copy=!!owned||(options.exclusiveCopy??false),bound:import('node:fs').BigIntStats|undefined;
   if(!copy) {

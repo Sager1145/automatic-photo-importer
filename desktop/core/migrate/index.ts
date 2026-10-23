@@ -29,9 +29,9 @@ async function markReceiptsConverted(root:string):Promise<void>{
 }
 /** Cheap: whether `root` still holds anything an earlier version wrote that the converter handles (record folders,
  * index or duplicate files, an unwalked library). */
-export async function needsConversion(root:string):Promise<boolean>{
+export async function needsConversion(root:string,walked=true):Promise<boolean>{
  for(const name of [RECOVERY_FOLDER,'.photo-importer-recovery','photo-importer-index.json','.photo-importer-index.json','photo-importer-duplicates.json'])if(await maybeLstat(path.join(root,name)))return true;
- return !await receiptsConverted(root);
+ return walked&&!await receiptsConverted(root);
 }
 export interface ConversionResult {/** Journals converted (or finished) this run. */converted:number;/** Earlier-version journals still not converted. */pending:number;problems:string[];}
 /** Convert everything earlier versions wrote under `roots` (a drive's destinations, backup folders and organized
@@ -48,6 +48,9 @@ export async function migrateDrive(roots:string[],options:Omit<MigrationContext,
   report('looking',position,unique.length,path.basename(root));
   try{
    await journalConversion.adopt(root);
+   // A journal in both the hidden and the visible folder (adopting leaves the hidden copy): which one is real is the user's call.
+   const hidden=(await fs.readdir(path.join(root,'.photo-importer-recovery')).catch(()=>[] as string[])).filter(name=>uuid.test(name));
+   if(hidden.length)context.problems.push(`${root}: ${hidden.length} organization record${hidden.length===1?' is':'s are'} in both the hidden .photo-importer-recovery folder and Photo Importer Recovery; the hidden copies were left as they are. Use First Aid.`);
    const names=await fs.readdir(path.join(root,RECOVERY_FOLDER)).catch(()=>[] as string[]);
    for(const id of names.filter(name=>uuid.test(name)).sort())jobs.push({root,id});
   }catch(error){if(passThrough(error))throw error;context.problems.push(`${root}: ${message(error)}`);}
