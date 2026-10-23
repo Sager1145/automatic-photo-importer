@@ -168,7 +168,7 @@ export async function bothNames(source:string,target:string):Promise<'source'|'t
  return from?'source':to?'target':'none';
 }
 /** The same file after a rename: device, size and inode (birth time where the inode is unreliable). */
-export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>after.dev===before.dev&&after.size===before.size&&(unreliableIno(before)||unreliableIno(after)?after.birthtimeNs===before.birthtimeNs:after.ino===before.ino);
+export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>after.dev===before.dev&&after.size===before.size&&after.mtimeNs===before.mtimeNs&&(unreliableIno(before)||unreliableIno(after)?after.birthtimeNs===before.birthtimeNs:after.ino===before.ino);
 /** rename(2) under the both-names rule: the target must be absent first; afterwards the source must be gone
  * and the target must be the file that was moved (`expected`, by default the source's identity). 'retry': the
  * source is still there and the target absent (a fresh name may be tried where names are free-form). Anything

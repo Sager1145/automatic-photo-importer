@@ -171,3 +171,13 @@ test('a folder of the user\'s own named "Photo Importer Data" (no store record) 
  await assert.rejects(store.ensureStore(root),/no store record/);
  assert.equal(await fs.readFile(path.join(root,'Photo Importer Data','notes.txt'),'utf8'),'mine');
 });
+
+test('a renamed file is the one moved only with the same modification time too',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'renamed-identity-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const file=path.join(dir,'a');await fs.writeFile(file,'same bytes');
+ const before=await fs.lstat(file,{bigint:true});
+ assert.equal(store.renamedIdentity(before)(await fs.lstat(file,{bigint:true})),true);
+ // Same inode and size, rewritten in place: not what was moved.
+ await fs.utimes(file,new Date(2020,0,1),new Date(2020,0,1));
+ assert.equal(store.renamedIdentity(before)(await fs.lstat(file,{bigint:true})),false);
+});
