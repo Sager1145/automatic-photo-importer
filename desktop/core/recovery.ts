@@ -285,6 +285,7 @@ function validateManifest(value:unknown,root:string,id:string):Manifest {
   if(!entry||(entry.captureTimeMs!==undefined&&(!Number.isFinite(entry.captureTimeMs)||Math.abs(entry.captureTimeMs)>8640000000000000))||typeof entry.source!=='string'||typeof entry.destination!=='string'||!beneath(entry.source,m.source)||path.resolve(entry.source)!==entry.source||!beneath(entry.destination,root)||path.resolve(entry.destination)!==entry.destination||typeof entry.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.digest)||!Number.isSafeInteger(entry.size)||entry.size<0||typeof entry.move!=='boolean'||!entry.stat||!entry.parents||typeof entry.parents!=='object')throw new Error('Invalid or unsafe organization recovery entry');
   if(path.relative(m.source,entry.source).split(path.sep).some(p=>isRecoveryName(p))||path.relative(root,entry.destination).split(path.sep).some(p=>isRecoveryName(p)))throw new Error('Unsafe recovery storage path in journal');
   if(entry.kept!==undefined&&(m.kind!=='duplicates'||!entry.kept||typeof entry.kept.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.kept.digest)||!Number.isSafeInteger(entry.kept.size)||entry.kept.size<0||pathKey(entry.source)===pathKey(entry.destination)))throw new Error('Invalid duplicate removal entry');
+  if(m.kind==='duplicates'&&pathKey(entry.source)===pathKey(entry.destination))throw new Error('Invalid duplicate removal entry');
   if(sources.has(pathKey(entry.source)))throw new Error('Duplicate recovery source');sources.add(pathKey(entry.source));
   const keys=Object.keys(entry.stat).sort().join(',');if(keys!=='ctime,dev,ino,mtime,size'||Object.entries(entry.stat).some(([key,v])=>typeof v!=='string'||!(key==='ino'?/^-?\d+$/:/^\d+$/).test(v))||entry.stat.size!==String(entry.size)||entry.stat.dev!==m.rootIdentity.split(':')[0])throw new Error('Invalid recovery source identity');
   const ancestors:string[]=[];for(let folder=path.dirname(entry.source);folder!==m.source;folder=path.dirname(folder)){if(!beneath(folder,m.source))throw new Error('Unsafe recovery source ancestor');ancestors.push(folder);}
@@ -894,6 +895,24 @@ export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'r
  validateManifest(manifest,transfer.root,id);await adoptLegacyStorage(transfer.root);await ensureDirectory(path.join(transfer.root,storage),transfer.root);await ensureDirectory(jobPath(transfer.root,id),transfer.root);
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
  return {id,result:await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress))};
+}
+/** The files (relative to `root`, with `/`) that an earlier, still live journal of this library placed or kept. Removing
+ * one supersedes that journal, which ends its Undo, so Remove duplicates warns before it does. Best effort: a
+ * journal that cannot be read is skipped. */
+export async function placedByEarlierJournals(root:string,signal?:AbortSignal):Promise<Set<string>> {
+ const placed=new Set<string>();
+ let ids:string[];
+ try{await adoptLegacyStorage(root);ids=await fs.readdir(path.join(root,storage));}catch{return placed;}
+ for(const id of ids){
+  checkAbort(signal);
+  if(!uuid.test(id))continue;
+  try{
+   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,undefined,false);
+   if(state.superseded||state.undoComplete)continue;
+   for(const entry of prior.entries)placed.add(path.relative(root,entry.destination).split(path.sep).join('/'));
+  }catch(error){if(isAbort(error))throw error;}
+ }
+ return placed;
 }
 /** Resume, or recheck a finished organization. A journal from before the event log is first
  * converted to it (compactLegacyEvents), which only this explicit action does. */

@@ -13,13 +13,14 @@ export function extensionClass(file: string): string {
 export function comparable(a: Pick<DuplicateFile, 'path' | 'edited'>, b: Pick<DuplicateFile, 'path' | 'edited'>): boolean {
   return a.edited === b.edited && extensionClass(a.path) === extensionClass(b.path);
 }
-const fraction = (date?: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(date ?? '')?.[1];
+/** The sub-second digits of a capture time. All zeros is a body that records none (a constant), so it is no discriminator. */
+const fraction = (date?: string) => { const digits = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(date ?? '')?.[1]; return digits && !/^0+$/.test(digits) ? digits : undefined; };
 /** The EXIF identity of a capture, or undefined when it is not enough to trust: a time, a camera, and
  * something that tells burst frames apart (sub-seconds, a shutter count or an image number). */
 export function exifKey(exif?: DuplicateExif): string | undefined {
   if (!exif?.date || !(exif.serial || exif.camera)) return undefined;
   if (!fraction(exif.date) && !exif.shutterCount && !exif.imageNumber) return undefined;
-  return [exif.date, exif.serial ?? '', exif.camera ?? '', exif.shutterCount ?? '', exif.imageNumber ?? '', `${exif.width ?? '?'}x${exif.height ?? '?'}`, exif.lens ?? ''].join('|');
+  return [exif.date, exif.serial ?? '', exif.camera ?? '', exif.shutterCount ?? '', exif.imageNumber ?? '', `${exif.width ?? '?'}x${exif.height ?? '?'}`, exif.lens ?? '', exif.exposureTime ?? '', exif.aperture ?? '', exif.iso ?? '', exif.exposureCompensation ?? ''].join('|');
 }
 /** Whether a path is in the organized structure: {year}/{yyyymm}/{camera}/… directly under the library
  * root or under one base folder, and not in an edited, conflict or drive backup folder. */
@@ -118,11 +119,13 @@ export function resolveGroups(groups: DuplicateGroup[], level: DuplicateLevel, d
     return { group, auto, suggested, keep, remove: keep === undefined || keep === 'all' ? [] : group.files.filter(file => file.path !== keep), needsDecision: keep === undefined };
   });
 }
-export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; }
-export function summarize(resolved: ResolvedGroup[]): RemovalSummary {
+export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; /** Files to remove that an earlier organization placed: removing them supersedes it and ends its Undo. Present when `earlier` is given. */ earlier?: number; }
+export function summarize(resolved: ResolvedGroup[], earlier?: ReadonlySet<string> | readonly string[]): RemovalSummary {
+  const placed = earlier && new Set(earlier);
   const removing = resolved.filter(item => item.remove.length);
   return {
     groups: removing.length, files: removing.reduce((sum, item) => sum + item.remove.length, 0), bytes: removing.reduce((sum, item) => sum + item.remove.reduce((n, file) => n + file.size, 0), 0),
     undecided: resolved.filter(item => item.needsDecision).length, automatic: resolved.filter(item => item.auto).length, manual: resolved.filter(item => !item.auto).length,
+    ...(placed ? { earlier: removing.reduce((sum, item) => sum + item.remove.filter(file => placed.has(file.path)).length, 0) } : {}),
   };
 }

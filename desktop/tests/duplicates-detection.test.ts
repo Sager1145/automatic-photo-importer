@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { plan } from '../core/index';
-import { scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
+import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
 import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
 import { identity } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
@@ -169,4 +169,61 @@ test('recordPlanDuplicates keeps what planning found per library and never delet
   // A second library gets nothing from the first.
   await recordPlanDuplicates(other, planned.duplicates!, () => undefined);
   assert.equal((await duplicateStore(await fs.realpath(other), await identity(other))).groups.length, 0);
+});
+
+test('stage 1 runs for imports only, and reuses a hash remembered for the source file', async t => {
+  const base = await library(t), source = path.join(base, 'card'), root = path.join(base, 'backup');
+  await fs.mkdir(root);
+  await write(source, 'DCIM/A_0001.JPG', 'one'); await write(source, 'DCIM/B_9999.JPG', 'two');
+  const table = { 'A_0001.JPG': exif(), 'B_9999.JPG': exif() };
+  const options = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {}, duplicates: true };
+  // Remembered hashes are used as they are (the files differ, the memory says they do not): nothing was read again.
+  const asked: string[] = [];
+  const imported = await plan(source, [root], { ...options, sourceDigest: file => { asked.push(path.basename(file)); return 'a'.repeat(64); } }, reader(table));
+  assert.deepEqual(imported.duplicates!.groups.map(group => group.strength), ['sha']);
+  assert.ok(asked.includes('A_0001.JPG') && asked.includes('B_9999.JPG'));
+  // An organization of a library never hashes name or EXIF candidates.
+  await fs.cp(source, root, { recursive: true });
+  const organized = await plan(root, [root], { ...options, reorganize: true }, reader(table));
+  assert.equal(organized.duplicates, undefined);
+});
+
+test('an all-zero sub-second is no discriminator, and exposure tells bracket and burst frames apart', () => {
+  const bare = { date: '2024-05-06T07:08:09.00', camera: 'Nikon Z f', width: 6048, height: 4032 };
+  assert.equal(exifKey(bare), undefined, 'a body that records .00 for every frame proves nothing');
+  assert.equal(exifKey({ ...bare, date: '2024-05-06T07:08:09.000' }), undefined);
+  assert.ok(exifKey({ ...bare, date: '2024-05-06T07:08:09.05' }), 'a real fraction still counts');
+  assert.ok(exifKey({ ...bare, shutterCount: '12' }), 'a shutter count still counts');
+  // A constant sub-second: frames that differ in exposure never share a key.
+  const frame = (patch: Partial<DuplicateExif>) => exifKey({ ...bare, date: '2024-05-06T07:08:09.50', ...patch });
+  assert.notEqual(frame({ exposureTime: '0.004' }), frame({ exposureTime: '0.008' }));
+  assert.notEqual(frame({ aperture: '2.8' }), frame({ aperture: '4' }));
+  assert.notEqual(frame({ iso: '100' }), frame({ iso: '400' }));
+  assert.notEqual(frame({ exposureCompensation: '0' }), frame({ exposureCompensation: '-2' }));
+  assert.equal(frame({ exposureTime: '0.004', iso: '100' }), frame({ exposureTime: '0.004', iso: '100' }));
+  const bracket = [file('b1.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '-2' } }), file('b2.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '0' } })];
+  assert.deepEqual(candidates(bracket), [], 'a bracket is not a candidate set');
+});
+
+test('a chosen folder that holds, overlaps or sits inside more than one library is refused', () => {
+  const libraries = ['/Volumes/A/photos', '/Volumes/B/photos'];
+  assert.deepEqual(overlappingLibraries('/Users/me', libraries), [], 'unrelated paths are not overlaps');
+  assert.equal(overlappingLibraries('/Volumes/A', [...libraries, '/Volumes/A/photos']).length, 1, 'a parent of one library is fine');
+  assert.equal(overlappingLibraries('/Volumes/A/photos/2024', libraries).length, 1, 'inside one library is fine');
+  assert.equal(overlappingLibraries('/Volumes/A/photos', libraries).length, 1, 'the library itself');
+  assert.equal(overlappingLibraries('/Volumes', ['/Volumes/A', '/Volumes/B']).length, 2, 'a parent of two libraries');
+  assert.equal(overlappingLibraries('/Volumes/A/photos/2024', ['/Volumes/A/photos', '/Volumes/A/photos/2024/x']).length, 2, 'inside one and holding another');
+});
+test('app folders are skipped at any depth: a parent of one library never pairs its drive mirrors, recovery or problem files', async t => {
+  const base = await library(t), parent = path.join(base, 'parent');
+  const same = 'the same photo bytes';
+  await write(parent, 'lib/2024/202405/Nikon Z f/A.JPG', same);
+  await write(parent, 'lib/Drive backups/Mirror/2024/202405/Nikon Z f/A.JPG', same);
+  await write(parent, 'lib/Photo Importer Recovery/job/originals/A.JPG', same);
+  await write(parent, 'lib/Problem files/unreadable/A.JPG', same);
+  await write(parent, 'other/Drive backups/B.JPG', same);
+  await write(parent, 'other/Photo Importer Recovery/C.JPG', same);
+  const result = await scan(parent);
+  assert.equal(result.files, 1, 'only the library photo is looked at');
+  assert.deepEqual(result.groups, []);
 });

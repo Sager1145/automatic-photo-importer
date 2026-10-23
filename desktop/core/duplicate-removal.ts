@@ -1,9 +1,9 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type { DuplicateGroup, DuplicateStrength, Progress } from '../shared';
-import type { ResolvedGroup } from '../duplicate-rules';
+import { classify, groupId, type ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
-import { checkAbort, contained, digest, directory, identity } from './paths';
+import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
 
 /** One line of the per-file report. primary: a duplicate removed; companion: its sidecar, proxy or audio file.
  * removed: set aside in the recovery store; carried: a companion the kept copy lacked, published next to it;
@@ -43,12 +43,19 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   let checked = 0;
   const checking = (file: string) => options.onProgress?.({ phase: 'verifying', step: 'checking', completed: checked, total, bytes: 0, totalBytes: 0, speed: 0, file });
   const stat = async (file: string) => { await contained(file, root); const found = await fs.lstat(file, { bigint: true }); return found.isFile() && !found.isSymbolicLink() ? found : undefined; };
+  // A file kept in one group is never removed by another, and a group that keeps everything keeps all its files.
+  const never = new Set<string>();
+  for (const item of resolved) if (item.keep === 'all') for (const file of item.group.files) never.add(abs(file.path)); else if (item.keep) never.add(abs(item.keep));
+  // The files of a lookalike group are not proven identical by content, so the scan's inode and modified time must still hold.
+  const moved = (file: { ino?: string; mtimeNs?: string }, found: { ino: bigint; mtimeNs: bigint }) => (file.ino !== undefined && file.ino !== String(found.ino)) || (file.mtimeNs !== undefined && file.mtimeNs !== String(found.mtimeNs));
   let groups = 0;
   for (const item of work) {
     checkAbort(signal);
     const keepPath = abs(item.keep!), kept = await stat(keepPath).catch(() => undefined);
     const context = { group: item.group.id, strength: item.group.strength, kept: item.keep! };
     if (!kept) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'the copy to keep is missing' }); checked += item.remove.length; continue; }
+    const keptFile = item.group.files.find(file => file.path === item.keep);
+    if (item.group.strength !== 'sha' && keptFile && moved(keptFile, kept)) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'changed since scan' }); checked += item.remove.length; continue; }
     const keeperSha = await digest(keepPath, signal);
     let any = false;
     for (const file of item.remove) {
@@ -57,6 +64,9 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       const entry = { ...context, role: 'primary' as const, file: file.path, size: file.size };
       checked++;
       if (!found || found.size !== BigInt(file.size)) { report.push({ ...entry, result: 'left', reason: 'the file changed or is gone since the scan' }); continue; }
+      if (item.group.strength !== 'sha' && moved(file, found)) { report.push({ ...entry, result: 'left', reason: 'changed since scan' }); continue; }
+      if (found.ino !== 0n && found.dev === kept.dev && found.ino === kept.ino) { report.push({ ...entry, result: 'left', reason: 'it is the same file as the copy to keep (a link)' }); continue; }
+      if (never.has(source)) { report.push({ ...entry, result: 'left', reason: 'it is the copy kept in another group' }); continue; }
       const sha = await digest(source, signal);
       // Identical groups are proven again by content now; a lookalike group is the user's decision, made on the previews.
       if (item.group.strength === 'sha' && sha !== keeperSha) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it no longer matches the copy to keep' }); continue; }
@@ -68,6 +78,8 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       // Companions follow their primary.
       for (const companion of companions.get(file.path) ?? []) {
         const from = abs(companion), target = companionTarget(file.path, companion, keepPath), line = { ...context, role: 'companion' as const, file: companion };
+        // Beside each other with one stem (IMG_1.JPG and IMG_1.jpeg), the sidecar is the kept copy's own.
+        if (pathKey(from) === pathKey(target)) { report.push({ ...line, size: 0, result: 'left', reason: 'it also belongs to the copy to keep' }); continue; }
         const own = await stat(from).catch(() => undefined);
         if (!own) { report.push({ ...line, size: 0, result: 'left', reason: 'the file changed or is gone since the scan' }); continue; }
         const ownSha = await digest(from, signal), there = await stat(target).catch(() => undefined);
@@ -95,3 +107,17 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
 }
 const relativeTo = (root: string, file: string) => path.relative(root, file).split(path.sep).join('/');
 export type { DuplicateGroup };
+
+/** The groups and companions after a clean removal, without scanning the library again: removed files leave their
+ * groups (a group left with one file is gone, the others are classified anew), and a carried companion now follows the kept file. */
+export function afterRemoval(groups: DuplicateGroup[], companions: Map<string, string[]>, removal: RemovalResult): { groups: DuplicateGroup[]; companions: Map<string, string[]> } {
+  const gone = new Set(removal.report.filter(line => line.role === 'primary' && line.result === 'removed').map(line => line.file));
+  const moved = new Set(removal.report.filter(line => line.role === 'companion' && (line.result === 'removed' || line.result === 'carried')).map(line => line.file));
+  const next = new Map<string, string[]>();
+  for (const [primary, list] of companions) if (!gone.has(primary)) next.set(primary, list.filter(item => !moved.has(item)));
+  for (const line of removal.report) if (line.role === 'companion' && line.result === 'carried' && line.carriedTo) next.set(line.kept, [...next.get(line.kept) ?? [], line.carriedTo]);
+  return {
+    groups: groups.flatMap(group => { const files = group.files.filter(file => !gone.has(file.path)); return files.length > 1 ? [{ id: groupId(files), strength: classify(files), files }] : []; }),
+    companions: next,
+  };
+}

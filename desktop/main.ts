@@ -6,7 +6,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
-import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,lockedPreferenceKeys,jobPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
@@ -23,10 +23,10 @@ import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
-import {removeDuplicates} from './core/duplicate-removal';
+import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue} from './core/residue';
-import {recordPlanDuplicates,scanDuplicates,type PlanDuplicates} from './core/duplicates';
+import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
@@ -119,7 +119,10 @@ interface Prepared {problems:ProblemFile[];review:Review;prefs:Preferences;optio
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
-const busy=()=>active.size>0;
+// A Duplicates scan holds the library's drive: imports and organizations wait for it (they are refused while it runs, queued jobs start after it).
+/** Library roots a running job writes to; a Duplicates scan of one of them is stale afterwards. */
+const touchedLibraries=new Map<string,string[]>();
+const busy=()=>active.size>0||!!duplicateControl;
 const stateChannel=createStateChannel(update=>{if(window&&!window.isDestroyed())window.webContents.send('importer:updated',update);});
 // Each job carries when it started running and when its current phase began, so elapsed time
 // can be shown; both are stamped as the state is published.
@@ -271,7 +274,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesUndone',{restored:undone.restored}):joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message(duplicates?'history.duplicatesUndone':'history.organizationUndone'),job.detail);}
   else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=progress.step==='history'?'verifying':'copying';job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
- }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
+ }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{if(kind!=='finalize'&&kind!=='delete')void duplicatesStale([root]);delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
   if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();}})()).finally(()=>{resumingOrganizations.delete(operation);void releaseIfIdle();});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
@@ -295,12 +298,12 @@ function enqueue(source:Source,backup=false,automatic=false){
  state.jobs.unshift(job);if(automatic)automaticallyQueued.add(job.id);seen.add(source.id);
  const finished=state.jobs.filter(j=>['complete','stopped','error'].includes(j.phase));if(finished.length>30){const remove=new Set(finished.slice(30).map(j=>j.id));state.jobs=state.jobs.filter(j=>!remove.has(j.id));}
 }
-function pump(){if(state.review||state.busyReview||organizationJobIds.size)return;while(active.size<state.preferences.parallel){
+function pump(){if(state.review||state.busyReview||organizationJobIds.size||duplicateControl)return;while(active.size<state.preferences.parallel){
  const job=nextQueued(state.jobs,sourceOrder);if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
  organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
- void settle(run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...skip})).finally(()=>{if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
+ void settle(run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...skip})).finally(()=>{void duplicatesStale(touchedLibraries.get(job.id)??[]);touchedLibraries.delete(job.id);if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
  if(organization)break;
 }}
 // Nothing here may touch a drive once the work is done, so macOS can eject it at once. exiftool and the
@@ -462,7 +465,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const previous=reorganize?undefined:reusableScan(source),previousHint=scopeHint(previous?.files,sourceFolders);
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?'camera:'+source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
-  const {inventory,plans,failures,problems,duplicates}=await plan(sourcePath,roots,{backup,duplicates:!backup,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
+  const {inventory,plans,failures,problems,duplicates}=await plan(sourcePath,roots,{backup,duplicates:!backup&&!reorganize,collectProblems:reorganize&&prefs.collectProblemFiles!==false,sourceDigest,skipErrors,...(request.exclude?.length?{exclude:request.exclude}:{}),drive:drive&&{name:drive.name,identity:drive.identity,mirror:drive.mirror},template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,...(videoRoots?{videoRoots}:{}),editedFolder:prefs.editedFolder,unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,reuse:reusableScan(source),reorganize,sourceFolders,...listing},p=>metadata(p,{preview:false,details:false}),signal,onProgress);
   signal.throwIfAborted();
   const available=availableFor(owner,infos);
   // A same-drive organization moves files; it never needs room for a second library.
@@ -512,6 +515,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('plan.json',{producer:'desktop-app',jobId:job.id,kind,sourceFolders,plans,skipped:job.inventory?.skipped??[],failed,inventory:job.inventory});
   await saveReport('context.json',{producer:'desktop-app',started:new Date().toISOString(),preferences:prefs,source:job.source});
   const reserved=reservations.get(job.id)!;
+  touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   job.phase='copying';
   const verified:Record<string,{sha256:string;identity:string}>={};
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes}=await executeDestinations(plans,{
@@ -520,7 +524,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));
-  await recordDuplicates(job,plans,prepared.duplicates,reorganize);
+  await recordDuplicates(plans,prepared.duplicates,reorganize);
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes,skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
@@ -549,19 +553,18 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();emit();
 }
-/** Duplicate detection, recorded only: stage 1 findings of the plan, then stage 2 (SHA collisions from the hashes
- * verification already stored). Best effort; it never fails or changes a job and never deletes a file. */
-async function recordDuplicates(job:Job,plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+/** Duplicate detection, recorded only: the stage 1 findings of the plan, for the files this job placed. It never
+ * scans the library (stage 2 runs only from the Remove duplicates page), so the drive is not held after the
+ * copy. Best effort; it never fails or changes a job and never deletes a file. */
+async function recordDuplicates(plans:TransferPlan[],found:PlanDuplicates|undefined,reorganize:boolean){
+ if(!found)return;
  try{
   for(const part of plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])])){
    const moves=new Map(part.entries.map(entry=>[entry.source,entry.destination]));
    // An organization leaves a file where it is when it already is where the rules put it.
-   if(found)await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
-   job.phase='verifying';
-   await scanDuplicates(part.root,{metadata:p=>metadata(p,{preview:false,details:false}),index:await destinationIndex(part.root,await identity(part.root))},{mode:'recorded',onProgress:progress=>{job.progress={...progress,phase:'verifying',step:'collisions'};progressEmit();}});
+   await recordPlanDuplicates(part.root,found,source=>moves.get(source)??(reorganize&&within(source,part.root)?source:undefined));
   }
  }catch{/* Only a record. */}
- job.phase='copying';job.progress=undefined;
 }
 async function discardReview(){reviewControl?.abort();reviewControl=undefined;const old=reviewed;reviewed=undefined;state.review=undefined;state.busyReview=false;state.reviewSourceId=undefined;reservations.delete(old?.review.id??'');if(old?.stage)await old.stage.cleanup().catch(()=>{});}
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean){
@@ -610,11 +613,29 @@ async function scanDuplicatesAction(){
   const real=await fs.realpath(root).catch(()=>{throw new MessageError('error.duplicatesUnavailable');});
   const result=await scanDuplicates(real,{metadata:file=>metadata(file,{preview:false,details:false}),index:await destinationIndex(real,await identity(real))},{editedFolder:state.preferences.editedFolder,signal:control.signal,onProgress:progress=>{dup.progress=progress;progressEmit();}});
   duplicateGroups=result.groups;duplicateCompanions=result.companions;
+  dup.earlier=[...await placedByEarlierJournals(real,control.signal).catch(()=>new Set<string>())];
   Object.assign(dup,{files:result.files,groups:result.groups.length,scannedAt:new Date().toISOString(),revision:dup.revision+1,status:'ready' as const});
  }catch(error){
   duplicateGroups=[];Object.assign(dup,{groups:0,files:0,revision:dup.revision+1,status:'idle' as const});
   if(!control.signal.aborted)throw error;
- }finally{dup.progress=undefined;if(duplicateControl===control)duplicateControl=undefined;emit();void releaseIfIdle();}
+ }finally{dup.progress=undefined;if(duplicateControl===control)duplicateControl=undefined;emit();pump();void releaseIfIdle();}
+}
+/** After a removal that ran cleanly: drop the removed files from the groups, and move carried companions, in memory. */
+function applyRemoval(removal:RemovalResult){
+ const next=afterRemoval(duplicateGroups,duplicateCompanions,removal);
+ const gone=removal.report.filter(line=>line.role==='primary'&&line.result==='removed').length,removed=new Set(removal.report.filter(line=>line.role==='primary'&&line.result==='removed').map(line=>line.file));
+ duplicateGroups=next.groups;duplicateCompanions=next.companions;
+ dup.earlier=dup.earlier?.filter(item=>!removed.has(item));
+ Object.assign(dup,{files:Math.max(0,dup.files-gone),groups:duplicateGroups.length,revision:dup.revision+1});
+}
+/** A job changed this library: the scan no longer describes it, so it must be run again before anything is removed. */
+async function duplicatesStale(roots:string[]){
+ if(!dup.root||dup.status!=='ready')return;
+ const own=dup.root,mine=[own,await fs.realpath(own).catch(()=>own)];
+ for(const root of roots){
+  const real=await fs.realpath(root).catch(()=>root);
+  if(mine.some(item=>within(item,real)||within(real,item))){duplicateGroups=[];Object.assign(dup,{status:'idle' as const,groups:0,files:0,earlier:undefined,revision:dup.revision+1});emit();return;}
+ }
 }
 async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string>){
  const root=dup.root,scope=root?duplicateScope(root):undefined;
@@ -629,9 +650,10 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
  state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);dup.status='removing';emit();
  void settle((async()=>{
   const reports=path.join(app.getPath('userData'),'operation-reports',job.id);
+  let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
@@ -642,7 +664,12 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=control.signal.aborted?message('job.stopped'):toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}
   finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);dup.status='idle';await refreshOrganizations().catch(()=>{});emit();
    // The library changed: look again (records make this quick).
-   if(!active.size&&dup.root===root){const result=dup.result;await scanDuplicatesAction().catch(error=>{state.error=toMessage(error);emit();});dup.result=result;emit();}
+   // The library changed only by this removal: update the groups in memory. A failed run is looked at again.
+   if(dup.root===root){
+    const result=dup.result;
+    if(removal&&!removal.result?.errors.length&&dup.status==='idle'){applyRemoval(removal);dup.status='ready';dup.result=result;emit();}
+    else if(!active.size){await scanDuplicatesAction().catch(error=>{state.error=toMessage(error);emit();});dup.result=result;emit();}
+   }
    pump();void releaseIfIdle();}
  })());
 }
@@ -676,7 +703,7 @@ async function action(input:Action):Promise<void>{
   case 'scanSource':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'duplicatesScope':{if(!duplicateScope(input.root))throw new MessageError('error.duplicatesScope');if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');if(dup.root!==input.root){duplicateGroups=[];Object.assign(dup,{root:input.root,name:duplicateScope(input.root)!.name,status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
-  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const libraries=await Promise.all(duplicateScopes().filter(item=>item.destination).map(item=>fs.realpath(item.root).catch(()=>item.root)));if(overlappingLibraries(root,libraries).length>1)throw new MessageError('error.duplicatesLibraries');approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
   case 'duplicatesScan':await scanDuplicatesAction();break;
   case 'duplicatesStop':duplicateControl?.abort();break;
   case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;

@@ -67,3 +67,14 @@ Known limits: removing a file that an earlier organization placed supersedes tha
 ## Tests
 
 `desktop/tests/duplicates-*.test.ts`: stage 1 and 2 detection (bursts, RAW+JPG, Live Photo, edited versions are never duplicates; renamed SHA duplicates found in stage 2), keep rule, each level's split (same EXIF but different size is manual), stash/undo/release through the journal, different destinations never paired, curated EXIF categories, thumbnail fallback, and renderer tests for the group view and level selector.
+
+## Review fixes (claude/remove-duplicates-fixes)
+
+- Organization, backup and import jobs no longer scan the library afterwards; they only record what the job placed. Stage 2 runs only from the Duplicates page. Stage 1 runs for imports only and reuses remembered source hashes.
+- A Duplicates scan blocks imports and organizations (they are refused while it runs; queued jobs start when it ends). Any job that writes to the scanned library, or an undo, marks the scan stale.
+- A chosen folder that is, holds or sits inside more than one destination library is refused. `Drive backups`, `Photo Importer Recovery`, `Problem files` are skipped at any depth.
+- A removal never removes a file another group keeps, refuses hard links of the kept file, and rechecks inode and mtime for non-SHA groups ("changed since scan"). A sidecar shared by the kept and removed copy stays.
+- `summarize(resolved, earlier)` reports `earlier`: removed files an earlier organization placed (`DuplicatesState.earlier`); removing them supersedes it and ends its Undo.
+- After a clean removal the groups are updated in memory (`afterRemoval`), not rescanned.
+- The EXIF key ignores an all-zero sub-second and includes exposure time, aperture, ISO and exposure compensation.
+- The thumbnail cache is pruned least recently used first to 2 GB.

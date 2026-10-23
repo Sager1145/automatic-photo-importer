@@ -29,18 +29,18 @@ export interface Inventory {issues?:{path:string;message:string}[];files:Invento
 /** Capture units: f-number, ISO, seconds, millimeters and EV respectively. */
 export interface Exposure {lens?:string;aperture?:number;iso?:number;exposureTime?:number;focalLength?:number;exposureCompensation?:number;}
 /** What decides whether two files are the same capture: all read from EXIF, never from file names. */
-export interface DuplicateExif {date?:string;camera?:string;serial?:string;shutterCount?:string;imageNumber?:string;width?:number;height?:number;lens?:string;}
+export interface DuplicateExif {date?:string;camera?:string;serial?:string;shutterCount?:string;imageNumber?:string;width?:number;height?:number;lens?:string;/** Exposure, so frames of a bracket or burst from a body with a constant sub-second never look alike. */exposureTime?:string;aperture?:string;iso?:string;exposureCompensation?:string;}
 export type DuplicateStrength='sha'|'exif'|'exif-size'|'similar';
 export type DuplicateLevel=1|2|3;
 /** A media file of a library: `path` is relative to the library root. birth and ctime are milliseconds. */
-export interface DuplicateFile {path:string;size:number;kind:MediaKind;sha256?:string;exif?:DuplicateExif;edited:boolean;birth:number;ctime:number;}
+export interface DuplicateFile {path:string;size:number;kind:MediaKind;sha256?:string;exif?:DuplicateExif;edited:boolean;birth:number;ctime:number;/** Inode and modified time (ns) when the scan saw the file; a removal that finds others skips the file. */ino?:string;mtimeNs?:string;}
 export interface DuplicateGroup {id:string;strength:DuplicateStrength;files:DuplicateFile[];}
 /** A preview picture. via embedded: the system could not decode the file, so the camera's own preview is shown (`problem` says why). */
 export interface Thumbnail {src?:string;via:'system'|'embedded'|'none';problem?:'raw-unsupported'|'unreadable'|'video';}
 /** A library Remove duplicates can look through: one destination's backup folder, or a chosen folder. */
 export interface DuplicateScope {root:string;name:string;destination?:string;}
 /** The groups themselves are fetched with DesktopAPI.duplicateGroups when `revision` changes, so progress updates stay small. */
-export interface DuplicatesState {scopes:DuplicateScope[];root?:string;name?:string;status:'idle'|'scanning'|'ready'|'removing';progress?:Progress;revision:number;groups:number;files:number;scannedAt?:string;result?:{removed:number;bytes:number;carried:number;left:number;errors:number;id?:string};}
+export interface DuplicatesState {scopes:DuplicateScope[];root?:string;name?:string;status:'idle'|'scanning'|'ready'|'removing';progress?:Progress;revision:number;groups:number;files:number;scannedAt?:string;/** Files (relative to the root) an earlier organization placed; removing them supersedes it and ends its Undo (see summarize). */earlier?:string[];result?:{removed:number;bytes:number;carried:number;left:number;errors:number;id?:string};}
 export interface Metadata {fingerprint?:DuplicateExif;edited?:boolean;camera?:string;date?:string;fields:Record<string,unknown>;exposure?:Exposure;shutterCount?:string;shutterNote?:string;preview?:string;}
 /** digest is absent until a copy streams the source ("computed during copy"); planning hashes
  * only when a same-size file already sits at a candidate destination. sourceIdentity is the
