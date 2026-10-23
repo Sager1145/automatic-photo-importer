@@ -243,25 +243,46 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Live Photos: a .mov beside a same-stem HEIC/HEIF/JPG is that still's companion when their ContentIdentifiers
   // agree. When either lacks one, the stem alone decides, but only for an Apple still. This needs the metadata
   // just read, so it runs here rather than in the inventory.
-  const livePaired=new Set<string>();
+  const livePaired=new Set<string>(),liveRoot=new Map<string,InventoryFile>();
   if(!options.backup) {
     const stillExtensions=['heic','heif','jpg','jpeg'],apple=(info?:Metadata)=>/^apple\b/i.test(info?.make??'');
+    // Indexed once by stem: a card holds thousands of videos.
+    const stillsByStem=new Map<string,InventoryFile[]>(),emptyStems=new Set<string>();
+    for(const f of scan.files) if(stillExtensions.includes(extension(f.path))) {
+      if(f.size===0) emptyStems.add(stem(f.path));
+    }
+    for(const f of files) if(stillExtensions.includes(extension(f.path))) {const key=stem(f.path);const list=stillsByStem.get(key);if(list)list.push(f);else stillsByStem.set(key,[f]);}
+    for(const list of stillsByStem.values()) list.sort((a,b)=>stillExtensions.indexOf(extension(a.path))-stillExtensions.indexOf(extension(b.path)));
+    const dropped=new Set<string>();
     for(const mov of files) {
+      checkAbort(signal);
       if(mov.kind!=='Videos'||extension(mov.path)!=='mov'||mov.companionOf) continue;
       const own=infos.get(mov.path),key=stem(mov.path);
-      const candidates=files.filter(f=>f!==mov&&stem(f.path)===key&&stillExtensions.includes(extension(f.path))).sort((a,b)=>stillExtensions.indexOf(extension(a.path))-stillExtensions.indexOf(extension(b.path)));
-      const still=candidates.find(f=>{const info=infos.get(f.path);return info?.contentId&&own?.contentId?info.contentId===own.contentId:apple(info);});
+      const still=(stillsByStem.get(key)??[]).find(f=>{const info=infos.get(f.path);return info?.contentId&&own?.contentId?info.contentId===own.contentId:apple(info);});
       if(still) {mov.companionOf=still.path;livePaired.add(mov.path);}
+      // An empty still is never imported, so an Apple video that shares its stem stays beside it.
+      else if(apple(own)&&emptyStems.has(key)) dropped.add(mov.path);
     }
-    // An empty still is never imported, so an Apple video that shares its stem stays beside it.
-    for(const mov of [...files]) {
-      if(mov.kind!=='Videos'||extension(mov.path)!=='mov'||mov.companionOf||!apple(infos.get(mov.path))) continue;
-      const key=stem(mov.path),empty=scan.files.find(f=>f.size===0&&stem(f.path)===key&&stillExtensions.includes(extension(f.path)));
-      if(!empty) continue;
-      files=files.filter(f=>f!==mov);mov.included=false;
-      (scan.skipped??=[]).push({path:mov.path,reason:'emptyPrimary'});
-      problems.push({path:mov.path,relative:path.relative(sourceRoot,mov.path),reason:'emptyPrimary',group:'empty',collected:false});
+    if(dropped.size) {
+      const listed=new Map(files.map(f=>[f.path,f]));
+      const rootedInDropped=(file:InventoryFile)=>{for(let cur:InventoryFile|undefined=file,hops=0;cur&&hops<16;cur=cur.companionOf?listed.get(cur.companionOf):undefined,hops++)if(dropped.has(cur.path))return true;return false;};
+      files=files.filter(file=>{
+        if(!rootedInDropped(file)) return true;
+        file.included=false;file.companionOf=undefined;
+        (scan.skipped??=[]).push({path:file.path,reason:'emptyPrimary'});
+        problems.push({path:file.path,relative:path.relative(sourceRoot,file.path),reason:'emptyPrimary',group:'empty',collected:false});
+        return false;
+      });
     }
+    // Companions of a live MOV (its .xmp, .LRV) follow the still: resolve each chain to its root once.
+    const listed=new Map(files.map(f=>[f.path,f]));
+    for(const file of files) {
+      if(!file.companionOf) continue;
+      let cur:InventoryFile|undefined=file,viaLive=false;
+      for(let hops=0;cur?.companionOf&&hops<16;hops++) {if(livePaired.has(cur.path))viaLive=true;cur=listed.get(cur.companionOf);}
+      if(viaLive&&cur) liveRoot.set(file.path,cur);
+    }
+    scan.companions=scan.files.filter(f=>!!f.companionOf).length;
   }
   const stems=new Map<string,InventoryFile[]>();
   for(const file of files) {const key=stem(file.path); stems.set(key,[...(stems.get(key)??[]),file]);}
@@ -280,8 +301,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const byPath=new Map(files.map(file=>[file.path,file]));
   for(const file of files) if(!options.backup && file.companionOf) {
     // Video companions, <name>.<ext>.xmp and NKSC_PARAM edits travel in their original's family.
-    const primary=byPath.get(file.companionOf);
-    if(primary && (primary.kind==='Videos' || livePaired.has(file.path) || stem(primary.path)!==stem(file.path))) {primaryFor.set(file.path,primary);familyFor.set(file.path,familyFor.get(primary.path)!);}
+    const primary=liveRoot.get(file.path)??byPath.get(file.companionOf);
+    if(primary && (primary.kind==='Videos' || liveRoot.has(file.path) || stem(primary.path)!==stem(file.path))) {primaryFor.set(file.path,primary);familyFor.set(file.path,familyFor.get(primary.path)!);}
   }
   // GoPro splits a long recording into chapters GXzzxxxx/GHzzxxxx (zz the chapter, xxxx the
   // video). They form one family filed by the first chapter, so a recording that crosses
@@ -340,7 +361,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
     const inherit=primary.path!==file.path && (file.companionOf || (file.kind!=='Other' && rawMembers.length===1));
-    const live=livePaired.has(file.path),info:Metadata={fields:{},camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
+    const live=liveRoot.has(file.path),info:Metadata={fields:{},camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let relative:string,place:ReturnType<typeof folder>|undefined;
@@ -348,7 +369,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
     else {
       // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
-      const original=file.companionOf?byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
+      const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
       const lead=chapterLead.get(file.path),route:Metadata=lead?{...info,date:infos.get(lead.path)?.date}:info;
       // An empty companion has no capture metadata of its own. Its primary also
       // supplies the fallback date, so differing mtimes cannot split the family.

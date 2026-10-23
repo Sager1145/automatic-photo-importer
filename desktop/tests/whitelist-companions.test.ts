@@ -107,9 +107,9 @@ test('Live Photo MOV with the same ContentIdentifier joins the still',async t=>{
  assert.equal(path.relative(root,entry(mov).destination),'2024/202403/iPhone 15/IMG_0001.MOV');
 });
 test('Live Photo MOV with a different ContentIdentifier stays independent',async t=>{
- const {entry,files,mov}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'XYZ'});
+ const {entry,files,mov,root}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'XYZ'});
  assert.notEqual(entry(mov).family,entry(files[0]!).family);
- assert.match(path.relative(path.dirname(entry(mov).destination),entry(mov).destination),/IMG_0001\.MOV/);
+ assert.equal(path.relative(root,entry(mov).destination),'2024/202403/iPhone MOV/IMG_0001.MOV');
 });
 test('Live Photo without identifiers pairs when the still is from Apple',async t=>{
  const {entry,files,mov}=await livePair(t,{make:'Apple'},{});
@@ -120,8 +120,9 @@ test('Live Photo without identifiers does not pair for a non-Apple still',async 
  assert.notEqual(entry(mov).family,entry(files[0]!).family);
 });
 test('Live Photo prefers the HEIC over a JPG of the same stem',async t=>{
- const {entry,files,mov}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'ABC'},['IMG_0001.JPG','IMG_0001.HEIC']);
+ const {entry,files,mov,found}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'ABC'},['IMG_0001.JPG','IMG_0001.HEIC']);
  assert.equal(entry(mov).family,entry(files[1]!).family);
+ assert.equal(found.inventory.files.find(f=>f.path===mov)?.companionOf,files[1]);
 });
 test('a MOV with no still is unchanged, and an empty still leaves its MOV in place',async t=>{
  const {source,root,put}=await fixture(t);
@@ -130,4 +131,52 @@ test('a MOV with no still is unchanged, and an empty still leaves its MOV in pla
  assert.deepEqual(found.plans[0]!.entries.map(entry=>path.basename(entry.source)),['CLIP.MOV']);
  assert.ok(found.inventory.skipped!.some(item=>item.path===heic&&item.reason==='empty'));
  assert.ok(found.inventory.skipped!.some(item=>item.path===mov&&item.reason==='emptyPrimary'));
+});
+
+// Review fixes
+const liveMeta=async(file:string):Promise<Metadata>=>/\.mov$/i.test(file)
+ ?{camera:'iPhone MOV',date:'2024-04-04T10:00:01Z',make:'Apple',contentId:'ABC',fields:{}}
+ :{camera:'iPhone 15',date:'2024-03-04T10:00:00Z',make:'Apple',contentId:'ABC',fields:{}};
+const formatOptions={...options,layout:'format' as const};
+test('a paired Live Photo MOV carries its own xmp and LRV (sorting first) to the still folder',async t=>{
+ const {source,root,put}=await fixture(t);
+ const heic=await put('DCIM/A/IMG_0001.HEIC'),mov=await put('DCIM/A/IMG_0001.MOV'),xmp=await put('DCIM/A/IMG_0001.MOV.xmp'),lrv=await put('DCIM/A/IMG_0001.LRV');
+ const found=await plan(source,[root],formatOptions,liveMeta);
+ const entries=found.plans[0]!.entries,entry=(f:string)=>entries.find(e=>e.source===f)!;
+ const rel=(f:string)=>path.relative(root,entry(f).destination).split(path.sep).join('/');
+ for(const f of [mov,xmp,lrv])assert.equal(path.dirname(rel(f)),'2024/202403/iPhone 15/HEIF',f);
+ assert.equal(new Set([heic,mov,xmp,lrv].map(f=>entry(f).family)).size,1);
+});
+test('an empty still keeps its Live Photo MOV and the MOV companions in place',async t=>{
+ const {source,root,put}=await fixture(t);
+ await put('A/IMG_0001.HEIC','');const mov=await put('A/IMG_0001.MOV'),xmp=await put('A/IMG_0001.MOV.xmp');await put('A/ok.JPG');
+ const found=await plan(source,[root],options,liveMeta);
+ assert.deepEqual(found.plans[0]!.entries.map(e=>path.basename(e.source)),['ok.JPG']);
+ for(const f of [mov,xmp])assert.ok(found.inventory.skipped!.some(i=>i.path===f&&i.reason==='emptyPrimary'),f);
+});
+test('the companion count includes Live Photo pairs',async t=>{
+ const {source,root,put}=await fixture(t);
+ await put('A/IMG_0001.HEIC');await put('A/IMG_0001.MOV');
+ const found=await plan(source,[root],options,liveMeta);
+ assert.equal(found.inventory.companions,1);
+});
+test('Live Photo pairing scales to many files',async t=>{
+ const {source,root}=await fixture(t);
+ const dir=path.join(source,'DCIM');await fs.mkdir(dir);
+ const writes:Promise<void>[]=[];
+ for(let i=0;i<6700;i++){const n=String(i).padStart(5,'0');for(const ext of ['HEIC','MOV','JPG'])writes.push(fs.writeFile(path.join(dir,`IMG_${n}.${ext}`),'x'));}
+ await Promise.all(writes);
+ const start=performance.now();
+ await plan(source,[root],options,async()=>({camera:'P',date:'2024-03-04T10:00:00Z',make:'Apple',fields:{}}));
+ const elapsed=performance.now()-start;
+ console.log('live scale ms',Math.round(elapsed));
+ // The rest of planning (stat, metadata, destinations) takes ~20 s for 20k files on its own; the quadratic pairing alone took ~500 s.
+ assert.ok(elapsed<90000,String(elapsed));
+});
+test('a darktable XMP needs exactly two digits',async t=>{
+ const {source,put}=await fixture(t);
+ const jpg=await put('y.jpg'),two=await put('y_01.jpg.xmp'),three=await put('y_001.jpg.xmp');
+ const scan=await inventory(source,{});
+ assert.equal(scan.files.find(i=>i.path===two)?.companionOf,jpg);
+ assert.equal(scan.files.find(i=>i.path===three)?.companionOf,undefined);
 });

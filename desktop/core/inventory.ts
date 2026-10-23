@@ -144,7 +144,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       primary??=byPath.get(stem(file.path));
       if(!primary && ext==='pp3' && /\.out$/i.test(name)) primary=byPath.get(pathKey(path.join(dir,name.slice(0,-4))));
       // darktable duplicates: <name>_<nn>.<ext>.xmp belongs to <name>.<ext> when no exact match exists.
-      if(!primary && ext==='xmp') {const duplicate=/^(.*)_\d{2,}\.(\w+)$/.exec(name);if(duplicate)primary=byPath.get(pathKey(path.join(dir,`${duplicate[1]}.${duplicate[2]}`)));}
+      if(!primary && ext==='xmp') {const duplicate=/^(.*)_\d{2}\.(\w+)$/.exec(name);if(duplicate)primary=byPath.get(pathKey(path.join(dir,`${duplicate[1]}.${duplicate[2]}`)));}
       if(!primary && (ext==='cos'||ext==='comask') && captureOneEdit(file.path)) primary=byPath.get(pathKey(path.join(path.dirname(path.dirname(dir)),name)));
       if(!primary && audio.has(ext) && name.startsWith('_')) primary=choose(media.get(pathKey(path.join(dir,name.slice(1))))??[]);
       if(!primary && ext==='bim') {const clip=/^(C\d{4})R01$/i.exec(name);if(clip)primary=choose(media.get(pathKey(path.join(dir,clip[1]!)))??[]);}

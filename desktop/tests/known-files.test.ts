@@ -142,3 +142,8 @@ test('a Sony thumbnail JPG is a system file, not a photo; backup still includes 
  const backup=await inventory(source,{backup:true});
  assert.equal(byName(backup,'PRIVATE/M4ROOT/THMBNL/C0001T01.JPG')?.included,true);
 });
+
+test('a MISC/*.MRK file is a DPOF file only at the card root',()=>{
+ assert.equal(knownSystemFile('MISC/AUTPRINT.MRK')?.id,'dpof-print-order');
+ assert.equal(knownSystemFile('Projects/MISC/edit.mrk'),undefined);
+});

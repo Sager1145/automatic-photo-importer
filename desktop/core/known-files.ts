@@ -15,7 +15,7 @@ const catalog:(SystemFile & {pattern:RegExp})[]=[
   {id:'fujifilm-transfer',vendor:'Fujifilm',label:'Fujifilm transfer list',pattern:/(?:^|\/)FFDB\/FFXFER\.DAT$/i},
   {id:'fujifilm-database',vendor:'Fujifilm',label:'Fujifilm camera database',pattern:/(?:^|\/)FFDB\/FFDB_[^/]+\.db$/i},
   {id:'canon-catalog',vendor:'Canon',label:'Canon card catalog',pattern:/(?:^|\/)(?:EOSMISC|CANONMSC)\/[^/]+\.CTG$/i},
-  {id:'dpof-print-order',vendor:'Other device',label:'Print order (DPOF)',pattern:/(?:^|\/)MISC\/[^/]+\.MRK$/i},
+  {id:'dpof-print-order',vendor:'Other device',label:'Print order (DPOF)',pattern:/^MISC\/[^/]+\.MRK$/i},
   {id:'sony-xavc-thumbnail',vendor:'Sony',label:'Sony XAVC clip thumbnail',pattern:/(?:^|\/)PRIVATE\/M4ROOT\/THMBNL\/[^/]*T01\.JPG$/i},
   {id:'p2-icon',vendor:'Panasonic',label:'Panasonic P2 clip icon',pattern:/(?:^|\/)CONTENTS\/ICON\/[^/]+\.BMP$/i},
   {id:'p2-last-clip',vendor:'Panasonic',label:'Panasonic P2 last clip',pattern:/(?:^|\/)CONTENTS\/LASTCLIP\.TXT$/i},
