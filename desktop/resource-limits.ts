@@ -1,6 +1,4 @@
-import * as fs from 'node:fs';
 import * as os from 'node:os';
-import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** The one place that knows how much CPU and memory the app may use. Everything that sizes a pool or a buffer reads it
@@ -53,24 +51,18 @@ export const scaledByBudget = (base: number, min: number, max = Infinity): numbe
 /** libuv threads mostly wait on the disk, so twice the thread limit, between 4 and 16 (the pool's fixed ceiling in threadpool.ts). */
 export const uvThreadpoolSize = (maxCpuThreads: number): number => clamp(Math.floor(maxCpuThreads) * 2, 4, 16);
 
-/** The limits saved in `<userData>/settings.json`, read synchronously so the thread pool can be sized before anything starts. */
-export function savedLimits(userData: string, host: Host = hostNow()): Limits {
-  try {
-    const saved = JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8'))?.preferences;
-    return { maxCpuThreads: clampCpuThreads(saved?.maxCpuThreads, host), memoryLimitMB: clampMemoryLimitMB(saved?.memoryLimitMB, host) };
-  } catch { return defaultLimits(host); }
+/** The limits in saved preferences, by the one rule both the thread pool (before anything starts) and normalizePreferences use:
+ * a limit that is not saved is left out; any other value is clamped to this host, and an unreadable one becomes its default. */
+export function savedLimits(preferences: unknown, host: Host = hostNow()): Partial<Limits> {
+  const saved = (preferences && typeof preferences === 'object' ? preferences : {}) as Record<string, unknown>;
+  return {
+    ...(saved.maxCpuThreads == null ? {} : { maxCpuThreads: clampCpuThreads(saved.maxCpuThreads, host) }),
+    ...(saved.memoryLimitMB == null ? {} : { memoryLimitMB: clampMemoryLimitMB(saved.memoryLimitMB, host) }),
+  };
 }
 
 /** V8 heap ceiling for the read-only scan process: half the memory budget, at least 1 GB (a large card's listing must fit). The renderer is left alone: a heap flag there could crash the interface. */
 export const scanHeapMB = (): number => Math.max(1024, Math.floor(current.memoryLimitMB / 2));
-
-/** The saved thread limit alone, or undefined when nothing valid is saved (a fresh install keeps the packaged 16-thread pool). */
-export function savedCpuThreads(userData: string, host: Host = hostNow()): number | undefined {
-  try {
-    const value = JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8'))?.preferences?.maxCpuThreads;
-    return Number.isFinite(Number(value)) && value !== null && value !== '' ? clampCpuThreads(value, host) : undefined;
-  } catch { return undefined; }
-}
 
 /** A soft memory governor: above 90% of the limit it stops admitting new files into the copy, verify and metadata
  * pipelines until usage drops (backpressure only; running work is never cancelled). Above 100% it also reports once

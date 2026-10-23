@@ -45,14 +45,14 @@ import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
-import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
+import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,memoryRange,MB} from './resource-limits';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {createQaHooks,type QaHooks} from './qa/hooks';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
 import {ErrorLog,clearErrors,createErrorLogCache} from './error-log';
 import {acknowledgeJob,acknowledgeSummary} from './acknowledge';
-import {appleDoubleIssues,noMetadataIssues,errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
+import {addErrors,appleDoubleIssues,noMetadataIssues,errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
 import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
@@ -87,7 +87,7 @@ function logInfo():AppState['logInfo']{const stats=activeLogger()?.stats();retur
 // A file the organization moved keeps its routing metadata under its new path, so the check after the job does not read it again.
 setMoveObserver(carryRouting);
 /** A job planning, copying or verifying (or a review being built) needs the drive's file calls: the organization listing gives way to it. */
-const drivesInUse=()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'||job.phase==='copying');
+const drivesInUse=()=>!!state.busyReview||state.jobs.some(isRunning);
 /** Any job at all on a drive: converting earlier records waits for none to be running. */
 const jobsActive=()=>drivesInUse()||active.size>0||resumingOrganizations.size>0||!!duplicateControl||!!residueControl||!!residueTask;
 let listingControl:AbortController|undefined;
@@ -165,7 +165,7 @@ function assertIdle(key:'error.busy'|'error.busyResume'|'error.busyScan'='error.
 // CPU and memory limits (Settings > Performance): applied to the next job; pools restart when idle (releaseIfIdle).
 const applyLimits=()=>{setResourceLimits({maxCpuThreads:state.preferences.maxCpuThreads,memoryLimitMB:state.preferences.memoryLimitMB});log('detailed','resources','limits',{threads:state.preferences.maxCpuThreads,memoryMB:state.preferences.memoryLimitMB});};
 let lastUsageMB=0,overLimit=false;
-const resourceUse=():ResourceUse=>{const host=hostNow(),limits=resourceLimits();return {threads:limits.maxCpuThreads,memoryMB:Math.round(lastUsageMB),limitMB:limits.memoryLimitMB,cores:host.cores,totalMemMB:Math.round(host.totalMemBytes/MB),defaultThreads:defaultCpuThreads(host),defaultMemoryMB:defaultMemoryLimitMB(host),...(overLimit?{warning:true}:{})};};
+const resourceUse=():ResourceUse=>{const host=hostNow(),limits=resourceLimits();return {threads:limits.maxCpuThreads,memoryMB:Math.round(lastUsageMB),limitMB:limits.memoryLimitMB,cores:host.cores,totalMemMB:Math.round(host.totalMemBytes/MB),memoryMaxMB:memoryRange(host).max,defaultThreads:defaultCpuThreads(host),defaultMemoryMB:defaultMemoryLimitMB(host),...(overLimit?{warning:true}:{})};};
 const thumbnailSlots=limiter(()=>cpuWorkers(4));
 const stateChannel=createStateChannel(update=>{if(window&&!window.isDestroyed())window.webContents.send('importer:updated',update);});
 // Each job carries when it started running and when its current phase began, so elapsed time
@@ -353,7 +353,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesUndone',{restored:undone.restored}):joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message(duplicates?'history.duplicatesUndone':'history.organizationUndone'),job.detail);}
   else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=recordSteps.includes(progress.step??'')?'verifying':'copying';job.detail=recordsDetail(progress)??message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
- }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{if(kind!=='finalize'&&kind!=='delete')touchedLibraries.set(job.id,[root]);
+ }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)addErrors(job,job.detail);}}finally{if(kind!=='finalize'&&kind!=='delete')touchedLibraries.set(job.id,[root]);
   // The job no longer holds the drives while the (possibly slow) recovery list is read again.
   delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();
   // Undo puts files back where they were, so the backup folder check runs again once nothing else runs.
@@ -735,7 +735,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.skipErrors=prepared.skipErrors;
   // Files skipped while planning are listed with the job's errors, so the job never reads as fully passed.
   for(const item of failures)log('normal','plan','file-skipped',{path:item.path,reason:item.text});
-  if(failures.length){job.failedFiles=failures.length;job.errors.push(...failures.map(item=>message('error.fileSkipped',{path:item.path,error:item.error})));}
+  if(failures.length){job.failedFiles=failures.length;addErrors(job,...failures.map(item=>message('error.fileSkipped',{path:item.path,error:item.error})));}
   // Unknown files are left or filed apart on purpose; they are listed as a warning (never a failure), also after an automatic job.
   if(prepared.noMetadata){const issues=noMetadataIssues(prepared.noMetadata);recordIssues(job,issues);log('normal','job','warning',{code:issues[0]?.code,count:prepared.noMetadata.count,counts:prepared.noMetadata.counts,handling:prepared.noMetadata.handling});}
   job.inventory=prepared.inventory;job.space=prepared.space;if(prepared.problems.length)job.problemFiles=prepared.problems;if(state.sources.some(source=>source.id===job.source.id))(state.sourceInventories??={})[job.source.id]=prepared.inventory;emit();
@@ -755,7 +755,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
-  }));job.errors.push(...errors.map(text));recordIssues(job,warnings);
+  }));addErrors(job,...errors.map(text));recordIssues(job,warnings);
   for(const error of errors)log('normal','job','error',{message:text(error)});for(const issue of warnings)log('normal','job',issue.severity==='error'?'error':'warning',{...issue});
   // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
   const sidecarIssues=appleDoubleIssues(appleDouble),reported=[...warnings,...sidecarIssues];
@@ -780,7 +780,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:gigabytes(releasedBytes??0)}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message('job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),removed&&message('job.mirrorRemoved',{count:removed}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail);
- }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)job.errors.push(job.detail);
+ }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)addErrors(job,job.detail);
   // A planning error about one file can be skipped by hand: never for a mirror (the copy would read as removed) or a USB camera (staged anew each time).
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&!(job.backup&&prefs?.backupMode==='mirror')&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail);}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
@@ -913,14 +913,14 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   try{
    await stopResidueCheck();
    const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,index:await destinationIndex(real,await identity(real)),onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):(recordsDetail(progress)??message('job.removingDuplicates'));progressEmit();}});
-   job.errors.push(...(result.result?.errors??[]).map(text));
+   addErrors(job,...(result.result?.errors??[]).map(text));
    await writeReport(job.id,'duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report});
    await writeReport(job.id,'summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()});
    job.phase=job.errors.length?'error':'complete';await writeExcerpt(job,reports);
    job.detail=joined(message('job.duplicatesRemoved',{count:result.removed,size:gigabytes(result.bytes)}),result.carried>0&&message('job.duplicatesCarried',{count:result.carried}),result.left>0&&message('job.duplicatesLeft',{count:result.left}),message('job.errors',{count:job.errors.length}));
    addHistory(message('history.duplicatesRemoved',{name:scope.name}),job.detail);
    dup.result={removed:result.removed,bytes:result.bytes,carried:result.carried,left:result.left,errors:job.errors.length,...(result.id?{id:result.id}:{})};
-  }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=control.signal.aborted?message('job.stopped'):toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}
+  }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=control.signal.aborted?message('job.stopped'):toMessage(error);if(!control.signal.aborted)addErrors(job,job.detail);}
   finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations().catch(()=>{});
    // Changed only by this clean removal, the library's groups are updated in memory; after a failure it is looked through again.
    const result=dup.result,clean=dup.root===root&&!!removal&&!removal.result?.errors.length;

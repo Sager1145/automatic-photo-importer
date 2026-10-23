@@ -1,8 +1,11 @@
-import type {AppState,Inventory,Job,Review} from './shared';
+import type {AppState,Inventory,Job,JobIssueGroup,Review} from './shared';
+import {versionOf} from './error-log';
 
 type StateFields=Omit<AppState,'jobs'|'sourceInventories'|'review'|'errorLog'|'history'|'duplicates'>&{duplicates?:Omit<NonNullable<AppState['duplicates']>,'earlier'>};
-type JobUpdate=Omit<Job,'inventory'|'errors'|'problemFiles'>&{inventoryRef?:string;errorsRef:string;problemFilesRef?:string};
-/** Large details cross IPC only when their reference changes. Job errors grow in place, so their length is part of the reference. */
+type GroupUpdate=Omit<JobIssueGroup,'items'>&{itemsRef:string};
+type JobUpdate=Omit<Job,'inventory'|'errors'|'problemFiles'|'groups'>&{inventoryRef?:string;errorsRef:string;problemFilesRef?:string;groups?:GroupUpdate[]};
+/** Large details cross IPC only when their reference changes. Job errors and group paths grow in place, so their change count (versionOf) is part of the reference;
+ * a group's count crosses as a number, so counting never resends its paths. */
 export interface StateUpdate {
  revision:number;
  reset?:boolean;
@@ -35,7 +38,8 @@ export function createStateChannel(send:(update:StateUpdate)=>void){
   const {jobs,sourceInventories,review,errorLog,history,duplicates,...rest}=state;
   const {earlier,...duplicateFields}=duplicates??{} as NonNullable<AppState['duplicates']>;
   const fields:StateFields={...rest,...(duplicates?{duplicates:duplicateFields as NonNullable<StateFields['duplicates']>}:{})};
-  const jobUpdates=jobs.map(({inventory,errors,problemFiles,...job})=>({...job,errorsRef:reference(errors,errors.length),...(inventory?{inventoryRef:reference(inventory)}:{}),...(problemFiles?{problemFilesRef:reference(problemFiles)}:{})}));
+  const jobUpdates=jobs.map(({inventory,errors,problemFiles,groups,...job})=>({...job,errorsRef:reference(errors,versionOf(errors)),
+   ...(groups?{groups:groups.map(({items,...group})=>({...group,itemsRef:reference(items,versionOf(items))}))}:{}),...(inventory?{inventoryRef:reference(inventory)}:{}),...(problemFiles?{problemFilesRef:reference(problemFiles)}:{})}));
   const sourceRefs=Object.fromEntries(Object.entries(sourceInventories??{}).map(([id,inventory])=>[id,reference(inventory)]));
   const result:StateUpdate={revision:++revision,...(reset?{reset:true}:{}),state:fields,jobs:jobUpdates,sourceInventories:sourceRefs,
    ...(errorLog?{errorLogRef:reference(errorLog)}:{}),historyRef:reference(history),...(earlier?{duplicatesEarlierRef:reference(earlier)}:{}),details,
@@ -53,21 +57,22 @@ export function createStateReceiver(){
  function apply(update:StateUpdate):AppState|undefined{
    if(update.revision<=revision)return current;
    if(!current&&!update.reset){pending.push(update);return undefined;}
-   if(update.reset)details=new Map();
-   for(const [id,value] of Object.entries(update.details))details.set(id,value);
-   const used=new Set<string>();
+   // Resolved against a candidate table: an update with a missing reference throws before anything received is replaced.
+   const known=new Map(update.reset?[]:details);
+   for(const [id,value] of Object.entries(update.details))known.set(id,value);
+   const used=new Map<string,unknown>();
    function detail<T>(id:string):T{
-    if(!details.has(id))throw new Error('State update references an unavailable detail.');
-    used.add(id);return details.get(id) as T;
+    if(!known.has(id))throw new Error('State update references an unavailable detail.');
+    used.set(id,known.get(id));return known.get(id) as T;
    }
-   const jobs=update.jobs.map(({inventoryRef,errorsRef,problemFilesRef,...job})=>({...job,errors:detail<Job['errors']>(errorsRef),...(inventoryRef?{inventory:detail<Inventory>(inventoryRef)}:{}),...(problemFilesRef?{problemFiles:detail<NonNullable<Job['problemFiles']>>(problemFilesRef)}:{})}));
+   const jobs=update.jobs.map(({inventoryRef,errorsRef,problemFilesRef,groups,...job})=>({...job,errors:detail<Job['errors']>(errorsRef),
+    ...(groups?{groups:groups.map(({itemsRef,...group})=>({...group,items:detail<JobIssueGroup['items']>(itemsRef)}))}:{}),...(inventoryRef?{inventory:detail<Inventory>(inventoryRef)}:{}),...(problemFilesRef?{problemFiles:detail<NonNullable<Job['problemFiles']>>(problemFilesRef)}:{})}));
    const sources=Object.fromEntries(Object.entries(update.sourceInventories).map(([source,id])=>[source,detail<Inventory>(id)]));
    const duplicates=update.state.duplicates?{...update.state.duplicates,...(update.duplicatesEarlierRef?{earlier:detail<string[]>(update.duplicatesEarlierRef)}:{})}:undefined;
    current={...update.state,...(duplicates?{duplicates}:{}),jobs,sourceInventories:sources,history:detail<AppState['history']>(update.historyRef),
     ...(update.errorLogRef?{errorLog:detail<NonNullable<AppState['errorLog']>>(update.errorLogRef)}:{}),
     review:Object.hasOwn(update,'review')?update.review??undefined:current?.review};
-   for(const id of details.keys())if(!used.has(id))details.delete(id);
-   revision=update.revision;
+   details=used;revision=update.revision;
    const waiting=pending;pending=[];for(const next of waiting)apply(next);
    return current;
  }

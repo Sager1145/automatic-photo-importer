@@ -64,14 +64,14 @@ test('structure sizes scale with the memory budget from their 2 GB design point'
     assert.equal(scaledByBudget(4, 2, 8), 2, 'never below the floor');
   } finally { setResourceLimits(before, mac); }
 });
-test('limits are read from the saved settings at startup, synchronously, and fall back to defaults', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'limits-'));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  assert.deepEqual(savedLimits(dir, mac), { maxCpuThreads: 5, memoryLimitMB: 2048 });
-  await fs.writeFile(path.join(dir, 'settings.json'), JSON.stringify({ preferences: { maxCpuThreads: 8, memoryLimitMB: 1024 } }));
-  assert.deepEqual(savedLimits(dir, mac), { maxCpuThreads: 8, memoryLimitMB: 1024 });
-  await fs.writeFile(path.join(dir, 'settings.json'), '{not json');
-  assert.deepEqual(savedLimits(dir, mac), { maxCpuThreads: 5, memoryLimitMB: 2048 });
+test('a saved limit is read by the one rule the preferences use: a bad thread limit is the same number before and after loading', () => {
+  for (const maxCpuThreads of ['abc', '', 0, 3, 99, '4', -2]) {
+    assert.equal(savedLimits({ maxCpuThreads }).maxCpuThreads, normalizePreferences({ maxCpuThreads }).maxCpuThreads, JSON.stringify(maxCpuThreads));
+    assert.equal(savedLimits({ memoryLimitMB: maxCpuThreads }).memoryLimitMB, normalizePreferences({ memoryLimitMB: maxCpuThreads }).memoryLimitMB, JSON.stringify(maxCpuThreads));
+  }
+  assert.deepEqual(savedLimits({ maxCpuThreads: 8, memoryLimitMB: 1024 }, mac), { maxCpuThreads: 8, memoryLimitMB: 1024 });
+  assert.deepEqual(savedLimits({ maxCpuThreads: null }), {}, 'nothing saved: the packaged pool and this machine\'s defaults apply');
+  assert.deepEqual(savedLimits(undefined), {});
 });
 
 test('preferences carry both limits, persisted, normalized to the host and defaulted', () => {

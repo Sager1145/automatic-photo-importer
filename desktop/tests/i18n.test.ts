@@ -540,14 +540,14 @@ test('sidebar drives show capacity, free space and a 1·2·3 status; destination
   }
 });
 
-test('organizing removes emptied source folders by default, saved preferences cannot turn it off, and a run can', async () => {
+test('organizing removes emptied source folders by default, and a run can turn it off', async () => {
   const { Organization } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const toggle = (markup: string, id = 'remove-empty-folders') => markup.match(new RegExp(`data-testid="${id}"[\\s\\S]*?</label>`))?.[0] ?? '';
   for (const language of languages) {
-    const t = createTranslator(language), render = (organizeOptions?: AppState['organizeOptions'], saved = true) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(Organization, { state: { preferences: { ...preferences, removeEmptySourceFolders: saved, releaseDuplicatesAfterOrganizing: saved }, ...(organizeOptions ? { organizeOptions } : {}), sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: false }) }));
+    const t = createTranslator(language), render = (organizeOptions?: AppState['organizeOptions']) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(Organization, { state: { preferences, ...(organizeOptions ? { organizeOptions } : {}), sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: false }) }));
     assert.ok(toggle(render()).includes(t('Remove emptied source folders')) && /checked=""/.test(toggle(render())), `${language}: on by default`);
-    assert.ok(/checked=""/.test(toggle(render(undefined, false))) && /checked=""/.test(toggle(render(undefined, false), 'release-duplicates')), `${language}: saved preferences cannot turn it off`);
+    assert.ok(/checked=""/.test(toggle(render(), 'release-duplicates')), `${language}: releasing duplicates is on by default`);
     assert.ok(!/checked=""/.test(toggle(render({ removeEmptyFolders: false, releaseDuplicates: true }))), `${language}: this run can turn it off`);
     assert.ok(render().includes(t('Organize: move, source removed')), `${language}: mode label`);
   }

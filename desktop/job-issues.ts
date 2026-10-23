@@ -1,6 +1,6 @@
 import {MAX_GROUP_ITEMS,type ExecutionIssue,type Job,type JobIssueGroup} from './shared';
-import {codeOf,severityOf} from './error-log';
-import {isAcknowledged} from './acknowledge';
+import {codeOf,entryId,isAcknowledged,markChanged,severityOf} from './error-log';
+import type {Message} from './messages';
 import type {AppleDoubleReport} from './core/appledouble';
 import type {NoMetadataSummary} from './shared';
 
@@ -12,15 +12,22 @@ const indexOf=(job:Job):Index=>{
  if(!index){index={groups:new Map(),full:new Map()};for(const group of job.groups??[])index.groups.set(group.severity+'|'+group.code,group);indexes.set(job,index);}
  return index;
 };
+/** Adds error entries to a job, the one way they are appended: each entry's id is computed here, and the change is marked for the error log and the state channel.
+ * A list replaced whole (job.errors = ...) is a new object and needs no mark. */
+export function addErrors(job:Job,...errors:Message[]){
+ if(!errors.length)return;
+ for(const error of errors){entryId(job,error);job.errors.push(error);}
+ markChanged(job.errors);
+}
 /** Folds one structured issue into the job's groups: a count and the first MAX_GROUP_ITEMS paths per (code, severity). */
 export function recordIssue(job:Job,issue:ExecutionIssue){
  const index=indexOf(job),key=issue.severity+'|'+issue.code;
  let group=index.groups.get(key);
- if(!group){group={code:issue.code,severity:issue.severity,count:0,items:[]};index.groups.set(key,group);(job.groups??=[]).push(group);}
- group.count++;
+ if(!group){group={code:issue.code,severity:issue.severity,count:0,items:[]};entryId(job,group);index.groups.set(key,group);(job.groups??=[]).push(group);}
+ group.count++;markChanged(job.groups!);
  if(group.items.length<MAX_GROUP_ITEMS){
   const detail=issue.destination?issue.detail?`Destination ${issue.destination}: ${issue.detail}`:`Destination ${issue.destination}`:issue.detail;
-  group.items.push(detail?{path:issue.path,detail}:{path:issue.path});
+  group.items.push(detail?{path:issue.path,detail}:{path:issue.path});markChanged(group.items);
  }
  const list=index.full.get(issue.code);if(list)list.push(issue.path);else index.full.set(issue.code,[issue.path]);
 }

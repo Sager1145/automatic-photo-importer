@@ -58,9 +58,11 @@ test('duplicates are not released when the organization reports an error',async 
  assert.ok(kept==='same bytes'||(job?.retainedFiles??0)>0,'the original is still on the drive');
 });
 
-test('releasing duplicates after organizing is on by default and can be turned off',()=>{
- assert.equal(normalizePreferences({}).releaseDuplicatesAfterOrganizing,true);
- assert.equal(normalizePreferences({releaseDuplicatesAfterOrganizing:false}).releaseDuplicatesAfterOrganizing,false);
+test('the per-run organize options are the only switches: old saved ones are read and ignored',async()=>{
+ const {jobPreferences}=await import('../settings-lock');
+ const old=normalizePreferences({releaseDuplicatesAfterOrganizing:false,removeEmptySourceFolders:false,copyMode:'mirror'});
+ assert.equal(old.copyMode,'mirror','the rest of an old settings file still loads');
+ for(const key of ['releaseDuplicatesAfterOrganizing','removeEmptySourceFolders']){assert.equal(Object.hasOwn(old,key),false,key);assert.equal(jobPreferences.has(key),false,key);}
 });
 
 const hiddenFolders=async(root:string)=>{const found:string[]=[];const walk=async(folder:string)=>{for(const entry of await fs.readdir(folder,{withFileTypes:true}))if(entry.isDirectory()){const child=path.join(folder,entry.name);if(entry.name.startsWith('.'))found.push(path.relative(root,child));await walk(child);}};await walk(root);return found;};

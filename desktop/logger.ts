@@ -3,11 +3,10 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {LOG_LEVELS,type LogLevel} from './shared';
 
 /** How much the diagnostic log records. off: nothing; normal: phases, settings, deletions, errors; detailed: every file's steps and decisions; trace: also each routing decision and journal entry. */
-import type {LogLevel} from './shared';
 export type {LogLevel};
-export const logLevels:readonly LogLevel[]=['off','normal','detailed','trace'];
 export const defaultLogLevel:LogLevel='normal';
 const rank:Record<LogLevel,number>={off:0,normal:1,detailed:2,trace:3};
 
@@ -71,7 +70,7 @@ export class Logger {
  }
  get directory(){return this.options.dir;}
  getLevel(){return this.level;}
- setLevel(level:LogLevel){this.level=logLevels.includes(level)?level:defaultLogLevel;}
+ setLevel(level:LogLevel){this.level=LOG_LEVELS.includes(level)?level:defaultLogLevel;}
  enabled(level:Exclude<LogLevel,'off'>){return rank[level]<=rank[this.level];}
  private lastMs=0;private lastIso='';
  private stamp():string{

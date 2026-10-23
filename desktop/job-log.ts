@@ -1,5 +1,5 @@
 import {log} from './logger';
-import type {DestinationStatus,DriveActivity,Job,Progress,Source} from './shared';
+import {isRunning,type DestinationStatus,type DriveActivity,type Job,type Progress,type Source} from './shared';
 import type {MountedVolume} from './platform/volumes';
 
 const terminal=new Set<Job['phase']>(['complete','stopped','error']);
@@ -28,7 +28,7 @@ export class PhaseLog {
 /** A snapshot of each running step, for the five-second log lines. */
 export function logProgress(jobs:readonly Job[]){
  for(const job of jobs){
-  if(!['discovering','verifying','copying'].includes(job.phase))continue;
+  if(!isRunning(job))continue;
   const progress=job.progress;
   log('detailed','job','progress',{phase:job.phase,step:progress?.step,stepPhase:progress?.phase,completed:progress?.completed,total:progress?.total,failed:progress?.failed,bytes:progress?.bytes,totalBytes:progress?.totalBytes,speed:progress?.speed,share:progress?.share,eta:progress?.eta??job.eta,file:progress?.file,fraction:job.fraction,errors:job.errors.length},job.id);
  }
