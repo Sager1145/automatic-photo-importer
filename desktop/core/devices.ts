@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 
 /** What a storage device is, as far as streaming it is concerned. */
 export type DeviceKind='hdd'|'ssd'|'card'|'unknown';
@@ -106,3 +107,22 @@ export class DeviceStreams {
 }
 /** The process-wide slots: every whole-file stream of every job goes through them. */
 export const streams=new DeviceStreams();
+
+/** CPU worker count for a pool wanting up to `cap`: leaves two cores for the app, never below one. */
+export function cpuWorkers(cap:number):number {
+  return Math.max(1,Math.min(availableParallelism()-2,cap));
+}
+/** Run `work` over `items` with at most `limit` in flight, results in input order (by index). The first
+ * failure stops new work and is rethrown once the running ones settle. */
+export async function mapPool<T,R>(items:readonly T[],limit:number,work:(item:T,index:number)=>Promise<R>):Promise<R[]> {
+  const results=new Array<R>(items.length);
+  let next=0,failure:unknown,failed=false;
+  await Promise.all(Array.from({length:Math.min(items.length,Math.max(1,limit))},async()=>{
+    while(!failed&&next<items.length) {
+      const index=next++;
+      try { results[index]=await work(items[index]!,index); } catch(error) { if(!failed){failed=true;failure=error;} }
+    }
+  }));
+  if(failed) throw failure;
+  return results;
+}

@@ -4,6 +4,10 @@ import type { DuplicateGroup, DuplicateStrength, Progress } from '../shared';
 import { classify, groupId, type ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
 import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
+import { mapPool } from './devices';
+
+/** Files digested ahead of the decision loop at once; each device's stream limit still caps the reads. */
+const DIGEST_AHEAD = 4;
 
 /** One line of the per-file report. primary: a duplicate removed; companion: its sidecar, proxy or audio file.
  * removed: set aside in the recovery store; carried: a companion the kept copy lacked, published next to it;
@@ -48,6 +52,18 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   for (const item of resolved) if (item.keep === 'all') for (const file of item.group.files) never.add(abs(file.path)); else if (item.keep) never.add(abs(item.keep));
   // The files of a lookalike group are not proven identical by content, so the scan's inode and modified time must still hold.
   const moved = (file: { ino?: string; mtimeNs?: string }, found: { ino: bigint; mtimeNs: bigint }) => (file.ino !== undefined && file.ino !== String(found.ino)) || (file.mtimeNs !== undefined && file.mtimeNs !== String(found.mtimeNs));
+  // Read ahead: the digests the decision loop below will ask for are computed first, a few files at once (each
+  // device's stream limit still applies), keyed by path and stat. The loop itself is unchanged and serial; a file
+  // whose stat no longer matches, or whose read-ahead failed, is simply hashed again where it is needed.
+  const statKey = (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => `${file}\0${found.dev}:${found.ino}:${found.size}:${found.mtimeNs}:${found.ctimeNs}`;
+  const ahead = new Map<string, string>();
+  const wanted = new Set<string>();
+  for (const item of work) { wanted.add(abs(item.keep!)); for (const file of item.remove) { const source = abs(file.path); if (!never.has(source)) wanted.add(source); } }
+  await mapPool([...wanted], DIGEST_AHEAD, async file => {
+    checkAbort(signal);
+    try { const found = await stat(file); if (found) ahead.set(statKey(file, found), await digest(file, signal)); } catch (error) { if ((error as Error)?.name === 'AbortError') throw error; }
+  });
+  const digestOf = async (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => ahead.get(statKey(file, found)) ?? await digest(file, signal);
   let groups = 0;
   for (const item of work) {
     checkAbort(signal);
@@ -56,7 +72,7 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
     if (!kept) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'the copy to keep is missing' }); checked += item.remove.length; continue; }
     const keptFile = item.group.files.find(file => file.path === item.keep);
     if (item.group.strength !== 'sha' && keptFile && moved(keptFile, kept)) { for (const file of item.remove) report.push({ ...context, role: 'primary', file: file.path, size: file.size, result: 'left', reason: 'changed since scan' }); checked += item.remove.length; continue; }
-    const keeperSha = await digest(keepPath, signal);
+    const keeperSha = await digestOf(keepPath, kept);
     let any = false;
     for (const file of item.remove) {
       checking(file.path);
@@ -67,7 +83,7 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
       if (item.group.strength !== 'sha' && moved(file, found)) { report.push({ ...entry, result: 'left', reason: 'changed since scan' }); continue; }
       if (found.ino !== 0n && found.dev === kept.dev && found.ino === kept.ino) { report.push({ ...entry, result: 'left', reason: 'it is the same file as the copy to keep (a link)' }); continue; }
       if (never.has(source)) { report.push({ ...entry, result: 'left', reason: 'it is the copy kept in another group' }); continue; }
-      const sha = await digest(source, signal);
+      const sha = await digestOf(source, found);
       // Identical groups are proven again by content now; a lookalike group is the user's decision, made on the previews.
       if (item.group.strength === 'sha' && sha !== keeperSha) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it no longer matches the copy to keep' }); continue; }
       if (taken.has(source) || taken.has(keepPath)) { report.push({ ...entry, sha256: sha, result: 'left', reason: 'it is also part of another group' }); continue; }
