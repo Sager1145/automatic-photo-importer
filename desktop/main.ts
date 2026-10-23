@@ -727,7 +727,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,index:await destinationIndex(real,await identity(real)),onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}

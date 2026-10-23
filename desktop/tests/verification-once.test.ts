@@ -93,3 +93,20 @@ test('an undo reads the kept original once and the copy it removes once',async t
  assert.deepEqual(reads.files(),{stash:1,destination:1});
  assert.deepEqual(await fs.readFile(f.original),f.data);
 });
+
+// The scan's checksums are in the library's index: the removal confirms each pair with one read of each file,
+// right before the duplicate is set aside, and does not read it again to set it aside.
+test('removing a duplicate reads it and the copy kept once each',async t=>{
+ const {scanDuplicates}=await import('../core/duplicates'),{removeDuplicates}=await import('../core/duplicate-removal');
+ const {destinationIndex}=await import('../core/destination-index'),{identity}=await import('../core/paths'),{resolveGroups}=await import('../duplicate-rules');
+ const lib=await folder(t,'verify-once-duplicates-'),keeper=path.join(lib,'2024','202405','Z','k.jpg'),removed=path.join(lib,'Imported','k.jpg'),data=Buffer.alloc(SIZE,3);
+ await photo(keeper,data);await photo(removed,data);
+ const index=await destinationIndex(lib,await identity(lib));
+ const scan=await scanDuplicates(lib,{metadata:async()=>({fields:{}}),index});
+ const reads=countReads(t,file=>recovery(file)&&file.endsWith('k.jpg')?'stash':file===keeper?'keeper':file===removed?'removed':undefined);
+ const removal=await removeDuplicates(lib,resolveGroups(scan.groups,2),scan.companions,{index});
+ reads.stop();
+ assert.equal(removal.removed,1);assert.deepEqual(removal.result?.errors,[]);
+ assert.deepEqual(reads.files(),{keeper:1,removed:1});
+ await assert.rejects(fs.lstat(removed),{code:'ENOENT'});
+});

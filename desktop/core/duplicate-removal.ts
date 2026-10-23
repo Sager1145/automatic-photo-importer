@@ -5,6 +5,7 @@ import { classify, groupId, type ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
 import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
 import { mapPool } from './devices';
+import type { DestinationIndex } from './destination-index';
 
 /** Files digested ahead of the decision loop at once; each device's stream limit still caps the reads. */
 const DIGEST_AHEAD = 4;
@@ -37,7 +38,7 @@ export function companionTarget(primary: string, from: string, keeper: string): 
 /** Set aside every duplicate the resolved groups remove, into the library's recovery store, with undo. The
  * hashes are read again here: a file that changed since the scan stays where it is. Companions follow their
  * primary. Never deletes anything. */
-export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup[], companions: Map<string, string[]>, options: { signal?: AbortSignal; onProgress?: (progress: Progress) => void } = {}): Promise<RemovalResult> {
+export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup[], companions: Map<string, string[]>, options: { signal?: AbortSignal; onProgress?: (progress: Progress) => void; /** The library's checksum index: a file whose whole stat it still records is not read ahead. */ index?: Pick<DestinationIndex, 'cached'> } = {}): Promise<RemovalResult> {
   const root = await directory(rootPath), rootIdentity = await identity(root), signal = options.signal;
   const report: RemovalReportEntry[] = [], entries: OrganizationEntry[] = [];
   const abs = (relative: string) => path.join(root, ...relative.split('/'));
@@ -55,13 +56,15 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   // Read ahead: the digests the decision loop below will ask for are computed first, a few files at once (each
   // device's stream limit still applies), keyed by path and stat. The loop itself is unchanged and serial; a file
   // whose stat no longer matches, or whose read-ahead failed, is simply hashed again where it is needed.
+  // A checksum the library's index holds for the file's exact, provable stat (the scan's) is taken without a read;
+  // the removal itself reads each file again before anything is set aside.
   const statKey = (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => `${file}\0${found.dev}:${found.ino}:${found.size}:${found.mtimeNs}:${found.ctimeNs}`;
   const ahead = new Map<string, string>();
   const wanted = new Set<string>();
   for (const item of work) { wanted.add(abs(item.keep!)); for (const file of item.remove) { const source = abs(file.path); if (!never.has(source)) wanted.add(source); } }
   await mapPool([...wanted], DIGEST_AHEAD, async file => {
     checkAbort(signal);
-    try { const found = await stat(file); if (found) ahead.set(statKey(file, found), await digest(file, signal)); } catch (error) { if ((error as Error)?.name === 'AbortError') throw error; }
+    try { const found = await stat(file); if (found) ahead.set(statKey(file, found), options.index?.cached(file, found) ?? await digest(file, signal)); } catch (error) { if ((error as Error)?.name === 'AbortError') throw error; }
   });
   const digestOf = async (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => ahead.get(statKey(file, found)) ?? await digest(file, signal);
   let groups = 0;
