@@ -1066,13 +1066,13 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
   const present=async(entry:PlanEntry,destination:string)=>{
     const sha=await resolve(entry);
-    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);result.copied++;}
+    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);result.copied++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;}
     else {
       await syncFile(destination);await syncParents(destination,root);
       if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity,false);
       const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
       await releaseCreations({...entry,destination},root,recovery);await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);
-      result.skipped++;
+      result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;
     }
     hooks.done(entry);
   };
@@ -1109,7 +1109,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       if(stat.birthtimeNs<=0n) {
         // No birth time to bind by: take back what was just made (this descriptor and this process created it) and use staging.
         const named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-        if(named&&sameStat(stat,named)&&stat.nlink===1n) await fs.unlink(destination);
+        if(named&&sameStat(stat,named)&&stat.nlink===1n){await fs.unlink(destination);logDeletion('copy',destination,'direct-copy name created a moment ago on a volume that reports no creation date; taking it back to use staging','created by this call with exclusive open (wx), same descriptor and inode, single link, nothing written',{bytes:Number(stat.size)});}
         await clearPartialRecord(creating,root,recovery).catch(()=>{});
         throw NOT_DIRECT;
       }
@@ -1184,7 +1184,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       if(check!==streamed) {
         // Only a file this run created with O_EXCL and still holds is ever removed; a resumed one may hold bytes that are not ours.
         const held=await output.stat({bigint:true}),named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-        if(member.created&&named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);await release({...entry,digest:streamed},destination,member.owned);}
+        if(member.created&&named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);logDeletion('copy',destination,'direct copy that failed its read-back against the source; removed','this run created the name with O_EXCL and still holds the same inode (single link); its bytes did not match the source checksum',{bytes:Number(held.size),streamed,readBack:check});await release({...entry,digest:streamed},destination,member.owned);}
         throw new Error(`Destination verification failed: ${destination}`);
       }
     }

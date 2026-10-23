@@ -200,7 +200,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
-    if(keeps(item)) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':'copy a re-import could continue'});continue;}
+    if(keeps(item)) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':item.kind==='unbound'?'receipt of an earlier direct copy that no longer matches its kept file; the file is never touched':'copy a re-import could continue'});continue;}
     handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);
@@ -235,6 +235,7 @@ export async function removeUnboundReceipt(item:ResidueItem):Promise<boolean> {
     const again=await leftoverReceipt(item.path,item.root);
     if(!again.unbound||again.file!==item.file) return false;
     await fs.unlink(item.path);
+    logDeletion('residue',item.path,'receipt no longer matches its kept file; removed by user/Clean up','receipt still the one found by the scan (same device, inode, size and times), still binds nothing, and the file it names is unchanged and was not touched',{kind:'unbound',file:item.file,bytes:item.bytes});
     return true;
   } catch { return false; }
 }

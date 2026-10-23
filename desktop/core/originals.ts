@@ -103,7 +103,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       const after=await regular(file.source);
       if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs||known&&after.ctimeNs!==before.ctimeNs) return {kept:'changed'};
       await fs.unlink(file.source);
-      logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} re-read now at the source and at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
+      logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} ${known?'not re-read at the source: unchanged since the import read it (identity + ctime); re-read':'re-read now at the source and'} at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
       return {deleted:true};
     } catch(error) {
       if(options.signal?.aborted) throw error;
