@@ -50,7 +50,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
  {id:'settings-languages',stage:'settings',title:'All four interface languages switch live and persist',covers:['4 locales','persisted language'],run:async h=>{
   for(const [language,label,details] of [['zh-Hans','设置','详细信息'],['zh-Hant','設定','詳細資訊'],['ja','設定','詳細情報'],['en','Settings','Drive details']] as const){
    await h.prefs({language});
-   await h.until(`language ${language}`,`Array.from(document.querySelectorAll('.nav-item')).some(item=>item.textContent.includes(${JSON.stringify(label)}))&&document.querySelectorAll('article[data-source-id^="fixture:"] details.source-disclosure > summary').length===6&&Array.from(document.querySelectorAll('article[data-source-id^="fixture:"] details.source-disclosure > summary')).every(summary=>summary.getAttribute('aria-label')===${JSON.stringify(details)}&&summary.querySelector('.source-disclosure-label').textContent===${JSON.stringify(details)})`);
+   await h.until(`language ${language}`,`Array.from(document.querySelectorAll('.nav-item')).some(item=>item.textContent.includes(${JSON.stringify(label)}))&&document.querySelectorAll('article[data-source-id^="fixture:"] .source-step-row > .source-disclosure-toggle').length===6&&Array.from(document.querySelectorAll('article[data-source-id^="fixture:"] .source-step-row > .source-disclosure-toggle')).every(toggle=>toggle.querySelector('.source-disclosure-label').textContent===${JSON.stringify(details)})`);
    await h.waitFor(`saved language ${language}`,async()=>(await savedPreferences(ctx.root)).language===language);
    await h.shot('language-'+language);
   }

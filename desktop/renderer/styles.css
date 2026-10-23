@@ -351,6 +351,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .progress-failed{font-style:normal;color:var(--danger);font-weight:600}
 .source-row>.progress-track{margin-top:.9rem}
 /* Scanning → Copying → Verifying stepper on each card */
+.source-step-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.35rem .75rem;margin-top:.8rem}
+.source-step-row .source-steps{margin-top:0;min-width:0}
+.source-disclosure-toggle{flex:none;margin-left:auto;padding:0;border:0;background:none;font:inherit;cursor:pointer;border-radius:var(--radius-capsule)}
 .source-steps{display:flex;flex-wrap:wrap;align-items:center;row-gap:.35rem;column-gap:0;margin-top:.8rem;list-style:none;font-size:var(--text-caption);font-weight:600;color:var(--label-tertiary);white-space:nowrap}
 .source-steps li{display:flex;flex:0 1 auto;align-items:center;gap:.35rem}
 .source-steps li+li::before{content:"";flex:1 1 2.25rem;min-width:.5rem;max-width:2.25rem;height:2px;margin:0 .45rem;border-radius:2px;background:var(--separator-strong);transition:background-color var(--base) var(--ease-out)}
@@ -382,13 +385,13 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .source-expanded-details .source-detail{white-space:normal}
 
 .source-disclosure{margin-top:.85rem;padding-top:.8rem;border-top:1px solid var(--separator)}
-.source-disclosure>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:1rem;list-style:none;cursor:pointer;border-radius:var(--radius-md)}
+.source-disclosure>summary{display:block;align-items:center;gap:1rem;list-style:none;cursor:pointer;border-radius:var(--radius-md)}
 .source-disclosure>summary::-webkit-details-marker{display:none}
 .source-compact-capacity{min-width:0}
 .source-disclosure-label{display:inline-flex;flex:none;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:var(--radius-capsule);font-size:var(--text-footnote);font-weight:600;color:var(--accent);white-space:nowrap;transition:background-color var(--quick) var(--ease-out)}
-.source-disclosure>summary:hover .source-disclosure-label{background:var(--accent-soft)}
+.source-disclosure-toggle:hover .source-disclosure-label{background:var(--accent-soft)}
 .source-disclosure-label svg{transition:transform var(--base) var(--ease-ios)}
-.source-disclosure[open] .source-disclosure-label svg{transform:rotate(180deg)}
+.source-disclosure-toggle[aria-expanded=true] .source-disclosure-label svg{transform:rotate(180deg)}
 .source-expanded-details{display:grid;gap:.85rem;padding-top:.95rem}
 .source-location div{display:grid;gap:.25rem}
 .source-location dt{font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
@@ -1004,7 +1007,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .segmented button,.source-layout-switch button,.preset,.accent-button,.inventory-open,.inventory-summary button,.file-preview-button,.review-source-button,.window-controls button,summary{transition-property:transform,background-color,color,box-shadow;transition-duration:var(--spring-duration),var(--quick),var(--quick),var(--quick);transition-timing-function:var(--spring),var(--ease-out),var(--ease-out),var(--ease-out)}
 :is(.segmented button,.source-layout-switch button,.preset,.inventory-open,.inventory-summary button,.window-controls button):active{transition-duration:70ms}
 :is(.file-preview-button,.review-source-button):active{transform:scale(.98);transition-duration:70ms}
-.source-disclosure>summary:active .source-disclosure-label,.metadata-details>summary:active{transform:scale(.97)}
+.source-disclosure-toggle:active .source-disclosure-label,.metadata-details>summary:active{transform:scale(.97)}
 .source-disclosure-label{transition:background-color var(--quick) var(--ease-out),transform var(--spring-duration) var(--spring)}
 
 /* Busy indicators spin */

@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {ImportDashboard,OrganizationProgress,ProgressDisplay,SidebarSources,SourceSteps,jobStageLayers,totalStageLayers} from '../renderer/RootApp';
+import {ImportDashboard,OrganizationProgress,ProgressDisplay,SidebarSources,SourceRow,SourceSteps,jobStageLayers,totalStageLayers} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
 
 const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
@@ -131,4 +131,17 @@ test('a finished first stage stays under the next colour, and the layers are cum
  assert.ok(Math.abs(layers[1]!.fraction-.278)<1e-9);
  const total=totalStageLayers([copying]);
  assert.ok(Math.abs(total[0]!.fraction-.13)<1e-9&&Math.abs(total[1]!.fraction-.278)<1e-9);
+});
+
+test('the Drive details toggle sits in the step row with the steps and controls the panel',()=>{
+ const markup=render(createElement(SourceRow,{source:card,act:()=>{},configured:true}));
+ const row=markup.match(/<div class="source-step-row"[^>]*>([\s\S]*?)<\/button><\/div>/)?.[1]??'';
+ assert.match(row,/data-testid="source-steps"/);
+ const toggle=row.match(/<button[^>]*drive-details-toggle[^>]*>/)?.[0]??'';
+ assert.match(toggle,/aria-expanded="false"/);
+ const id=toggle.match(/aria-controls="([^"]+)"/)?.[1];
+ assert.ok(id);assert.ok(markup.includes(`id="${id}"`));
+ assert.doesNotMatch(markup.match(/<summary[\s\S]*?<\/summary>/)?.[0]??'',/Drive details/);
+
+ assert.match(css,/\.source-step-row\{[^}]*flex-wrap:wrap/);
 });

@@ -16,7 +16,7 @@ export async function scanned(h:Harness,sourceId='fixture:1'){
  await h.waitFor(`media scan of ${sourceId}`,async()=>!!(await h.state()).sourceInventories?.[sourceId]);
 }
 type Row={sourceId:string;height:number;width:number;controlsFit:boolean;outside:string[]};
-const cardRows=`Array.from(document.querySelectorAll('article.source-row')).map(card=>{const box=card.getBoundingClientRect();const outside=Array.from(card.querySelectorAll('button, details.source-disclosure > summary')).filter(control=>{if(!control.checkVisibility())return false;const b=control.getBoundingClientRect();return !(b.left>=box.left-1&&b.right<=box.right+1&&b.top>=box.top-1&&b.bottom<=box.bottom+1);}).map(control=>(control.getAttribute('aria-label')||control.textContent||'').trim().slice(0,40)+' '+JSON.stringify(control.getBoundingClientRect()));return {sourceId:card.dataset.sourceId,height:box.height,width:box.width,controlsFit:outside.length===0,outside};})`;
+const cardRows=`Array.from(document.querySelectorAll('article.source-row')).map(card=>{const box=card.getBoundingClientRect();const outside=Array.from(card.querySelectorAll('button')).filter(control=>{if(!control.checkVisibility())return false;const b=control.getBoundingClientRect();return !(b.left>=box.left-1&&b.right<=box.right+1&&b.top>=box.top-1&&b.bottom<=box.bottom+1);}).map(control=>(control.getAttribute('aria-label')||control.textContent||'').trim().slice(0,40)+' '+JSON.stringify(control.getBoundingClientRect()));return {sourceId:card.dataset.sourceId,height:box.height,width:box.width,controlsFit:outside.length===0,outside};})`;
 
 export const importChecks=(ctx:Context):Check[]=>[
  {id:'import-scan',stage:'imports',title:'Read-only drive scanning exposes media formats without copying files, and drive cards expand and collapse in place',covers:['scan flow','card disclosure','cancel and rescan'],run:async h=>{
@@ -33,7 +33,7 @@ export const importChecks=(ctx:Context):Check[]=>[
   const compact=await measure('compact-125');await h.shot('source-cards-compact');
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('article.source-row')).every((card,index,cards)=>{const style=getComputedStyle(card);return parseFloat(style.borderTopWidth)>0&&parseFloat(style.borderBottomWidth)>0&&(!index||card.getBoundingClientRect().top>cards[index-1].getBoundingClientRect().bottom);})"),true,'Each source has a separate bordered surface and gap');
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')?.checkVisibility()"),false);
-  await h.click('article[data-source-id="fixture:1"] details.source-disclosure > summary');
+  await h.click('article[data-source-id="fixture:1"] .source-step-row > .source-disclosure-toggle');
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('article.source-row')).every(card=>card.querySelector('details.source-disclosure').open===(card.dataset.sourceId==='fixture:1'))"),true,'Expanding one card must leave the others collapsed');
   const summary="document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')";
   await h.until('media format summary',`${summary}?.textContent.includes('PNG')&&${summary}?.textContent.includes('MP4')&&${summary}?.checkVisibility()`);
@@ -41,7 +41,7 @@ export const importChecks=(ctx:Context):Check[]=>[
   await h.settle();
   const expanded=await measure('expanded-125');assert.ok(expanded.find(row=>row.sourceId==='fixture:1')!.height>compact.find(row=>row.sourceId==='fixture:1')!.height);await h.shot('source-card-expanded');await h.shot('drive-details');
   const checked=(await h.state()).sourceCameraInfo?.['fixture:1']?.checked??0;
-  await h.click('article[data-source-id="fixture:1"] details.source-disclosure > summary');await h.settle();
+  await h.click('article[data-source-id="fixture:1"] .source-step-row > .source-disclosure-toggle');await h.settle();
   const collapsed=await measure('collapsed-125');assert.ok(collapsed.find(row=>row.sourceId==='fixture:1')!.height<expanded.find(row=>row.sourceId==='fixture:1')!.height);
   assert.equal((await h.state()).sourceInventories!['fixture:1']!.media,2);assert.ok(((await h.state()).sourceCameraInfo?.['fixture:1']?.checked??0)>=checked,'Collapsing must retain camera scan progress');
   assert.equal(await h.js<boolean>(`${summary}?.textContent.includes('PNG')&&${summary}?.textContent.includes('MP4')`),true,'Collapsing must retain scan results');
@@ -70,10 +70,10 @@ export const importChecks=(ctx:Context):Check[]=>[
   await h.waitFor('two columns',()=>columns(true),{seen:rows});
   await h.waitFor('saved grid preference',async()=>(await savedPreferences(ctx.root)).sourceLayout==='grid');
   await h.shot('sources-grid');
-  await h.click('article.source-row details.source-disclosure > summary');
+  await h.click('article.source-row .source-step-row > .source-disclosure-toggle');
   assert.equal(await h.js<number>("document.querySelectorAll('details.source-disclosure[open]').length"),1);
   await h.shot('sources-grid-expanded');
-  await h.click('article.source-row details.source-disclosure > summary');
+  await h.click('article.source-row .source-step-row > .source-disclosure-toggle');
   await h.size(1000,760);await h.prefs({textScale:1.5});
   await h.waitFor('grid adapts to narrow workspace',()=>columns(false),{seen:rows});
   assert.equal(await h.js<boolean>("document.querySelector('.main-content').scrollWidth<=document.querySelector('.main-content').clientWidth"),true,'No horizontal overflow with large text');
