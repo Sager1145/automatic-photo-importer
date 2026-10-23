@@ -11,7 +11,7 @@ import {assertCopied,executeAll,leftovers,listedExtensions,parts,put,temporary} 
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const layouts:MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const fixed=async():Promise<Metadata>=>({camera:'Fixture Cam',date:'2026-10-03T12:00:00',fields:{}});
 const camera='2026/202610/Fixture Cam';
 
@@ -105,7 +105,7 @@ test('unknown formats, camera service files and extensionless files are never dr
   }
  }
  // A drive backup copies service files too.
- const {plans:[backup]}=await plan(source,[photos],{...base,backup:true,layout:'flat'},fixed);
+ const {plans:[backup]}=await plan(source,[photos],{...base,backup:true},fixed);
  assert.equal(backup!.entries.length,names.length);
 });
 

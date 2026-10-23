@@ -26,7 +26,7 @@ async function fixture(t:test.TestContext,names:string[]){
  for(const name of names)await fs.writeFile(path.join(source,name),`bytes of ${name}`);
  return {source,root};
 }
-const backup={backup:true,template:'{year}',layout:'flat' as const,unknownRules:{}};
+const backup={backup:true as const,template:'{year}',layout:'flat' as const,unknownRules:{}};
 
 // Planning reads an unknown small file while listing it (Finder alias check), and reads a photo
 // when a same-size file already at its destination has to be compared with it.
@@ -68,7 +68,7 @@ async function unreadableJpg(t:test.TestContext){
 
 // Metadata is read between two identity checks; a file rewritten then has changed mid-plan.
 const changing=(source:string)=>async(file:string)=>{if(path.basename(file)==='b.jpg')await fs.appendFile(path.join(source,'b.jpg'),'more');return {fields:{},camera:'Cam',date:'2024-05-06T07:08:09'};};
-const photos={backup:false,template:'{year}',layout:'flat' as const,unknownRules:{}};
+const photos={backup:false as const,template:'{year}',layout:'flat' as const,unknownRules:{}};
 
 test('a file that changes during planning stops the plan when skipping is off',async t=>{
  const f=await fixture(t,['a.jpg','b.jpg','c.jpg']);

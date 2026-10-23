@@ -21,7 +21,7 @@ async function record(name:string,started:number,extra:Record<string,unknown>={}
  await fs.mkdir(path.join(repository,'build'),{recursive:true});
  await fs.appendFile(path.join(repository,'build','stress-timings.jsonl'),JSON.stringify({at:new Date().toISOString(),...line})+'\n');
 }
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'type-format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'type-format' as const,unknownRules:{}};
 const kinds=['JPG','NEF','MP4','HEIC','xmp','DNG','MOV','LRF'];
 /** `files` small files across folders of 100, with a mix of formats and companions (each .xmp belongs to
  * the HEIC before it); `salt` varies the bytes. */
@@ -159,7 +159,7 @@ test('an import killed with SIGKILL at random points resumes to an exact copy',a
  const final=await worker(t,'import',base);
  assert.deepEqual((final.result as {errors:string[]}).errors,[]);
  await record('import with SIGKILLs',started,{files,kills});
- const {plans:[transfer]}=await core.plan(source,[drive],{backup:false,template:'{year}/{camera}',layout:'format',unknownRules:{}},metadata);
+ const {plans:[transfer]}=await core.plan(source,[drive],{backup:false as const,template:'{year}/{camera}',layout:'format',unknownRules:{}},metadata);
  assert.ok(transfer!.entries.every(entry=>entry.skip),'every file is in place');await assertCopied(transfer!);
  // Only complete copies are visible; a staged copy left by the last kill is released by the final run.
  assert.equal([...(await tree(drive)).keys()].filter(relative=>!relative.startsWith('.')).length,files);

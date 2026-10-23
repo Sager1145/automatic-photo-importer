@@ -17,7 +17,7 @@ test('all new files finish staging before any standalone content validation read
  const source=path.join(base,'source'),root=path.join(base,'destination');await fs.mkdir(source);await fs.mkdir(root);
  const names=['first.bin','second.bin','third.bin'];
  for(const [index,name] of names.entries())await fs.writeFile(path.join(source,name),Buffer.alloc(2*1024*1024,index+1));
- const {plans:[transfer]}=await plan(source,[root],{backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
+ const {plans:[transfer]}=await plan(source,[root],{backup:true,unknownRules:{}},async()=>({fields:{}}));
  const sourceOpens=new Map<string,number>(),stageSizes=new Map<string,number>();let readbacks=0;const prematureReads:string[]=[];
  const open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
@@ -48,7 +48,7 @@ test('source cards distinguish copying from verification in every language',asyn
  const labels=[['Copying files','Verifying copied files'],['正在复制文件','正在验证已复制文件'],['正在複製檔案','正在驗證已複製檔案'],['ファイルをコピー中','コピーしたファイルを検証中']];
  for(const [index,language] of languages.entries())for(const phase of ['copying','verifying'] as const){
   const source={id:'card',name:'Card',path:'/fixture/card',transport:'storage' as const};
-  const state:import('../shared').AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/fixture/destination'],copyMode:'single',basePath:'photobackup',template:'{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'job',source,phase,errors:[],backup:false,progress:{phase,completed:0,total:1,bytes:1,totalBytes:1,speed:0,file:'test.JPG'}}],history:[],platform:'darwin'};
+  const state:import('../shared').AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/fixture/destination'],copyMode:'single',basePath:'photobackup',template:'{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'job',source,phase,errors:[],backup:false as const,progress:{phase,completed:0,total:1,bytes:1,totalBytes:1,speed:0,file:'test.JPG'}}],history:[],platform:'darwin'};
   const markup=renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
   assert.ok(markup.includes(labels[index][phase==='copying'?0:1]),`${language} ${phase} must show the actual transfer phase`);
   assert.ok(markup.includes(`aria-valuenow="${phase==='copying'?99:0}"`),'Verification progress must use checked files, not fully transferred bytes');
@@ -60,7 +60,7 @@ test('Stop between copy and validation publishes nothing and retains every sourc
  const source=path.join(base,'source'),root=path.join(base,'destination');await fs.mkdir(source);await fs.mkdir(root);
  for(const name of ['one.bin','two.bin'])await fs.writeFile(path.join(source,name),'original '+name);
  await fs.writeFile(path.join(root,'sentinel'),'existing');
- const {plans:[transfer]}=await plan(source,[root],{backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
+ const {plans:[transfer]}=await plan(source,[root],{backup:true,unknownRules:{}},async()=>({fields:{}}));
  const control=new AbortController();let copiedAll=false;
  await assert.rejects(execute(transfer,control.signal,value=>{if(value.phase==='verifying'){copiedAll=value.bytes===32;control.abort();}}),{name:'AbortError'});
  assert.ok(copiedAll);assert.deepEqual((await fs.readdir(root)).filter(name=>name!=='Photo Importer Data'),['sentinel']);assert.deepEqual(await fs.readdir(await stagingFor(root)),[]);assert.equal((await openReceiptsFor(root)).size,0);assert.equal(await fs.readFile(path.join(root,'sentinel'),'utf8'),'existing');

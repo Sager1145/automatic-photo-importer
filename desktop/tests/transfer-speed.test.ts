@@ -11,7 +11,7 @@ import {stagingFor} from './fixtures/receipts';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>({fields:{}});
 async function fixture(t:test.TestContext,destinations=1){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'transfer-speed-')));
@@ -169,7 +169,7 @@ test('a card whose files were imported before is recognised without reading them
  const f=await fixture(t);
  const first=await plan(f.source,f.roots,options,noMetadata);
  const imported:Record<string,{sha256:string;identity:string}>={};
- await execute(first.plans[0]!,undefined,undefined,{onVerified:(source:string,sha256:string,identity:string)=>{imported[source]={sha256,identity};}});
+ await execute(first.plans[0]!,undefined,undefined,{onFileOutcome:outcome=>{imported[outcome.source]={sha256:outcome.sha256,identity:outcome.sourceIdentity!};}});
  assert.ok(imported[f.original]?.sha256&&imported[f.original]?.identity,'each copied file reports its checksum and the source identity it was read under');
  const {read,stop}=countReads(t,f.original,f.roots);
  const again=await plan(f.source,f.roots,{...options,sourceDigest:(file:string,identity:string)=>imported[file]?.identity===identity?imported[file]!.sha256:undefined},noMetadata);

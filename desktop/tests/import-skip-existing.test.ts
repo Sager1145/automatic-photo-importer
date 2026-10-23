@@ -4,15 +4,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery,RECOVERY_FOLDER,type PlanProgress} from '../core';
-import {placedEntries} from '../core/allocation';
+import {placedOutcomes} from '../platform/placement-memory';
 import {dropDestinationIndexes} from '../core/destination-index';
 import {recordPartial} from '../core/import-recovery';
-import type {Metadata,PlanEntry,TransferPlan} from '../shared';
+import type {Metadata,TransferPlan} from '../shared';
 import {stagePathFor} from './fixtures/receipts';
 import {randomUUID} from 'node:crypto';
 
 configureOrganizationRecovery('skip-existing-fixture-host-authentication-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 const bytes=(seed:number,size=5000)=>{const data=Buffer.alloc(size);for(let i=0;i<size;i++)data[i]=(i*7+seed)%251;return data;};
 async function fixture(t:test.TestContext){
@@ -113,7 +113,7 @@ test('a skipped file is reported verified at the old path',async t=>{
  await f.put(path.join(f.source,'A.JPG'),data);const existing=await f.put(path.join(f.old,'A.JPG'),data);
  const {plans}=await plan(f.source,[f.root],options,metadata);
  const seen:string[]=[];
- await execute(plans[0]!,undefined,undefined,{onVerified:source=>{seen.push(source);}});
+ await execute(plans[0]!,undefined,undefined,{onFileOutcome:outcome=>{seen.push(outcome.source);}});
  assert.deepEqual(seen,[path.join(f.source,'A.JPG')]);
  assert.equal(plans[0]!.entries.find(entry=>entry.source===seen[0])!.destination,existing);
 });
@@ -126,9 +126,9 @@ test('a copy inside the recovery store never counts',async t=>{
 });
 
 test('files found elsewhere are not remembered as placed',()=>{
- const entry=(id:string,routed?:string):PlanEntry=>({id,source:id,destination:'/d/'+id,size:1,kind:'Photos' as PlanEntry['kind'],skip:true,family:id,...(routed?{routed}:{})});
- const transfer:TransferPlan={source:'/s',root:'/d',rootIdentity:'x',entries:[entry('a'),entry('b','/d/new/b')],videos:{source:'/s',root:'/v',rootIdentity:'y',entries:[entry('c','/v/new/c'),entry('e')]}};
- assert.deepEqual(placedEntries(transfer).map(item=>item.id),['a','e']);
+ const outcome=(destination:string,destinationSlot:number,disposition:string)=>({destination,destinationSlot,disposition,size:1});
+ const outcomes=[[outcome('/d/a',0,'existing'),outcome('/e/a',1,'published')],[outcome('/d/old/b',0,'routed')],[outcome('/v/c',0,'published')]];
+ assert.deepEqual(placedOutcomes(outcomes,0).map(item=>item.destination),['/d/a','/v/c']);
 });
 
 test('the lookup reports a counter that moves to the number of files looked up',async t=>{

@@ -16,7 +16,7 @@ import { syncBuiltinESMExports } from 'node:module';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00Z',fields:{}});
 
 /** A small exFAT disk image mounted privately, as camera backup drives usually are. */

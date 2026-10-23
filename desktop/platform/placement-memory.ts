@@ -63,6 +63,11 @@ export const replacePlacement=(store:string,id:string,scope:string,files:Iterabl
 export const addPlacement=(store:string,id:string,scope:string,files:Iterable<PlacedFile>)=>{const added=toMap(files);return mutate(store,id,scope,current=>{for(const [relative,key] of added)current.set(relative,key);return current;});};
 /** Whether `relative` is remembered with this exact size, mtime and inode. */
 export const placedMatches=(memory:Placement|undefined,relative:string,size:number,mtimeNs:bigint,ino:bigint)=>memory?.get(relative.split(path.sep).join('/'))===placementKey(size,mtimeNs,ino);
+/** Where an import's files actually are on destination `slot`, as outcomes report them: a file found where older rules
+ * filed it (`routed`) is not where the rules put it, so it is not placed. */
+export function placedOutcomes(outcomes:Iterable<readonly {destinationSlot:number;disposition:string;destination:string;size:number}[]>,slot:number):{destination:string;size:number}[] {
+  return [...outcomes].flat().filter(item=>item.destinationSlot===slot&&item.disposition!=='routed');
+}
 /** Adds the entries of an import or organization that now exist as files of their planned size inside `roots`, using their stat after the job
  * published them (library-relative to `source`). Entries that are missing, changed in size or outside the roots are left out. */
 export async function rememberEntries(store:string,id:string,scope:string,source:string,roots:string[],entries:{destination:string;size:number}[]):Promise<void> {

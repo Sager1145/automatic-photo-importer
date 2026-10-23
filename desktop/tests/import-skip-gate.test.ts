@@ -11,7 +11,7 @@ import {defaultPreferences} from '../preferences';
 import type {Preferences} from '../shared';
 import type {Metadata} from '../shared';
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 const data=Buffer.alloc(4000,7);
 async function fixture(t:test.TestContext){

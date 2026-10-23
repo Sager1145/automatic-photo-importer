@@ -7,7 +7,7 @@ import type {Metadata,TransferPlan} from '../shared';
 import {assertCopied,fileSha,leftovers,put,temporary,tree} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Cam',date:'2024-02-03T12:00:00',fields:{}});
 async function card(root:string,name:string,count:number,size=256*1024,seed=0):Promise<string>{
  const source=path.join(root,name);

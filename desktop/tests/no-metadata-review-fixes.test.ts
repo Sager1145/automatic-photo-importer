@@ -11,7 +11,7 @@ import {validNoMetadataFolder} from '../no-metadata';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'no-metadata-fixes-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -40,7 +40,7 @@ test('the folder check built from the shared rules does not flag unknown files, 
   await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_1.JPG');await f.put(f.library,'old/SNAP_2.PNG');await f.put(f.library,'old/IMG_3.JPG');
   const meta=async(file:string):Promise<Metadata>=>/NOCAM/.test(file)?{date:'2021-03-04T10:00:00Z',fields:{}}:/SNAP/.test(file)?{fields:{}}:known;
   const flat={...defaultPreferences,mediaLayout:'flat' as const};
-  const check=(prefs:typeof defaultPreferences)=>findMisplaced(f.library,f.library,{...ruleOptions({...prefs,mediaLayout:'flat'}),unknownRules:{}},meta);
+  const check=(prefs:typeof defaultPreferences)=>findMisplaced(f.library,f.library,ruleOptions({...prefs,mediaLayout:'flat'}),meta);
   assert.deepEqual((await check(flat)).files,['old/IMG_3.JPG']);
   const folder={...flat,noMetadataHandling:'folder' as const};
   assert.deepEqual((await check(folder)).files.sort(),['2021/202103/Unknown Camera/NOCAM_1.JPG','old/IMG_3.JPG','old/SNAP_2.PNG']);

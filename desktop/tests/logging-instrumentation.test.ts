@@ -15,7 +15,7 @@ import type { Job, Metadata } from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata = async (): Promise<Metadata> => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} });
-const options = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {} };
+const options = { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {} };
 const sha = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 
 let logger: Logger | undefined;
@@ -133,7 +133,7 @@ test('finalizing releases a retained original and undo removes a published copy,
   const dir = await start('normal'), root = await folder(t, 'log-organize-');
   const put = async (relative: string, contents: string) => { const file = path.join(root, relative); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, contents); return file; };
   await put('2024/202402/Sony/JPEG/A.JPG', 'same bytes'); await put('old card/A.JPG', 'same bytes');
-  const organizing = { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'format' as const, unknownRules: {}, reorganize: true };
+  const organizing = { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'format' as const, unknownRules: {}, reorganize: true as const };
   const sony = async () => ({ camera: 'Sony', date: '2024-02-03', fields: {} });
   const reviewed = (await plan(root, [root], organizing, sony)).plans[0]!;
   await executeReorganization(reviewed, undefined, undefined);

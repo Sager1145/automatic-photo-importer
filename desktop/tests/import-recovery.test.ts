@@ -8,7 +8,7 @@ import {plan,execute,configureOrganizationRecovery} from '../core';
 import {segmentsFor} from './fixtures/receipts';
 
 configureOrganizationRecovery('import-fixture-host-authentication-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async()=>({camera:'Fixture Camera',date:'2024-02-03',fields:{}});
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'import-resume-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));

@@ -9,7 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {promisify} from 'node:util';
 import {createHash, randomBytes} from 'node:crypto';
-import {plan, execute, configureOrganizationRecovery} from '../core/index';
+import {plan, execute, configureOrganizationRecovery, type FileOutcome} from '../core/index';
 import {findResidue, cleanResidue} from '../core/residue';
 import {recordPartial} from '../core/import-recovery';
 import {STREAMS} from '../core/devices';
@@ -23,7 +23,7 @@ import {openReceiptsFor,segmentsFor,stagePathFor,stagingFor} from './fixtures/re
 // SIGKILL stands for a crashed process; the page cache survives it, so power loss is not covered.
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const CAPTURE=Date.parse('2024-02-03T12:00:00Z');
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00Z',fields:{}});
 const FILES=14;
@@ -261,6 +261,21 @@ test('files the preflight found already present count as done only once each is 
   assert.ok(result.errors.some(error=>/Destination changed after copy preparation; retry/.test(error)),result.errors.join(' | '));
   assert.equal(await fs.lstat(gone).then(()=>true,()=>false),false,'it was not copied again');
   assert.equal(result.skipped,FILES-1);
+});
+
+test('each direct copy reports where it is once: published and read back, stream-only with verification off, existing on the next import',async t=>{
+  const env=await ready(t);if(!env) return;
+  const run=async(verify:boolean)=>{const outcomes:FileOutcome[]=[];const result=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!,undefined,undefined,{verify,onFileOutcome:outcome=>{outcomes.push(outcome);}});return {result,outcomes};};
+  const kinds=(outcomes:FileOutcome[])=>[...new Set(outcomes.map(item=>`${item.disposition} ${item.verification}`))];
+  const first=await run(true);
+  assert.equal(first.result.copied,FILES);assert.equal(first.outcomes.length,FILES);
+  assert.deepEqual(kinds(first.outcomes),['published content-verified']);
+  for(const item of first.outcomes) assert.equal(await sha(item.destination),item.sha256);
+  const again=await run(false);
+  assert.equal(again.outcomes.length,FILES);assert.deepEqual(kinds(again.outcomes),['existing content-verified']);
+  await fs.rm(first.outcomes[0]!.destination);
+  const recopied=await run(false);
+  assert.deepEqual(recopied.outcomes.filter(item=>item.disposition==='published').map(item=>[item.destination,item.verification,item.finalIdentity]),[[first.outcomes[0]!.destination,'stream-only',undefined]]);
 });
 
 test('a direct run that finds a file already in place also releases a whole stale staged copy of it',async t=>{

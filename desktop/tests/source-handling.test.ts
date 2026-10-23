@@ -15,7 +15,7 @@ import {DeleteOriginals,OriginalsConfirm,nextConfirmStep} from '../renderer/Root
 import type {Job,Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 
 async function imported(t:test.TestContext){
@@ -25,7 +25,7 @@ async function imported(t:test.TestContext){
  for(const name of ['A','B','C'])await fs.writeFile(path.join(source,'DCIM',name+'.JPG'),name.repeat(100+name.charCodeAt(0)));
  const verified=new Map<string,string>();
  const [transfer]=(await plan(source,[root],options,metadata)).plans;
- await execute(transfer!,undefined,undefined,{onVerified:(file,sha256)=>{verified.set(file,sha256);}});
+ await execute(transfer!,undefined,undefined,{onFileOutcome:outcome=>{verified.set(outcome.source,outcome.sha256);}});
  const files:VerifiedOriginal[]=destinationEntries(transfer!).map(entry=>({source:entry.source,size:entry.size,sha256:verified.get(entry.source)??'',destinations:[entry.destination]}));
  return {base,source,root,files};
 }

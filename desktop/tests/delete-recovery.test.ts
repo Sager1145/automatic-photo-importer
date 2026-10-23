@@ -19,7 +19,7 @@ async function fixture(t:test.TestContext){
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original));await fs.writeFile(original,'precious original');return {root,original};
 }
 async function organize(root:string,folder:string,signal?:AbortSignal,onProgress?:()=>void){
- const p=(await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat' as const,unknownRules:{}},metadata)).plans[0]!;
+ const p=(await core.plan(root,[root],{backup:false,reorganize:true,template:`${folder}/{year}/{yyyymm}/{camera}`,layout:'flat'},metadata)).plans[0]!;
  return {result:await organizeByCopy(p,signal,onProgress),destination:p.entries[0]!.destination};
 }
 const ids=async(root:string)=>(await fs.readdir(storage(root))).filter(name=>/^[0-9a-f-]{36}$/.test(name));

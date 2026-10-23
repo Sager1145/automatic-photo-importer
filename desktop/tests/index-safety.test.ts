@@ -41,7 +41,7 @@ test('a file changed right after hashing is never indexed with the old checksum'
 test('a destination rewritten after publication is not trusted as the copied bytes',async t=>{
  const base=await temporary(t),source=path.join(base,'card'),root=path.join(base,'disk'),original=path.join(source,'DCIM','a.bin'),copy=path.join(root,'DCIM','a.bin');
  await fs.mkdir(path.dirname(original),{recursive:true});await fs.mkdir(root);await fs.writeFile(original,Buffer.alloc(65536,1));
- const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
+ const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const {plans:[first]}=await plan(source,[root],options,none);
  // The copy is rewritten (through its still-linked staging name) just before the staged copy is removed, which is before the index remembers it.
  const unlink=fs.unlink.bind(fs);let fired=false;

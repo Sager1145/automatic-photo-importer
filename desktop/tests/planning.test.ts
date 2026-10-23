@@ -7,7 +7,7 @@ import {plan,execute} from '../core';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-planning-')));
  t.after(()=>fs.rm(base,{recursive:true,force:true}));

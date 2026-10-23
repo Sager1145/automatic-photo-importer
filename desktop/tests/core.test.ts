@@ -14,7 +14,7 @@ const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!nam
 
 async function plan(source:string,root:string,...args:Parameters<typeof planDestinations> extends [string,string[],...infer Rest]?Rest:never){return (await planDestinations(source,[root],...args)).plans[0]!;}
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options = {backup:false, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
+const options = {backup:false as const, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
 const metadata = async ():Promise<Metadata> => ({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
 async function fixture(t:test.TestContext) {
   const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-core-')));
@@ -331,10 +331,9 @@ test('runtime reorganization collision copies to a new name and retains the unre
   assert.equal(await fs.readFile(p.entries[0]!.destination,'utf8'),'other writer!!');
 });
 
-test('reorganization requires a reviewed plan for one library and forbids backup mode',async t=>{
+test('reorganization requires a reviewed plan for one library',async t=>{
   const {source,root,put}=await fixture(t); await put('A.JPG');
   await assert.rejects(plan(source,root,{...options,reorganize:true},metadata),/same|library/i);
-  await assert.rejects(plan(source,source,{...options,reorganize:true,backup:true},metadata),/backup|library/i);
   const copy=await plan(source,root,options,metadata);
   await assert.rejects(executeReorganization(copy),/review|reorganization/i);
 });

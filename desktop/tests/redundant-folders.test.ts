@@ -20,7 +20,7 @@ async function library(t:test.TestContext){
 const blankSidecar=()=>{const b=Buffer.alloc(26);b.writeUInt32BE(0x00051607,0);b.writeUInt32BE(0x00020000,4);return b;};
 /** One Finder info entry with a colour label set: real user data. */
 const taggedSidecar=()=>{const b=Buffer.alloc(26+12+32);b.writeUInt32BE(0x00051607,0);b.writeUInt32BE(0x00020000,4);b.writeUInt16BE(1,24);b.writeUInt32BE(9,26);b.writeUInt32BE(38,30);b.writeUInt32BE(32,34);b[38+9]=0x0c;return b;};
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{},reorganize:true};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{},reorganize:true as const};
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 
 test('only folders holding nothing but OS bookkeeping go; a labelled "._" file, a link, a protected folder or a replaced folder keeps its folder',async t=>{
@@ -90,7 +90,7 @@ test('after a video-root backup organization both backup folders stay and only e
  const l=await library(t),photos=path.join(l.root,'photobackup'),videos=path.join(l.root,'videobackup');
  await l.put('photobackup/2024/202402/Sony A7/RAW/A.ARW');await l.put('photobackup/old/C.MOV');await l.put('photobackup/old/.DS_Store');
  await l.put('videobackup/stray/B.JPG');await l.put('elsewhere/D.JPG');
- const layout={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{},sourceFolders:['photobackup','videobackup']};
+ const layout={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'video-root' as const,videoRoots:[videos],unknownRules:{},sourceFolders:['photobackup','videobackup']};
  const {plans}=await core.plan(l.root,[photos],{...layout,reorganize:true},async()=>({camera:'Sony A7',date:'2024-02-03T12:00:00',fields:{}}));
  let removed=0;
  for(const part of [plans[0]!,plans[0]!.videos!]){const result=await core.executeReorganization(part);assert.deepEqual(result.errors,[]);removed+=result.foldersRemoved??0;}

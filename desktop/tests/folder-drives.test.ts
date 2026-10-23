@@ -12,7 +12,7 @@ import {mountedVolumes,volumeOf} from '../platform/volumes';
 import {driveContext} from '../drive-groups';
 import {DeviceStreams,deviceHasRoom} from '../core/devices';
 import {nextRunnable} from '../queue-order';
-import {destinationSpace,freeAfterReservations} from '../core/allocation';
+import {destinationSpace,freeAfterReservations,reservationVolume} from '../core/allocation';
 import {I18nProvider,languages,createTranslator} from '../renderer/i18n';
 import {DriveLabel,SameDriveNotice,SharedCapacityNote,SourceSpace} from '../renderer/RootApp';
 import type {Source,TransferPlan} from '../shared';
@@ -115,10 +115,18 @@ test('a source sharing the destination drive draws on the free space every other
  assert.equal(space.sameDrive,true);assert.equal(space.needed,1200);assert.equal(space.existing,300);
  assert.equal(destinationSpace(plan,1000).sameDrive,undefined);
  // Another job already claimed 500 of the shared volume; a different volume is untouched.
- const held=new Map([['other',[{volume:'vol-dest',bytes:500}]]]);
- assert.deepEqual(freeAfterReservations('me',[{path:'/d',volumeId:'vol-dest',free:1000},{path:'/e',volumeId:'vol-else',free:1000}],held),[500,1000]);
- assert.deepEqual(freeAfterReservations('other',[{path:'/d',volumeId:'vol-dest',free:1000}],held),[1000]);
- assert.deepEqual(freeAfterReservations('me',[{path:'/d',volumeId:'vol-dest',free:100}],held),[0]);
+ const volumes=[{path:'/'},{path:'/d'},{path:'/e'}],held=new Map([['other',[{volume:reservationVolume(volumes,'/d'),bytes:500}]]]);
+ assert.deepEqual(freeAfterReservations('me',[{path:'/d',free:1000},{path:'/e',free:1000}],volumes,held),[500,1000]);
+ assert.deepEqual(freeAfterReservations('other',[{path:'/d',free:1000}],volumes,held),[1000]);
+ assert.deepEqual(freeAfterReservations('me',[{path:'/d',free:100}],volumes,held),[0]);
+});
+
+test('two jobs planning into different folders of one volume without a UUID share one reservation',()=>{
+ // The destination status of a volume with no UUID names it by its device; the reservation key comes from the volume snapshot.
+ const volumes=[{path:'/'},{path:'/Volumes/NO NAME'}];
+ const held=new Map([['first',[{volume:reservationVolume(volumes,'/Volumes/NO NAME/Photos'),bytes:700}]]]);
+ assert.deepEqual(freeAfterReservations('second',[{path:'/Volumes/NO NAME/Other library',free:1000}],volumes,held),[300]);
+ assert.equal(reservationVolume(volumes,'/Volumes/NO NAME/Photos'),reservationVolume(volumes,'/Volumes/NO NAME'));
 });
 
 const render=(node:unknown,props:object,language:typeof languages[number]='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(node as never,props)}));

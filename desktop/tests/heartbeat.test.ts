@@ -14,7 +14,7 @@ import type {Metadata} from '../shared';
 const secret='fixture-only-host-recovery-secret-32bytes';
 core.configureOrganizationRecovery(secret);
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const LIMIT=3;
 
 async function organized(t:test.TestContext,count=24){

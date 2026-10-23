@@ -8,7 +8,7 @@ import { inventory } from './inventory';
 import { DRIVE_BACKUPS } from './drive-backup';
 import { APP_DATA_FOLDER, LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './legacy-names';
 import { PROBLEM_FILES_FOLDER } from '../shared';
-import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
+import { checkAbort, code, directory, identity, statKey, syncDirectory, within } from './paths';
 import { indexLocations, indexTarget, provablySame, statRecord, type StatRecord } from './destination-index';
 import { toMessage, type Message } from '../messages';
 import { openV5, sealV5 } from './app-store';
@@ -19,6 +19,9 @@ import { CHECK_CONCURRENCY } from './devices';
 export const DUPLICATES_PREFIX='photo-importer-duplicates';
 /** Folders the app owns, skipped at any depth: mirrors of other drives, the recovery store and collected problem files. */
 export const APP_FOLDERS=[DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
+/** The files duplicate detection looks at, in planning and in a library scan alike: recognised media with bytes, never a
+ * companion (a sidecar, an edit's settings, a Live Photo's clip), which goes with its primary. */
+export const duplicateMember=(file:Pick<InventoryFile,'kind'|'size'|'companionOf'>)=>file.kind!=='Other'&&file.size>0&&!file.companionOf;
 /** The destination libraries a chosen folder is, contains or sits inside. More than one means the scan would mix
  * libraries (or pair a library with another), so the folder is refused. */
 export function overlappingLibraries(folder:string,libraries:string[]):string[] {
@@ -152,7 +155,7 @@ export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanO
   const root=await directory(rootPath),rootIdentity=await identity(root),store=await duplicateStore(root,rootIdentity),signal=options.signal;
   const report=(progress:Omit<Progress,'phase'|'bytes'|'totalBytes'|'speed'>)=>options.onProgress?.({phase:'planning',bytes:0,totalBytes:0,speed:0,...progress});
   const listed=await inventory(root,{backup:true,excludeNames:APP_FOLDERS,onProgress:(found,_bytes,top,latest)=>report({step:'listing',completed:found,total:0,file:latest??'',...(top?.total?{share:top.done/top.total}:{})})},signal);
-  const media=listed.files.filter((item:InventoryFile)=>item.kind!=='Other'&&!item.companionOf);
+  const media=listed.files.filter(duplicateMember);
   const companions=new Map<string,string[]>();
   for(const item of listed.files) if(item.companionOf) { const primary=relativeOf(root,item.companionOf); companions.set(primary,[...companions.get(primary)??[],relativeOf(root,item.path)]); }
   // One entry per file: a failed hash (the file is left out) replaces a failed metadata read of the same file.
@@ -202,18 +205,20 @@ export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanO
   return {groups,files:items.length,companions,failures:[...failures.values()].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)};
 }
 
-/** What planning learned about the files it examined: EXIF for every media file, and the SHA-256 stage 1
+/** What planning learned about the files it examined: EXIF for every member, and the SHA-256 stage 1
  * computed for candidates. Paths are the source files'. */
-export interface PlanDuplicates {files:DuplicateFile[];groups:DuplicateGroup[];}
+export interface PlanDuplicates {files:DuplicateFile[];}
 /** Record the EXIF a finished plan read, for the files it placed in this library, so a later scan does not read it
- * again. `destinationOf` maps a source path to its path in this library (absent: not in it). Never deletes anything. */
-export async function recordPlanDuplicates(root:string,found:PlanDuplicates,destinationOf:(source:string)=>string|undefined):Promise<void> {
+ * again. `placed` maps a source path to where the import verified it in this library and that file's identity then (absent:
+ * not there); a file changed since gets nothing. Never deletes anything. */
+export async function recordPlanDuplicates(root:string,found:PlanDuplicates,placed:(source:string)=>{destination:string;identity:string}|undefined):Promise<void> {
   const library=await directory(root),rootIdentity=await identity(library),store=await duplicateStore(library,rootIdentity);
   for(const item of found.files) {
-    const destination=destinationOf(item.path);if(!destination) continue;
-    const relative=relativeOf(library,destination);if(relative.startsWith('..')) continue;
-    const stat=await fs.lstat(destination,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
-    if(!stat?.isFile()) continue;
+    const at=placed(item.path);if(!at) continue;
+    const relative=relativeOf(library,at.destination);if(relative.startsWith('..')) continue;
+    const stat=await fs.lstat(at.destination,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
+    // Only the very file the import verified there gets the source's kind and EXIF.
+    if(!stat?.isFile()||statKey(stat)!==at.identity) continue;
     store.files.set(relative,{stat:statRecord(stat),kind:item.kind,edited:item.edited,...(item.exif?{exif:item.exif}:{})});store.mark();
   }
   await store.flush();

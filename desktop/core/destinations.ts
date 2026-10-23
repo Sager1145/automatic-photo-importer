@@ -1,15 +1,17 @@
-import {executeMany,executeReorganization} from './index';
+import {executeMany,executeReorganization,type FileOutcome} from './index';
 import {destinationEntries,destinationParts,requiredTransferSpace} from './allocation';
 import type {ExecutionIssue,Progress,TransferPlan} from '../shared';
 import {addAppleDoubleReport,emptyAppleDoubleReport} from './appledouble';
 
+/** A file's outcome at one destination disk: `destinationSlot` is that destination's place in the plans (its video folder included). */
+export interface DestinationOutcome extends FileOutcome {destinationSlot:number;}
 /** Execute independent destination copies; one unavailable disk must not cancel the
  * other. Copies to several destinations share one read of each source file. A destination's
  * video folder (video-root layout) runs as its own plan but is validated, reported and
  * settled as part of that destination. */
 export async function executeDestinations(plans:TransferPlan[],options:{
  signal:AbortSignal;reorganize:boolean;verify?:boolean;removeAppleDouble?:boolean;keepSourceFolders?:boolean;releaseDuplicates?:boolean;
- onVerified?:(source:string,sha256:string,identity:string,streamed:boolean)=>void;
+ onFileOutcome?:(outcome:DestinationOutcome)=>void;
  validate(index:number):Promise<void>;
  progress(index:number,value:Progress,pendingBytes:number):void;
  settled(index:number):void;
@@ -70,7 +72,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    try{await options.validate(index);ready.push(...slots.flatMap((slot,position)=>slot.index===index?[position]:[]));}
    catch(error){if(options.signal.aborted)throw error;failed(index,error);settle(index);}
   }
-  const results=await executeMany(ready.map(slot=>slots[slot].part),options.signal,(position,value)=>report(ready[position],value),{verify:options.verify,onVerified:options.onVerified,removeAppleDouble:options.removeAppleDouble},position=>{finished.add(ready[position]);const index=slots[ready[position]].index;if(slots.every((slot,other)=>slot.index!==index||finished.has(other)))settle(index);});
+  const results=await executeMany(ready.map(slot=>slots[slot].part),options.signal,(position,value)=>report(ready[position],value),{verify:options.verify,onFileOutcome:(outcome,position)=>options.onFileOutcome?.({...outcome,destinationSlot:slots[ready[position]].index}),removeAppleDouble:options.removeAppleDouble},position=>{finished.add(ready[position]);const index=slots[ready[position]].index;if(slots.every((slot,other)=>slot.index!==index||finished.has(other)))settle(index);});
   results.forEach((value,position)=>{
    const index=slots[ready[position]].index;
    if(value instanceof Error){failed(index,value);return;}

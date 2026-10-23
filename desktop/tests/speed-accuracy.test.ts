@@ -249,7 +249,7 @@ test('verification reports the bytes it hashed as it reads, so a large file move
   const size = 6 * 1024 * 1024;
   await fs.writeFile(path.join(source, 'DSC0001.ARW'), Buffer.alloc(size, 7));
   const metadata = async (): Promise<Metadata> => ({ camera: 'Sony A7', date: '2024-02-03T12:00:00Z', fields: {} });
-  const planned = (await planDestinations(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'format', unknownRules: {} }, metadata)).plans[0]!;
+  const planned = (await planDestinations(source, [root], { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'format', unknownRules: {} }, metadata)).plans[0]!;
   const seen: Progress[] = [];
   const result = await execute(planned, undefined, progress => seen.push({ ...progress }));
   assert.deepEqual(result.errors, []);

@@ -371,6 +371,11 @@ Videos|视频|影片|動画
 {count} of 10|{count} / 10|{count} / 10|{count} / 10
 Drive backups|驱动器备份|磁碟備份|ドライブのバックアップ
 Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバックアップモード
+Same name, different content|同名但内容不同|同名但內容不同|同じ名前で内容が違うファイル
+Conflicts folder|Conflicts 文件夹|Conflicts 資料夾|Conflicts フォルダ
+Add a number|添加编号|加上編號|番号を付ける
+Saved with its own name in a Conflicts folder inside the camera folder, one subfolder per file.|保留原文件名，存入相机文件夹内的 Conflicts 文件夹，每个文件一个子文件夹。|保留原檔名，存入相機資料夾內的 Conflicts 資料夾，每個檔案一個子資料夾。|元の名前のまま、カメラフォルダ内の Conflicts フォルダに保存します。ファイルごとにサブフォルダを作ります。
+Saved beside the other file with a number: IMG_0001 (1).JPG, then (2). Its sidecars get the same number.|在另一个文件旁加编号保存：IMG_0001 (1).JPG，之后是 (2)。其附属文件使用相同编号。|在另一個檔案旁加編號儲存：IMG_0001 (1).JPG，之後是 (2)。其附屬檔案使用相同編號。|もう一方のファイルの隣に番号を付けて保存します：IMG_0001 (1).JPG、次は (2)。サイドカーファイルにも同じ番号が付きます。
 Additive|只增不删|只增不刪|追加のみ
 Mirror|镜像|鏡像|ミラー
 Drive backups are saved here on each destination|驱动器备份保存在每个目标的此位置|磁碟備份儲存在每個目的地的此位置|ドライブのバックアップは各保存先のここに保存されます

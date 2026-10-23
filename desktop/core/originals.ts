@@ -5,6 +5,9 @@ import { beneath, checkAbort, code, contained, digest, statKey } from './paths';
 import { removeEmptiedFolders } from './redundant-folders';
 import { mapPool } from './devices';
 import { log, logDeletion } from '../logger';
+import { destinationEntries } from './allocation';
+import type { DestinationOutcome } from './destinations';
+import type { TransferPlan } from '../shared';
 
 /** Files checked at once; each device's own stream limit (devices.ts) still caps the reads. */
 const VERIFY_CONCURRENCY=4;
@@ -39,24 +42,27 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
   }
   return {files:count,bytes,kept};
 }
-/** What an import verified for one source: its checksum, the source identity it was hashed under, and whether this
- * job read the source for it (a copy it streamed) rather than matching a file already in the backup by a checksum
- * from planning. */
-export interface ImportVerified {sha256:string;identity:string;streamed:boolean;}
-/** Note one verification; a source copied to one destination and found in another counts as read by this job. */
-export function recordVerified(verified:Record<string,ImportVerified>,source:string,sha256:string,identity:string,streamed:boolean):void {
-  verified[source]={sha256,identity,streamed:streamed||verified[source]?.streamed===true};
-}
-/** The originals a finished import may offer to delete, with every place it put each. Only a source this job read
- * itself carries its identity, which lets deleteOriginals skip reading it again; a planning checksum never does. */
-export function verifiedOriginals(verified:Record<string,ImportVerified>,entries:{source:string;destination:string;size:number}[]):VerifiedOriginal[] {
-  const files:VerifiedOriginal[]=[],bySource=new Map<string,typeof entries>();
-  for(const entry of entries) {const list=bySource.get(entry.source);if(list)list.push(entry);else bySource.set(entry.source,[entry]);}
-  for(const [source,found] of Object.entries(verified)) {
-    const matching=bySource.get(source)??[];
-    if(matching.length) files.push({source,size:matching[0]!.size,sha256:found.sha256,...(found.streamed?{identity:found.identity}:{}),destinations:[...new Set(matching.map(entry=>entry.destination))]});
+/** Why a source this import copied is not offered for deletion. copy-missing: a destination its allocation requires
+ * (both disks when mirroring, the one it was assigned when filling first) holds no copy from this run. unverified: a
+ * required copy was never read back (verification off). */
+export interface WithheldOriginal {source:string;reason:'copy-missing'|'unverified';}
+/** The originals a finished import may offer to delete, from what each file actually came to at each destination: a source
+ * qualifies only when every destination its plan sends it to holds a copy this run verified, and its actual paths there are
+ * what deleteOriginals re-reads. Only a source this run read itself (a copy it published) carries its identity, which lets
+ * deleteOriginals skip reading it again; a file found already in the backup never does. */
+export function verifiedOriginals(outcomes:ReadonlyMap<string,readonly DestinationOutcome[]>,plans:TransferPlan[]):{files:VerifiedOriginal[];withheld:WithheldOriginal[]} {
+  const required=new Map<string,Set<number>>();
+  plans.forEach((plan,slot)=>{for(const entry of destinationEntries(plan)){const slots=required.get(entry.source)??new Set<number>();slots.add(slot);required.set(entry.source,slots);}});
+  const files:VerifiedOriginal[]=[],withheld:WithheldOriginal[]=[];
+  for(const [source,found] of outcomes) {
+    const slots=required.get(source);
+    if(!slots||!found.length) continue;
+    if([...slots].some(slot=>!found.some(item=>item.destinationSlot===slot))) {withheld.push({source,reason:'copy-missing'});continue;}
+    if(found.some(item=>item.verification!=='content-verified')) {withheld.push({source,reason:'unverified'});continue;}
+    const read=found.find(item=>item.disposition==='published'&&item.sourceIdentity!==undefined);
+    files.push({source,size:found[0]!.size,sha256:found[0]!.sha256,...(read?{identity:read.sourceIdentity}:{}),destinations:[...new Set(found.map(item=>item.destination))]});
   }
-  return files;
+  return {files,withheld};
 }
 type Outcome={deleted:true}|{kept:KeptReason;error?:string};
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that

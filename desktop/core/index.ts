@@ -2,12 +2,12 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import type { ConflictNaming, DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { LEGACY_UNKNOWN_CAMERA_FOLDER, PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
 import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, nkscEdit, captureOneEdit, unknownRule, type RuleDefaults } from './inventory';
-import { destinationIndex, flushIndex, type DestinationIndex, type Digests } from './destination-index';
+import { destinationIndex, flushIndex, provable, type DestinationIndex, type Digests } from './destination-index';
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
@@ -17,8 +17,7 @@ import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, co
 export { inventory } from './inventory';
 import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
-import { APP_FOLDERS, confirmCandidates, type PlanDuplicates } from './duplicates';
-import { buildGroups } from '../duplicate-rules';
+import { APP_FOLDERS, confirmCandidates, duplicateMember, type PlanDuplicates } from './duplicates';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, APP_DATA_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 export type { AppleDoubleReport } from './appledouble';
@@ -47,7 +46,50 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;/** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;/** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};/** Fill-first copy mode across two destinations: given the first one's plan, the sources it keeps (`fillFirst` in allocation.ts). The second is planned only for the rest. */fillFirst?:(first:TransferPlan)=>Set<string>;}
+/** The folder rules of a library: where each media file goes under its backup folder. */
+export interface FolderRules {
+  template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;
+  /** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];editedFolder?:string;
+  /** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;
+  /** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;
+}
+/** How the source is listed. */
+interface Listing {
+  sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;
+  /** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;
+  /** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;
+  /** A file whose name is taken at its destination by other content (ConflictNaming). Absent: folder. */conflictNaming?:ConflictNaming;
+  /** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];
+}
+/** What a copy (an import or a drive backup) adds: which source files it takes and what it already knows of them. */
+interface Copy extends Listing {
+  unknownRules:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;
+  /** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;
+  /** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;
+  /** Fill-first copy mode across two destinations: given the first one's plan, the sources it keeps (`fillFirst` in allocation.ts). The second is planned only for the rest. */fillFirst?:(first:TransferPlan)=>Set<string>;
+}
+/** Importing media into one or two libraries, filed by the folder rules. */
+export interface ImportRequest extends FolderRules,Copy {
+  backup:false;reorganize?:false;
+  /** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;
+  /** Whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;
+  /** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};
+}
+/** Backing up a drive as it is laid out, into its drive folder (`drive`) of each destination. */
+export interface DriveRequest extends Copy {backup:true;drive?:Drive;}
+/** Organizing a library in place (or a folder beneath it on the same filesystem) by its folder rules. Unknown files stay put. */
+export interface OrganizeRequest extends FolderRules,Listing {
+  backup:false;reorganize:true;/** Move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;
+}
+export type PlanRequest=ImportRequest|DriveRequest|OrganizeRequest;
+/** The read-only check of an organized library (findMisplaced). */
+export interface MisplacedRequest extends FolderRules,Pick<Listing,'sourceFolders'|'listingHint'|'onListed'> {
+  /** True for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */
+  inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;
+}
+type Request=PlanRequest|(MisplacedRequest&{backup:false;reorganize:true;misplacedOnly:true});
+/** Every request as planOnce reads it, field by field. */
+type Options={backup:boolean;reorganize?:boolean;misplacedOnly?:boolean}&Partial<Omit<ImportRequest,'backup'|'reorganize'>&Omit<DriveRequest,'backup'>&Omit<OrganizeRequest,'backup'|'reorganize'>&MisplacedRequest>;
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -62,7 +104,7 @@ const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentit
 interface Media {video:boolean;format:string;}
 /** `camera`: the templated folder (a family's conflict folder lives there); `sub`: the layout's
  * folders inside it; `root`: which backup folder, the video one only in the video-root layout. */
-function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):{root:'photos'|'videos';camera:string;sub:string} {
+function folder(info:Metadata,mtime:Date,media:Media|undefined,options:FolderRules):{root:'photos'|'videos';camera:string;sub:string} {
   // Capture dates describe the camera's calendar day. Converting an EXIF
   // offset to UTC can move a midnight photo into the previous folder.
   const calendar=info.date?.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
@@ -88,14 +130,31 @@ function groups(entries:PlanEntry[]):PlanEntry[][] {
   for(const entry of entries) {const family=families.get(entry.family)??[]; family.push(entry); families.set(entry.family,family);}
   return [...families.values()];
 }
-// Conflicts/<content id> retains original names and camera/media grouping.
-// Allocation metadata is serialized with the plan so review roundtrips preserve
-// the same policy if another writer arrives after planning.
+// Conflicts/<content id> retains original names and camera/media grouping; numbering instead
+// names attempt n `<name> (n)` in place. Allocation metadata (the policy too) is serialized with
+// the plan so review roundtrips and resumed imports allocate alike if another writer arrives after planning.
 function target(entry:PlanEntry,attempt:number,family:PlanEntry[],digests?:Map<string,string>):string {
   const original=entry.allocation??{destination:entry.destination,folder:path.dirname(entry.destination)};
   if(!attempt)return original.destination;
+  if(entry.allocation?.conflictNaming==='number')return path.join(path.dirname(original.destination),numbered(entry,attempt,family));
   const content=createHash('sha256').update(JSON.stringify(family.map(member=>[path.basename(member.source),digests!.get(member.id)!]).sort((a,b)=>a[0]!.localeCompare(b[0]!)||a[1]!.localeCompare(b[1]!)))).digest('hex').slice(0,16);
   return path.join(original.folder,'Conflicts',content+(attempt>1?'-'+attempt:''),path.relative(original.folder,original.destination));
+}
+const NAME_BYTES=255;
+const originalName=(entry:PlanEntry)=>path.basename(entry.allocation?.destination??entry.destination);
+/** ` (n)` after the stem the family shares (its shortest name without the extension), or after a
+ * member's own stem when it is not named after it: DSC_0001 (1).NEF.xmp, C0004 (1)M01.XML. Members
+ * matched by a stem (XMP, NKSC, LRF, Live Photo MOV) pair again when the library is read later;
+ * pattern-named ones (Sony M01.XML/R01.BIM, IMG_O….AAE, GoPro GL….LRV) keep the number but not
+ * that pattern. Every member's stem is shortened alike when a name would pass 255 bytes. */
+function numbered(entry:PlanEntry,n:number,family:PlanEntry[]):string {
+  const suffix=` (${n})`,stemOf=(name:string)=>name.slice(0,name.length-path.extname(name).length);
+  const shared=family.map(member=>stemOf(originalName(member))).sort((a,b)=>a.length-b.length||(a<b?-1:a>b?1:0))[0]!;
+  const split=(name:string)=>{const at=name.toLowerCase().startsWith(shared.toLowerCase())?shared.length:stemOf(name).length;return [name.slice(0,at),name.slice(at)] as const;};
+  const over=Math.max(0,...family.map(member=>Buffer.byteLength(originalName(member))+Buffer.byteLength(suffix)-NAME_BYTES));
+  const [stem,rest]=split(originalName(entry)),characters=Array.from(stem);
+  let cut=0;while(cut<over&&characters.length)cut+=Buffer.byteLength(characters.pop()!);
+  return characters.join('')+suffix+rest;
 }
 /** null: nothing there. A different size is a different file without reading
  * anything; equal sizes compare SHA-256 values (the destination via its index). */
@@ -110,7 +169,7 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
-    const digests=attempt?new Map<string,string>():undefined;
+    const digests=attempt&&family[0]!.allocation?.conflictNaming!=='number'?new Map<string,string>():undefined;
     if(digests) for(const member of family) digests.set(member.id,await resolve(member));
     const proposed=new Map<string,PlanEntry>(), allocation=[];
     let conflict=false;
@@ -170,7 +229,7 @@ export function pairLivePhotos(files:InventoryFile[],scanned:InventoryFile[],inf
   }
   return {paired,dropped};
 }
-export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
+export async function plan(source:string,roots:string[],options:PlanRequest,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   if(!options.reuse) return planOnce(source,roots,options,metadata,signal,onProgress);
   // A file rewritten in place leaves its folder unchanged, so a remembered listing
   // can hold a stale size. List the card again once rather than failing.
@@ -183,7 +242,7 @@ export async function plan(source:string,roots:string[],options:Options,metadata
 /** Read-only check of an organized library: the files in `source` (relative to it) that are not
  * where the folder rules put them under `root` (and the video root of the video-root layout).
  * `source` is the library itself or a folder holding it. Nothing is read beyond names, sizes and metadata. */
-export async function findMisplaced(source:string,root:string,options:Omit<Options,'reorganize'|'misplacedOnly'|'backup'|'drive'>&{backup?:boolean},metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{count:number;bytes:number;files:string[];placed:PlacedFile[]}> {
+export async function findMisplaced(source:string,root:string,options:MisplacedRequest,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{count:number;bytes:number;files:string[];placed:PlacedFile[]}> {
   const {plans:[found],placed=[]}=await planOnce(source,[root],{...options,backup:false,reorganize:true,misplacedOnly:true},metadata,signal,onProgress);
   const entries=[...found?.entries??[],...found?.videos?.entries??[]];
   return {count:entries.length,bytes:entries.reduce((sum,entry)=>sum+entry.size,0),files:entries.map(entry=>path.relative(found!.source,entry.source)),placed};
@@ -195,8 +254,10 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
  * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, of totalBytes: the size of the files with a same-size file at a destination; matched, matchedBytes: files found identical there, which are not copied);
  * 'locating': files to copy looked for elsewhere in the backup, by content (an import after the folder rules changed). */
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number;matched?:number;matchedBytes?:number})=>void;
-async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
+async function planOnce(source:string,roots:string[],request:Request,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   checkAbort(signal);
+  // A drive backup keeps the drive's own layout; every other plan files by the folder rules.
+  const options:Options=request,folderRules=request.backup?undefined:request;
   if(!roots.length)throw new Error('Choose at least one destination.');
   if(options.reorganize&&roots.length!==1)throw new Error('Review one organization destination at a time.');
   const sourceRoot=await directory(source),custom=rules(options.reorganize?{}:options.unknownRules);
@@ -211,7 +272,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   async function backupRoot(root:string):Promise<Root> {
     const destinationRoot=await directory(root);
     if(options.reorganize) {
-      if(options.backup || (sourceRoot!==destinationRoot && !beneath(destinationRoot,sourceRoot)) || (await fs.lstat(sourceRoot,{bigint:true})).dev!==(await fs.lstat(destinationRoot,{bigint:true})).dev) throw new Error('Reorganization requires the same library or a base folder beneath it on the same filesystem and cannot use backup mode.');
+      if((sourceRoot!==destinationRoot && !beneath(destinationRoot,sourceRoot)) || (await fs.lstat(sourceRoot,{bigint:true})).dev!==(await fs.lstat(destinationRoot,{bigint:true})).dev) throw new Error('Reorganization requires the same library or a base folder beneath it on the same filesystem.');
     } else if(sourceRoot===destinationRoot || beneath(sourceRoot,destinationRoot)) throw new MessageError('error.alreadyInBackup',{source:sourceRoot,root:destinationRoot});
     // A backup folder inside the chosen source is left out of it, so the backup is never copied into itself.
     else if(beneath(destinationRoot,sourceRoot)) excludedRoots.push(destinationRoot);
@@ -223,9 +284,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     destinations.push({...photos,...(videos?{videos}:{})});
   }
   const allRoots=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
-  if(options.drive&&!options.backup)throw new Error('Only drive backups use a drive folder.');
   const unknownMode:NoMetadataHandling=options.backup?'fileDate':options.noMetadata??'fileDate',unknownFolder=unknownMode==='folder'?noMetadataFolderName(options.noMetadataFolder,[options.editedFolder??'editied']):options.noMetadataFolder??UNKNOWN_FILES_FOLDER;
-  if(!options.backup) {folder({fields:{}},new Date(0),undefined,options);folder({fields:{}},new Date(0),{video:true,format:'MOV'},options);}
+  if(folderRules) {folder({fields:{}},new Date(0),undefined,folderRules);folder({fields:{}},new Date(0),{video:true,format:'MOV'},folderRules);}
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   // The Problem files folder is the app's own, like Drive backups: never organized again, never misplaced.
   if(options.reorganize) excludedRoots.push(...allRoots.flatMap(({root})=>[path.join(root,DRIVE_BACKUPS),path.join(root,PROBLEM_FILES_FOLDER)]));
@@ -368,9 +428,10 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // Duplicate detection, stage 1: files with the same name or EXIF identity are hashed now to confirm or
   // reject them. The hashes are reused below, so the plan never reads those files twice. Only recorded.
   const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
-  if(options.duplicates&&!options.backup&&!options.reorganize&&!options.misplacedOnly) {
+  // Only an import's request asks for it; a request spread from import settings into an organization still does not run it.
+  if(options.duplicates&&!options.backup&&!options.reorganize) {
     const edited=options.editedFolder??'editied';
-    const items:DuplicateFile[]=files.filter(file=>file.kind!=='Other'&&(!file.companionOf||livePaired.has(file.path))&&sourceStats.has(file.path)&&file.size>0).map(file=>{
+    const items:DuplicateFile[]=files.filter(file=>duplicateMember(file)&&sourceStats.has(file.path)).map(file=>{
       const stat=sourceStats.get(file.path)!,info=infos.get(file.path),exif=info?.fingerprint;
       return {path:file.path,size:file.size,kind:file.kind,edited:info?.edited===true||file.relative.split(path.sep).slice(0,-1).includes(edited),...(exif&&Object.keys(exif).length?{exif}:{}),birth:Number(stat.birthtimeNs)/1e6,ctime:Number(stat.ctimeNs)/1e6};
     });
@@ -385,7 +446,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       },{signal,onProgress:progress=>onProgress?.(progress.completed,progress.file,{step:'candidates',total:progress.total,bytes:0,totalBytes:0})});
     } catch(error) { if(isAbort(error)) throw error; }
     for(const item of items) if(item.sha256) early.set(item.path,item.sha256);
-    duplicates={files:items,groups:buildGroups(items)};
+    duplicates={files:items};
   }
   // Each ancestor describes only media within its own subtree. Stop at the
   // nearest evidence, including mixed-camera evidence, rather than guessing
@@ -461,7 +522,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file;
       relative=unknownRelative(file);forcedRoot=options.layout==='video-root'&&original.kind==='Videos'?'videos':'photos';
     }
-    else if(options.backup) relative=file.relative;
+    else if(!folderRules) relative=file.relative;
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
     else {
       // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
@@ -470,7 +531,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       // An empty companion has no capture metadata of its own. Its primary also
       // supplies the fallback date, so differing mtimes cannot split the family.
       const dated=lead??(nksc||captureOne||live || file.size===0&&file.companionOf?primary:file);
-      place=folder(route,mtimes.get(dated.path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},options);
+      place=folder(route,mtimes.get(dated.path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},folderRules);
       // NX Studio reads NKSC_PARAM beside the original.
       relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':captureOne??'',path.basename(file.path));
     }
@@ -558,7 +619,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       checkAbort(signal);
       const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
-      pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera)}});
+      pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera),...(options.conflictNaming==='number'?{conflictNaming:'number' as const}:{})}});
       onProgress?.(++made,path.relative(sourceRoot,entry.source),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     }
     const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0})):undefined;
@@ -616,15 +677,14 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }
   // Identical bytes may already sit elsewhere in the library (folders of older rules, the other root).
   // Only imports look: never a backup or drive copy, an organization or its read-only check.
-  const lookup=!options.backup&&!options.drive&&!options.reorganize&&!options.misplacedOnly;
-  const APP_NAMES=[...APP_FOLDERS,'Photo Importer Data'];
+  const lookup=!options.backup&&!options.reorganize;
   /** The library's files by size (this session's listing is reused). `listed` counts files found while listing. */
   async function sizesOf(destination:Root&{videos?:Root},listed:(found:number,file:string)=>void):Promise<Map<number,string[]>> {
     const sizes=new Map<number,string[]>();let before=0;
     for(const part of [destination,...(destination.videos?[destination.videos]:[])]) {
       const index=await destinationIndex(part.root,part.identity),offset=before;
       index.listing??=(async()=>{
-        const found=await inventory(part.root,{backup:true,excludeNames:APP_NAMES,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
+        const found=await inventory(part.root,{backup:true,excludeNames:APP_FOLDERS,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
         // Conflict copies are never proof that a file is filed: they hold what the folder rules could not place.
         return found.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-')&&!file.relative.split(path.sep).includes('Conflicts')&&file.relative.split(path.sep)[0]?.toLowerCase()!==unknownFolder.toLowerCase();}).map(file=>({path:file.path,size:file.size}));
       })();
@@ -722,7 +782,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         if(!hit) continue;
         moved.add(entry.id);
         const list=arrived.get(hit.part)??[];
-        list.push({...entry,skip:true,destination:hit.path,allocation:{destination:hit.path,folder:path.dirname(hit.path)},digest:hit.digest,routed:entry.destination});
+        list.push({...entry,skip:true,destination:hit.path,allocation:{...entry.allocation,destination:hit.path,folder:path.dirname(hit.path)},digest:hit.digest,routed:entry.destination});
         arrived.set(hit.part,list);
       }
     }
@@ -954,6 +1014,18 @@ async function releaseStaleStage(entry:PlanEntry,root:string,recovery:RecoveryIn
     await clearPartialRecord(stale,root,recovery);
   } finally { claimedStages.delete(stale.file); }
 }
+/** One file at one destination as this run left it. `destination` is where it actually is (a conflict folder chosen
+ * late, the place older rules filed it), never only where the plan meant it to go. */
+export interface FileOutcome {
+  entryId:string;family:string;source:string;sourceIdentity?:string;root:string;rootIdentity:string;destination:string;size:number;sha256:string;
+  /** published: this run wrote it from its own read of the source. existing: the bytes were already there (also an interrupted copy of an earlier run, finished now). routed: already there where older folder rules filed it. */
+  disposition:'published'|'existing'|'routed';
+  /** content-verified: this run compared the bytes at `destination` with the checksum. stream-only: written from a checksummed read of the source and never read back (verification off). */
+  verification:'content-verified'|'stream-only';
+  /** statKey of `destination` after the last flush and stage removal, only when this run can vouch for the bytes under it (a stat
+   * that proves identity, as the destination index requires): only then may a cache trust it. */
+  finalIdentity?:string;
+}
 export interface ExecutionOptions {
   /** Use journaled exclusive copies for a filesystem known not to support hard links. */
   exclusiveCopy?:boolean;
@@ -962,10 +1034,9 @@ export interface ExecutionOptions {
   /** Re-read each copy and compare its SHA-256 before it is published (default true). When off,
    * the SHA-256 of the streamed source bytes and the source-unchanged checks still apply. */
   verify?:boolean;
-  /** Called for every file whose copy is verified or confirmed already present, with the
-   * plan-time source identity, so a later plan can recognise the unchanged source. */
-  /** streamed: this job read the source for the checksum (a copy it made), not a file already in the backup matched by a checksum from planning. */
-  onVerified?:(source:string,sha256:string,identity:string,streamed:boolean)=>void;
+  /** Called once per file and destination plan (`position` in the plans executed) with what is actually there, after
+   * the file's last flush and its stage's removal: on every way a file ends up at a destination. Not for failed files. */
+  onFileOutcome?:(outcome:FileOutcome,position:number)=>void;
   /** Remove the macOS "._" file beside each published file (see appledouble.ts); results are in ExecutionResult.appleDouble. */
   removeAppleDouble?:boolean;
 }
@@ -1057,7 +1128,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
 /** A whole file at its final name whose bytes equal the source's. If a direct copy's receipt binds it, the copy is finished (dates, one
  * flush, folder flush) and its receipts released: true. If a direct receipt names it but binds nothing, it is not known to be ours
  * and finished, so this throws and leaves everything as it is. Otherwise false. Used by the staged path's skip branch as well. */
-async function finishDirect(entry:PlanEntry,destination:string,sha:string,transfer:TransferPlan,recovery:RecoveryIndex,options:ExecutionOptions,signal?:AbortSignal):Promise<boolean> {
+async function finishDirect(entry:PlanEntry,destination:string,sha:string,transfer:TransferPlan,recovery:RecoveryIndex,signal?:AbortSignal):Promise<boolean> {
   const root=transfer.root,found=await findPublication({...entry,destination},root,recovery,signal);
   if(!found) {
     if(await unboundDirect({...entry,destination},root,recovery)) throw new MessageError('error.unboundReceipt',{path:destination});
@@ -1076,7 +1147,6 @@ async function finishDirect(entry:PlanEntry,destination:string,sha:string,transf
     if(!sameStat(await output.stat({bigint:true}),await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while finishing');
   } finally { await output.close(); }
   await syncParents(destination,root);
-  if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity,false);
   // A leftover receipt beside a finished file is silent, so a failed removal is not a failed copy.
   try { await clearPartialRecord(found,root,recovery,'lazy').catch(error=>{if(code(error)!=='ENOENT')throw error;});await releaseCreations({...entry,destination,digest:sha},root,recovery,'lazy'); }
   catch(error) { if(isAbort(error)) throw error; }
@@ -1111,14 +1181,18 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
   const present=async(entry:PlanEntry,destination:string)=>{
     const sha=await resolve(entry);
-    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);result.copied++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;}
-    else {
+    // Reported once the stale stage is gone too: one hard-linked to this file moves its change time.
+    const settled=async()=>run.emit(outcomeOf(run,entry,destination,sha,entry.routed!==undefined?'routed':'existing','content-verified',await vouched(index,destination,sha)));
+    const finished=await finishDirect(entry,destination,sha,transfer,recovery,signal);
+    if(!finished) {
       await syncFile(destination);await syncParents(destination,root);
-      if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity,false);
       const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
-      await releaseCreations({...entry,destination},root,recovery);await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal);
-      result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;
+      await releaseCreations({...entry,destination},root,recovery);
     }
+    await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal).finally(settled);
+    // Counted only once its family's step here is done, so a failed family is never counted as found.
+    if(finished)result.copied++;else result.skipped++;
+    if(entry.routed!==undefined)result.routed=(result.routed??0)+1;
     hooks.done(entry);
   };
   /** Create the name (or take up the unfinished file already there) and bind it to a receipt. Throws NOT_DIRECT after undoing its own creation when the volume reports no birth time. */
@@ -1242,13 +1316,15 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(destination,root);
     await syncParents(destination,root);
     // Phase 5: done only now.
+    let finalIdentity:string|undefined;
     if(options.verify!==false) {
-      if(entry.sourceIdentity) options.onVerified?.(entry.source,streamed,entry.sourceIdentity,true);
       const now=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-      if(now?.isFile()&&sameStat(now,placed)) index.remember(destination,streamed,now);
+      if(now?.isFile()&&sameStat(now,placed)) {index.remember(destination,streamed,now);if(provable(now))finalIdentity=statKey(now);}
     }
     if(run.appleDouble) await exclusive(()=>run.appleDouble!.besideFile(destination,root,now=>samePlaced(now,placed)),[destination]);
     result.copied++;hooks.done(entry);
+    // Created by this run with O_EXCL, so no older stage is a link of it: its receipts' removal below changes nothing about it.
+    run.emit(outcomeOf(run,entry,destination,streamed,'published',options.verify!==false?'content-verified':'stream-only',finalIdentity));
     await release({...entry,digest:streamed},destination,member.owned);
     // A complete staged copy of this file left by an interrupted older run is released now that the file is published and checked.
     try { await releaseStaleStage({...publicationEntry,digest:streamed},root,recovery,signal); } catch(error) { if(isAbort(error)) throw error; }
@@ -1281,6 +1357,7 @@ export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgre
 }
 interface Run {
   transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;appleDouble?:AppleDoubleCleaner;
+  /** Reports one file's outcome for this destination plan (ExecutionOptions.onFileOutcome). */emit:(outcome:FileOutcome)=>void;
   /** Files are written straight to their final names (exFAT and FAT volumes; see directCapable). */direct?:boolean;
   batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[];/** `direct`: written in place by directFamily; a family that cannot be falls back to `staged`. */mode:'direct'|'staged'}[];pending:Set<string>;
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
@@ -1292,9 +1369,15 @@ interface Run {
 /** Copy the same reviewed entries to several destinations. Each source file is
  * read once for all of them; checks, publication and errors stay per destination.
  * A destination that cannot start returns an Error in its slot; Stop throws. */
+const outcomeOf=(run:Run,entry:PlanEntry,destination:string,sha256:string,disposition:FileOutcome['disposition'],verification:FileOutcome['verification'],finalIdentity?:string):FileOutcome=>({entryId:entry.id,family:entry.family,source:entry.source,...(entry.sourceIdentity!==undefined?{sourceIdentity:entry.sourceIdentity}:{}),root:run.transfer.root,rootIdentity:run.transfer.rootIdentity,destination,size:entry.size,sha256,disposition,verification,...(finalIdentity!==undefined?{finalIdentity}:{})});
+/** A file this run did not write is vouched for under its current stat only by the index's provable record of these bytes. */
+async function vouched(index:DestinationIndex,file:string,sha256:string):Promise<string|undefined> {
+  const now=await fs.lstat(file,{bigint:true}).catch(()=>undefined);
+  return now?.isFile()&&index.cached(file,now)===sha256?statKey(now):undefined;
+}
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[],mode:'staged' as 'direct'|'staged'})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,hashedBytes:0,
+  const runs:Run[]=transfers.map((transfer,position)=>({transfer,emit:outcome=>options.onFileOutcome?.(outcome,position),result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[],mode:'staged' as 'direct'|'staged'})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,hashedBytes:0,
     // A drive backup mirrors a drive as it is: nothing in it is removed.
     ...(options.removeAppleDouble&&!transfer.drive?{appleDouble:appleDoubleCleaner()}:{})}));
   for(const run of runs)if(run.appleDouble)run.result.appleDouble=run.appleDouble.report;
@@ -1413,6 +1496,9 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
         const {family,staged,failed}=batch;
         checkAbort(signal);
         const published:{file:string;sha256:string;stat:import('node:fs').BigIntStats}[]=[],placed:{file:string;stat:import('node:fs').BigIntStats}[]=[];
+        // What each member came to, reported after the stages are removed: also the members done before a later one failed or Stop arrived.
+        const outcomes:{entry:PlanEntry;destination:string;disposition:FileOutcome['disposition'];verification:FileOutcome['verification'];bound?:import('node:fs').BigIntStats}[]=[];
+        let stopped:unknown;
         if(!failed)try{
           const {verifiedSources,members}=await check(batch),known:Resolve=async entry=>entry.digest!;
           // A destination taken meanwhile sends the family to a conflict folder: then it gives
@@ -1430,30 +1516,39 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){log('detailed','exec','already-present',{source:entry.source,destination:item.destination,sha256:entry.digest});if(await finishDirect(entry,item.destination,entry.digest!,transfer,recovery,options,signal)){await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.copied++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;i++;continue;}await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity,false);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){log('detailed','exec','already-present',{source:entry.source,destination:item.destination,sha256:entry.digest});const routed=entry.routed!==undefined;if(await finishDirect(entry,item.destination,entry.digest!,transfer,recovery,signal)){outcomes.push({entry,destination:item.destination,disposition:routed?'routed':'existing',verification:'content-verified'});await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.copied++;if(routed)result.routed=(result.routed??0)+1;i++;continue;}await syncFile(item.destination);await syncParents(item.destination,transfer.root);outcomes.push({entry,destination:item.destination,disposition:routed?'routed':'existing',verification:'content-verified'});const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;if(entry.routed!==undefined)result.routed=(result.routed??0)+1;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
               if(run.appleDouble)await run.appleDouble.noteExisting(item.destination);
-              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal,bytes=>{run.hashedBytes+=bytes;progress(position,path.basename(entry.source));});if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity,true);result.copied++;i++;}
+              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal,bytes=>{run.hashedBytes+=bytes;progress(position,path.basename(entry.source));});if(bound!==temporary.verifiedStat)run.publishCopy=true;
+                // Without verification the stage was never read back: nothing may cache these bytes as known.
+                const verification=options.verify!==false?'content-verified':'stream-only';
+                if(bound&&verification==='content-verified')published.push({file:item.destination,sha256:entry.digest!,stat:bound});
+                outcomes.push({entry,destination:item.destination,disposition:'published',verification,...(bound&&verification==='content-verified'?{bound}:{})});
+                if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}result.copied++;i++;}
               catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);
           try { await decide(exact??familyFolders(members)); }
           catch(error) { if(error!==WIDEN) throw error; await decide(familyFolders(members)); }
           run.completed+=family.length;
-        }catch(error){if(isAbort(error))throw error;run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);log('normal','exec','file-failed',{source:family[0]!.source,files:family.length,error});}
+        }catch(error){if(isAbort(error))stopped=error;else{run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);log('normal','exec','file-failed',{source:family[0]!.source,files:family.length,error});}}
+        const identities=new Map<string,string>();
         await exclusive(async()=>{
           for(const temporary of staged.values())await cleanStage(temporary,transfer.root,'lazy',(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
-          for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
+          for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs){index!.remember(item.file,item.sha256,now);if(provable(now))identities.set(item.file,statKey(now));}}
+          for(const item of outcomes)if(item.disposition!=='published'){const known=await vouched(index!,item.destination,item.entry.digest!);if(known)identities.set(item.destination,known);}
           // After the last write, timestamps, sync and the staged copy's removal: the "._" beside each file just published, while it is still that file.
           if(run.appleDouble)for(const item of placed)await run.appleDouble.besideFile(item.file,transfer.root,now=>samePlaced(now,item.stat));
         },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file),...placed.map(item=>item.file)]);
+        for(const item of outcomes)run.emit(outcomeOf(run,item.entry,item.destination,item.entry.digest!,item.disposition,item.verification,identities.get(item.destination)));
         if(!batch.failed)run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
         staged.clear();
+        if(stopped)throw stopped;
         progress(position,path.basename(family[family.length-1]!.source));
       });
       report(run);

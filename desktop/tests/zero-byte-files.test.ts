@@ -12,7 +12,7 @@ import type { Metadata } from '../shared';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Canon R6',date:'2022-05-06T12:00:00Z',fields:{}});
 
 async function exfat(t:test.TestContext):Promise<string|undefined> {

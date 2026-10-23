@@ -13,7 +13,7 @@ import {journalFolderFor,journalFileFor,organizeAs} from './fixtures/records';
 // journal records each one moving from that exact path, with the same inode, size and SHA-256.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
 const names=['C0016.MOV','C0017.MOV','A.JPG','B.JPG','D.JPG'];
 
@@ -159,7 +159,7 @@ for(const [strategy,release] of [['rename',false],['copy',true]] as const)test(`
  const listed=await job(photos,A);
  assert.equal(listed?.error,undefined);assert.equal(listed?.status,'pending');assert.equal(listed?.missing,1);assert.equal(listed?.completed,names.length-1);
  // It never blocks a new organization either.
- const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true,sourceFolders:['photobackup']},metadata)).plans[0]!;
+ const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true as const,sourceFolders:['photobackup']},metadata)).plans[0]!;
  assert.deepEqual((await core.executeReorganization(next,undefined,undefined)).errors,[]);
 });
 

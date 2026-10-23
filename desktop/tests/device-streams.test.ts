@@ -72,7 +72,7 @@ test('a device is classified once and every stream on it shares the answer',asyn
  assert.equal(asked,1);
 });
 
-const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}};
 const noMetadata=async()=>({fields:{}});
 
 test('planning compares a library already at the destination several files at once',async t=>{

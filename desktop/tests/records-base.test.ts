@@ -13,7 +13,7 @@ import type {Metadata} from '../shared';
 // library beneath it shares one "Photo Importer Data" there, and nothing of the app is written in the libraries.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
-const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
+const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 const camera='2026/202610/Sony A7';
 const stopAfterFirstMove=()=>{const controller=new AbortController();return {signal:controller.signal,progress:(value:{step?:string;completed:number})=>{if(value.step==='moving'&&value.completed>=1)controller.abort();}};};
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);

@@ -16,7 +16,7 @@ import type {Metadata} from '../shared';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
+const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=(date:string)=>async():Promise<Metadata>=>({camera:'Nikon Z f',date,fields:{}});
 const SECOND=1_000_000_000n;
 type Stat=import('node:fs').BigIntStats;
