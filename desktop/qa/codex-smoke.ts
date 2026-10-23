@@ -62,6 +62,9 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
 
    assert.equal(await js<string>("document.querySelector('.import-dashboard [data-metric=sources]').textContent"),'6');
    assert.equal(await js<string>("document.querySelector('.import-dashboard [data-metric=destinations]').textContent"),'1 / 1');
+   // Fixture folders live on the internal disk, so utilization of that disk appears for the destination and in the UI.
+   if(process.platform==='darwin'){await wait(async()=>{const s=await state();const first=s.preferences.destinations[0];const entry=first?s.driveActivity?.[first]:undefined;return !!entry&&entry.utilization>=0&&entry.utilization<=100&&Array.isArray(entry.history);},'drive activity for the destination');
+    await wait(()=>js<boolean>("document.querySelector('[data-testid=sidebar-activity]')!==null&&document.querySelector('[data-testid=drive-activity]')!==null&&document.querySelector('.import-dashboard [data-metric=drive-activity]')!==null"),'drive activity meters');}
    assert.equal(await js<boolean>("Array.from(document.querySelectorAll('h2')).some(h=>h.textContent.includes('Ready for your next shoot'))"),false);
    await js("document.querySelector('[data-testid=show-errors]').click()");await wait(()=>js<boolean>("document.querySelector('.activity-dialog')?.open===true"),'errors panel');await shot('all-errors');await js("document.querySelector('[data-testid=activity-close]').click()");await wait(()=>js<boolean>("document.querySelector('.activity-dialog')===null"),'animated activity close');
   });

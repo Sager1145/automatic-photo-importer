@@ -1329,3 +1329,21 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .progress-display>.progress-file{display:block;width:100%;max-width:100%;min-width:0;height:1.3em;line-height:1.3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .progress-count,.progress-speed,.progress-elapsed,.progress-eta{font-variant-numeric:tabular-nums}
 .progress-percent{min-width:3.6ch;text-align:right;font-variant-numeric:tabular-nums}
+
+/* Drive activity: how busy a drive is (utilization), drawn apart from the capacity strip */
+.drive-activity{display:grid;gap:.25rem;min-width:0;margin-top:.5rem;font-size:var(--text-footnote)}
+.drive-activity-head{display:flex;justify-content:space-between;gap:.75rem;font-weight:600;white-space:nowrap}
+.drive-activity-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.drive-activity-head>strong{flex:none;font-variant-numeric:tabular-nums;color:var(--accent)}
+.drive-activity-graph{display:flex;align-items:center;gap:.5rem;min-width:0}
+.drive-activity-bar{flex:0 0 28%;min-width:2rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
+.drive-activity-bar>span{display:block;height:100%;background:var(--accent);transition:width var(--slow) var(--ease-out)}
+.drive-sparkline{flex:1 1 0;min-width:0;height:1.1rem}
+.drive-sparkline-line{fill:none;stroke:var(--accent);stroke-width:1.2;vector-effect:non-scaling-stroke}
+.drive-sparkline-area{fill:var(--accent);opacity:.15}
+.drive-activity-rates{display:flex;justify-content:space-between;gap:.5rem;color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.drive-activity-rates>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.sidebar-activity{display:flex;align-items:center;gap:.5rem;margin:.1rem .75rem 0 2.35rem;min-width:0}
+.sidebar-activity>small{flex:none;font-size:var(--text-caption);color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sidebar-activity-bar{flex:1;min-width:1.5rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
+.sidebar-activity-bar>span{display:block;height:100%;background:var(--accent);transform-origin:left;transition:transform var(--slow) var(--ease-out)}
