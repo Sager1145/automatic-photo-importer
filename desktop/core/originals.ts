@@ -7,9 +7,11 @@ const VERIFY_CONCURRENCY=4;
 
 /** A source file an import copied and verified: its checksum and every place the import put it. */
 export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];}
-export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error';
+/** stopped: Stop was pressed before this file was removed. */
+export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error'|'stopped';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
-export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];}
+/** stopped: the run was stopped; files it had already removed are still listed in `deleted`. */
+export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];stopped?:boolean;}
 
 async function regular(file:string) {
   const stat=await fs.lstat(file,{bigint:true});
@@ -42,8 +44,9 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
   let completed=0,bytesDone=0;
   const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length),bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
+  // A stop never throws away the outcome of files already removed: each file still reports deleted or kept.
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
-    checkAbort(options.signal);
+    if(options.signal?.aborted) return {kept:'stopped'};
     options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
     try {
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
@@ -65,7 +68,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       await fs.unlink(file.source);
       return {deleted:true};
     } catch(error) {
-      if(options.signal?.aborted) throw error;
+      if(options.signal?.aborted) return {kept:'stopped'};
       return {kept:'error',error:`${file.source}: ${error instanceof Error?error.message:String(error)}`};
     } finally {
       // Counted when this file's checks end, so the byte progress never runs ahead of the reads.
@@ -79,5 +82,6 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
   });
   options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
+  if(options.signal?.aborted) result.stopped=true;
   return result;
 }
