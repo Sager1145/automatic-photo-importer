@@ -767,7 +767,7 @@ const samePlaced=(a:import('node:fs').BigIntStats,b:import('node:fs').BigIntStat
 export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
-async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal):Promise<import('node:fs').BigIntStats|undefined> {
+async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<import('node:fs').BigIntStats|undefined> {
   await rootUnchanged(transfer.root,transfer.rootIdentity); await makeParent(destination,transfer.root,transfer.rootIdentity); await contained(staged.file,transfer.root);
   const verified=staged.verifiedStat;
   if(!verified || !sameStat(verified,await fs.lstat(staged.file,{bigint:true}))) throw new Error(`Staged file changed: ${entry.source}`);
@@ -784,7 +784,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
       // only then fall back to reading the published bytes.
       if(linked.dev===verified.dev&&linked.ino===verified.ino&&linked.size===verified.size&&linked.mtimeNs===verified.mtimeNs) bound=verified;
       else {
-        if(await digest(destination,signal)!==entry.digest)throw new Error(`Destination verification failed: ${destination}`);
+        if(await digest(destination,signal,onBytes)!==entry.digest)throw new Error(`Destination verification failed: ${destination}`);
         const after=await fs.lstat(destination,{bigint:true});if(sameStat(linked,after))bound=after;
       }
     }
@@ -826,7 +826,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   if(copy&&options.verify===false) bound=undefined;
   else if(copy) {
     const before=await fs.lstat(destination,{bigint:true});
-    if(await digest(destination)!==entry.digest) throw new Error(`Destination verification failed: ${destination}`);
+    if(await digest(destination,undefined,onBytes)!==entry.digest) throw new Error(`Destination verification failed: ${destination}`);
     const after=await fs.lstat(destination,{bigint:true});bound=sameStat(before,after)?after:undefined;
   }
   await syncParents(destination,transfer.root);
@@ -847,19 +847,21 @@ interface Run {
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
   /** Bytes of the files staged for this run, of those published so far, and whether any was published by copying instead of linking. */
   stagedBytes:number;verifiedBytes:number;publishCopy:boolean;
+  /** Bytes hashed while verifying, counted as each chunk is read: the verify speed's input. */
+  hashedBytes:number;
 }
 /** Copy the same reviewed entries to several destinations. Each source file is
  * read once for all of them; checks, publication and errors stay per destination.
  * A destination that cannot start returns an Error in its slot; Stop throws. */
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,
+  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,hashedBytes:0,
     // A drive backup mirrors a drive as it is: nothing in it is removed.
     ...(options.removeAppleDouble&&!transfer.drive?{appleDouble:appleDoubleCleaner()}:{})}));
   for(const run of runs)if(run.appleDouble)run.result.appleDouble=run.appleDouble.report;
   const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...skippedOf(run.transfer),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file,
    // What the time-left estimate counts: copying moves bytes; verifying publishes the staged files (bytes of files already in the backup add files only).
-   work:run.phase==='copying'?{files:run.completed,bytes:run.bytes,totalFiles:run.transfer.entries.length,totalBytes:Math.max(run.totalBytes,run.bytes)}:{files:run.completed,bytes:run.verifiedBytes,totalFiles:run.transfer.entries.length,totalBytes:run.stagedBytes,...(run.publishCopy?{publishCopy:true}:{})}});};
+   work:run.phase==='copying'?{files:run.completed,bytes:run.bytes,totalFiles:run.transfer.entries.length,totalBytes:Math.max(run.totalBytes,run.bytes)}:{files:run.completed,bytes:run.verifiedBytes,totalFiles:run.transfer.entries.length,totalBytes:run.stagedBytes,...(run.publishCopy?{publishCopy:true}:{})},...(run.phase==='verifying'?{hashedBytes:run.hashedBytes}:{})});};
   // A failed group stops counting as done and is reported as failed, once.
   const fail=(run:Run,batch:Run['batches'][number],error:unknown)=>{if(!batch.failed){run.failed+=batch.family.length;for(const entry of batch.family)if(run.counted.delete(entry.id))run.completed--;}batch.failed=true;batch.errors.push(`${path.basename(batch.family[0]!.source)}: ${message(error)}`);};
   // Errors of families handled side by side, in file order.
@@ -916,6 +918,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       // Check all members of a family before publishing it. Publication then checks
       // inode/stat identity, avoiding another full staging hash.
       const check=async({family,staged}:Run['batches'][number])=>{
+        const hashed=(file:string)=>(bytes:number)=>{run.hashedBytes+=bytes;progress(position,path.basename(file));};
         const verifiedSources=new Map<string,import('node:fs').BigIntStats>(),effective=new Map<string,PlanEntry>();
         for(const entry of family){
           await contained(entry.source,transfer.source);
@@ -924,7 +927,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
             if(entry.digest!==undefined&&temporary.streamDigest!==entry.digest)throw sourceChanged(entry);
             const streamed=temporary.streamDigest!;
             const before=await fs.lstat(temporary.file,{bigint:true});
-            if(options.verify!==false&&await digest(temporary.file,signal)!==streamed)throw new Error(`Staged file verification failed: ${entry.source}`);
+            if(options.verify!==false&&await digest(temporary.file,signal,hashed(entry.source))!==streamed)throw new Error(`Staged file verification failed: ${entry.source}`);
             const after=await fs.lstat(temporary.file,{bigint:true});if(!sameStat(before,after))throw new Error(`Staged file changed: ${entry.source}`);
             temporary.verifiedStat=after;effective.set(entry.id,{...entry,digest:streamed});
           } else {
@@ -934,7 +937,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
             effective.set(entry.id,entry);
           }
           const before=await fs.lstat(entry.source,{bigint:true});
-          if(temporary?!sameStat(temporary.sourceStat!,before):!(entry.sourceIdentity!==undefined&&statKey(before)===entry.sourceIdentity)&&await digest(entry.source,signal)!==entry.digest)throw sourceChanged(entry);
+          if(temporary?!sameStat(temporary.sourceStat!,before):!(entry.sourceIdentity!==undefined&&statKey(before)===entry.sourceIdentity)&&await digest(entry.source,signal,hashed(entry.source))!==entry.digest)throw sourceChanged(entry);
           const after=await fs.lstat(entry.source,{bigint:true});if(!sameStat(before,after))throw sourceChanged(entry);
           verifiedSources.set(entry.id,after);
         }
@@ -969,7 +972,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
               if(run.appleDouble)await run.appleDouble.noteExisting(item.destination);
-              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
+              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal,bytes=>{run.hashedBytes+=bytes;progress(position,path.basename(entry.source));});if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
               catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);

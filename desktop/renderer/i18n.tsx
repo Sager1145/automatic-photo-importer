@@ -226,6 +226,7 @@ Estimated share of time the drive spent reading or writing, not its capacity|硬
 Read|读取|讀取|読み込み
 Write|写入|寫入|書き込み
 Activity ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}
+Whole disk, all apps; may include metadata and receipts|整个硬盘，包含所有应用；可能含元数据和回执|整個硬碟，包含所有應用程式；可能含中繼資料和回條|ディスク全体・すべてのアプリの合計です。メタデータやレシートを含む場合があります
 Read {read} · Write {write}|读取 {read} · 写入 {write}|讀取 {read} · 寫入 {write}|読み込み {read} · 書き込み {write}
 Destinations|目标|目的地|保存先
 Copy policy|复制策略|複製策略|コピー方式
@@ -731,6 +732,7 @@ Staging files from interrupted imports, organization scratch copies and camera d
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
 Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
 {count} files/s|{count} 个文件/秒|{count} 個檔案/秒|{count} ファイル/秒
+Verify read|校验读取|校驗讀取|検証の読み込み
 {time} left|剩余{time}|剩餘{time}|残り{time}
 {count} already in the backup|备份中已有 {count} 个|備份中已有 {count} 個|バックアップに {count} 件が既にあります
 {time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）

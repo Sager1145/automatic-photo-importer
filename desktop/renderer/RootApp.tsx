@@ -106,7 +106,7 @@ function ProgressFile({ file }: { file?: string }) {
  * elapsed and time left, and the file it is on. Indeterminate only before the first event (or while no estimate exists),
  * and never full before the work has ended. */
 export interface ProgressDisplayProps {
-  label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: Pick<Progress, 'speed' | 'fileRate'>;
+  label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: SpeedInput;
   startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
   heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean; step?: StepKind;
   /** Nothing is planned: an empty bar and no percentage. */
@@ -219,7 +219,7 @@ export function DriveActivityMeter({ activity }: { activity?: DriveActivity }) {
   return <div className="drive-activity" data-testid="drive-activity" title={t("Estimated share of time the drive spent reading or writing, not its capacity")}>
     <div className="drive-activity-head"><span>{t("Drive activity")}</span><strong data-testid="drive-activity-percent">{percent}%</strong></div>
     <div className="drive-activity-graph"><span className="drive-activity-bar" role="meter" aria-label={t("Drive activity")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></span><Sparkline values={activity.history} /></div>
-    <div className="drive-activity-rates"><span>{t("Read")} <Speed value={activity.readBps} /></span><span>{t("Write")} <Speed value={activity.writeBps} /></span></div>
+    <div className="drive-activity-rates" title={t("Whole disk, all apps; may include metadata and receipts")}><span>{t("Read")} <Speed value={activity.readBps} /></span><span>{t("Write")} <Speed value={activity.writeBps} /></span></div>
   </div>;
 }
 /** Sidebar drive row: a thin utilization bar with its percent, next to the capacity line. */
@@ -713,6 +713,17 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
   </dialog>;
 }
 
+/** The combined speed of running jobs, for the overview's Transfer speed and its Total line alike. One rule: jobs moving data (copying,
+ * verifying, moving, removing) count with their MB/s and files/s; planning reads the source and moves nothing, so it adds no MB/s.
+ * While every job is still planning, only the files/s of its metadata checking is shown. Verification is labelled as read. */
+export function combinedSpeed(jobs: Job[]): Required<Pick<SpeedInput, 'speed' | 'fileRate'>> & Pick<SpeedInput, 'phase' | 'step'> {
+  const running = jobs.filter(job => job.progress);
+  const moving = running.filter(job => job.progress!.phase !== 'planning');
+  const counted = moving.length ? moving : running.filter(job => job.progress!.step === 'checking');
+  const sum = (pick: (progress: Progress) => number | undefined) => counted.reduce((total, job) => total + (pick(job.progress!) ?? 0), 0);
+  const verifying = moving.length > 0 && moving.every(job => job.progress!.phase === 'verifying' && !job.progress!.step);
+  return { speed: moving.length ? sum(progress => progress.speed) : 0, fileRate: sum(progress => progress.fileRate), ...(verifying ? { phase: 'verifying' as const } : {}) };
+}
 // Import desk statistics. Source jobs show their own progress on their cards, so only library organization jobs are listed here.
 export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) {
   const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
@@ -721,10 +732,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // Bytes count only once copying starts: planning measures the source, not the transfer.
   const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning' && !job.progress.renames);
   const transferred = transferring.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = transferring.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
-  // Transfers only: planning reads the source, it moves nothing.
-  const speed = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.speed ?? 0),0);
-  // Steps that only rename or check files report files per second instead of bytes.
-  const fileRate = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.fileRate ?? 0),0);
+  // One rule for the Transfer speed metric and the Total line.
+  const { speed, fileRate } = combinedSpeed(active);
   const startedAt = active.map(job => job.startedAt).filter(Boolean).sort()[0];
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
@@ -755,13 +764,13 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
         <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+doneFiles(job),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
         <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : checkingDestinations ? t("Checking destinations…") : t("Choose a backup destination")}</small></div>
-        {driveTotal && <div><dt><Icon icon={Activity} size={16}/>{t("Drive activity")}</dt><dd data-metric="drive-activity">{Math.round(driveTotal.utilization)}%</dd><small className="metric-optional">{t("Read {read} · Write {write}", { read: formatSpeed(driveTotal.readBps, language), write: formatSpeed(driveTotal.writeBps, language) })}</small></div>}
+        {driveTotal && <div><dt><Icon icon={Activity} size={16}/>{t("Drive activity")}</dt><dd data-metric="drive-activity">{Math.round(driveTotal.utilization)}%</dd><small className="metric-optional" title={t("Whole disk, all apps; may include metadata and receipts")}>{t("Read {read} · Write {write}", { read: formatSpeed(driveTotal.readBps, language), write: formatSpeed(driveTotal.writeBps, language) })}</small></div>}
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
         empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && totalFraction(job, verify) === 1)}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
-        speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
+        speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
         step={stepKind(lead?.progress)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
@@ -1307,11 +1316,13 @@ function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
   return <>{t("{count} files/s", { count: numberIn(value, language, { maximumSignificantDigits: 3 }) })}</>;
 }
-/** Bytes per second, plus files per second where a step reports both (metadata checking). */
-function ProgressSpeed({ progress }: { progress: Pick<Progress, 'speed' | 'fileRate'> }) {
+/** What a speed display needs: the rates, and the step when it is verification (its bytes are bytes read, so it is labelled). */
+export type SpeedInput = Pick<Progress, 'speed' | 'fileRate'> & Partial<Pick<Progress, 'phase' | 'step'>>;
+/** Bytes per second with files per second beside it where the step reports both; files per second alone before bytes have a measure. */
+function ProgressSpeed({ progress }: { progress: SpeedInput }) {
   const { t, language } = useTranslation();
   const rate = progress.fileRate && progress.fileRate > 0 ? t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
-  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed"><Speed value={progress.speed} />{rate && <> · <span data-testid="file-rate">{rate}</span></>}</span>;
+  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed">{progress.phase === 'verifying' && !progress.step && <>{t("Verify read")} </>}<Speed value={progress.speed} />{rate && <> · <span data-testid="file-rate">{rate}</span></>}</span>;
   return rate ? <span className="progress-speed" data-testid="speed">{rate}</span> : null;
 }
 /** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */

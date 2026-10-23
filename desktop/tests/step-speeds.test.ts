@@ -38,7 +38,7 @@ function run(item:Case){
 
 for(const item of cases)test(`${item.name} reports a live ${item.unit==='bytes'?'byte':'file'} speed`,()=>{
  const {job}=run(item),progress=job.progress!;
- if(item.unit==='bytes'){assert.ok(progress.speed>0,`speed ${progress.speed}`);assert.ok(!progress.fileRate);}
+ if(item.unit==='bytes'){assert.ok(progress.speed>0,`speed ${progress.speed}`);assert.ok(progress.fileRate!>0,`files/s beside the bytes ${progress.fileRate}`);}
  else{assert.equal(progress.speed,0);assert.ok(progress.fileRate!>0,`fileRate ${progress.fileRate}`);}
 });
 
