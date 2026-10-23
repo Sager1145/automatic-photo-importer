@@ -37,7 +37,7 @@ import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {orphanedJournals} from './core/recovery';
 import {registerDestinations} from './core/app-store';
-import {acknowledgeOldRecords,findOldRecords} from './core/old-records';
+import {acknowledgeOldRecords,findOldRecords,onOldRecordsFound} from './core/old-records';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
@@ -555,6 +555,9 @@ function scheduleOldRecordsCheck(force=false){
  })().catch(error=>{log('normal','records','old-records-check-failed',{error:toMessage(error)});}).finally(()=>{if(oldRecordsTask===task)oldRecordsTask=undefined;});
  oldRecordsTask=task;
 }
+/** A receipt met while listing, or a library refused for old records, after the drive was already checked: look again (once a second at most). */
+let oldRecordsAgain:NodeJS.Timeout|undefined;
+onOldRecordsFound(()=>{if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
 /** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the drive's reviewed list. */
 async function acknowledgeDrive(drive:string){
  const found=(await oldRecordsDrives()).find(item=>item.drive===drive);if(!found)return;

@@ -28,7 +28,8 @@ import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
 import { log, logDeletion } from '../logger';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
-export { findOldRecords, acknowledgeOldRecords, refuseOldRecords, driveName } from './old-records';
+import { refuseOldRecords } from './old-records';
+export { findOldRecords, acknowledgeOldRecords, refuseOldRecords, driveName, onOldRecordsFound } from './old-records';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
@@ -1492,6 +1493,8 @@ export async function executeReorganization(transfer:TransferPlan,signal?:AbortS
       entries.push({captureTimeMs:entry.captureTimeMs,source:entry.source,destination:allocated.destination,digest:entry.digest!,size:entry.size,stat:original.stat,
         move:allocated.destination===original.destination && pathKey(entry.source)!==pathKey(allocated.destination)});
     }
+    // Refused before anything is dropped: a refused organize keeps the cached checksums.
+    await refuseOldRecords(transfer.root,...(scope.libraries??[]));
     // Organization renames files; drop the cached checksums for this library.
     index.clear();
     return beginOrganization(transfer,entries,signal,onProgress,options.strategy,options.keepSourceFolders,scope.libraries,options.releaseDuplicates,options.removeAppleDouble?appleDoubleCleaner():undefined);
