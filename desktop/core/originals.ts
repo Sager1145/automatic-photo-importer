@@ -185,7 +185,7 @@ async function removeEmptiedFolders(root:string,deleted:string[],options:{signal
       logDeletion('originals',folder,'folder left with no files after Delete originals','rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
       await syncDirectory(path.dirname(folder));
       removed++;
-    } catch(error) { if(options.signal?.aborted) throw error; log('normal','originals','folder-kept',{path:folder,code:code(error)??'error',error}); }
+    } catch(error) { log('normal','originals','folder-kept',{path:folder,code:code(error)??'error',error}); if(options.signal?.aborted) break; }
   }
   return removed;
 }

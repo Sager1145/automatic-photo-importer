@@ -89,7 +89,7 @@ export const importChecks=(ctx:Context):Check[]=>[
   const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:'123',shutterNote:'Fixture shutter note',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
   let selected={path:path.join(ctx.root,'source-1','photo.png'),metadata:photo};
   // Through the QA hook when there is one, so the real handler stays for later checks; else replaced for the rest of the run.
-  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:inspect');ipcMain.handle('importer:inspect',()=>selected.metadata);}
+  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:exif');ipcMain.handle('importer:exif',()=>selected.metadata);}
   const open=async(name:string)=>{await h.js(`Array.from(document.querySelectorAll('.review-source-button')).find(button=>button.textContent.includes(${JSON.stringify(name)})).click()`);await h.until('metadata dialog',"document.querySelector('.metadata-dialog')?.open===true");};
   const close=async()=>{await h.click('[data-testid=metadata-close]');await h.until('animated metadata close',"document.querySelector('.metadata-dialog')===null");};
   try{

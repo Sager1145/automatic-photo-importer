@@ -14,7 +14,7 @@ export const recoveryChecks=():Check[]=>[
   if(!recovery)throw new SkipCheck('no finished organization in this run');
   await h.nav('Organization');await h.until('recovery list on the Organization page',"document.querySelector('.organization-recovery')");
   const before=new Set((await h.state()).jobs.map(job=>job.id));
-  const resume=JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root});
+  const resume=JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root});
   await h.js(`Promise.all([window.importer.action(${resume}),window.importer.action(${resume})])`);
   await h.waitFor('recheck finish',async()=>!(await h.state()).jobs.some(job=>running.includes(job.phase)),{timeoutMs:60000});
   const created=(await h.state()).jobs.filter(job=>!before.has(job.id));
