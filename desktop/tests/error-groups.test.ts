@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ErrorLog,gatherErrors,severityOf,codeOf} from '../error-log';
+import {ErrorLog,gatherErrors,severityOf,codeOf,createErrorLogCache,clearErrors} from '../error-log';
 import {buildRows,rowCounts} from '../error-groups';
 import {createIssueSink,errorTotal,issuePaths,recordIssue,reportSummary,throttled} from '../job-issues';
 import {createStateChannel} from '../state-channel';
@@ -95,4 +95,19 @@ test('Delete originals shows for a complete job, and for an error job without re
  assert.notEqual(render(leftovers),'','only leftovers: still offered');
  const failed=newJob({source:folder,verifiedOriginals:10,phase:'error',errors:[text('EIO')]});
  assert.equal(render(failed),'','a real failure hides it');
+});
+
+test('progress emits stay at 4 a second while copying, and the error log is rebuilt only when errors change',()=>{
+ let clock=0,emitted=0;
+ const copying=newJob({phase:'copying'});
+ const emit=throttled(()=>{emitted++;},()=>copying.phase==='copying'?250:100,()=>clock);
+ for(clock=0;clock<10_000;clock+=5)emit();
+ assert.ok(emitted<=40,`${emitted} emits in 10 s`);assert.ok(emitted>=35);
+ const log=new ErrorLog(),cache=createErrorLogCache(log),value=state([copying]);
+ for(let index=0;index<50;index++)cache.refresh(value);
+ assert.equal(cache.builds,1,'nothing changed: built once');
+ recordIssue(copying,leftover(1));cache.refresh(value);cache.refresh(value);
+ assert.equal(cache.builds,2,'a new issue rebuilds once');
+ clearErrors(log,value);cache.refresh(value);
+ assert.equal(cache.builds,3,'a clear rebuilds once');
 });

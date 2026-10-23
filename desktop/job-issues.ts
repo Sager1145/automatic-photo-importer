@@ -43,7 +43,7 @@ export function reportSummary(errors:string[],warnings:ExecutionIssue[],failedCo
  return {passed:errors.length===0&&failedCount===0,failedCount,warningCount:warnings.length,warningCodes};
 }
 /** Runs `emit` at most once per interval (leading edge). Error bursts ask for emits through this, never directly. */
-export function throttled(emit:()=>void,interval=100,now:()=>number=Date.now){
+export function throttled(emit:()=>void,interval:number|(()=>number)=100,now:()=>number=Date.now){
  let last=-Infinity;
- return ()=>{const time=now();if(time-last>interval){last=time;emit();}};
+ return ()=>{const time=now();if(time-last>(typeof interval==='function'?interval():interval)){last=time;emit();}};
 }

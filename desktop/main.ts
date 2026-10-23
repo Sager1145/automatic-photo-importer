@@ -37,7 +37,7 @@ import {terminateHasher} from './core/hasher';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
-import {ErrorLog,clearErrorIds,clearErrors,gatherErrors} from './error-log';
+import {ErrorLog,clearErrorIds,clearErrors,createErrorLogCache} from './error-log';
 import {errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
 import {EtaTracker,stampEstimates} from './eta';
 import {normalizePreferences} from './preferences';
@@ -144,13 +144,15 @@ function stampJobs(){
 let sourceOrder:string[]=[];
 // When each error appeared and which ones the user cleared; clearing never touches the jobs.
 const errorLog=new ErrorLog();
+const errorCache=createErrorLogCache(errorLog);
 const etaTracker=new EtaTracker();
 // A stalled step sends no progress; republish so its time left can grow instead of freezing.
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
-const emit=()=>{state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
-const progressEmit=throttled(()=>emit());
+const emit=()=>{state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+// Progress republishes at most 4 times a second while a job copies or verifies (the renderer is busy then), 10 otherwise. Phase changes and the final emit call emit() directly and are never dropped.
+const progressEmit=throttled(()=>emit(),()=>state.jobs.some(job=>job.phase==='copying'||job.phase==='verifying')?250:100);
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
 function save():Promise<void>{const data=JSON.stringify({preferences:state.preferences,history:state.history,organizationLocations,organizationFolders:state.organizationFolders},null,2);const write=saving.then(async()=>{await fs.mkdir(app.getPath('userData'),{recursive:true});const temp=store()+'.'+randomUUID()+'.new';const file=await fs.open(temp,'wx',0o600);try{await file.writeFile(data);await file.sync();}finally{await file.close();}await fs.rename(temp,store());await syncDirectory(app.getPath('userData'));});saving=write.catch(()=>{});return write;}
@@ -523,7 +525,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   job.phase='copying';
   const verified:Record<string,{sha256:string;identity:string}>={};
-  const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings,notes}=await executeDestinations(plans,{
+  const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes}=await executeDestinations(plans,{
    signal,reorganize,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},

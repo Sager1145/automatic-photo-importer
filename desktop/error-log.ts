@@ -82,7 +82,9 @@ export class ErrorLog{
   for(const id of live)if(!this.at.has(id))this.at.set(id,now.toISOString());
   return {at:Object.fromEntries([...this.at].filter(([id])=>!this.cleared.has(id))),cleared:[...this.cleared]};
  }
- clear(ids:string[]){for(const id of ids)this.cleared.add(id);}
+ /** Bumps whenever something is cleared, so a cache keyed on the state also notices clears. */
+ revision=0;
+ clear(ids:string[]){for(const id of ids)this.cleared.add(id);this.revision++;}
 }
 
 /** Clears the listed errors in one go (a whole group), never touching the other severity when one is given. */
@@ -97,4 +99,27 @@ export function clearErrors(log:ErrorLog,state:AppState,id?:string,severity?:Sev
  const errors=gatherErrors(state).filter(error=>!severity||error.severity===severity),app=errors.find(error=>error.kind==='app');
  log.clear(id?errors.filter(error=>error.id===id).map(error=>error.id):errors.map(error=>error.id));
  if(app&&(!id||id===app.id))state.error=undefined;
+}
+
+/** A cheap fingerprint of everything gatherErrors reads: counts and short strings, never the paths. Equal fingerprints mean equal errors. */
+export function errorSignature(state:AppState):string{
+ const parts:(string|number)[]=[state.error?JSON.stringify(state.error):''];
+ for(const job of state.jobs){
+  let grouped=0;for(const group of job.groups??[])grouped+=group.count;
+  parts.push(job.id,job.errors.length,grouped,job.inventory?.issues?.length??0,job.phase==='error'&&!job.errors.length?JSON.stringify(job.detail??''):'');
+ }
+ for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))parts.push(id,info.issues?.length??0,info.error??'');
+ for(const recovery of state.organizationRecovery??[])parts.push(recovery.id,recovery.error??'');
+ for(const destination of state.destinationStatus??[])parts.push(destination.path,destination.detail??'');
+ for(const source of state.sources)parts.push(source.id,state.sourceInventories?.[source.id]?.issues?.length??0);
+ return parts.join('\u0001');
+}
+/** Rebuilds the error log only when the errors (or a clear) changed since the last emit. */
+export function createErrorLogCache(log:ErrorLog){
+ let signature:string|undefined,value:ErrorLogState|undefined;
+ return {builds:0,refresh(this:{builds:number},state:AppState,now=new Date()):ErrorLogState{
+  const next=errorSignature(state)+'\u0002'+log.revision;
+  if(value&&next===signature)return value;
+  signature=next;this.builds++;value=log.update(gatherErrors(state),now);return value;
+ }};
 }
