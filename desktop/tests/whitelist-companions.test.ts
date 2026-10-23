@@ -188,6 +188,8 @@ test('pattern-named companions numbered by the same-name rule pair again with th
  const insta=await put('X/VID_20240101_101010_00_001 (1).insv'),lrv=await put('X/LRV_20240101_101010_01_001 (1).lrv');
  // A number on only one side is a different file: it stays unpaired.
  await put('U/IMG_9999.HEIC');const lone=await put('U/IMG_O9999 (1).AAE');
+ await put('W/C0007 (1).MP4');const other=await put('W/C0007 (2)M01.XML'),otherBim=await put('W/C0007 (2)R01.BIM');
+ await put('H/GX020002 (1).MP4');const otherProxy=await put('H/GL020002 (2).LRV');
  const scan=await inventory(source,{});
  const of=(file:string)=>scan.files.find(item=>item.path===file)?.companionOf;
  assert.equal(of(xml),clip);assert.equal(of(bim),clip);
@@ -195,4 +197,5 @@ test('pattern-named companions numbered by the same-name rule pair again with th
  assert.equal(of(proxy),gopro);
  assert.equal(of(lrv),insta);
  assert.equal(of(lone),undefined);
+ assert.equal(of(other),undefined);assert.equal(of(otherBim),undefined);assert.equal(of(otherProxy),undefined);
 });

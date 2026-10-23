@@ -142,9 +142,10 @@ function target(entry:PlanEntry,attempt:number,family:PlanEntry[],digests?:Map<s
 const NAME_BYTES=255;
 const originalName=(entry:PlanEntry)=>path.basename(entry.allocation?.destination??entry.destination);
 /** ` (n)` after the stem the family shares (its shortest name without the extension), or after a
- * member's own stem when it is not named after it: DSC_0001 (1).NEF.xmp, C0004 (1)M01.XML. Every
- * member pairs again when the library is read later: inventory's name patterns accept the ` (n)`.
- * Every member's stem is shortened alike when a name would pass 255 bytes. */
+ * member's own stem when it is not named after it: DSC_0001 (1).NEF.xmp, C0004 (1)M01.XML. The
+ * members pair again when the library is read later (inventory's name patterns accept the ` (n)`),
+ * except pattern-named ones whose stem had to be shortened: every member's stem is shortened alike
+ * when a name would pass 255 bytes, and a shortened stem no longer fits those camera patterns. */
 function numbered(entry:PlanEntry,n:number,family:PlanEntry[]):string {
   const suffix=` (${n})`,stemOf=(name:string)=>name.slice(0,name.length-path.extname(name).length);
   const shared=family.map(member=>stemOf(originalName(member))).sort((a,b)=>a.length-b.length||(a<b?-1:a>b?1:0))[0]!;
