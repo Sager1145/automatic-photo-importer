@@ -237,3 +237,23 @@ test('on exFAT an organization reads the original and the copy again before sett
  assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
  assert.deepEqual(reads.files(),{source:3,stage:1,destination:3});
 });
+
+// Without hard links the copy is streamed out of the stage into a new file, which is read back once. A link that is
+// not exactly the stage plus one name (another name appeared) is read back too, and again before stashing: removing
+// the stage's name moved the shared inode's change time.
+for(const [name,expected,link] of [
+ ['links are unsupported',1,async()=>{throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});}],
+ ['another name appears beside the link',2,async(from:string,to:string,original:(a:string,b:string)=>Promise<void>)=>{await original(from,to);await original(to,`${to}.other`);}],
+] as const)test(`an organization copy reads its published copy back when ${name}`,async t=>{
+ const root=await folder(t,'verify-once-fallback-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
+ await photo(original,data);
+ const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
+ const destination=transfer!.entries[0]!.destination,real=fs.link.bind(fs);
+ t.mock.method(fs,'link',async(from:string,to:string)=>String(from).endsWith('.partial')?(link as (a:string,b:string,c:typeof real)=>Promise<void>)(String(from),String(to),real):real(from,to));syncBuiltinESMExports();
+ const reads=countReads(t,file=>file===destination?'destination':undefined);
+ const result=await core.executeReorganization(transfer!);
+ reads.stop();
+ assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
+ assert.deepEqual(reads.files(),{destination:expected});
+ assert.deepEqual(await fs.readFile(destination),data);
+});

@@ -423,10 +423,11 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
  let linked=false;
  try{await fs.link(staged,entry.destination);linked=true;}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
- // A hard link is the verified stage itself (the link only moves its change time); a streamed copy is read back.
+ // A hard link is the verified stage itself (the link only moves its change time and adds this one name); a streamed
+ // copy, or a link with any other name besides, is read back.
  const published=linked&&stage?await maybeStat(entry.destination):undefined;
- const same=!!published&&!!stage&&published.dev===stage.dev&&published.ino===stage.ino&&published.size===stage.size&&published.mtimeNs===stage.mtimeNs;
- if(!await targetMatches(entry,m,signal,!same))throw new Error('Destination disappeared after publication');
+ const same=!!published&&!!stage&&provable(published)&&published.dev===stage.dev&&published.ino===stage.ino&&published.nlink===stage.nlink+1n&&published.size===stage.size&&published.mtimeNs===stage.mtimeNs;
+ if(!await targetMatches(entry,m,signal,!same,proofs))throw new Error('Destination disappeared after publication');
  // Retained originals are never unlinked; only the stage is.
  await contained(staged,m.root);await fs.unlink(staged);
  // The stage's name is gone; its verified inode, unchanged but for the change time, is this run's proof of the copy.
