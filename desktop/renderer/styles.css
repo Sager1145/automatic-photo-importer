@@ -1302,3 +1302,5 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .duplicate-full-exif h4{font-size:var(--text-caption);font-weight:650;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
 .duplicate-full-exif dl{display:grid;gap:.2rem}
 .duplicate-pager{display:flex;align-items:center;justify-content:center;gap:.75rem}
+.settings-fieldset:disabled .settings-section,.segmented[title]:has(button:disabled){opacity:.5;cursor:not-allowed}
+.settings-fieldset:disabled :disabled,.segmented[title] button:disabled{cursor:not-allowed}
