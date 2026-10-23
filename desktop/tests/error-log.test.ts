@@ -160,3 +160,12 @@ test('an error has the same id in main and, after the wire, in the renderer',asy
  const value=state({jobs:[recorded]});
  assert.deepEqual(gatherErrors(structuredClone(value)).map(error=>error.id),gatherErrors(value).map(error=>error.id));
 });
+
+test('lists rebuilt with the same contents on every emit (sources, destinations) do not rebuild the log',async()=>{
+ const {createErrorLogCache}=await import('../error-log');
+ const log=new ErrorLog(),cache=createErrorLogCache(log),value=state({destinationStatus:[{path:'/Volumes/A006',available:true}]});
+ for(let index=0;index<5;index++){cache.refresh(value);value.sources=[...value.sources];value.destinationStatus=value.destinationStatus!.map(item=>({...item}));}
+ assert.equal(cache.builds,1);
+ value.destinationStatus=[{path:'/Volumes/A006',available:false,detail:'Not mounted'}];cache.refresh(value);assert.equal(cache.builds,2,'a destination problem');
+ value.sources=[{...value.sources[0]!,name:'Renamed'},value.sources[1]!];cache.refresh(value);assert.equal(cache.builds,3,'a source name an error shows');
+});

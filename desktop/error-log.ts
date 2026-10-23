@@ -114,14 +114,17 @@ export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:str
  if(errors.some(error=>error.kind==='app'))state.error=undefined;
 }
 
-/** What the log is built from: the change count of each list that grows in place, and the identity of every value that is only ever replaced whole. */
+/** What the log is built from: the change count of each list that grows in place, the identity of values only ever replaced whole,
+ * and the fields read from lists main rebuilds with the same contents on every emit or poll (sources, destinations, recoveries). */
 function errorInputs(state:AppState,log:ErrorLog):unknown[]{
- const inputs:unknown[]=[log.revision,state.error,state.sources,state.organizationRecovery,state.destinationStatus];
+ const inputs:unknown[]=[log.revision,state.error];
  for(const job of state.jobs){
   inputs.push(job,job.errors,versionOf(job.errors),job.groups,job.groups&&versionOf(job.groups),job.acknowledged,job.inventory,job.phase==='error'&&job.detail);
  }
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))inputs.push(id,info.issues,info.error);
- for(const source of state.sources)inputs.push(state.sourceInventories?.[source.id]);
+ for(const source of state.sources)inputs.push(source.id,source.name,source.path,state.sourceInventories?.[source.id]);
+ for(const recovery of state.organizationRecovery??[])inputs.push(recovery.id,recovery.root,recovery.error);
+ for(const destination of state.destinationStatus??[])inputs.push(destination.path,destination.detail);
  return inputs;
 }
 /** Rebuilds the error log only when the errors (or a clear) changed since the last emit. */
