@@ -1,5 +1,6 @@
 import {MAX_GROUP_ITEMS,type ExecutionIssue,type Job,type JobIssueGroup} from './shared';
 import {codeOf,severityOf} from './error-log';
+import {isAcknowledged} from './acknowledge';
 import type {AppleDoubleReport} from './core/appledouble';
 
 /** Per job: group lookup by `${severity}|${code}` and every path by code. Appending is O(1): no scan, sort or formatting beyond the capped samples. */
@@ -32,9 +33,8 @@ export function createIssueSink(job:Job,schedule:()=>void){
 /** What actually failed: error entries and error groups. Warnings (leftovers, notes) never count, so they never fail a job. */
 export function errorTotal(job:Pick<Job,'errors'|'groups'|'acknowledged'>):number{
  let total=0;
- const skipped=(code:string)=>!!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));
- for(const error of job.errors)if(severityOf(error)==='error'&&!skipped(codeOf(error)))total++;
- for(const group of job.groups??[])if(group.severity==='error'&&!skipped(group.code))total+=group.count;
+ for(const error of job.errors)if(severityOf(error)==='error'&&!isAcknowledged(job,codeOf(error)))total++;
+ for(const group of job.groups??[])if(group.severity==='error'&&!isAcknowledged(job,group.code))total+=group.count;
  return total;
 }
 
