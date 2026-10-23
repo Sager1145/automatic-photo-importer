@@ -55,27 +55,31 @@ class Pool {
     // Without workers (or after one failed) hashing runs here, as it always used to.
     if(!slot) {const hash=createHash('sha256');return {update:async chunk=>{hash.update(chunk);},digest:async()=>hash.digest('hex'),drop:()=>{}};}
     const id=++this.id;let pending=0,made=0,free:ArrayBuffer[]=[],dropped=false,wake:(()=>void)|undefined,finished=false,failure:Error|undefined,reject:((error:Error)=>void)|undefined;
-    const item:Waiting={acked:chunk=>{pending--;if(chunk&&!dropped)free.push(chunk);wake?.();wake=undefined;},fail:error=>{failure=error;wake?.();wake=undefined;reject?.(error);}};slot.waiting.set(id,item);
+    const item:Waiting={acked:chunk=>{pending--;if(chunk&&!dropped){if(made>pendingChunks())made--;else free.push(chunk);}wake?.();wake=undefined;},fail:error=>{failure=error;wake?.();wake=undefined;reject?.(error);}};slot.waiting.set(id,item);
     return {
       update:async chunk=>{
         if(failure) throw failure;
+        if(dropped) throw new Error('Hash dropped');
         // Buffers cycle between here and the worker (transferred both ways), so memory stays at pendingChunks() chunks.
         let buffer:ArrayBuffer|undefined;
         for(;;) {
+          // A smaller cap (a lower memory limit) lets go of the buffers above it.
+          while(free.length&&made>pendingChunks()){free.pop();made--;}
           buffer=free.pop();
           if(buffer&&buffer.byteLength<chunk.byteLength){buffer=undefined;made--;}
           if(!buffer&&made<pendingChunks()){made++;buffer=new ArrayBuffer(chunk.byteLength);}
-          if(buffer||failure) break;
+          if(buffer||failure||dropped) break;
           await new Promise<void>(resolve=>{wake=resolve;});
         }
-        if(failure||!buffer) throw failure??new Error('Hash dropped');
+        if(failure||dropped||!buffer) throw failure??new Error('Hash dropped');
         new Uint8Array(buffer).set(chunk);
         pending++;expect(slot);slot.worker.postMessage({id,chunk:buffer,length:chunk.byteLength},[buffer]);
-        while(pending>=pendingChunks()&&!failure) await new Promise<void>(resolve=>{wake=resolve;});
+        while(pending>=pendingChunks()&&!failure&&!dropped) await new Promise<void>(resolve=>{wake=resolve;});
         if(failure) throw failure;
+        if(dropped) throw new Error('Hash dropped');
       },
       digest:()=>new Promise<string>((resolve,fail)=>{if(failure){fail(failure);return;}finished=true;item.done=resolve;reject=fail;expect(slot);slot.worker.postMessage({id,final:true});}),
-      drop:()=>{dropped=true;free=[];if(!finished){finished=true;slot.waiting.delete(id);slot.worker.postMessage({id,drop:true});}},
+      drop:()=>{dropped=true;free=[];wake?.();wake=undefined;if(!finished){finished=true;slot.waiting.delete(id);slot.worker.postMessage({id,drop:true});}},
     };
   }
 }
