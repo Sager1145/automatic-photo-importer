@@ -874,7 +874,12 @@ async function finishDirect(entry:PlanEntry,destination:string,sha:string,transf
   catch(error) { if(isAbort(error)) throw error; }
   return true;
 }
-const claimedDirect=new Set<string>();
+/** Final names a direct copy in this process is writing now, each with a promise that settles when that copy is done with it. */
+const claimedDirect=new Map<string,{done:Promise<void>;release():void}>();
+/** Another job's direct copy has this name: not a conflict, so the family waits for it outside the lock and decides again. */
+class DirectBusy {constructor(readonly until:Promise<void>){}}
+const claimDirect=(key:string)=>{let release!:()=>void;const done=new Promise<void>(resolve=>{release=resolve;});claimedDirect.set(key,{done,release});};
+const unclaimDirect=(key:string)=>{const claim=claimedDirect.get(key);claimedDirect.delete(key);claim?.release();};
 const NOT_DIRECT=Symbol('not-direct');
 const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=2n**63n;
 interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;}
@@ -916,7 +921,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     const fields:DirectFields={size:entry.size,finalBirth:[...(entry.captureTimeMs!==undefined&&Number.isFinite(entry.captureTimeMs)?[BigInt(Math.round(entry.captureTimeMs))*1_000_000n]:[]),source.birthtimeNs]};
     const prior=await findPartial('publication',publicationEntry,root,recovery,signal);
     if(prior&&!prior.absent) {
-      const output=await openPartial(prior,root);claimedDirect.add(claim);
+      const output=await openPartial(prior,root);claimDirect(claim);
       try {
         const stat=await output.stat({bigint:true});
         let owned=prior;
@@ -929,13 +934,13 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
         }
         return {entry,destination,output,owned,initial:Number(stat.size),synthetic:syntheticIno(owned===prior?prior.stat:stat),fields,claim,closed:false};
       }
-      catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
+      catch(error) { unclaimDirect(claim);await output.close().catch(()=>{});throw error; }
     }
     const creating=prior?.absent?prior:await recordCreation(destination,publicationEntry,transfer,recovery,fields);
     let output;
     try { output=await fs.open(destination,'wx',0o600); }
     catch(error) { await clearPartialRecord(creating,root,recovery).catch(()=>{}); throw error; }
-    claimedDirect.add(claim);
+    claimDirect(claim);
     try {
       const stat=await output.stat({bigint:true});
       if(stat.birthtimeNs<=0n) {
@@ -948,19 +953,22 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       const owned=await recordPartial('publication',destination,stat,publicationEntry,transfer,recovery,fields);
       await clearPartialRecord(creating,root,recovery,'lazy');
       return {entry,destination,output,owned,initial:0,synthetic:syntheticIno(stat),fields,claim,closed:false};
-    } catch(error) { claimedDirect.delete(claim);await output.close().catch(()=>{});throw error; }
+    } catch(error) { unclaimDirect(claim);await output.close().catch(()=>{});throw error; }
   };
   const exact=await familyPaths(family);
+  const busy=(names:string[])=>{for(const name of names){const claim=claimedDirect.get(pathKey(name));if(claim)throw new DirectBusy(claim.done);}};
   const decide=(keys:string[])=>exclusive(async()=>{
     checkAbort(signal);await rootUnchanged(transfer.root,transfer.rootIdentity);
+    busy(family.map(entry=>entry.destination));
     const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
     const checks=index.section();
     let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);
     if(outside(allocated)) throw WIDEN;
+    // Before anything is created or finished: a name another copy of this process is writing is waited for, never fought over.
+    busy(allocated.map(item=>item.destination));
     for(let i=0;i<allocated.length;) {
       checkAbort(signal);const item=allocated[i]!,entry=item.entry;
       await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
-      if(claimedDirect.has(pathKey(item.destination))) throw new Error(`Another copy is writing ${item.destination}`);
       if(await existingMatches(item.destination,entry.size,()=>resolve(entry),root,checks,signal)===true) {await present(entry,item.destination);i++;continue;}
       if(run.appleDouble) await run.appleDouble.noteExisting(item.destination);
       try { members.push(await begin(entry,item.destination));i++; }
@@ -1030,15 +1038,23 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     try { await releaseStaleStage({...publicationEntry,digest:streamed},root,recovery,signal); } catch(error) { if(isAbort(error)) throw error; }
   };
   try {
-    try { await decide(exact??familyFolders(family)); }
-    catch(error) { if(error!==WIDEN) throw error; await decide(familyFolders(family)); }
+    for(;;) {
+      try {
+        try { await decide(exact??familyFolders(family)); }
+        catch(error) { if(error!==WIDEN) throw error; await decide(familyFolders(family)); }
+        break;
+      } catch(error) {
+        if(!(error instanceof DirectBusy)) throw error;
+        await abortable(error.until,signal);
+      }
+    }
     for(const member of members) await copy(member);
     return 'done';
   } catch(error) {
     if(error===NOT_DIRECT) return 'staged';
     throw error;
   } finally {
-    for(const member of members) {claimedDirect.delete(member.claim);if(!member.closed)await member.output.close().catch(()=>{});}
+    for(const member of members) {unclaimDirect(member.claim);if(!member.closed)await member.output.close().catch(()=>{});}
   }
 }
 export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];appleDouble?:AppleDoubleReport;}

@@ -146,6 +146,23 @@ test('a whole file whose direct receipt no longer binds it is neither skipped no
   assert.equal(Math.round((await fs.stat(target!)).birthtimeMs/1000),Math.round((CAPTURE+400*86400*1000)/1000),'the file was not touched');
 });
 
+test('identical files with one destination name, copied in the same run, finish as one copy and one skip with no conflict and no error',async t=>{
+  const env=await ready(t);if(!env) return;
+  const twins=path.join(base,`twins-${counter}`);
+  for(const folder of ['A','B']) await fs.mkdir(path.join(twins,folder),{recursive:true});
+  for(let i=0;i<6;i++) {
+    const data=randomBytes(3*1024*1024),name=`DSC_${String(i).padStart(4,'0')}.NEF`;
+    for(const folder of ['A','B']) await fs.writeFile(path.join(twins,folder,name),data);
+  }
+  const result=await execute((await plan(twins,[env.root],options,metadata)).plans[0]!);
+  assert.deepEqual(result.errors,[]);
+  assert.equal(result.copied+result.skipped,12);
+  const found=await media(env.root);
+  assert.equal(found.length,6);assert.deepEqual(found.filter(file=>file.includes('Conflicts')),[]);
+  for(const file of found) assert.ok(Math.abs((await fs.stat(file)).birthtimeMs-CAPTURE)<2000,`${path.basename(file)} has the capture date`);
+  await assertNothingOwned(env.root);
+});
+
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{
   const env=await ready(t);if(!env) return;
   const reads=new Map<string,number>(),opened:string[]=[],proto=await (async()=>{const probe=await fs.open(env.root,'r');await probe.close();return Object.getPrototypeOf(probe) as {sync:()=>Promise<void>};})();
