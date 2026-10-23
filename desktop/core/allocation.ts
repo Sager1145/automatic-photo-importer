@@ -3,6 +3,14 @@ import {MessageError} from '../messages';
 
 /** A destination's plans: its backup folder and, in the video-root layout, its video folder. */
 export function destinationParts(plan:TransferPlan):TransferPlan[]{return plan.videos?[plan,plan.videos]:[plan];}
+/** What an import found already in the backup under older folder rules: for the report, one line per file (source, where it is, where the rules wanted it). */
+export function olderRulesPaths(plans:TransferPlan[]):{source:string;existing:string;routed:string}[]{
+ const seen=new Set<string>();
+ return plans.flatMap(plan=>destinationEntries(plan)).flatMap(entry=>{
+  if(entry.routed===undefined||seen.has(entry.destination))return [];
+  seen.add(entry.destination);return [{source:entry.source,existing:entry.destination,routed:entry.routed}];
+ });
+}
 /** Every entry written to one destination disk. */
 export function destinationEntries(plan:TransferPlan):PlanEntry[]{return destinationParts(plan).flatMap(part=>part.entries);}
 /** Files an import placed where the rules wanted them: entries found elsewhere under older rules (`routed`) are not. */
