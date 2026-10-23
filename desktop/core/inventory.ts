@@ -15,11 +15,12 @@ const videoOnly=new Set('xml moi srt thm wav bwf m4a mp3 aac bim'.split(' '));
 /** Low-resolution proxies: real video, kept with their original or imported alone. */
 const proxies=new Set(['lrf','lrv']);
 /** Stems a proxy's original may have: its own (DJI LRF), GoPro GL… → GX…/GH… (same chapter and
- * number), Insta360 LRV_<date>_<time>_<lens>1_<seq> → VID_<date>_<time>_<lens>0_<seq>. */
+ * number), Insta360 LRV_<date>_<time>_<lens>1_<seq> → VID_<date>_<time>_<lens>0_<seq>. A ` (n)` the
+ * same-name rule added (conflictNaming 'number') stays on both names. */
 function proxyOriginals(file:string):string[] {
   const folder=path.dirname(file),name=path.basename(file,path.extname(file)),names=[name];
-  const gopro=/^GL(\d{6})$/i.exec(name);if(gopro)names.push('GX'+gopro[1],'GH'+gopro[1]);
-  const insta=/^LRV(_\d{8}_\d{6}_\d)1(_\d+)$/i.exec(name);if(insta)names.push(`VID${insta[1]}0${insta[2]}`);
+  const gopro=/^GL(\d{6})( \(\d+\))?$/i.exec(name);if(gopro)names.push('GX'+gopro[1]+(gopro[2]??''),'GH'+gopro[1]+(gopro[2]??''));
+  const insta=/^LRV(_\d{8}_\d{6}_\d)1(_\d+(?: \(\d+\))?)$/i.exec(name);if(insta)names.push(`VID${insta[1]}0${insta[2]}`);
   return names.map(item=>pathKey(path.join(folder,item)));
 }
 const audio=new Set('wav bwf m4a mp3 aac'.split(' '));
@@ -152,7 +153,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       };
       // A Sony CnnnnR01.BIM belongs to its clip alone; its stem is never matched as-is.
       let primary=ext==='bim'?undefined:choose(media.get(stem(file.path))??[]);
-      if(!primary && ext==='xml' && /^C\d+M\d{2}$/i.test(name)) {
+      if(!primary && ext==='xml' && /^C\d+(?: \(\d+\))?M\d{2}$/i.test(name)) {
         const videos=(media.get(stem(file.path).slice(0,-3))??[]).filter(f=>f.kind==='Videos');
         const originals=videos.filter(video=>!proxies.has(extension(video.path))),candidates=originals.length?originals:videos;
         if(candidates.length===1) primary=candidates[0];
@@ -164,8 +165,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       if(!primary && ext==='xmp') {const duplicate=/^(.*)_\d{2}\.(\w+)$/.exec(name);if(duplicate)primary=byPath.get(pathKey(path.join(dir,`${duplicate[1]}.${duplicate[2]}`)));}
       if(!primary && (ext==='cos'||ext==='comask') && captureOneEdit(file.path)) primary=byPath.get(pathKey(path.join(path.dirname(path.dirname(dir)),name)));
       if(!primary && audio.has(ext) && name.startsWith('_')) primary=choose(media.get(pathKey(path.join(dir,name.slice(1))))??[]);
-      if(!primary && ext==='bim') {const clip=/^(C\d{4})R01$/i.exec(name);if(clip)primary=choose(media.get(pathKey(path.join(dir,clip[1]!)))??[]);}
-      if(!primary && ext==='aae') {const edit=/^(IMG_)O(\d+)$/i.exec(name);if(edit)primary=choose(media.get(pathKey(path.join(dir,edit[1]!+edit[2]!)))??[]);}
+      if(!primary && ext==='bim') {const clip=/^(C\d{4}(?: \(\d+\))?)R01$/i.exec(name);if(clip)primary=choose(media.get(pathKey(path.join(dir,clip[1]!)))??[]);}
+      if(!primary && ext==='aae') {const edit=/^(IMG_)O(\d+( \(\d+\))?)$/i.exec(name);if(edit)primary=choose(media.get(pathKey(path.join(dir,edit[1]!+edit[2]!)))??[]);}
       file.companionOf=primary?.path;
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;

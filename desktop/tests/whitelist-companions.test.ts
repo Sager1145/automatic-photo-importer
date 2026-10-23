@@ -179,3 +179,20 @@ test('a darktable XMP needs exactly two digits',async t=>{
  assert.equal(scan.files.find(i=>i.path===two)?.companionOf,jpg);
  assert.equal(scan.files.find(i=>i.path===three)?.companionOf,undefined);
 });
+
+test('pattern-named companions numbered by the same-name rule pair again with their numbered originals',async t=>{
+ const {source,put}=await fixture(t);
+ const clip=await put('CLIP/C0004 (1).MP4'),xml=await put('CLIP/C0004 (1)M01.XML'),bim=await put('CLIP/C0004 (1)R01.BIM');
+ const img=await put('I/IMG_1234 (2).HEIC'),aae=await put('I/IMG_O1234 (2).AAE');
+ const gopro=await put('G/GX010001 (1).MP4'),proxy=await put('G/GL010001 (1).LRV');
+ const insta=await put('X/VID_20240101_101010_00_001 (1).insv'),lrv=await put('X/LRV_20240101_101010_01_001 (1).lrv');
+ // A number on only one side is a different file: it stays unpaired.
+ await put('U/IMG_9999.HEIC');const lone=await put('U/IMG_O9999 (1).AAE');
+ const scan=await inventory(source,{});
+ const of=(file:string)=>scan.files.find(item=>item.path===file)?.companionOf;
+ assert.equal(of(xml),clip);assert.equal(of(bim),clip);
+ assert.equal(of(aae),img);
+ assert.equal(of(proxy),gopro);
+ assert.equal(of(lrv),insta);
+ assert.equal(of(lone),undefined);
+});
