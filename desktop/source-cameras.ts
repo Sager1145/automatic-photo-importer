@@ -75,7 +75,7 @@ export async function analyzeSourceCameras(
   // Reads run a window ahead so the reader can group them; results are still handled in file order.
   const ahead = new Map<number,Promise<Metadata>>();
   const read = (position:number) => {
-    for (let next = position; next < Math.min(files.length, position + READ_AHEAD); next++) if (!ahead.has(next)) {
+    for (let next = position; next < Math.min(files.length, position + (position === 0 ? 1 : READ_AHEAD)); next++) if (!ahead.has(next)) {
       const pending = readMetadata(files[next]!.path); pending.catch(() => {}); ahead.set(next, pending);
     }
     const found = ahead.get(position)!; ahead.delete(position); return found;
