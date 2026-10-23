@@ -648,6 +648,8 @@ export async function storePointerLeftover(store:Store,file:string):Promise<bool
   const pointer=await readPointer(file,store.path,id);
   if(path.basename(path.dirname(file)).split(' ').pop()!==pointerPartition(pointer.library).split(' ').pop())return true;
   const root=await siblingPointer(pointer.library,file,store.path);if(root===undefined)return true;
+  // A library folder that is not there (renamed, or on a drive not connected) proves nothing about its journal.
+  if(await fs.realpath(root).then(real=>real!==root,()=>true))return false;
   let m:Manifest;try{m=await readManifest(root,id);}catch(error){if(code(error)==='ENOENT')return true;return false;}
   const state=await readEvents(m,undefined,undefined,false);
   return !!state.superseded||!unfinished(state);
@@ -1639,6 +1641,8 @@ export const journalConversion={
  /** P1: where journal `id` of `root` stands now: 'absent', 'converting' (only the earlier version's copy), live
   * (unfinished, not superseded: its pointers are still needed) or 'ended'. Unreadable: thrown. */
  async standing(root:string,id:string):Promise<'absent'|'converting'|'live'|'ended'>{
+  // A library folder that is not there (renamed, or on a drive not connected) proves nothing about its journals.
+  if(await fs.realpath(root).then(real=>real!==root,()=>true))throw new Error(`the library folder ${root} was not found`);
   let m:Manifest;
   try{m=await readManifest(root,id);}
   catch(error){if(code(error)==='ENOENT')return 'absent';if(error instanceof MessageError&&error.key==='error.recordsConverting')return 'converting';throw error;}

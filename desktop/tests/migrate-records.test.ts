@@ -240,3 +240,12 @@ test('R: a card file that cannot be looked at (not missing) proves nothing: the 
  assert.ok(await exists(partial),'the staged copy stays');assert.ok(await exists(receipt),'its receipt stays');
  assert.ok(result.problems.some(problem=>problem.includes(path.basename(receipt))),result.problems.join('; '));
 });
+
+test('P1: a pointer whose journal\'s library folder is not there (renamed or unplugged) is kept and reported',async t=>{
+ const f=await stoppedSplit(t);
+ await toLegacy(f.videos,f.id);
+ await fs.rename(f.videos,f.videos+' elsewhere');
+ const result=await migrateDrive([f.photos]);
+ assert.ok(await exists(legacyPointer(f.photos,f.id)),'kept');
+ assert.ok(result.problems.some(problem=>problem.includes(`journal-${f.id}.json`)),result.problems.join('; '));
+});

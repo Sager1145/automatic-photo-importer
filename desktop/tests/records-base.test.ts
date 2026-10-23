@@ -104,3 +104,15 @@ test('a journal whose library folder was renamed away stays listed from the dest
  assert.deepEqual(orphans.map(item=>[item.id,item.root,item.missingRoot]),[[job!.id,photos,true]]);
  assert.match(orphans[0]!.error!,/not found/);
 });
+
+test('the cleanup keeps a pointer whose journal\'s library folder is not there',async t=>{
+ const {drive,photos,videos}=await destination(t);
+ for(const name of ['C0016.MOV','C0017.MOV','A.JPG'])await fs.writeFile(path.join(photos,name),'bytes of '+name);
+ const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
+ const stop=stopAfterFirstMove();
+ await assert.rejects(core.executeReorganization(split!.videos!,stop.signal,stop.progress,{strategy:'rename'}),{name:'AbortError'});
+ const [pointer]=await pointerFilesFor(photos);
+ await fs.rename(videos,videos+' elsewhere');
+ await cleanResidue(await findResidue([photos]),{keepResumable:true});
+ assert.ok(await exists(pointer!),'kept');
+});
