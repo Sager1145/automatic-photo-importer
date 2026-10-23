@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Coef,PriorBook,PriorChoice} from './eta-model';
 import {priorWeight} from './eta-model';
+import {cacheRecord,readCache} from './platform/user-caches';
 
 export interface DriveInfo {id?:string;transport?:string;fsType?:string;external?:boolean;}
 export interface PriorContext {source?:DriveInfo;destinations:DriveInfo[];}
@@ -83,10 +84,11 @@ export class PriorTable {
   const order=[...this.entries].sort((x,y)=>x[1].updated<y[1].updated?-1:x[1].updated>y[1].updated?1:x[0]<y[0]?-1:1);
   for(const [key] of order.slice(0,this.entries.size-MAX_ENTRIES))this.entries.delete(key);
  }
- toJSON():PriorFile{return {version:1,salt:this.salt,entries:Object.fromEntries(this.entries)};}
+ /** As this version stores it (records v5: {v:5,kind:'eta'}). */
+ toJSON():Record<string,unknown>{return cacheRecord('eta',{salt:this.salt,entries:Object.fromEntries(this.entries)});}
  static from(data:unknown,fallbackSalt:()=>string):PriorTable{
-  const file=data as PriorFile;
-  if(!file||typeof file!=='object'||file.version!==1||typeof file.salt!=='string'||!file.salt||!file.entries||typeof file.entries!=='object'||Array.isArray(file.entries))return new PriorTable(fallbackSalt());
+  const file=readCache<PriorFile>(data,'eta',1);
+  if(!file||typeof file.salt!=='string'||!file.salt||!file.entries||typeof file.entries!=='object'||Array.isArray(file.entries))return new PriorTable(fallbackSalt());
   return new PriorTable(file.salt,file.entries);
  }
 }

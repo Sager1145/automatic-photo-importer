@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import { cacheRecord, readCache } from './user-caches';
 
 /** What the last folder check (or an import) knew about a destination library: which files sit where the folder
  * rules put them, each with the size, modification time (ns) and inode it had then. The next check skips reading
@@ -23,8 +24,8 @@ export async function loadPlacement(store:string,id:string,scope:string):Promise
   try {
     const file=fileFor(store,id);
     if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
-    const stored=JSON.parse(gunzipSync(await fs.readFile(file),{maxOutputLength:8*MAX_BYTES}).toString('utf8')) as Stored;
-    if(stored?.version!==1||stored.scope!==scope||!Array.isArray(stored.dirs)||![stored.d,stored.n,stored.s,stored.m,stored.i].every(column=>Array.isArray(column)&&column.length===stored.n.length)) return undefined;
+    const stored=readCache<Stored>(JSON.parse(gunzipSync(await fs.readFile(file),{maxOutputLength:8*MAX_BYTES}).toString('utf8')),'placement',1);
+    if(!stored||stored.scope!==scope||!Array.isArray(stored.dirs)||![stored.d,stored.n,stored.s,stored.m,stored.i].every(column=>Array.isArray(column)&&column.length===stored.n.length)) return undefined;
     const memory:Placement=new Map();
     for(let index=0;index<stored.n.length;index++) {
       const dir=stored.dirs[stored.d[index]!],name=stored.n[index];
@@ -50,7 +51,7 @@ function mutate(store:string,id:string,scope:string,change:(current:Placement)=>
     }
     const temporary=`${target}.${randomUUID()}.tmp`;
     await fs.mkdir(path.dirname(target),{recursive:true,mode:0o700});
-    try { await fs.writeFile(temporary,gzipSync(JSON.stringify(stored),{level:1}),{mode:0o600}); await fs.rename(temporary,target); }
+    try { await fs.writeFile(temporary,gzipSync(JSON.stringify(cacheRecord('placement',stored as unknown as Record<string,unknown>)),{level:1}),{mode:0o600}); await fs.rename(temporary,target); }
     catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
   });
   writing=work;return work;

@@ -14,7 +14,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, MediaLayout, Metadata, MigrationState, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
@@ -477,11 +477,35 @@ export function SidebarDestinations({ state, errors, onErrors, act }: { state: A
       const status = state.destinationStatus?.find(item => item.path === path);
       const online = status?.available !== false;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-item sidebar-static"><Icon icon={HardDrive} size={16} /><span>{filename(path) || path}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} />{act && online && <RevealButton path={path} act={act} name={filename(path) || path} />}<SidebarErrors errors={errors} target={{ destination: path, name: filename(path) || path }} onErrors={onErrors} /></div>
-        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} /></li>;
+        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} />
+        {state.migration?.drive === path && <SidebarMigration migration={state.migration} />}</li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
   </section>;
 }
 
+/** What the conversion of earlier-version records is doing, in words. */
+function useMigrationStep() {
+  const { t } = useTranslation();
+  return (step: MigrationState['step']) => ({ looking: t("Looking for earlier records"), converting: t("Reading earlier records"), originals: t("Moving kept originals"), removing: t("Removing old record files"), receipts: t("Converting import records"), caches: t("Converting cached records"), cleanup: t("Tidying old record folders") })[step];
+}
+/** The destination row while its earlier records are converted: the step and a counter that moves. */
+function SidebarMigration({ migration }: { migration: MigrationState }) {
+  const { t, formatNumber } = useTranslation();
+  const step = useMigrationStep()(migration.step);
+  const count = migration.total > 0 ? t("{step} · {completed} of {total}", { step, completed: formatNumber(migration.completed), total: formatNumber(migration.total) }) : migration.completed > 0 ? `${step} · ${formatNumber(migration.completed)}` : step;
+  return <small className="sidebar-capacity-text sidebar-migration" data-testid="sidebar-migration" title={`${t("Converting earlier records")} · ${count}`}>{count}</small>;
+}
+/** Settings: the conversion while it runs (step, counter, file), and what it left as it was. */
+export function RecordsConversion({ state }: { state: AppState }) {
+  const { t, formatNumber } = useTranslation();
+  const stepName = useMigrationStep();
+  const migration = state.migration, problems = Object.entries(state.migrationProblems ?? {});
+  return <div data-testid="records-conversion">
+    {migration && <ProgressDisplay label={t("Records conversion progress")} testId="records-conversion-progress" heading={<span className="settings-row-note">{`${filename(migration.drive) || migration.drive} · ${stepName(migration.step)}`}</span>} fraction={migration.total > 0 ? migration.completed / migration.total : undefined} count={migration.total > 0 ? t("{completed} of {total}", { completed: formatNumber(migration.completed), total: formatNumber(migration.total) }) : migration.completed > 0 ? formatNumber(migration.completed) : undefined} file={migration.file || undefined} />}
+    {problems.map(([drive, list]) => <div key={drive} className="settings-row-note" data-testid="records-conversion-problems"><p>{t("{count} could not be converted and were left as they are:", { count: formatNumber(list.length) })} <span>{filename(drive) || drive}</span></p><ul>{list.slice(0, 20).map(item => <li key={item}>{item}</li>)}</ul></div>)}
+    <p className="settings-row-note">{t("Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.")}</p>
+  </div>;
+}
 function sourceInventories(state: AppState) {
   const sources = new Map(state.sources.map(source => [source.id, source]));
   for (const job of state.jobs) if (!job.organization && !sources.has(job.source.id)) sources.set(job.source.id, job.source);
@@ -785,6 +809,7 @@ export function LeftoverFiles({ state, act, busy }: { state: AppState; act: Disp
     <div className="settings-row"><span>{status}</span><Button icon={Trash2} disabled={busy || !!residue?.checking} onClick={() => act({ type: 'cleanResidue' })}>{t("Clean up")}</Button></div>
     {residue?.checking && <OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress" />}
     {!!residue?.resumable.files && <p className="settings-row-note">{t("{count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.", { count: formatNumber(residue.resumable.files), size: formatBytes(residue.resumable.bytes) })}</p>}
+    {!!residue?.recoverable?.files && <p className="settings-row-note">{t("{count} complete copies whose card file changed are kept ({size}): each may be the only copy.", { count: formatNumber(residue.recoverable.files), size: formatBytes(residue.recoverable.bytes) })}</p>}
     {residue?.cleaned && <p className="settings-row-note">{t("Last cleanup removed {files} ({size}).", { files: files(residue.cleaned.files), size: formatBytes(residue.cleaned.bytes) })}</p>}
     <p className="settings-row-note">{t("Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.")}</p>
   </div>;
@@ -848,6 +873,7 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         <p className="settings-row-note">{p.autoOrganizeBackup === 'auto' ? t("Misplaced files are moved into place after each import.") : p.autoOrganizeBackup === 'off' ? t("Not checked automatically.") : t("Checked after each import. You choose when to move files.")}</p>
       </SettingsSection>
       <SettingsSection title={t("Leftover files")} icon={Trash2}><LeftoverFiles state={state} act={act} busy={busy} /></SettingsSection>
+      {(state.migration || Object.keys(state.migrationProblems ?? {}).length > 0) && <SettingsSection title={t("Records from the earlier version")} icon={RefreshCw}><RecordsConversion state={state} /></SettingsSection>}
     </>,
     drives: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /></>,
     general: <>
@@ -1725,7 +1751,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.converting ? t("Converting from the earlier version") : job.missingRoot ? t("Library folder not found") : job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && !job.converting && !job.missingRoot && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
     </div>
 
   </div>;

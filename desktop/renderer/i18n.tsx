@@ -172,6 +172,23 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files put back|已放回 {completed}/{total} 个文件|已放回 {completed}/{total} 個檔案|{total} 件中 {completed} 件を元に戻し済み
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
+Converting earlier records|正在转换早期记录|正在轉換早期記錄|以前の記録を変換中
+Converting from the earlier version|正在从早期版本转换|正在從早期版本轉換|以前のバージョンから変換中
+Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
+{completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
+{step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
+Looking for earlier records|正在查找早期记录|正在尋找早期記錄|以前の記録を探しています
+Reading earlier records|正在读取早期记录|正在讀取早期記錄|以前の記録を読み込み中
+Moving kept originals|正在移动保留的原件|正在移動保留的原始檔案|保持中のオリジナルを移動中
+Removing old record files|正在删除旧记录文件|正在刪除舊記錄檔案|古い記録ファイルを削除中
+Converting import records|正在转换导入记录|正在轉換匯入記錄|読み込み記録を変換中
+Converting cached records|正在转换缓存记录|正在轉換快取記錄|キャッシュ記録を変換中
+Tidying old record folders|正在整理旧记录文件夹|正在整理舊記錄資料夾|古い記録フォルダーを整理中
+Records from the earlier version|早期版本的记录|早期版本的記錄|以前のバージョンの記録
+Records conversion progress|记录转换进度|記錄轉換進度|記録変換の進行状況
+{count} could not be converted and were left as they are:|{count} 项无法转换，已保持原样：|{count} 項無法轉換，已保持原樣：|{count} 件は変換できなかったため、そのままにしました：
+Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.|本应用早期版本在驱动器上写入的记录，会在驱动器空闲时转换到该驱动器的 Photo Importer Data 文件夹中。整理资料库需等待其记录转换完成；导入照常进行。|本 App 早期版本在磁碟上寫入的記錄，會在磁碟閒置時轉換到該磁碟的 Photo Importer Data 資料夾中。整理資料庫需等待其記錄轉換完成；匯入照常進行。|このアプリの以前のバージョンがドライブに書き込んだ記録は、ドライブがほかに使われていないときに、そのドライブの Photo Importer Data フォルダーへ変換されます。ライブラリの整理は記録の変換が終わるまで待ちます。読み込みはそのまま続きます。
+{count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。
 Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
 Checking {drive} folder layout|正在检查 {drive} 的文件夹结构|正在檢查 {drive} 的資料夾結構|{drive} のフォルダー構成を確認中
 Organization history progress|整理记录读取进度|整理記錄讀取進度|整理履歴の読み込み状況

@@ -69,6 +69,7 @@ test('a scan remembered before the current DJI camera names is not reused',async
  const f=await fixture(t);
  await saveScanMemory(f.store,'CARD-UUID',f.mount,await inventory(f.mount,{}),[await routingFor(path.join(f.folder,'DSC0.NEF'),'NIKON Z f')]);
  const dir=path.join(f.store,'scan-memory'),[name]=(await fs.readdir(dir)).filter(file=>!file.includes('.imported.'));
- const stored=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:2}));
+ // The same scan in the shape of an earlier format (version 2, before records v5): not reused.
+ const {v:_v,kind:_kind,...stored}=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:2}));
  assert.equal(await loadScanMemory(f.store,'CARD-UUID',f.mount),undefined);
 });

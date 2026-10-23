@@ -74,7 +74,7 @@ test('the table holds at most 200 entries and evicts the least recently updated'
  assert.ok(table.size<=200);
  assert.equal(table.lookup('copying',{source:{...card,id:'S0'},destinations:[backup]},'exact'),undefined,'the oldest is gone');
  assert.ok(table.lookup('copying',{source:{...card,id:'NEWEST'},destinations:[backup]},'exact'),'the newest survives');
- assert.equal(table.toJSON().version,1);
+ assert.equal(table.toJSON().v,5);assert.equal(table.toJSON().kind,'eta');
 });
 
 test('the saved file has no paths, names or raw ids, and round trips',async t=>{

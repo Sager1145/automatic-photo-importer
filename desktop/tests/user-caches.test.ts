@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {gzipSync,gunzipSync} from 'node:zlib';
+import {convertUserCaches} from '../platform/user-caches';
+import {loadListingHint} from '../platform/listing-memory';
+import {loadPlacement} from '../platform/placement-memory';
+import {PriorStore} from '../eta-priors';
+
+test('this Mac\'s caches in the earlier version\'s shape are rewritten as v5 at startup and still read',async t=>{
+ const store=await fs.mkdtemp(path.join(os.tmpdir(),'user-caches-'));t.after(()=>fs.rm(store,{recursive:true,force:true}));
+ const {listingScope}=await import('../platform/listing-memory');
+ await fs.writeFile(path.join(store,'listing-memory.json'),JSON.stringify({version:1,scopes:{[listingScope('/Volumes/CARD',undefined,false)]:{files:12,bytes:3400,at:'2026-01-01T00:00:00Z'}}}));
+ await fs.writeFile(path.join(store,'eta-priors.json'),JSON.stringify({version:1,salt:'salt',entries:{}}));
+ await fs.mkdir(path.join(store,'placement-memory'));
+ const placement=path.join(store,'placement-memory','0123456789abcdef0123456789abcdef.json.gz');
+ await fs.writeFile(placement,gzipSync(JSON.stringify({version:1,scope:'s',dirs:[''],d:[0],n:['A.JPG'],s:[5],m:['1'],i:['2']})));
+ await fs.mkdir(path.join(store,'scan-memory'));
+ await fs.writeFile(path.join(store,'scan-memory','0123456789abcdef0123456789abcdef.imported.json'),JSON.stringify({version:1,volume:'V',files:{}}));
+ assert.equal(await convertUserCaches(store),4);
+ const listing=JSON.parse(await fs.readFile(path.join(store,'listing-memory.json'),'utf8'));
+ assert.equal(listing.v,5);assert.equal(listing.kind,'listing');assert.equal(listing.version,undefined);
+ assert.deepEqual(await loadListingHint(store,'/Volumes/CARD',undefined,false),{files:12,bytes:3400});
+ assert.equal(JSON.parse(gunzipSync(await fs.readFile(placement)).toString()).kind,'placement');
+ assert.equal((await loadPlacement(store,'0123456789abcdef0123456789abcdef','s'))?.get('A.JPG'),'5:1:2');
+ const priors=new PriorStore(path.join(store,'eta-priors.json'),()=>'fresh');await priors.load();
+ assert.equal(priors.table.toJSON().salt,'salt','the converted table is read, not replaced');
+ assert.equal(await convertUserCaches(store),0,'nothing left to convert');
+ for(const name of await fs.readdir(store,{recursive:true}))assert.ok(!String(name).endsWith('.tmp'),String(name));
+});
