@@ -1362,8 +1362,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .sidebar-dest-from{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary)}
 .sidebar-dest-percent{flex:none;margin-left:auto;font-size:var(--text-caption);font-weight:650;color:var(--label-secondary);white-space:nowrap}
 .sidebar-dest-progress{display:grid;gap:.15rem;min-width:0}
-.sidebar-dest-bar{display:block;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}
-.sidebar-dest-bar>span{display:block;height:100%;background:var(--step,var(--accent));transition:width var(--slow) var(--ease-out)}
+.sidebar-dest-bar{display:block;height:4px}
+.sidebar-dest-progress[data-paused] .sidebar-dest-bar>span{background:var(--warning)}
 .sidebar-dest-detail{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);line-height:1.25;color:var(--label-secondary)}
 .sidebar-activity{display:flex;align-items:center;gap:.5rem;margin:.1rem .75rem 0 2.35rem;min-width:0}
 .sidebar-activity>small{flex:none;font-size:var(--text-caption);color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}

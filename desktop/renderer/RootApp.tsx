@@ -490,7 +490,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
 
 /** What a destination is doing now, from state the app already holds (jobs, the folder check, duplicates, leftover cleanup). */
 export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
-export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number }
+export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
 const destinationPriority: DestinationStatusKind[] = ['receiving', 'verifying', 'organizing', 'folder-check', 'cleaning'];
 function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
 export function destinationActivity(state: AppState, path: string): DestinationActivity {
@@ -500,14 +500,14 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   if (!status.available) return { kind: 'offline', ...empty };
   const required = state.preferences.copyMode === 'single' ? 1 : 2;
   const chosen = state.preferences.destinations.slice(0, required).includes(path);
-  type Part = { kind: DestinationStatusKind; progress?: Progress; eta?: number; source?: string };
+  type Part = { kind: DestinationStatusKind; progress?: Progress; eta?: number; source?: string; paused?: boolean };
   const parts: Part[] = [];
   for (const job of state.jobs) {
     if (!activePhases.includes(job.phase)) continue;
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
-    if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta }); continue; }
+    if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
-    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name });
+    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
   if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
@@ -527,7 +527,7 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     sum.speed += progress.speed; sum.fileRate += progress.fileRate ?? 0;
   }
   const fraction = sum.totalBytes > 0 && sum.bytes > 0 ? sum.bytes / sum.totalBytes : sum.total > 0 ? sum.completed / sum.total : undefined;
-  return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)) };
+  return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)), ...(same.length && same.every(part => part.paused) ? { paused: true } : {}) };
 }
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
 function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
@@ -535,6 +535,8 @@ function SidebarDestinationStatus({ activity }: { activity: DestinationActivity 
   const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
   const step = ({ receiving: 'copy', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
   const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
+  // Verifying sits over the finished copy layer, as in every other bar.
+  const top = Math.min(1, Math.max(0, activity.fraction ?? 0)), layers: StageLayer[] = activity.kind === 'verifying' ? [{ kind: 'copy', fraction: 1 }, { kind: 'verify', fraction: top }] : step ? [{ kind: step as StepKind, fraction: top }] : [];
   const first = activity.sources[0], more = activity.sources.length - 1;
   const from = first === undefined ? undefined : more > 0 ? t("from {name} (+{count} more)", { name: first, count: formatNumber(more) }) : t("from {name}", { name: first });
   const count = activity.total > 0 ? activity.totalBytes > 0 ? t("{completed} of {total} files · {size} of {totalSize}", { completed: formatNumber(activity.completed), total: formatNumber(activity.total), size: formatBytes(activity.bytes), totalSize: formatBytes(activity.totalBytes) }) : t("{completed} of {total} files", { completed: formatNumber(activity.completed), total: formatNumber(activity.total) }) : undefined;
@@ -543,8 +545,8 @@ function SidebarDestinationStatus({ activity }: { activity: DestinationActivity 
   const rates = [speed, left].filter(Boolean).join(' · ');
   return <div className="sidebar-dest-status" role="group" aria-label={t("Destination status")}>
     <div className="sidebar-dest-line"><span data-testid="sidebar-destination-status" data-kind={activity.kind} {...(step ? { 'data-step': step } : {})} className="sidebar-dest-label">{labels[activity.kind]}</span>{from && <small className="sidebar-dest-from" title={activity.sources.join(', ')}>{from}</small>}{busy && percent !== undefined && <small className="sidebar-dest-percent">{formatNumber(percent)}%</small>}</div>
-    {busy && <div className="sidebar-dest-progress" data-step={step}>
-      <span className="sidebar-dest-bar" role="meter" aria-label={t("Destination progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent ?? 0}%` }} /></span>
+    {busy && <div className="sidebar-dest-progress" data-step={step} {...(activity.paused ? { 'data-paused': '' } : {})}>
+      <span className="sidebar-dest-bar progress-track" role="meter" aria-label={t("Destination progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>{layers.map((layer, index) => <span key={index} data-layer="" data-step={layer.kind} style={{ transform: `scaleX(${layer.fraction})` }} />)}</span>
       {count && <small className="sidebar-dest-detail" title={count}>{count}</small>}
       {rates && <small className="sidebar-dest-detail" title={rates}>{rates}</small>}
     </div>}

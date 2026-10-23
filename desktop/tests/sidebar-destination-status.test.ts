@@ -41,13 +41,14 @@ test('each destination shows one status, derived from existing state',()=>{
  }
 });
 
-test('only offline uses the danger colour; active states use step colours and nothing layers',()=>{
+test('only offline uses the danger colour; the bar uses the shared layers and the paused colour',()=>{
  const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');
  const rules=[...css.matchAll(/\.sidebar-dest[^{]*\{[^}]*\}/g)].map(match=>match[0]).join('\n');
  assert.ok(rules.length>0,'sidebar destination status rules exist');
  assert.match(rules,/data-kind=offline[^{]*\{[^}]*var\(--danger\)/);
- assert.equal([...rules.matchAll(/var\(--(danger|warning)\)/g)].length,1,'danger only for offline, never warning');
- assert.ok(!/z-index|transform|animation/.test(rules),'no layering-sensitive properties');
+ assert.equal([...rules.matchAll(/var\(--danger\)/g)].length,1,'danger only for offline');
+ assert.match(rules,/data-paused\][^{]*\{[^}]*var\(--warning\)/,'paused uses the warning colour');
+ assert.ok(!/z-index|animation/.test(rules),'no layering-sensitive properties');
  for(const kind of ['copy','verify','folder-check','move','tidy'])assert.ok(css.includes(`--step-${kind}`),kind);
 });
 
