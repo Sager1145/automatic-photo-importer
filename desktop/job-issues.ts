@@ -1,5 +1,6 @@
 import {MAX_GROUP_ITEMS,type ExecutionIssue,type Job,type JobIssueGroup} from './shared';
 import {codeOf,severityOf} from './error-log';
+import {isAcknowledged} from './acknowledge';
 import type {AppleDoubleReport} from './core/appledouble';
 import type {NoMetadataSummary} from './shared';
 
@@ -26,16 +27,11 @@ export function recordIssue(job:Job,issue:ExecutionIssue){
 export function recordIssues(job:Job,issues:Iterable<ExecutionIssue>){for(const issue of issues)recordIssue(job,issue);}
 /** Every path recorded for a code, for Copy all paths. */
 export function issuePaths(job:Job,code:string):string[]{return indexes.get(job)?.full.get(code)??[];}
-/** Records issues as they happen. Each addition only asks for a (throttled) emit; the state is never rebuilt per error. */
-export function createIssueSink(job:Job,schedule:()=>void){
- return {add(issue:ExecutionIssue){recordIssue(job,issue);schedule();}};
-}
 /** What actually failed: error entries and error groups. Warnings (leftovers, notes) never count, so they never fail a job. */
 export function errorTotal(job:Pick<Job,'errors'|'groups'|'acknowledged'>):number{
  let total=0;
- const skipped=(code:string)=>!!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));
- for(const error of job.errors)if(severityOf(error)==='error'&&!skipped(codeOf(error)))total++;
- for(const group of job.groups??[])if(group.severity==='error'&&!skipped(group.code))total+=group.count;
+ for(const error of job.errors)if(severityOf(error)==='error'&&!isAcknowledged(job,codeOf(error)))total++;
+ for(const group of job.groups??[])if(group.severity==='error'&&!isAcknowledged(job,group.code))total+=group.count;
  return total;
 }
 

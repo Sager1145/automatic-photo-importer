@@ -12,7 +12,7 @@ const ended=(phase:string)=>['complete','error','stopped'].includes(phase);
 /** Scans fixture:1 read-only unless its media summary is already known. */
 export async function scanned(h:Harness,sourceId='fixture:1'){
  if((await h.state()).sourceInventories?.[sourceId])return;
- await h.action({type:'scanSource',sourceId});
+ await h.action({type:'scan',sourceId});
  await h.waitFor(`media scan of ${sourceId}`,async()=>!!(await h.state()).sourceInventories?.[sourceId]);
 }
 type Row={sourceId:string;height:number;width:number;controlsFit:boolean;outside:string[]};
@@ -24,8 +24,8 @@ export const importChecks=(ctx:Context):Check[]=>[
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('details.source-disclosure')).every(details=>!details.open)"),true,'Drive details must start collapsed');
   assert.equal(await h.js<boolean>("document.querySelector('#parallel-source-limit').closest('.section-heading').contains(document.querySelector('#source-heading'))&&document.querySelector('.concurrency-control')===null"),true,'Parallel limit belongs in the source heading row');
   const before=(await h.state()).jobs.length;
-  await h.action({type:'scanSource',sourceId:'fixture:1'});await h.action({type:'stop'});await h.waitFor('scan cancellation',async()=>!(await h.state()).scanningSources?.length);
-  await h.action({type:'scanSource',sourceId:'fixture:1'});await h.waitFor('media scan',async()=>!!(await h.state()).sourceInventories?.['fixture:1']);
+  await h.action({type:'scan',sourceId:'fixture:1'});await h.action({type:'stop'});await h.waitFor('scan cancellation',async()=>!(await h.state()).scanningSources?.length);
+  await h.action({type:'scan',sourceId:'fixture:1'});await h.waitFor('media scan',async()=>!!(await h.state()).sourceInventories?.['fixture:1']);
   const scan=(await h.state()).sourceInventories!['fixture:1']!;assert.equal(scan.media,2);assert.equal((await h.state()).jobs.length,before,'Scanning starts no job');
   await h.until('scanned card content',"document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')");
   const layout:{label:string;rows:Row[]}[]=[];
@@ -89,7 +89,7 @@ export const importChecks=(ctx:Context):Check[]=>[
   const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:'123',shutterNote:'Fixture shutter note',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
   let selected={path:path.join(ctx.root,'source-1','photo.png'),metadata:photo};
   // Through the QA hook when there is one, so the real handler stays for later checks; else replaced for the rest of the run.
-  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:inspect');ipcMain.handle('importer:inspect',()=>selected.metadata);}
+  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:exif');ipcMain.handle('importer:exif',()=>selected.metadata);}
   const open=async(name:string)=>{await h.js(`Array.from(document.querySelectorAll('.review-source-button')).find(button=>button.textContent.includes(${JSON.stringify(name)})).click()`);await h.until('metadata dialog',"document.querySelector('.metadata-dialog')?.open===true");};
   const close=async()=>{await h.click('[data-testid=metadata-close]');await h.until('animated metadata close',"document.querySelector('.metadata-dialog')===null");};
   try{

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,createTranslator,formatBytes} from '../renderer/i18n';
-import {RetainedOriginals,DeleteRecoveryConfirm,nextDeleteRecoveryStep,recoveryDeletable} from '../renderer/RootApp';
+import {RetainedOriginals,DeleteRecoveryConfirm,nextConfirmStep,recoveryDeletable} from '../renderer/RootApp';
 import type {AppState,Language} from '../shared';
 
 type Recovery=NonNullable<AppState['organizationRecovery']>[number];
@@ -14,12 +14,12 @@ const button=(html:string,id:string)=>html.match(new RegExp(`<button[^>]*data-te
 const html=(text:string)=>text.replaceAll("'",'&#x27;');
 
 test('only the second confirmation deletes; cancelling either one deletes nothing',()=>{
- const first=nextDeleteRecoveryStep('closed','open');assert.deepEqual(first,{step:'first',delete:false});
- const second=nextDeleteRecoveryStep(first.step,'confirm');assert.deepEqual(second,{step:'second',delete:false});
- assert.deepEqual(nextDeleteRecoveryStep(second.step,'confirm'),{step:'closed',delete:true});
- assert.deepEqual(nextDeleteRecoveryStep('first','cancel'),{step:'closed',delete:false});
- assert.deepEqual(nextDeleteRecoveryStep('second','cancel'),{step:'closed',delete:false});
- assert.deepEqual(nextDeleteRecoveryStep('closed','confirm'),{step:'closed',delete:false});
+ const first=nextConfirmStep('closed','open');assert.deepEqual(first,{step:'first',delete:false});
+ const second=nextConfirmStep(first.step,'confirm');assert.deepEqual(second,{step:'second',delete:false});
+ assert.deepEqual(nextConfirmStep(second.step,'confirm'),{step:'closed',delete:true});
+ assert.deepEqual(nextConfirmStep('first','cancel'),{step:'closed',delete:false});
+ assert.deepEqual(nextConfirmStep('second','cancel'),{step:'closed',delete:false});
+ assert.deepEqual(nextConfirmStep('closed','confirm'),{step:'closed',delete:false});
 });
 
 test('each recovery card has a red Delete recovery files button beside Undo, disabled while busy or unfinished',()=>{

@@ -23,3 +23,11 @@ test('a hold the system dropped is taken again while work continues',()=>{
  update([job('copying')]);started.clear();update([job('copying')]);
  assert.deepEqual(calls,['start prevent-display-sleep','start prevent-display-sleep']);
 });
+
+test('deleting originals after a finished import keeps the display awake until it ends',()=>{
+ const {blocker,calls}=fake(),update=keepAwake(blocker);
+ update([{...job('complete'),deletingOriginals:{completed:0,total:3}}]);
+ assert.deepEqual(calls,['start prevent-display-sleep']);
+ update([job('complete')]);
+ assert.deepEqual(calls,['start prevent-display-sleep','stop 1']);
+});

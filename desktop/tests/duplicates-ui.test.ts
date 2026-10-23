@@ -6,7 +6,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,translationCatalogs,languages} from '../renderer/i18n';
 import {categories} from '../renderer/exif-categories';
 import {LevelSelector,GroupView,DuplicatesConfirm,RemovedDuplicates,removalPlan,fileBadges,GROUPS_PER_PAGE,Pagination} from '../renderer/DuplicatesPage';
-import {nextDeleteRecoveryStep} from '../renderer/RootApp';
+import {nextConfirmStep} from '../renderer/RootApp';
 import type {DuplicateFile,DuplicateGroup,Language,Metadata,Thumbnail,OrganizationRecovery} from '../shared';
 
 const render=(child:ReturnType<typeof createElement>,language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
@@ -72,9 +72,9 @@ test('the summary counts groups, files and bytes from the level and the choices'
 });
 
 test('removal asks twice and only the second confirmation acts',()=>{
- let step=nextDeleteRecoveryStep('closed','open');assert.equal(step.step,'first');
- step=nextDeleteRecoveryStep(step.step,'confirm');assert.deepEqual(step,{step:'second',delete:false});
- assert.equal(nextDeleteRecoveryStep('second','confirm').delete,true);assert.equal(nextDeleteRecoveryStep('second','cancel').delete,false);
+ let step=nextConfirmStep('closed','open');assert.equal(step.step,'first');
+ step=nextConfirmStep(step.step,'confirm');assert.deepEqual(step,{step:'second',delete:false});
+ assert.equal(nextConfirmStep('second','confirm').delete,true);assert.equal(nextConfirmStep('second','cancel').delete,false);
  const summary={groups:3,files:5,bytes:5_000_000};
  const first=render(createElement(DuplicatesConfirm,{step:'first',summary,name:'Library',onCancel:()=>{},onConfirm:()=>{}}));
  assert.match(first,/data-testid="duplicates-confirm-first"/);assert.match(first,/5 files in 3 groups/);assert.match(first,/5.0 MB/);

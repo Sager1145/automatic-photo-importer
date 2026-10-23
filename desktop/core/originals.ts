@@ -14,9 +14,11 @@ const VERIFY_CONCURRENCY=4;
 /** A source file an import copied and verified: its checksum and every place the import put it.
  * identity: the source's statKey when the import read it for that checksum. */
 export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];identity?:string;}
-export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error';
+/** stopped: Stop was pressed before this file was removed. */
+export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error'|'stopped';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
-export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];/** Source folders removed because this run left them empty. */folders:number;}
+/** stopped: the run was stopped; files it had already removed are still listed in `deleted`, and no folder was removed. */
+export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];/** Source folders removed because this run left them empty. */folders:number;stopped?:boolean;}
 
 async function regular(file:string) {
   const stat=await fs.lstat(file,{bigint:true});
@@ -50,9 +52,10 @@ export function recordVerified(verified:Record<string,ImportVerified>,source:str
 /** The originals a finished import may offer to delete, with every place it put each. Only a source this job read
  * itself carries its identity, which lets deleteOriginals skip reading it again; a planning checksum never does. */
 export function verifiedOriginals(verified:Record<string,ImportVerified>,entries:{source:string;destination:string;size:number}[]):VerifiedOriginal[] {
-  const files:VerifiedOriginal[]=[];
+  const files:VerifiedOriginal[]=[],bySource=new Map<string,typeof entries>();
+  for(const entry of entries) {const list=bySource.get(entry.source);if(list)list.push(entry);else bySource.set(entry.source,[entry]);}
   for(const [source,found] of Object.entries(verified)) {
-    const matching=entries.filter(entry=>entry.source===source);
+    const matching=bySource.get(source)??[];
     if(matching.length) files.push({source,size:matching[0]!.size,sha256:found.sha256,...(found.streamed?{identity:found.identity}:{}),destinations:[...new Set(matching.map(entry=>entry.destination))]});
   }
   return files;
@@ -73,14 +76,16 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
   // What each file will read, planned from a stat of each source before the first read, so the total holds still.
   const planned=new Map<VerifiedOriginal,number>();
   if(options.changeTimes) for(const file of files) {
-    checkAbort(options.signal);
+    // A stop here ends the run as stopped: every file reports 'stopped' below and nothing is deleted.
+    if(options.signal?.aborted) break;
     const stat=file.identity!==undefined?await regular(file.source).catch(()=>undefined):undefined;
     planned.set(file,file.size*(file.destinations.length+(stat&&unchanged(file,stat)?0:1)));
   }
   const reads=(file:VerifiedOriginal)=>planned.get(file)??file.size*(1+file.destinations.length);
   const bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
+  // A stop never throws away the outcome of files already removed: each file still reports deleted or kept.
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
-    checkAbort(options.signal);
+    if(options.signal?.aborted) return {kept:'stopped'};
     options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
     // Counted as planned, even when the source turns out to need a read after all.
     const read=reads(file);
@@ -106,7 +111,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} ${known?'not re-read at the source: unchanged since the import read it (identity + ctime); re-read':'re-read now at the source and'} at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
       return {deleted:true};
     } catch(error) {
-      if(options.signal?.aborted) throw error;
+      if(options.signal?.aborted) return {kept:'stopped'};
       return {kept:'error',error:`${file.source}: ${error instanceof Error?error.message:String(error)}`};
     } finally {
       // Counted when this file's checks end, so the byte progress never runs ahead of the reads.
@@ -121,7 +126,9 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
   });
   options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
-  result.folders=await removeEmptiedFolders(sourceRoot,result.deleted.map(item=>item.source),options);
+  // A stop skips the folder pass; one that arrives during it ends the pass early. Neither throws away the deletions.
+  if(!options.signal?.aborted) result.folders=await removeEmptiedFolders(sourceRoot,result.deleted.map(item=>item.source),options);
+  if(options.signal?.aborted) result.stopped=true;
   return result;
 }
 
@@ -148,14 +155,13 @@ async function removeEmptiedFolders(root:string,deleted:string[],options:{signal
   const candidates=new Set<string>();
   for(const file of deleted) for(let folder=path.dirname(file);beneath(folder,root);folder=path.dirname(folder)) candidates.add(folder);
   const folders=[...candidates].sort((a,b)=>b.length-a.length),protect=(options.protect??[]).map(item=>path.resolve(item));
-  if(!folders.length) return 0;
-  checkAbort(options.signal);
+  if(!folders.length||options.signal?.aborted) return 0;
   let device:bigint;
   try { device=(await fs.lstat(root,{bigint:true})).dev; } catch { return 0; }
   let removed=0,done=0;
   options.onFolders?.(0,folders.length,'');
   for(const folder of folders) {
-    checkAbort(options.signal);
+    if(options.signal?.aborted) break;
     options.onFolders?.(++done,folders.length,folder);
     if(protect.some(item=>item===folder)) continue;
     try {
@@ -179,7 +185,7 @@ async function removeEmptiedFolders(root:string,deleted:string[],options:{signal
       logDeletion('originals',folder,'folder left with no files after Delete originals','rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
       await syncDirectory(path.dirname(folder));
       removed++;
-    } catch(error) { if(options.signal?.aborted) throw error; log('normal','originals','folder-kept',{path:folder,code:code(error)??'error',error}); }
+    } catch(error) { if(options.signal?.aborted) break; log('normal','originals','folder-kept',{path:folder,code:code(error)??'error',error}); }
   }
   return removed;
 }

@@ -63,7 +63,7 @@ test('the translator accepts backend messages and job details render in the chos
 test('errors panel explains keyed mirror confirmations in every language', async () => {
   const { explainError } = await import('../renderer/RootApp');
   const mirror = message('error.mirrorReview', { count: 3 });
-  for (const language of languages) assert.deepEqual(explainError(mirror, 'source', language), { title: 'Mirror needs your review before moving files.', hint: 'Open Review on this drive.', severity: 'warning' });
+  for (const language of languages) assert.deepEqual(explainError(mirror, 'source', language), { title: 'Mirror needs your review before moving files.', hint: 'Open Review on this drive.' });
   assert.equal(explainError(message('error.sourceDisconnected'), 'app', 'ja').title, 'The drive was disconnected or a file is missing.');
   assert.equal(explainError(message('error.selectDrive'), 'app', 'zh-Hans').title, formatMessage(message('error.selectDrive'), 'zh-Hans'));
   assert.equal(explainError(text('Unexpected failure. More text.'), 'app', 'en').title, 'Unexpected failure.');

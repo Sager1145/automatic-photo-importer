@@ -1,16 +1,13 @@
-import type { AppState, Preferences } from './shared';
-
-/** Phases in which a job is reading or writing drives. */
-export const activeJobPhases:readonly string[]=['discovering','verifying','copying'];
+import { isLive, type AppState, type Preferences } from './shared';
 
 /** Settings a job reads while it runs or when it continues after a pause; changing one midway
  * could file half a job one way and half another, so they wait until every job has fully stopped. */
 export const jobPreferences:ReadonlySet<string>=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','removeEmptySourceFolders','collectProblemFiles','removeAppleDouble','releaseDuplicatesAfterOrganizing','autoOrganizeBackup','unknownDefault','noMetadataHandling','noMetadataFolder','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder','maxCpuThreads','memoryLimitMB']);
 
-/** True while any job is running, queued or paused, or a review is open or being built, or a source is scanned. */
-export function settingsLocked(state:Pick<AppState,'jobs'>&{review?:unknown;busyReview?:unknown;scanningSources?:readonly string[]}):boolean {
- return state.jobs.some(job=>activeJobPhases.includes(job.phase)||job.phase==='queued'||(job.phase==='stopped'&&job.paused===true))
-  ||!!state.review||!!state.busyReview||!!state.scanningSources?.length;
+/** True while any job is running, queued or paused, a review is open or being built, a source is scanned, or Remove duplicates scans or removes. */
+export function settingsLocked(state:Pick<AppState,'jobs'>&{review?:unknown;busyReview?:unknown;scanningSources?:readonly string[];duplicates?:{status:string}}):boolean {
+ return state.jobs.some(job=>isLive(job)||(job.phase==='stopped'&&job.paused===true))
+  ||!!state.review||!!state.busyReview||!!state.scanningSources?.length||state.duplicates?.status==='scanning'||state.duplicates?.status==='removing';
 }
 
 /** The keys of a settings change that must wait until nothing is running. */

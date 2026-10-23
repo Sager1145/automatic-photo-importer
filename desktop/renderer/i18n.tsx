@@ -77,13 +77,10 @@ Exposure compensation|曝光补偿|曝光補償|露出補正
 Refresh list|刷新列表|重新整理清單|一覧を更新
 Last completed|上次已完成|上次已完成|前回完了
 Last verified: {completed} of {total} files|上次校验：{completed}/{total} 个文件|上次驗證：{completed}/{total} 個檔案|前回の検証：{total} 件中 {completed} 件
-Originals stay in the hidden recovery store. Resume uses this operation’s saved paths; start a new review to apply changed folder settings.|原文件保留在隐藏的恢复目录中。恢复会使用此操作保存的路径；要应用新的文件夹设置，请重新审核。|原始檔案保留在隱藏的復原目錄中。繼續會使用此操作儲存的路徑；要套用新的資料夾設定，請重新審核。|オリジナルは非表示の復旧領域に残ります。再開時はこの操作の保存済みパスを使用します。新しいフォルダー設定は、新たに確認して適用してください。
 
 Photo Importer|照片导入器|照片匯入器|写真インポーター
 Automatic Photo Importer|自动照片导入器|自動照片匯入器|自動写真インポーター
 Opening your camera workbench…|正在打开相机工作台…|正在開啟相機工作台…|カメラワークベンチを開いています…
-Try again|重试|重試|再試行
-Your camera workbench|你的相机工作台|你的相機工作台|カメラのワークベンチ
 Import desk|导入工作台|匯入工作台|インポート
 Organization|整理|整理|整理
 History|历史记录|歷史記錄|履歴
@@ -98,38 +95,15 @@ Close window|关闭窗口|關閉視窗|ウィンドウを閉じる
 Close|关闭|關閉|閉じる
 Main navigation|主导航|主導覽|メインナビゲーション
 Connected sources|已连接的来源|已連接的來源|接続中のソース
-Import in progress|正在导入|正在匯入|インポート中
-Ready for your next shoot|准备好迎接下一次拍摄|準備好迎接下一次拍攝|次の撮影に備えて
-Originals stay safe|原文件安全保留|原始檔案安全保留|オリジナルを安全に保管
-Verified copies. Your camera files stay right where they are.|副本经过校验，相机中的原文件保持不动。|副本經過驗證，相機中的原始檔案保持不動。|コピーを検証し、カメラのファイルは元の場所に残します。
-Watching for cameras|正在监测相机|正在監測相機|カメラの接続を監視中
-Manual import|手动导入|手動匯入|手動インポート
 Start imports|开始导入|開始匯入|インポート開始
 Stop|停止|停止|停止
 Automatic|自动|自動|自動
-Preview photo and metadata|预览照片和元数据|預覽照片與中繼資料|写真とメタデータをプレビュー
-Preview a photo and inspect its metadata|预览照片并查看元数据|預覽照片並檢視中繼資料|写真をプレビューしてメタデータを確認
 Refresh connected sources|刷新已连接的来源|重新整理已連接的來源|接続中のソースを更新
-Dismiss error|关闭错误提示|關閉錯誤提示|エラーを閉じる
-Make it yours.|打造你的专属体验。|打造你的專屬體驗。|自分好みに設定。
-Comfortable text, your preferred colors, and the way you import. Changes save automatically.|调整文字、颜色和导入方式，所有更改自动保存。|調整文字、顏色與匯入方式，所有變更自動儲存。|文字、色、インポート方法を調整できます。変更は自動保存されます。
-Language|语言|語言|言語
 App language|应用语言|應用程式語言|アプリの言語
-Choose the language used throughout the app.|选择整个应用使用的语言。|選擇整個應用程式使用的語言。|アプリ全体で使用する言語を選択します。
-Text & readability|文字与可读性|文字與可讀性|文字と読みやすさ
 Text size|文字大小|文字大小|文字サイズ
-Use larger text throughout the app. The comfortable default is 125%.|放大整个应用的文字，默认舒适大小为 125%。|放大整個應用程式的文字，預設舒適大小為 125%。|アプリ全体の文字を大きくします。標準は読みやすい125%です。
-Your originals stay safe.|原文件安全保留。|原始檔案安全保留。|オリジナルを安全に保管します。
-Review connected cameras, choose your backup drive, then start a verified import.|查看连接的相机，选择备份磁盘，然后开始校验导入。|檢視連接的相機，選擇備份磁碟，然後開始驗證匯入。|接続中のカメラを確認し、バックアップ先を選んで検証付きインポートを開始します。
 Reset text size|重置文字大小|重設文字大小|文字サイズをリセット
-Appearance & color|外观与颜色|外觀與顏色|外観と色
-System follows your computer’s Light or Dark appearance. Choose a mode to keep it fixed.|系统模式跟随电脑的浅色或深色外观，也可选择固定模式。|系統模式跟隨電腦的淺色或深色外觀，也可選擇固定模式。|「システム」はコンピューターの外観に従います。固定するにはモードを選択します。
-Import behavior|导入行为|匯入行為|インポート動作
 Automatic import|自动导入|自動匯入|自動インポート
-Queue newly connected camera sources after you choose a destination.|选择目标后，将新连接的相机来源加入队列。|選擇目的地後，將新連接的相機來源加入佇列。|保存先を選択すると、新しく接続したカメラをキューに追加します。
 Parallel sources|并行来源|並行來源|同時処理ソース数
-Settings maximum parallel sources|设置最大并行来源数|設定最大並行來源數|同時処理ソース数の上限設定
-Lowering the limit lets active copies finish before another source starts. Folder paths and media rules are in Organization.|降低上限后，当前复制完成才会启动其他来源。文件夹路径和媒体规则位于「整理」。|降低上限後，目前複製完成才會啟動其他來源。資料夾路徑與媒體規則位於「整理」。|上限を下げると、実行中のコピー完了後に次のソースを開始します。フォルダーとメディアルールは「整理」にあります。
 Appearance|外观|外觀|外観
 Color mode|颜色模式|顏色模式|カラーモード
 System|跟随系统|跟隨系統|システム
@@ -142,6 +116,8 @@ Ocean accent|海洋蓝|海洋藍|オーシャン
 Forest accent|森林绿|森林綠|フォレスト
 Import dashboard|导入仪表板|匯入儀表板|インポートダッシュボード
 Import overview|导入概览|匯入概覽|インポート概要
+Overview|概览|概覽|概要
+Show or hide the import overview|显示或隐藏导入概览|顯示或隱藏匯入概覽|インポート概要の表示/非表示
 Transfers running|正在传输|正在傳輸|転送中
 Review pending|等待审核|等待審核|確認待ち
 Idle|空闲|閒置|待機中
@@ -149,7 +125,6 @@ Active / queued|活动 / 排队|進行中 / 排隊|実行中 / 待機中
 Transfer speed|传输速度|傳輸速度|転送速度
 Combined active sources|所有活动来源合计|所有進行中來源合計|実行中ソースの合計
 No active transfers|没有正在进行的传输|沒有進行中的傳輸|転送は実行されていません
-Transferred|已传输|已傳輸|転送済み
 No transfer planned|尚无传输计划|尚無傳輸計畫|転送予定なし
 Starting…|正在开始…|開始中…|開始しています…
 Moving|移动|移動|移動
@@ -184,27 +159,20 @@ Files checked|已检查的文件|已檢查的檔案|確認済みファイル
 Destinations ready|已就绪的目标|已就緒的目的地|準備済みの保存先
 Choose a backup destination|选择备份目标|選擇備份目的地|バックアップ先を選択
 Combined copy progress|总体复制进度|整體複製進度|全体のコピー進捗
-A destination is offline or still being checked. Reconnect it before importing.|目标离线或仍在检查中，请在导入前重新连接。|目的地離線或仍在檢查中，請在匯入前重新連接。|保存先がオフラインか確認中です。インポート前に再接続してください。
-Review the proposed files and destinations, then apply or discard the plan.|审核建议的文件和目标，然后应用或放弃计划。|審核建議的檔案與目的地，然後套用或捨棄計畫。|対象ファイルと保存先を確認し、プランを適用または破棄してください。
-Destination ready. Connect mounted camera storage or a memory card to begin.|目标已就绪，连接已挂载的相机存储或存储卡即可开始。|目的地已就緒，連接已掛載的相機儲存裝置或記憶卡即可開始。|保存先の準備ができました。マウント済みのカメラのストレージやメモリーカードを接続してください。
 Choose destination|选择目标|選擇目的地|保存先を選択
 Sources & queue|来源与队列|來源與佇列|ソースとキュー
 Current copies finish before a lower limit takes effect.|当前复制完成后，降低的上限才会生效。|目前複製完成後，降低的上限才會生效。|上限の引き下げは実行中のコピー完了後に反映されます。
 Maximum parallel sources|最大并行来源数|最大並行來源數|同時処理ソース数の上限
 Connect camera storage or a memory card.|连接相机存储或存储卡。|連接相機儲存裝置或記憶卡。|カメラのストレージやメモリーカードを接続。
-Mounted SD cards, CFexpress cards and camera storage appear here. Check your destination, then start importing.|已挂载的 SD 卡、CFexpress 卡和相机存储会显示在此处。确认目标后即可开始导入。|已掛載的 SD 卡、CFexpress 卡與相機儲存裝置會顯示於此。確認目的地後即可開始匯入。|マウント済みのSDカード、CFexpressカード、カメラのストレージをここに表示します。保存先を確認してインポートを開始してください。
 Automatic import is watching for new connections.|自动导入正在监测新连接。|自動匯入正在監測新連接。|自動インポートで新しい接続を監視しています。
 Automatic import is off. Use Start when you’re ready.|自动导入已关闭，准备好后点击「开始」。|自動匯入已關閉，準備好後點選「開始」。|自動インポートはオフです。準備ができたら開始してください。
 Enable media folder selection|启用媒体文件夹选择|啟用媒體資料夾選擇|メディアフォルダーの選択を有効化
 Choose media folders…|选择媒体文件夹…|選擇媒體資料夾…|メディアフォルダーを選択…
 Bring an entire drive, too.|也能备份整个磁盘。|也能備份整個磁碟。|ドライブ全体もバックアップ。
-Back up files in their original folders, including documents and other non-photo files.|按原有文件夹备份文件，包括文档和其他非照片文件。|依原有資料夾備份檔案，包括文件與其他非照片檔案。|文書などの写真以外のファイルも、元のフォルダー構造でバックアップします。
 Back up drives or folders…|备份磁盘或文件夹…|備份磁碟或資料夾…|ドライブやフォルダーをバックアップ…
-Backup files stay when originals disappear. Links and filesystem service files are skipped.|即使原文件消失，备份仍会保留。跳过链接和文件系统服务文件。|即使原始檔案消失，備份仍會保留。略過連結與檔案系統服務檔案。|元のファイルがなくなってもバックアップは残ります。リンクとファイルシステム用ファイルはスキップします。
 Ready to import|准备导入|準備匯入|インポート可能
 Discovering files|正在查找文件|正在尋找檔案|ファイルを検索中
 Checking existing files|正在检查现有文件|正在檢查現有檔案|既存ファイルを確認中
-Copying & verifying|正在复制并校验|正在複製並驗證|コピー・検証中
 Complete|完成|完成|完了
 Stopped|已停止|已停止|停止済み
 Needs attention|需要处理|需要處理|確認が必要
@@ -238,9 +206,6 @@ Copy policy|复制策略|複製策略|コピー方式
 One destination|单一目标|單一目的地|1つの保存先
 Copy to both destinations|复制到两个目标|複製到兩個目的地|両方の保存先にコピー
 Fill first, then second|先存满第一块再用第二块|先存滿第一顆再用第二顆|1台目から順に保存
-Save one verified copy to your selected destination.|在所选目标保存一份经过校验的副本。|在所選目的地儲存一份經過驗證的副本。|選択した保存先に検証済みコピーを1つ保存します。
-Save and verify a copy on both drives. Both must be available.|在两个磁盘上分别保存并校验副本，两个磁盘都必须可用。|在兩個磁碟上分別儲存並驗證副本，兩個磁碟都必須可用。|両方のドライブにコピーして検証します。両方の接続が必要です。
-Use the first drive’s space, then continue on the second. Related files stay together.|先使用第一块磁盘，再继续使用第二块。关联文件保存在一起。|先使用第一顆磁碟，再繼續使用第二顆。相關檔案儲存在一起。|1台目の空き容量を使い、その後2台目に続けます。関連ファイルはまとめて保存します。
 First destination|第一目标|第一目的地|1つ目の保存先
 Second destination|第二目标|第二目的地|2つ目の保存先
 Not selected|未选择|未選擇|未選択
@@ -258,13 +223,10 @@ Change…|更改…|變更…|変更…
 Choose location…|选择位置…|選擇位置…|場所を選択…
 Show in file manager|在文件管理器中显示|在檔案管理員中顯示|ファイルマネージャーで表示
 Remove destination|移除目标|移除目的地|保存先を削除
-Every copy is verified. Files already on a destination are kept.|每份副本都会校验，目标中的现有文件予以保留。|每份副本都會驗證，目的地中的現有檔案予以保留。|すべてのコピーを検証し、保存先の既存ファイルは保持します。
-{used} of {total} used|已用 {used}，共 {total}|已用 {used}，共 {total}|{total} 中 {used} 使用済み
 {used} used, {free} free, {total} total|已用 {used}，可用 {free}，总计 {total}|已用 {used}，可用 {free}，總計 {total}|使用済み {used}、空き {free}、合計 {total}
 Other or unscanned|其他或未扫描|其他或未掃描|その他・未スキャン
 Used|已用|已用|使用済み
 Media categories use scanned file sizes.|媒体分类按扫描文件大小估算。|媒體分類依掃描檔案大小估算。|メディア分類はスキャンしたファイルサイズに基づきます。
-Media storage by format|各格式媒体容量|各格式媒體容量|形式別のメディア容量
 Source layout|来源布局|來源配置|ソースのレイアウト
 List view|列表视图|清單檢視|リスト表示
 Grid view|网格视图|網格檢視|グリッド表示
@@ -283,13 +245,8 @@ Included|已包含|已包含|対象
 Ignored|已忽略|已忽略|対象外
 Other|其他|其他|その他
 Images|图像|影像|画像
-Video|视频|影片|動画
-Companion|伴随文件|伴隨檔案|関連ファイル
 No files match this filter.|没有符合此筛选条件的文件。|沒有符合此篩選條件的檔案。|条件に一致するファイルはありません。
-Showing the first 500 matches. Search to narrow the file list.|显示前 500 项匹配结果，请搜索以缩小范围。|顯示前 500 項符合結果，請搜尋以縮小範圍。|最初の500件を表示しています。検索で絞り込んでください。
-Select a filename to preview its image and EXIF metadata.|选择文件名以预览图像和 EXIF 元数据。|選擇檔名以預覽影像與 EXIF 中繼資料。|ファイル名を選ぶと画像とEXIFメタデータを表示します。
 Other file rules|其他文件规则|其他檔案規則|その他のファイルルール
-Companions stay with their photos automatically. Choose what happens to unrecognized files.|伴随文件会自动与照片保存在一起。请选择如何处理无法识别的文件。|伴隨檔案會自動與照片儲存在一起。請選擇如何處理無法識別的檔案。|関連ファイルは自動で写真と一緒に保存します。未認識ファイルの処理を選択してください。
 Extension|扩展名|副檔名|拡張子
 No extension|无扩展名|無副檔名|拡張子なし
 Action|操作|操作|操作
@@ -299,16 +256,8 @@ Folder beneath each destination|每个目标下的文件夹|每個目的地下�
 Use a relative folder without empty components, . or ..|请输入相对文件夹路径，不能包含空段、. 或 ..|請輸入相對資料夾路徑，不能包含空段、. 或 ..|空の要素、.、.. を含まない相対フォルダーを指定してください。
 Remember for this extension|记住此扩展名的规则|記住此副檔名的規則|この拡張子のルールを保存
 Apply rule|应用规则|套用規則|ルールを適用
-Rules without Remember apply to this session. Recheck the source to use changed rules.|未记住的规则仅适用于本次会话。重新检查来源以使用更改后的规则。|未記住的規則僅適用於本次工作階段。重新檢查來源以使用變更後的規則。|保存しないルールは今回のみ適用します。変更後のルールはソースの再確認で反映します。
-Make room for every shoot.|让每次拍摄井然有序。|讓每次拍攝井然有序。|すべての撮影を整理。
-Choose where originals land and how your collection grows.|选择原文件的存放位置和照片库的整理方式。|選擇原始檔案的存放位置與照片庫的整理方式。|オリジナルの保存先とコレクションの整理方法を選択します。
-Finish or discard the current review, or wait for active transfers, before changing import settings.|更改导入设置前，请完成或放弃当前审核，或等待传输结束。|變更匯入設定前，請完成或捨棄目前審核，或等待傳輸結束。|設定を変更するには、確認を完了・破棄するか、転送の完了を待ってください。
 Backup location|备份位置|備份位置|バックアップ先
-The same folder structure is used at each destination.|每个目标使用相同的文件夹结构。|每個目的地使用相同的資料夾結構。|各保存先で同じフォルダー構造を使用します。
-No destination selected|未选择目标|未選擇目的地|保存先未選択
-Choose a drive or folder to begin.|选择磁盘或文件夹即可开始。|選擇磁碟或資料夾即可開始。|ドライブやフォルダーを選択してください。
 Backup folder|备份文件夹|備份資料夾|バックアップフォルダー
-A folder inside each destination. Leave empty to use the destination itself.|每个目标内的文件夹。留空则直接使用目标。|每個目的地內的資料夾。留空則直接使用目的地。|各保存先内のフォルダーです。空欄にすると保存先を直接使用します。
 Folder structure|文件夹结构|資料夾結構|フォルダー構造
 Date, then camera|先日期后相机|先日期後相機|日付 → カメラ
 Camera, then date|先相机后日期|先相機後日期|カメラ → 日付
@@ -340,7 +289,6 @@ Unreadable files|无法读取的文件|無法讀取的檔案|読み取れない�
 Could not be read|无法读取|無法讀取|読み取れませんでした
 and {count} more|还有 {count} 个|還有 {count} 個|ほか {count} 件
 Edited exports folder|编辑导出文件夹|編輯匯出資料夾|編集済み書き出しフォルダー
-Editor-exported photos go in this folder within each month. RAW originals and XMP stay together.|编辑器导出的照片会保存在每月目录中的此文件夹内。RAW 原片和 XMP 保存在一起。|編輯器匯出的照片會儲存在每月目錄中的此資料夾內。RAW 原始檔與 XMP 儲存在一起。|編集ソフトから書き出した写真を各月のこのフォルダーに保存します。RAWの原本とXMPは一緒に保存します。
 Your edited export lands here|编辑导出的照片将保存在这里|編輯匯出的照片將儲存在這裡|編集済み写真の保存先
 Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}|可用标记：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|可用標記：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|使用可能なトークン：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}
 Media layout|媒体文件布局|媒體檔案配置|メディアの配置
@@ -364,44 +312,20 @@ Review progress|预览进度|預覽進度|確認の進行状況
 Checking the backup folder|正在检查备份文件夹|正在檢查備份資料夾|バックアップフォルダーを確認中
 Your next video lands here|下一个视频将保存在这里|下一部影片將儲存在這裡|次の動画の保存先
 Your next photo lands here|下一张照片将保存在这里|下一張照片將儲存在這裡|次の写真の保存先
-Example: Nikon Z6III · 20 October 2026|示例：Nikon Z6III · 2026年10月20日|範例：Nikon Z6III · 2026年10月20日|例：Nikon Z6III · 2026年10月20日
-Sources & automation|来源与自动化|來源與自動化|ソースと自動化
-Keep control over what enters your collection.|掌控进入照片库的内容。|掌控進入照片庫的內容。|コレクションに取り込む内容を管理します。
-Import new camera connections|导入新连接的相机|匯入新連接的相機|新しく接続したカメラをインポート
-Watch for cameras while Photo Importer is open. Existing files are checked on each import.|应用开启时监测相机，每次导入都会检查现有文件。|應用程式開啟時監測相機，每次匯入都會檢查現有檔案。|アプリを開いている間、カメラを監視します。毎回既存ファイルを確認します。
-Choose a media folder manually|手动选择媒体文件夹|手動選擇媒體資料夾|メディアフォルダーを手動で選択
-Enable folder selection on the import desk. Ordinary hard drives are never imported automatically.|在导入工作台启用文件夹选择，普通硬盘不会自动导入。|在匯入工作台啟用資料夾選擇，一般硬碟不會自動匯入。|インポート画面でフォルダー選択を有効にします。通常のドライブは自動インポートしません。
-Remember how to handle unrecognized extensions. Photo and video companions stay together automatically.|记住无法识别的扩展名的处理方式，照片和视频伴随文件会自动保存在一起。|記住無法識別的副檔名的處理方式，照片與影片伴隨檔案會自動儲存在一起。|未認識の拡張子の処理方法を保存します。写真・動画の関連ファイルは自動でまとめます。
 Edit|编辑|編輯|編集
-No saved rules. Unrecognized files are ignored during camera imports.|尚无保存的规则。相机导入时忽略无法识别的文件。|尚無儲存的規則。相機匯入時忽略無法識別的檔案。|保存済みルールはありません。カメラのインポートでは未認識ファイルを無視します。
 File extension|文件扩展名|檔案副檔名|ファイル拡張子
 For example, PDF|例如 PDF|例如 PDF|例：PDF
 Leave empty for files without an extension.|无扩展名的文件请留空。|無副檔名的檔案請留空。|拡張子のないファイルは空欄にします。
 Copy to custom folder|复制到自定义文件夹|複製到自訂資料夾|指定フォルダーにコピー
 Relative folder|相对文件夹|相對資料夾|相対フォルダー
-Saved for future imports|已保存供后续导入使用|已儲存供後續匯入使用|次回以降のインポートに保存
 Save rule|保存规则|儲存規則|ルールを保存
-Existing collection|现有照片库|現有照片庫|既存コレクション
-Review where files in your library belong before applying the current folder structure.|应用当前文件夹结构前，审核照片库内文件的归属位置。|套用目前資料夾結構前，審核照片庫內檔案的歸屬位置。|現在の構造を適用する前に、ライブラリ内の保存先を確認します。
-Scan your first backup destination and review every proposed path. Identical files already at a destination are kept.|扫描第一备份目标并审核每个建议路径，保留目标中已有的相同文件。|掃描第一備份目的地並審核每個建議路徑，保留目的地中已有的相同檔案。|1つ目のバックアップ先をスキャンし、予定パスを確認します。保存先の同一ファイルは保持します。
-Preview library reorganization…|预览照片库重新整理…|預覽照片庫重新整理…|ライブラリの整理をプレビュー…
-Choose One destination on the import desk to reorganize an existing library.|在导入工作台选择「单一目标」即可重新整理现有照片库。|在匯入工作台選擇「單一目的地」即可重新整理現有照片庫。|既存ライブラリを整理するには、インポート画面で「1つの保存先」を選択してください。
-Changes are saved automatically. Your source files are never deleted.|更改自动保存，来源文件永远不会被删除。|變更自動儲存，來源檔案永遠不會被刪除。|変更は自動保存されます。ソースのファイルは削除しません。
-Every shoot, accounted for.|记录每一次拍摄。|記錄每一次拍攝。|すべての撮影を記録。
-Your recent import sessions, from first frame to verified copy.|近期导入会话，从第一帧到校验副本一目了然。|近期匯入工作階段，從第一張到驗證副本一目瞭然。|最初の1枚から検証済みコピーまで、最近のインポートを記録します。
 Your collection starts here.|照片库从这里开始。|照片庫從這裡開始。|コレクションはここから。
-Completed imports and drive backups will appear in this timeline.|完成的导入和磁盘备份会显示在此时间线中。|完成的匯入與磁碟備份會顯示於此時間軸。|完了したインポートとドライブのバックアップがここに表示されます。
 Go to import desk|前往导入工作台|前往匯入工作台|インポート画面へ
 Stopped by user|用户已停止|使用者已停止|ユーザーが停止
 Session recorded|已记录会话|已記錄工作階段|セッション記録済み
-Photo & metadata|照片与元数据|照片與中繼資料|写真とメタデータ
-Close photo preview|关闭照片预览|關閉照片預覽|写真プレビューを閉じる
 Reading photo metadata…|正在读取照片元数据…|正在讀取照片中繼資料…|写真のメタデータを読み込み中…
 Could not read this file|无法读取此文件|無法讀取此檔案|ファイルを読み込めませんでした
-Image preview unavailable|无法预览图像|無法預覽影像|画像プレビューを表示できません
-This file does not contain a supported image preview. Available metadata is shown.|此文件不包含支持的图像预览。可用的元数据仍会显示。|此檔案不含支援的影像預覽。仍會顯示可用的中繼資料。|このファイルに対応する画像プレビューはありません。取得できたメタデータを表示します。
 Show this file in file manager|在文件管理器中显示此文件|在檔案管理員中顯示此檔案|このファイルをファイルマネージャーで表示
-EXIF metadata|EXIF 元数据|EXIF 中繼資料|EXIFメタデータ
 Camera|相机|相機|カメラ
 Captured|拍摄时间|拍攝時間|撮影日時
 Shutter count|快门次数|快門次數|シャッター回数
@@ -412,17 +336,12 @@ Find a metadata field…|查找元数据字段…|尋找中繼資料欄位…|�
 Search metadata fields|搜索元数据字段|搜尋中繼資料欄位|メタデータ項目を検索
 No metadata fields match your search.|没有匹配的元数据字段。|沒有符合的中繼資料欄位。|検索に一致する項目はありません。
 No metadata fields were returned for this file.|此文件没有返回元数据字段。|此檔案未傳回中繼資料欄位。|このファイルにはメタデータ項目がありません。
-Preview reads your file without changing it.|预览只读取文件，不会更改文件。|預覽僅讀取檔案，不會變更檔案。|プレビューでは読み取りのみ行い、ファイルは変更しません。
 Done|完成|完成|完了
 Building review…|正在生成审核…|正在產生審核…|確認を準備中…
 Building your file review…|正在生成文件审核…|正在產生檔案審核…|ファイル確認を準備中…
-Reading metadata and checking destinations. No files are being copied or moved.|正在读取元数据并检查目标，尚未复制或移动文件。|正在讀取中繼資料並檢查目的地，尚未複製或移動檔案。|メタデータと保存先を確認しています。コピーや移動は行っていません。
 Cancel review|取消审核|取消審核|確認をキャンセル
 Review before reorganizing|整理前审核|整理前審核|整理前に確認
 Review before copying|复制前审核|複製前審核|コピー前に確認
-Your collection, reorganized.|重新整理你的照片库。|重新整理你的照片庫。|コレクションを整理。
-Check the proposed paths below. Changes start when you apply this review.|检查下方建议路径。应用此次审核后才开始更改。|檢查下方建議路徑。套用此次審核後才開始變更。|予定パスを確認してください。適用すると変更が始まります。
-Check the destination for each file. Copying starts when you apply this review.|检查每个文件的目标。应用此次审核后开始复制。|檢查每個檔案的目的地。套用此次審核後開始複製。|各ファイルの保存先を確認してください。適用するとコピーが始まります。
 Ready to review|准备审核|準備審核|確認可能
 Find a source, destination or checksum…|查找来源、目标或校验和…|尋找來源、目的地或校驗碼…|ソース・保存先・チェックサムを検索…
 Search reviewed files|搜索审核文件|搜尋審核檔案|確認対象ファイルを検索
@@ -431,25 +350,16 @@ Destination|目标|目的地|保存先
 Type / size|类型 / 大小|類型 / 大小|種類 / サイズ
 Checksum|校验和|校驗碼|チェックサム
 Keep verified|保留已校验文件|保留已驗證檔案|検証済みを保持
-Move|移动|移動|移動
 Copy|复制|複製|コピー
 No files need to be processed.|没有需要处理的文件。|沒有需要處理的檔案。|処理が必要なファイルはありません。
 No files match this search.|没有匹配的文件。|沒有符合的檔案。|検索に一致するファイルはありません。
 Previous|上一页|上一頁|前へ
 Next|下一页|下一頁|次へ
-Identical duplicates stay in place. Every proposed move is shown above.|相同的重复文件保留原位，所有计划移动均已列出。|相同的重複檔案保留原位，所有計畫移動均已列出。|同一の重複ファイルは元の場所に残します。移動予定はすべて上記に表示しています。
-Original files stay on your source. Copies are verified.|原文件保留在来源中，副本经过校验。|原始檔案保留在來源中，副本經過驗證。|オリジナルはソースに残し、コピーを検証します。
 Discard review|放弃审核|捨棄審核|確認を破棄
-Apply reviewed moves|应用已审核的移动|套用已審核的移動|確認した移動を適用
 Copy reviewed files|复制已审核的文件|複製已審核的檔案|確認したファイルをコピー
-Organize existing files…|整理现有文件…|整理現有檔案…|既存ファイルを整理…
 Scan media|扫描媒体|掃描媒體|メディアをスキャン
-Scan all sources|扫描所有来源|掃描所有來源|すべてのソースをスキャン
 Resume & recheck|继续并重新检查|繼續並重新檢查|再開して再確認
-Recheck organization|重新检查整理结果|重新檢查整理結果|整理を再確認
-Pictures|图片|圖片|写真
 Videos|视频|影片|動画
-Extension breakdown|按扩展名统计|依副檔名統計|拡張子別の内訳
 {count} files|{count} 个文件|{count} 個檔案|{count} ファイル
 {count} fields|{count} 个字段|{count} 個欄位|{count} 項目
 {count} sessions|{count} 次会话|{count} 次工作階段|{count} セッション
@@ -460,20 +370,11 @@ Extension breakdown|按扩展名统计|依副檔名統計|拡張子別の内訳
 {count} other files|{count} 个其他文件|{count} 個其他檔案|その他 {count} 件
 {count} of 10|{count} / 10|{count} / 10|{count} / 10
 Drive backups|驱动器备份|磁碟備份|ドライブのバックアップ
-Choose what happens when files disappear from a backed-up drive.|选择已备份驱动器上的文件消失后如何处理。|選擇已備份磁碟上的檔案消失後如何處理。|バックアップ済みドライブからファイルが消えたときの扱いを選択します。
 Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバックアップモード
 Additive|只增不删|只增不刪|追加のみ
 Mirror|镜像|鏡像|ミラー
-Keep files on the backup even after they're deleted from the drive.|即使文件已从驱动器删除，也保留在备份中。|即使檔案已從磁碟刪除，也保留在備份中。|ドライブから削除されたファイルもバックアップに残します。
-Make the backup match the drive. Files no longer on the drive, or changed since the last backup, are moved to Drive backups/Removed by mirror on that destination after you review them. Nothing is permanently deleted.|让备份与驱动器保持一致。驱动器上已不存在或自上次备份后已更改的文件，会在你审核后移到该目标的 Drive backups/Removed by mirror。不会永久删除任何文件。|讓備份與磁碟保持一致。磁碟上已不存在或自上次備份後已變更的檔案，會在你審核後移到該目的地的 Drive backups/Removed by mirror。不會永久刪除任何檔案。|バックアップをドライブと一致させます。ドライブにもう存在しないファイルや前回のバックアップ以降に変更されたファイルは、確認後にその保存先の Drive backups/Removed by mirror へ移動されます。完全に削除されるものはありません。
-Mirror can’t be combined with Fill first, then second. Choose another copy policy to use Mirror.|镜像不能与“先存满第一块再用第二块”同时使用。请选择其他复制策略以使用镜像。|鏡像不能與「先存滿第一顆再用第二顆」同時使用。請選擇其他複製策略以使用鏡像。|ミラーは「1台目から順に保存」と併用できません。ミラーを使うには別のコピー方式を選択してください。
-Fill first, then second is unavailable while drive backups use Mirror.|驱动器备份使用镜像时，无法使用“先存满第一块再用第二块”。|磁碟備份使用鏡像時，無法使用「先存滿第一顆再用第二顆」。|ドライブのバックアップがミラーの間は「1台目から順に保存」は使用できません。
-Drive backups are saved in {path} on each destination.|驱动器备份保存在每个目标的 {path} 中。|磁碟備份儲存在每個目的地的 {path} 中。|ドライブのバックアップは各保存先の {path} に保存されます。
 Drive backups are saved here on each destination|驱动器备份保存在每个目标的此位置|磁碟備份儲存在每個目的地的此位置|ドライブのバックアップは各保存先のここに保存されます
-Mirror backup: the backup matches the drive. Removed or changed files move to Removed by mirror after you review them.|镜像备份：备份与驱动器保持一致。已删除或已更改的文件会在你审核后移到 Removed by mirror。|鏡像備份：備份與磁碟保持一致。已刪除或已變更的檔案會在你審核後移到 Removed by mirror。|ミラーバックアップ：バックアップをドライブと一致させます。削除・変更されたファイルは確認後に Removed by mirror へ移動します。
-Review the files Mirror will move before this backup can continue.|请先审核镜像将要移动的文件，然后才能继续此备份。|請先審核鏡像將要移動的檔案，然後才能繼續此備份。|このバックアップを続行する前に、ミラーで移動されるファイルを確認してください。
 {count} files will be moved to Removed by mirror|{count} 个文件将移到 Removed by mirror|{count} 個檔案將移到 Removed by mirror|{count} 件のファイルが Removed by mirror へ移動されます
-Nothing is permanently deleted. Moved files stay in Drive backups/Removed by mirror on this destination.|不会永久删除任何文件。移动的文件保留在此目标的 Drive backups/Removed by mirror 中。|不會永久刪除任何檔案。移動的檔案保留在此目的地的 Drive backups/Removed by mirror 中。|完全に削除されるものはありません。移動したファイルはこの保存先の Drive backups/Removed by mirror に残ります。
 Drive folder: {folder}|驱动器文件夹：{folder}|磁碟資料夾：{folder}|ドライブフォルダー：{folder}
 Reason|原因|原因|理由
 No longer on the drive|驱动器上已不存在|磁碟上已不存在|ドライブにもう存在しません
@@ -482,17 +383,10 @@ Unknown files|未知文件|未知檔案|不明なファイル
 Skip automatically|自动跳过|自動略過|自動的にスキップ
 Copy to Other files folder|复制到“其他文件”文件夹|複製到「其他檔案」資料夾|「その他のファイル」フォルダーにコピー
 Ask me|询问我|詢問我|確認する
-Unknown files stay on the source and are not copied. They are listed in drive details, not reported as errors.|未知文件保留在来源上，不会被复制。它们会列在详细信息中，不会作为错误报告。|未知檔案保留在來源上，不會被複製。它們會列在詳細資訊中，不會作為錯誤回報。|不明なファイルはソースに残り、コピーされません。詳細情報に一覧表示され、エラーとしては報告されません。
-Unknown files are copied to an Other files folder on each destination.|未知文件会复制到每个目标上的“其他文件”文件夹。|未知檔案會複製到每個目的地上的「其他檔案」資料夾。|不明なファイルは各保存先の「その他のファイル」フォルダーにコピーされます。
-Unknown formats appear in All errors so you can decide for each extension.|未知格式会显示在“所有错误”中，供你按扩展名逐一决定。|未知格式會顯示在「所有錯誤」中，供你依副檔名逐一決定。|不明な形式は「すべてのエラー」に表示され、拡張子ごとに扱いを決められます。
-Camera system files, such as card indexes, are always skipped. Rules saved below for specific extensions take priority.|卡索引等相机系统文件始终会被跳过。下方为特定扩展名保存的规则优先。|卡片索引等相機系統檔案一律略過。下方為特定副檔名儲存的規則優先。|カードのインデックスなどのカメラのシステムファイルは常にスキップされます。下に保存した拡張子ごとのルールが優先されます。
-No saved rules. The setting above applies to every unknown extension.|没有已保存的规则。上方设置适用于所有未知扩展名。|沒有已儲存的規則。上方設定適用於所有未知副檔名。|保存されたルールはありません。上の設定がすべての不明な拡張子に適用されます。
 Skipped {count} camera system files ({names})|已跳过 {count} 个相机系统文件（{names}）|已略過 {count} 個相機系統檔案（{names}）|カメラのシステムファイル {count} 件をスキップ（{names}）
 {count} unknown files skipped|已跳过 {count} 个未知文件|已略過 {count} 個未知檔案|不明なファイル {count} 件をスキップ
 {count} unknown files copied to other folders|{count} 个未知文件复制到其他文件夹|{count} 個未知檔案複製到其他資料夾|不明なファイル {count} 件を別フォルダーにコピー
 Camera system files|相机系统文件|相機系統檔案|カメラのシステムファイル
-Card indexes and housekeeping data written by the camera or card. Your photos and videos never need them.|由相机或存储卡写入的索引和管理数据。你的照片和视频不需要它们。|由相機或記憶卡寫入的索引與管理資料。你的照片和影片不需要它們。|カメラやカードが書き込むインデックスや管理用データです。写真や動画の閲覧には必要ありません。
-Not photos, videos or known companions. Choose how they are handled in Settings.|不是照片、视频或已知伴随文件。可在设置中选择处理方式。|不是照片、影片或已知伴隨檔案。可在設定中選擇處理方式。|写真、動画、既知の関連ファイルのいずれでもありません。扱い方は設定で選べます。
 Lenses from EXIF metadata|EXIF 元数据中的镜头|EXIF 中繼資料中的鏡頭|EXIF メタデータのレンズ
 No lenses identified yet.|尚未识别出镜头。|尚未識別出鏡頭。|まだレンズは特定されていません。
 No lens information in checked files.|已检查的文件中没有镜头信息。|已檢查的檔案中沒有鏡頭資訊。|確認したファイルにレンズ情報はありません。
@@ -504,23 +398,16 @@ New drive connected|已连接新驱动器|已連接新磁碟|新しいドライ�
 New drives connected|已连接多个新驱动器|已連接多個新磁碟|新しいドライブが接続されました
 Import from this drive|从此驱动器导入|從此磁碟匯入|このドライブから読み込む
 Don't import|不导入|不匯入|読み込まない
-Looks like a camera card: it has camera folders such as DCIM.|看起来是相机存储卡：包含 DCIM 等相机文件夹。|看起來是相機記憶卡：包含 DCIM 等相機資料夾。|カメラのカードのようです：DCIM などのカメラフォルダーがあります。
-Not recognized as a camera card: no camera folders such as DCIM were found.|未识别为相机存储卡：没有找到 DCIM 等相机文件夹。|未辨識為相機記憶卡：沒有找到 DCIM 等相機資料夾。|カメラのカードとして認識されません：DCIM などのカメラフォルダーが見つかりません。
-Drives you import from are remembered and selected automatically next time. Change this on the source card or in Settings.|你选择导入的驱动器会被记住，下次自动选中。可在来源卡片或设置中更改。|你選擇匯入的磁碟會被記住，下次自動選取。可在來源卡片或設定中變更。|読み込むと選んだドライブは記憶され、次回は自動的に選択されます。ソースカードまたは設定で変更できます。
 Not selected · won't be imported|未选中 · 不会导入|未選取 · 不會匯入|未選択 · 読み込みません
 Import this drive|导入此驱动器|匯入此磁碟|このドライブを読み込む
 Start imports ({count})|开始导入（{count}）|開始匯入（{count}）|インポート開始（{count}）
 Remembered drives|已记住的驱动器|已記住的磁碟|記憶したドライブ
-Drives you chose to import from are selected automatically when they connect again.|你选择导入过的驱动器再次连接时会自动选中。|你選擇匯入過的磁碟再次連接時會自動選取。|読み込むと選んだドライブは、再接続時に自動的に選択されます。
 Last selected {date}|上次选中：{date}|上次選取：{date}|最終選択：{date}
 Forget|忘记|忘記|削除
 Forget {name}|忘记 {name}|忘記 {name}|{name} を削除
-No remembered drives yet. You'll be asked about each new drive when it connects.|还没有已记住的驱动器。每个新驱动器连接时都会询问你。|還沒有已記住的磁碟。每個新磁碟連接時都會詢問你。|記憶したドライブはまだありません。新しいドライブを接続するたびに確認します。
 File metadata|文件元数据|檔案中繼資料|ファイルのメタデータ
 Close metadata|关闭元数据|關閉中繼資料|メタデータを閉じる
-Reading metadata never changes your file.|读取元数据不会更改你的文件。|讀取中繼資料不會變更你的檔案。|メタデータの読み取りでファイルが変更されることはありません。
 Show metadata for {name}|显示 {name} 的元数据|顯示 {name} 的中繼資料|{name} のメタデータを表示
-Select a filename to see its EXIF metadata.|选择文件名以查看其 EXIF 元数据。|選擇檔名以查看其 EXIF 中繼資料。|ファイル名を選択すると EXIF メタデータを表示します。
 Total progress|总进度|總進度|全体の進捗
 Sources|来源|來源|ソース
 General|通用|一般|一般
@@ -533,7 +420,6 @@ No ignored drives.|没有已忽略的驱动器。|沒有已忽略的磁碟。|�
 Stop ignoring|取消忽略|取消忽略|無視をやめる
 Stop ignoring {name}|取消忽略 {name}|取消忽略 {name}|{name} の無視をやめる
 Import from {name}?|要从 {name} 导入吗？|要從 {name} 匯入嗎？|{name} から読み込みますか？
-Your answer is remembered. Change it any time in Drives.|你的选择会被记住，可随时在“驱动器”中更改。|你的選擇會被記住，可隨時在「磁碟」中變更。|選択は記憶されます。「ドライブ」でいつでも変更できます。
 Select|选择|選取|選択
 Don't import this drive|不导入此驱动器|不匯入此磁碟|このドライブを読み込まない
 Pause|暂停|暫停|一時停止
@@ -541,7 +427,6 @@ Resume|继续|繼續|再開
 Pause {name}|暂停 {name}|暫停 {name}|{name} を一時停止
 Paused|已暂停|已暫停|一時停止中
 Continue|继续|繼續|再開
-{count} originals ({size}) are kept so this organization can be undone.|保留了 {count} 个原始文件（{size}），以便撤销此次整理。|保留了 {count} 個原始檔案（{size}），以便復原此次整理。|この整理を元に戻せるよう、元のファイル {count} 件（{size}）を保持しています。
 Undo organization|撤销整理|復原整理|整理を元に戻す
 Delete recovery files|删除恢复文件|刪除復原檔案|復元用ファイルを削除
 Finish or undo this organization before deleting its recovery files.|请先完成或撤销此整理，然后再删除其恢复文件。|請先完成或復原此整理，然後再刪除其復原檔案。|復元用ファイルを削除する前に、この整理を完了するか元に戻してください。
@@ -557,13 +442,10 @@ Replaced by a later organization|已被之后的整理取代|已被之後的整�
 Undone|已撤销|已復原|元に戻し済み
 Release {size}|释放 {size}|釋放 {size}|{size} を解放
 Release {size}?|要释放 {size} 吗？|要釋放 {size} 嗎？|{size} を解放しますか？
-The kept originals are permanently removed from this destination. After this, the organization can't be undone.|保留的原始文件将从此目标永久删除。之后将无法撤销此次整理。|保留的原始檔案將從此目的地永久刪除。之後將無法復原此次整理。|保持している元のファイルをこの保存先から完全に削除します。この後は整理を元に戻せません。
 Cancel|取消|取消|キャンセル
 Verify each copy after copying|复制后校验每个副本|複製後驗證每個副本|コピー後に各コピーを検証
-Reads every copied file again and compares its checksum before it counts as done. Turning this off is faster but skips that second read; source checksums and change checks still apply.|在视为完成前，重新读取每个已复制文件并比对校验和。关闭后速度更快，但会跳过这次重读；来源校验和与变更检查仍会执行。|在視為完成前，重新讀取每個已複製檔案並比對總和檢查碼。關閉後速度更快，但會略過這次重讀；來源總和檢查碼與變更檢查仍會執行。|完了とみなす前に、コピーした各ファイルを読み直してチェックサムを照合します。オフにすると速くなりますが、この再読み込みを省略します。ソースのチェックサムと変更チェックは引き続き行われます。
 Verification after copy is off|复制后校验已关闭|複製後驗證已關閉|コピー後の検証はオフです
 {completed} of {total} files copied|已复制 {completed}/{total} 个文件|已複製 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピー済み
-{completed} of {total} files verified|已校验 {completed}/{total} 个文件|已驗證 {completed}/{total} 個檔案|{total} 件中 {completed} 件を検証済み
 {count} failed|{count} 个失败|{count} 個失敗|{count} 件失敗
 Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン
@@ -654,7 +536,6 @@ Large sizes shrink to fit small windows.|窗口较小时，大字号会自动缩
 Choose whether to import this drive.|请选择是否导入此驱动器。|請選擇是否匯入此磁碟。|このドライブを読み込むか選んでください。
 Decide later|稍后决定|稍後決定|あとで決める
 Organizing now|正在整理|正在整理|整理中
-Preparing organization…|正在准备整理…|正在準備整理…|整理を準備中…
 Organizing|正在整理|正在整理|整理中
 Listing files|正在列出文件|正在列出檔案|ファイルを一覧中
 Checking files|正在检查文件|正在檢查檔案|ファイルを確認中
@@ -685,7 +566,6 @@ Reconnect it to choose.|重新连接后即可选择。|重新連接後即可選�
 Unplugged|已拔出|已拔出|取り外し済み
 {completed} of {total} files moved|已移动 {completed}/{total} 个文件|已移動 {completed}/{total} 個檔案|{total} 件中 {completed} 件を移動済み
 {completed} of {total} files organized|已整理 {completed}/{total} 个文件|已整理 {completed}/{total} 個檔案|{total} 件中 {completed} 件を整理済み
-{percent}% scanned|已扫描 {percent}%|已掃描 {percent}%|{percent}% スキャン済み
 Not enough space on the destination.|目标空间不足。|目的地空間不足。|保存先の空き容量が足りません。
 Free up space or choose another destination.|请释放空间或选择其他目标。|請釋放空間或選擇其他目的地。|空き容量を増やすか、別の保存先を選んでください。
 macOS didn't allow access to this location.|macOS 不允许访问此位置。|macOS 不允許存取此位置。|macOS がこの場所へのアクセスを許可しませんでした。
@@ -790,7 +670,6 @@ Starting imports|开始导入|開始匯入|読み込みの開始
 Imports start as soon as a selected drive connects.|选定的驱动器一连接就开始导入。|選定的磁碟一連接就開始匯入。|選択したドライブを接続するとすぐに読み込みを開始します。
 Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ
 Lets you choose a folder of photos as a source.|允许选择一个照片文件夹作为来源。|允許選擇一個照片資料夾作為來源。|写真フォルダーを読み込み元として選べます。
-After organizing|整理之后|整理之後|整理の後
 Settings categories|设置类别|設定類別|設定のカテゴリ
 Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
 1 file outside your folder structure|1 个文件不在文件夹结构中|1 個檔案不在資料夾結構中|フォルダー構成の外に 1 個のファイル
@@ -799,32 +678,24 @@ of {size} planned|计划共 {size}|計畫共 {size}|予定 {size} 中
 {complete} sources complete · {errors} need attention|{complete} 个来源完成 · {errors} 个需处理|{complete} 個來源完成 · {errors} 個需處理|{complete} 件完了 · {errors} 件要確認
 {size} free across destinations|目标合计剩余 {size}|目的地合計剩餘 {size}|保存先の空き容量 {size}
 {size} free|剩余 {size}|剩餘 {size}|空き {size}
-{size} total|总计 {size}|總計 {size}|合計 {size}
 Queue position {count}|队列位置 {count}|佇列位置 {count}|待機順 {count}
 Review import from {name}|审核来自 {name} 的导入|審核來自 {name} 的匯入|{name} のインポートを確認
 {name} copy progress|{name} 复制进度|{name} 複製進度|{name} のコピー進捗
 {name} scanning|正在扫描 {name}|正在掃描 {name}|{name} をスキャン中
-{completed} / {total} files|{completed} / {total} 个文件|{completed} / {total} 個檔案|{completed} / {total} ファイル
-{count} files need attention|{count} 个文件需要处理|{count} 個檔案需要處理|{count} 件のファイルに確認が必要
 Show first destination in file manager|在文件管理器中显示第一目标|在檔案管理員中顯示第一目的地|1つ目の保存先をファイルマネージャーで表示
 Show second destination in file manager|在文件管理器中显示第二目标|在檔案管理員中顯示第二目的地|2つ目の保存先をファイルマネージャーで表示
-Preview {name} and metadata|预览 {name} 和元数据|預覽 {name} 與中繼資料|{name} とメタデータをプレビュー
 Companion to {name}|{name} 的伴随文件|{name} 的伴隨檔案|{name} の関連ファイル
 Copy to {folder}|复制到 {folder}|複製到 {folder}|{folder} にコピー
 Edit rule for {extension}|编辑 {extension} 的规则|編輯 {extension} 的規則|{extension} のルールを編集
 files without an extension|无扩展名的文件|無副檔名的檔案|拡張子のないファイル
 Preview of {name}|{name} 的预览|{name} 的預覽|{name} のプレビュー
 {name}: import preview|{name}：导入预览|{name}：匯入預覽|{name}：インポートのプレビュー
-{count} moves to write|待写入 {count} 次移动|待寫入 {count} 次移動|移動予定 {count} 件
 {count} copies to write|待写入 {count} 份副本|待寫入 {count} 份副本|コピー予定 {count} 件
 {count} already verified|{count} 个已校验|{count} 個已驗證|{count} 件検証済み
 {size} to organize|待整理 {size}|待整理 {size}|整理予定 {size}
 {size} to copy|待复制 {size}|待複製 {size}|コピー予定 {size}
 Destination {count}: |目标 {count}：|目的地 {count}：|保存先 {count}：
 Files {start}–{end} of {total}|文件 {start}–{end}，共 {total} 个|檔案 {start}–{end}，共 {total} 個|{total} 件中 {start}〜{end} 件
-{count} sources ready. Use Start imports to check and copy their files.|{count} 个来源已就绪。点击「开始导入」检查并复制文件。|{count} 個來源已就緒。點選「開始匯入」檢查並複製檔案。|{count} 件のソースが準備済みです。「インポート開始」で確認とコピーを行います。
-{count} sources processing. Originals stay on the source.|正在处理 {count} 个来源。原文件保留在来源中。|正在處理 {count} 個來源。原始檔案保留在來源中。|{count} 件を処理中です。オリジナルはソースに残ります。
-{count} sources processing, {queued} waiting in the queue. Originals stay on the source.|正在处理 {count} 个来源，{queued} 个排队中。原文件保留在来源中。|正在處理 {count} 個來源，{queued} 個排隊中。原始檔案保留在來源中。|{count} 件を処理中、{queued} 件が待機中です。オリジナルはソースに残ります。
 {count} sources connected. Choose a backup destination to enable imports.|已连接 {count} 个来源。选择备份目标以启用导入。|已連接 {count} 個來源。選擇備份目的地以啟用匯入。|{count} 件接続中です。バックアップ先を選ぶとインポートできます。
 {count} sources connected. Choose two backup destinations to enable imports.|已连接 {count} 个来源。选择两个备份目标以启用导入。|已連接 {count} 個來源。選擇兩個備份目的地以啟用匯入。|{count} 件接続中です。2つのバックアップ先を選ぶとインポートできます。
 
@@ -836,8 +707,6 @@ Scan all|扫描全部|掃描全部|すべてスキャン
 Scanning…|正在扫描…|正在掃描…|スキャン中…
 Scan to see formats and counts|扫描以查看格式和数量|掃描以檢視格式與數量|スキャンで形式と件数を表示
 Reading media formats and counts…|正在读取媒体格式和数量…|正在讀取媒體格式與數量…|メディアの形式と件数を取得中…
-Use Review to inspect camera files. Read-only scans are unavailable over USB.|请使用「审核」检查相机文件。USB 连接不支持只读扫描。|請使用「審核」檢查相機檔案。USB 連接不支援唯讀掃描。|カメラのファイルは「確認」で調べてください。USB経由の読み取り専用スキャンには対応していません。
-Read-only scans are unavailable over USB. Use Review to inspect camera files.|USB 连接不支持只读扫描，请使用「审核」检查相机文件。|USB 連接不支援唯讀掃描，請使用「審核」檢查相機檔案。|USB経由の読み取り専用スキャンには対応していません。「確認」でカメラのファイルを調べてください。
 Read photo and video formats without copying files|只读取照片和视频格式，不复制文件|僅讀取照片與影片格式，不複製檔案|コピーせずに写真・動画の形式を確認
 Media summary for {name}|{name} 的媒体摘要|{name} 的媒體摘要|{name} のメディア概要
 {size} media|媒体 {size}|媒體 {size}|メディア {size}
@@ -846,28 +715,20 @@ Photos|照片|照片|写真
 {count} files · {size}|{count} 个文件 · {size}|{count} 個檔案 · {size}|{count} ファイル · {size}
 No photos found.|未找到照片。|未找到照片。|写真が見つかりません。
 No videos found.|未找到视频。|未找到影片。|動画が見つかりません。
-Organize your collection.|整理你的照片库。|整理你的照片庫。|コレクションを整理。
-Choose a folder structure, then review the changes to your existing files.|选择文件夹结构，然后审核现有文件的更改。|選擇資料夾結構，然後審核現有檔案的變更。|フォルダー構造を選び、既存ファイルへの変更を確認します。
 Existing files, new structure|现有文件，全新结构|現有檔案，全新結構|既存ファイルを新しい構造に
-Scan the selected destination and preview each existing path beside its proposed new path. Your current backup folder and folder structure settings are used.|扫描所选目标，对照预览现有路径和建议的新路径。使用当前备份文件夹和结构设置。|掃描所選目的地，對照預覽現有路徑與建議的新路徑。使用目前備份資料夾與結構設定。|選択した保存先をスキャンし、現在と新しいパスを並べて表示します。現在のバックアップフォルダーと構造設定を使用します。
 Organization destination|整理目标|整理目的地|整理する保存先
 Scan existing files in|扫描此处的现有文件|掃描此處的現有檔案|既存ファイルのスキャン先
 New structure under|新结构的根目录|新結構的根目錄|新しい構造の保存先
 Choose a backup location in Settings to begin.|在设置中选择备份位置即可开始。|在設定中選擇備份位置即可開始。|設定でバックアップ先を選択してください。
-Preview first. When you apply the review, each new file is verified before its original is retained in a hidden recovery store on the same destination.|先预览。应用审核时，每个新文件都会先校验，然后将原文件保留在同一目标的隐藏恢复存储中。|先預覽。套用審核時，每個新檔案都會先驗證，然後將原始檔案保留在同一目的地的隱藏復原儲存區中。|まずプレビューしてください。適用時に新しいファイルを検証した後、元のファイルを同じ保存先の非表示の復元領域に保持します。
 Organization recovery|整理恢复|整理復原|整理の復元
 Needs recovery|需要恢复|需要復原|復元が必要
 {completed} of {total} files verified|已校验 {completed} / {total} 个文件|已驗證 {completed} / {total} 個檔案|{total} 件中 {completed} 件検証済み
-Originals are retained in the hidden recovery store after their new files are verified. Rechecking verifies the saved operation before continuing.|新文件校验后，原文件保留在隐藏恢复存储中。重新检查会在继续前验证已保存的操作。|新檔案驗證後，原始檔案保留在隱藏復原儲存區中。重新檢查會在繼續前驗證已儲存的操作。|新しいファイルの検証後、元のファイルを非表示の復元領域に保持します。再確認では保存済みの処理を検証してから続行します。
-No saved organization operations found. Recheck after reconnecting a destination.|未找到已保存的整理操作。重新连接目标后再次检查。|未找到已儲存的整理操作。重新連接目的地後再次檢查。|保存された整理処理はありません。保存先を再接続して再確認してください。
 Review your new folder structure|审核新的文件夹结构|審核新的資料夾結構|新しいフォルダー構造を確認
-Compare existing and new paths. No files change until you apply this review.|对比现有路径和新路径，应用此次审核前不会更改文件。|對比現有路徑與新路徑，套用此次審核前不會變更檔案。|現在と新しいパスを比較してください。適用するまでファイルは変更しません。
 {count} files to organize|待整理 {count} 个文件|待整理 {count} 個檔案|整理予定 {count} ファイル
 Existing path|现有路径|現有路徑|現在のパス
 New path|新路径|新路徑|新しいパス
 Organize|整理|整理|整理
 Apply reviewed organization|应用已审核的整理|套用已審核的整理|確認した整理を適用
-Each new file is verified before its original is retained in a hidden recovery store on this destination.|每个新文件先经过校验，然后将原文件保留在此目标的隐藏恢复存储中。|每個新檔案先經過驗證，然後將原始檔案保留在此目的地的隱藏復原儲存區中。|新しいファイルを検証した後、元のファイルをこの保存先の非表示の復元領域に保持します。
 Scan media on {name}|扫描 {name} 上的媒体|掃描 {name} 上的媒體|{name} のメディアをスキャン
 Media camera information|媒体相机信息|媒體相機資訊|メディアのカメラ情報
 Camera metadata|相机元数据|相機中繼資料|カメラのメタデータ
@@ -883,9 +744,7 @@ Confirmed by EXIF metadata|EXIF 元数据已确认|EXIF 中繼資料已確認|EX
 No camera models confirmed yet.|尚未确认相机型号。|尚未確認相機型號。|カメラ機種はまだ確認されていません。
 No camera models confirmed in checked files.|已检查的文件中未确认相机型号。|已檢查的檔案中未確認相機型號。|確認したファイルにカメラ機種の記録がありません。
 Unknown file formats|未知文件格式|未知檔案格式|不明なファイル形式
-{name}: {count} unrecognized files are excluded. Photo and video imports can continue.|{name}：已排除 {count} 个无法识别的文件。照片和视频导入可以继续。|{name}：已排除 {count} 個無法辨識的檔案。照片和影片匯入可以繼續。|{name}：不明な {count} ファイルを除外しています。写真と動画のインポートは続行できます。
 Keep unknown files excluded|继续排除未知文件|繼續排除未知檔案|不明なファイルの除外を保存
-This choice is remembered for each extension. Camera cards import only media and its companions.|此选择会按扩展名保存。相机卡仅导入媒体及其关联文件。|此選擇會依副檔名儲存。相機卡僅匯入媒體及其關聯檔案。|拡張子ごとにこの選択を保存します。カメラカードからはメディアと付随ファイルのみをインポートします。
 Choose folders…|选择文件夹…|選擇資料夾…|フォルダーを選択…
 Use whole destination|使用整个目标|使用整個目的地|保存先全体を使用
 Only the selected folders will be scanned.|仅扫描选定的文件夹。|僅掃描選取的資料夾。|選択したフォルダーのみをスキャンします。
@@ -933,8 +792,6 @@ See All errors for details.|请在“所有错误”中查看详情。|請在「
 Organize now|立即整理|立即整理|今すぐ整理
 Review changes…|预览更改…|預覽變更…|変更を確認…
 Library organization|媒体库整理|媒體庫整理|ライブラリの整理
-Organization waits for queued imports to finish. Every new file is verified before its original is retained in the recovery store. Use Review changes to inspect the paths first.|整理会等待排队的导入完成。每个新文件都会经过验证，然后将原文件保留在恢复目录中。可使用“预览更改”先检查路径。|整理會等待佇列中的匯入完成。每個新檔案都會經過驗證，然後將原始檔案保留在復原目錄中。可使用「預覽變更」先檢查路徑。|整理は待機中のインポートが完了してから始まります。新しいファイルを検証してから、オリジナルを復旧領域に保持します。先にパスを確認するには「変更を確認」を使用してください。
-How camera folders are chosen|如何选择相机文件夹|如何選擇相機資料夾|カメラ別フォルダーの選択方法
 Import: copy, source untouched|导入：复制，来源保持不变|匯入：複製，來源保持不變|インポート：コピー、ソースはそのまま
 Organize: move, source removed|整理：移动，来源文件已移除|整理：移動，來源檔案已移除|整理：移動、ソースから削除
 Emptied source folders are removed|已清空的来源文件夹会被删除|已清空的來源資料夾會被刪除|空になった元フォルダーは削除されます

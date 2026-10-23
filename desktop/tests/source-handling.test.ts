@@ -11,7 +11,7 @@ import {destinationEntries} from '../core/allocation';
 import {sourcePolicy,freshOrganizeOptions,organizeDefaults} from '../run-policy';
 import {normalizePreferences} from '../preferences';
 import {I18nProvider,languages,createTranslator} from '../renderer/i18n';
-import {DeleteOriginals,OriginalsConfirm,nextDeleteRecoveryStep} from '../renderer/RootApp';
+import {DeleteOriginals,OriginalsConfirm,nextConfirmStep} from '../renderer/RootApp';
 import type {Job,Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -84,11 +84,11 @@ const job:Job={id:'j1',source:{id:'folder:/x',name:'Shoot',path:'/x',transport:'
 const render=(child:ReturnType<typeof createElement>,language:'en'|'zh-Hans'|'zh-Hant'|'ja'='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
 
 test('Delete originals asks twice, names count and size, and only the second confirmation deletes',()=>{
- const first=nextDeleteRecoveryStep('closed','open');
- const second=nextDeleteRecoveryStep(first.step,'confirm');
+ const first=nextConfirmStep('closed','open');
+ const second=nextConfirmStep(first.step,'confirm');
  assert.deepEqual([first,second],[{step:'first',delete:false},{step:'second',delete:false}]);
- assert.deepEqual(nextDeleteRecoveryStep(second.step,'confirm'),{step:'closed',delete:true});
- assert.equal(nextDeleteRecoveryStep('first','cancel').delete,false);
+ assert.deepEqual(nextConfirmStep(second.step,'confirm'),{step:'closed',delete:true});
+ assert.equal(nextConfirmStep('first','cancel').delete,false);
  for(const language of languages){
   const t=createTranslator(language);
   const card=render(createElement(DeleteOriginals,{job,act:()=>{}}),language);
@@ -108,4 +108,14 @@ test('Delete originals asks twice, names count and size, and only the second con
  // Nothing to confirm until the count is known, or when it is zero.
  const measuring=render(createElement(OriginalsConfirm,{step:'first',name:'Shoot',onCancel:()=>{},onConfirm:()=>{}}));
  assert.match(measuring.match(/<button[^>]*button-danger[^>]*>/)![0],/disabled/);
+});
+
+test('a stopped Delete originals still reports every file it removed, and keeps the rest',async t=>{
+ const {source,files}=await imported(t);
+ const control=new AbortController();
+ const result=await deleteOriginals(source,files,{signal:control.signal,onProgress:completed=>{if(completed===1)control.abort();}});
+ assert.equal(result.stopped,true);
+ assert.equal(result.deleted.length+result.kept.length,files.length,'every file is accounted for');
+ for(const item of result.deleted)await assert.rejects(fs.stat(item.source),'reported deleted, so it is gone');
+ for(const item of result.kept){assert.equal(item.reason,'stopped');assert.ok((await fs.stat(item.source)).isFile(),'kept, so it is still there');}
 });

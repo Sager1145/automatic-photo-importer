@@ -140,6 +140,18 @@ test('a second scan reads no metadata and no file again, and a changed file is r
   const changed = await scanDuplicates(root, await deps());
   assert.equal(counter.reads, 3); assert.equal(changed.groups.length, 0);
 });
+test('a failed metadata read is not remembered: the next full scan reads that file again', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'one'); await write(root, 'b/two.JPG', 'two');
+  const reads: string[] = []; let fail = true;
+  const deps = async () => ({ metadata: async (target: string): Promise<Metadata> => { reads.push(path.basename(target)); if (fail && path.basename(target) === 'one.JPG') throw new Error('EIO'); return { fields: {} }; }, index: await destinationIndex(root, await identity(root)) });
+  await scanDuplicates(root, await deps());
+  assert.deepEqual(reads.slice().sort(), ['one.JPG', 'two.JPG']);
+  fail = false; reads.length = 0;
+  await scanDuplicates(root, await deps());
+  assert.deepEqual(reads, ['one.JPG'], 'only the file whose read failed is read again');
+});
+
 test('copies on different destinations are never paired: each root is scanned alone', async t => {
   const base = await library(t), one = path.join(base, 'disk1'), two = path.join(base, 'disk2');
   for (const root of [one, two]) await write(root, '2024/202405/cam/IMG_1.JPG', 'the same photo');

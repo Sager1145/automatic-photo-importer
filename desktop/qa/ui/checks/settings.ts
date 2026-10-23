@@ -78,7 +78,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
    await h.click('[data-testid=activity-close]');await h.until('animated activity close',"document.querySelector('.activity-dialog')===null");
    assert.equal((await savedPreferences(ctx.root)).editedFolder,'Finished','An invalid folder must not be persisted');
   }finally{
-   await h.action({type:'clearError'});await h.prefs({editedFolder:'editied'});
+   await h.action({type:'clearErrors'});await h.prefs({editedFolder:'editied'});
   }
   await h.nav('Settings');await h.settingsTab('folders');
   await h.until('restored edited exports folder',`${inputValue('editied')}?.value==='editied'&&document.querySelector('[data-testid=edited-export-preview]')?.textContent.includes('2026202610editiedNikon Z6III')`);

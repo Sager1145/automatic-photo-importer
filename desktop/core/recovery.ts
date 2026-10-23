@@ -1168,7 +1168,10 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   // A finalize in progress still owns its files: its pointers stay until it finishes.
   await writeSiblingPointers(m);await recordHandOffs(m,state,(completed,total,file)=>onProgress?.({step:'later',completed,total,file}),signal);
   // Check every entry before authorizing the first deletion, including entries
-  // that stay at their original paths and previously finalized destinations.
+  // that stay at their original paths and previously finalized destinations. A file's content is read here only
+  // where its stat can prove it unchanged until its release (a real change time: not FAT or exFAT), so the release
+  // reuses that read. Elsewhere this pass checks stats only, and the file is read once, right before its release.
+  const upFront=async(file:string)=>{const stat=await maybeStat(file);return !!stat&&provable(stat);};
   for(const [index,entry]of m.entries.entries()){
    checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
    if(state.undone.size)throw new Error('This organization was undone');
@@ -1176,14 +1179,14 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
    if(state.renamed.has(index)){const target=await maybeStat(entry.destination);if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
-   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Finalized destination unavailable');tick();continue;}
+   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,await upFront(entry.destination),proofs))throw new Error('Finalized destination unavailable');tick();continue;}
    const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!entry.move)await parents(entry,m);
    if(entry.move){
     if(source)throw new Error('Original path reappeared; retained originals preserved');
-    if(saved){await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
+    if(saved){await validateOriginal(saved,entry,scopeOf(m),true,signal,await upFront(saved),proofs);tick();}
     else if(!state.finalizing.has(index))throw new Error('Retained original unavailable without a finalization intent');
-   }else if(!state.finalizing.has(index))await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);
-   if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Destination unavailable; retained originals preserved');
+   }else if(!state.finalizing.has(index))await validateOriginal(entry.source,entry,m.source,false,signal,await upFront(entry.source),proofs);
+   if(!await targetMatches(entry,m,signal,await upFront(entry.destination),proofs))throw new Error('Destination unavailable; retained originals preserved');
    tick();
   }
   const result:OrganizationFinalization={removed:0,bytes:0,finalized:0,handedOff:0};

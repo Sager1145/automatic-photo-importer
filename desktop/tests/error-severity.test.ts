@@ -35,16 +35,16 @@ test('clearing one severity never clears the other',()=>{
  const all=gatherErrors(value),errors=all.filter(item=>item.severity==='error'),warns=all.filter(item=>item.severity==='warning');
  assert.equal(errors.length,2);assert.equal(warns.length,2);
  log.update(all);
- clearErrors(log,value,undefined,'warning');
+ clearErrors(log,value,{severity:'warning'});
  assert.deepEqual(log.update(gatherErrors(value)).cleared.sort(),warns.map(item=>item.id).sort(),'only warnings cleared');
  assert.ok(value.error,'the app error is untouched');
- clearErrors(log,value,errors[0]!.id,'warning');
+ clearErrors(log,value,{ids:[errors[0]!.id],severity:'warning'});
  assert.equal(log.update(gatherErrors(value)).cleared.length,2,'a warning-scoped clear ignores an error id');
- clearErrors(log,value,undefined,'error');
+ clearErrors(log,value,{severity:'error'});
  assert.equal(value.error,undefined);
  assert.equal(log.update(gatherErrors(value)).cleared.length,3,'the app error is gone, the rest are cleared');
  const other=new ErrorLog();other.update(all);
- clearErrors(other,value,undefined,'error');
+ clearErrors(other,value,{severity:'error'});
  assert.deepEqual(other.update(gatherErrors(value)).cleared.sort(),errors.filter(item=>item.kind!=='app').map(item=>item.id).sort(),'only errors cleared');
 });
 
@@ -90,4 +90,19 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
  const calm=state({jobs:[job({errors:[message('error.userSkipped')]})]});calm.errorLog=new ErrorLog().update(gatherErrors(calm));
  const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
  assert.ok(!html.includes('sidebar-errors')&&html.includes('sidebar-warnings'));
+});
+
+test('the dashboard counts the warnings All errors shows: a cleared warning is not counted',async()=>{
+ const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider}=await import('../renderer/i18n');
+ const {ImportDashboard}=await import('../renderer/RootApp');
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
+ const value=state({jobs:[job({errors:[message('error.userSkipped'),message('error.folderCleanup',{error:text('x')})]})]});
+ value.errorLog=new ErrorLog().update(gatherErrors(value));
+ assert.match(render(value),/2 warnings/);
+ const [first]=gatherErrors(value).filter(item=>item.severity==='warning');
+ value.errorLog={...value.errorLog,cleared:[first!.id]};
+ assert.match(render(value),/1 warnings/);
+ value.errorLog={...value.errorLog,cleared:gatherErrors(value).map(item=>item.id)};
+ assert.doesNotMatch(render(value),/warnings/);
 });

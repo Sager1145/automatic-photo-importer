@@ -10,14 +10,14 @@ import {
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
   ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
   Activity, EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
-  Circle, LayoutGrid, List, ListOrdered, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
+  Circle, LayoutGrid, List, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, InventoryFile, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { errorPath, filePath, formatMessage, message, text, type Message } from '../messages';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
-import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
+import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
@@ -55,9 +55,11 @@ const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
   { value: 'flat', title: 'Everything in the camera folder', detail: 'Photos and videos side by side.' },
   { value: 'video-root', title: 'A separate video backup folder', detail: 'Videos go to their own backup folder beside the photo backup folder.' },
 ];
-function samplePath(template: string): string[] { return template.replaceAll('{yearMonthName}', '2026-10 October').replaceAll('{monthName}', '10 October').replaceAll('{year}', '2026').replaceAll('{yyyymm}', '202610').replaceAll('{month}', '10').replaceAll('{day}', '20').replaceAll('{yyyyMMdd}', '20261020').replaceAll('{camera}', 'Nikon Z6III').split('/').filter(Boolean); }
+// The Settings previews expand the templates exactly as imports do, for one sample capture.
+const sampleValues = templateValues(new Date('2026-10-20T00:00:00Z'), 'Nikon Z6III');
+function samplePath(template: string): string[] { return expandTemplate(template, sampleValues).split('/').filter(Boolean); }
 const defaultFolderPath = parseTemplate('{year}/{yyyymm}/{camera}')!;
-const monthSample = ({ full, english }: FolderPath['month']) => english ? (full ? '2026-10 October' : '10 October') : (full ? '202610' : '10');
+const monthSample = (month: FolderPath['month']) => expandTemplate(monthToken(month), sampleValues);
 /** Date first or camera first, then a toggle per date level. It edits the folder template, the one stored form. */
 function FolderPathBuilder({ template, onChange, testId }: { template: string; onChange: (template: string) => void; testId: string }) {
   const { t } = useTranslation();
@@ -189,22 +191,29 @@ export function sourceCapacity(state: AppState, source: Source): SourceCapacity 
   const holder = holders[0];
   return holder ? { total: holder.total, free: holder.free, drive: holder.name } : {};
 }
+/** The one reading of a drive's total and free bytes: free is clamped into 0..total, `fraction` is the used share and `low` is above 90% used. */
+export function capacityUse(total?: number, free?: number): { known: boolean; used: number; free: number; fraction: number; low: boolean } {
+  if (!total || !Number.isFinite(total) || total < 0 || free === undefined || !Number.isFinite(free)) return { known: false, used: 0, free: 0, fraction: 0, low: false };
+  const available = Math.max(0, Math.min(total, free)), fraction = (total - available) / total;
+  return { known: true, used: total - available, free: available, fraction, low: fraction > .9 };
+}
 export function CapacityBar({ total, free, inventory, scanning, unavailable = 'Capacity unavailable', driveName }: { total?: number; free?: number; inventory?: Inventory; scanning?: boolean; unavailable?: string; driveName?: string }) {
   const { t, formatBytes: bytes } = useTranslation();
-  if (!total || !Number.isFinite(total) || total < 0 || free === undefined || !Number.isFinite(free)) return <div className="capacity-unavailable"><Icon icon={HardDrive} size={13} />{t(unavailable)}</div>;
-  const available = Math.max(0,Math.min(total,free)), used=total-available;
+  const use = capacityUse(total, free);
+  if (!use.known) return <div className="capacity-unavailable"><Icon icon={HardDrive} size={13} />{t(unavailable)}</div>;
+  const { free: available, used, fraction, low } = use, size = total!;
   const classified=inventory?formatSegments(inventory):[];
   const classifiedBytes=classified.reduce((sum,item)=>sum+item.size,0);
   // Logical media sizes may exceed physical usage (compression/shared extents).
   // Keep the meter within actual used capacity; the legend reports scanned sizes.
   const scale=classifiedBytes>used&&classifiedBytes?used/classifiedBytes:1;
-  const segments=[...classified.map(item=>({...item,width:item.size*scale/total*100,label:item.kind})),{kind:'other',color:'var(--storage-used)',size:Math.max(0,used-classifiedBytes*scale),width:Math.max(0,used-classifiedBytes*scale)/total*100,label:inventory?t('Other or unscanned'):t('Used')}].filter(item=>item.width>0);
-  const percent=used/total*100;
-  return <div className={`capacity storage-capacity ${percent>90?'capacity-low':''}`} data-testid="storage-capacity">
-    <div className="storage-heading"><span>{t("{free} free of {total}",{free:bytes(available),total:bytes(total)})}{driveName ? ` · ${driveName}` : ''}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
-    <div className="storage-track" role="meter" aria-label={t("Storage used")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{used} used, {free} free, {total} total",{used:bytes(used),free:bytes(available),total:bytes(total)})}>
+  const segments=[...classified.map(item=>({...item,width:item.size*scale/size*100,label:item.kind})),{kind:'other',color:'var(--storage-used)',size:Math.max(0,used-classifiedBytes*scale),width:Math.max(0,used-classifiedBytes*scale)/size*100,label:inventory?t('Other or unscanned'):t('Used')}].filter(item=>item.width>0);
+  const percent=fraction*100;
+  return <div className={`capacity storage-capacity ${low?'capacity-low':''}`} data-testid="storage-capacity">
+    <div className="storage-heading"><span>{t("{free} free of {total}",{free:bytes(available),total:bytes(size)})}{driveName ? ` · ${driveName}` : ''}</span>{scanning&&<span className="storage-scanning">{t("Scanning…")}</span>}</div>
+    <div className="storage-track" role="meter" aria-label={t("Storage used")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{used} used, {free} free, {total} total",{used:bytes(used),free:bytes(available),total:bytes(size)})}>
       {segments.map(segment=><span key={segment.kind} className="storage-segment" data-storage-kind={segment.kind} title={`${segment.label}: ${bytes(segment.size)}`} style={{width:`${segment.width}%`,background:segment.color}} />)}
-      <span className="storage-free" data-storage-kind="free" style={{width:`${available/total*100}%`}} title={t("{size} free",{size:bytes(available)})}>{available/total>=.18&&<span>{bytes(available)}</span>}</span>
+      <span className="storage-free" data-storage-kind="free" style={{width:`${available/size*100}%`}} title={t("{size} free",{size:bytes(available)})}>{available/size>=.18&&<span>{bytes(available)}</span>}</span>
     </div>
     <div className="storage-legend">{segments.map(segment=><span key={segment.kind} title={`${segment.label}: ${bytes(segment.size)}`}><i style={{background:segment.color}} />{segment.label}</span>)}<span className="storage-free-label"><i />{t("{size} free",{size:bytes(available)})}</span></div>
     {classifiedBytes>used&&<small className="storage-logical-note">{t("Media categories use scanned file sizes.")}</small>}
@@ -379,7 +388,7 @@ export default function RootApp() {
   const inspect = useCallback((path: string) => {
     const request = ++previewSequence.current;
     setPreview({ path, loading: true });
-    window.importer.inspect(path).then(metadata => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); if (request === previewSequence.current) setPreview({ path, metadata, loading: false }); })
+    window.importer.exif(path).then(metadata => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); if (request === previewSequence.current) setPreview({ path, metadata, loading: false }); })
       .catch(error => { const detail=`${path}: ${String(error)}`; setInspectionErrors(errors => errors.includes(detail) ? errors : [...errors,detail]); if (request === previewSequence.current) setPreview({ path, loading: false, error: String(error) }); });
   }, []);
   function closePreview() { ++previewSequence.current; setPreview(null); }
@@ -389,7 +398,7 @@ export default function RootApp() {
   // The start-up splash finishes once the first state has been rendered (a layout effect, so the sidebar logo can be measured).
   const hasState = !!state;
   useLayoutEffect(() => { if (hasState) markAppReady(); }, [hasState]);
-  if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Try again")}</Button>}</div>;
+  if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Retry")}</Button>}</div>;
   const busy = pageBusy(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
   // The badge counts rows (groups needing attention), from the summaries; paths are never iterated.
@@ -400,7 +409,7 @@ export default function RootApp() {
     for (const detail of local) localErrorTimes.current.delete(detail);
     if (local.has(connectionError)) setConnectionError('');
     setInspectionErrors(list => list.filter(detail => !local.has(detail)));
-    if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else { const real = ids.filter(id => !id.startsWith('local:')); if (real.length) act({ type: 'clearErrorIds', ids: real, ...(severity ? { severity } : {}) }); }
+    if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else { const real = ids.filter(id => !id.startsWith('local:')); if (real.length) act({ type: 'clearErrors', ids: real, ...(severity ? { severity } : {}) }); }
   };
   return <I18nProvider language={language}><div className="app-shell">
     <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
@@ -435,17 +444,16 @@ export default function RootApp() {
 // The name gets the full first line; capacity bar and status share the second; free space is the third.
 function SidebarCapacity({ total, free, unavailable, status, activity }: { total?: number; free?: number; unavailable: string; status?: ReactNode; activity?: DriveActivity }) {
   const { t, formatBytes: bytes } = useTranslation();
-  const known = !!total && free !== undefined && Number.isFinite(total) && Number.isFinite(free);
-  const used = known ? Math.min(1, Math.max(0, 1 - free! / total!)) : 0;
+  const { known, free: left, fraction: used, low } = capacityUse(total, free);
   return <>
-    <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${used > .9 ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
-    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(free), total: bytes(total) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{t("{size} free", { size: bytes(free) })}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
+    <div className="sidebar-meta">{known ? <span className={`sidebar-capacity ${low ? 'is-low' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={t("Storage used")}><span style={{ transform: `scaleX(${used})` }} /></span> : <span className="sidebar-capacity is-unknown" />}{status}</div>
+    {known ? (() => { const full = t("{free} free of {total}", { free: bytes(left), total: bytes(total!) }); return <small className="sidebar-capacity-text" title={full}><span className="capacity-full">{full}</span><span className="capacity-short" aria-hidden="true">{t("{size} free", { size: bytes(left) })}</span></small>; })() : <small className="sidebar-capacity-text">{unavailable}</small>}
     <SidebarActivity activity={activity} />
   </>;
 }
 
 // The sidebar widens to fit "342.9 GB free of 2.00 TB" when the window has room; a line that
-// still does not fit switches to "342.9 GB/2.00 TB". Measured after every render and on resize,
+// still does not fit switches to "342.9 GB free". Measured after every render and on resize,
 // and applied to the DOM directly so measuring never re-renders.
 function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
   const fit = useCallback(() => {
@@ -614,27 +622,33 @@ function SidebarErrors({ errors, target, onErrors }: { errors?: DisplayError[]; 
   // Errors get the red count; warnings only a small amber mark that never competes with it.
   return <>{warnings.length > 0 && <button type="button" className="sidebar-warning-indicator" data-testid="sidebar-warnings" aria-label={t("{count} warnings", { count: formatNumber(warnings.length) })} title={t("Show warnings for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={Info} size={13} /></button>}{own.length > 0 && <button type="button" className="sidebar-error-badge" data-testid="sidebar-errors" data-level="error" aria-label={t("{count} errors", { count: formatNumber(own.length) })} title={t("Show errors for {name}", { name: target.name })} onClick={() => onErrors?.(target)}><Icon icon={CircleAlert} size={13} /><span>{formatNumber(own.length)}</span></button>}</>;
 }
-type ErrorExplanation = { title: string; hint?: string; severity: 'error' | 'warning' };
-// Turns a raw technical message into a plain title, a next step and a severity. Keys are translated at render time.
+type ErrorExplanation = { title: string; hint?: string };
+// Turns a raw technical message into a plain title and a next step. Keys are translated at render time.
 export function explainError(message: Message, kind: ErrorKind = 'app', language: Language = 'en'): ErrorExplanation {
   const text = formatMessage(message, 'en').toLowerCase();
-  if (kind === 'format') return { title: "Unknown file formats", severity: 'warning' };
-  if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination.", severity: 'error' };
-  if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security.", severity: 'error' };
-  if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import.", severity: 'error' };
-  if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept.", severity: 'error' };
-  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive.", severity: 'warning' };
-  if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again.", severity: 'error' };
-  if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader.", severity: 'error' };
-  if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this.", severity: 'error' };
-  if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead.", severity: 'warning' };
-  return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]!, severity: 'error' };
+  if (kind === 'format') return { title: "Unknown file formats" };
+  if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination." };
+  if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security." };
+  if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import." };
+  if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept." };
+  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive." };
+  if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again." };
+  if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader." };
+  if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this." };
+  if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead." };
+  return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]! };
+}
+// The main process rebuilds errorLog exactly when the errors change, so the same errorLog object means the same errors.
+let gathered: { log: AppState['errorLog']; errors: ReturnType<typeof gatherErrors> } | undefined;
+function loggedErrors(state: AppState) {
+  if (!state.errorLog || gathered?.log !== state.errorLog) gathered = { log: state.errorLog, errors: gatherErrors(state) };
+  return gathered.errors;
 }
 export function collectErrors(state: AppState, extra: (string | LocalError | undefined)[] = []): DisplayError[] {
   const result: DisplayError[] = [];
   for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', severity: 'error', ...(local.at ? { at: local.at } : {}) }); }
   const cleared = new Set(state.errorLog?.cleared ?? []);
-  for (const error of gatherErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
+  for (const error of loggedErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
   const t = createTranslator(state.preferences.language);
   for (const {source,inventory,backup} of sourceInventories(state)) {
     if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
@@ -702,7 +716,8 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   const live = state.jobs.filter(job => activePhases.includes(job.phase));
   const winding = live.length > 0 && live.every(job => job.stopping) && !state.jobs.some(job => job.phase === 'queued') && !scanning && !state.review && !state.busyReview;
   const stopping = winding && live.some(job => job.stopping === 'stop');
-  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
+  const showing = state.preferences.showDashboard !== false;
+  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start imports ({count})", { count: formatNumber(selectedCount) }) : t("Start imports")}</Button>}<Button icon={Square} data-testid="global-stop" disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop'})}>{stopping ? t("Stopping…") : t("Stop")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button><Button className="automatic-button" icon={Gauge} data-testid="titlebar-overview" aria-pressed={showing} title={t("Show or hide the import overview")} onClick={() => act({type:'preferences',patch:{showDashboard:!showing}})}>{t("Overview")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
 }
 
 type Translate = ReturnType<typeof useTranslation>['t'];
@@ -783,7 +798,7 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
   const api = useRef<RowApi['current']>(null as unknown as RowApi['current']);
   const report = (items: DisplayError[]) => buildRows(items).map(row => row.merged ? rowReport(row, t, formatNumber) : row.entries.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n')).join('\n');
-  const clear = onClear ?? ((ids?: string[], severity?: Severity) => { const extra = severity ? { severity } : {}; if (!ids) act({ type: 'clearErrors', ...extra }); else for (const id of ids) act({ type: 'clearError', id, ...extra }); });
+  const clear = onClear ?? ((ids?: string[], severity?: Severity) => act({ type: 'clearErrors', ...(ids ? { ids } : {}), ...(severity ? { severity } : {}) }));
   api.current = { act, copy, clear, onOpenSource, close };
   const section = (severity: Severity) => {
     const items = errors.filter(error => error.severity === severity), plural = severity === 'error' ? 'errors' : 'warnings', rows = buildRows(items);
@@ -800,10 +815,10 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
           const error = row.entries[0]!;
           if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
           const explained = explainError(error.message, error.kind, language);
-          const shown = errorPath(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
+          const shown = pathOf(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
           const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
           return <li key={index} className={`error-item is-${error.severity}`} data-severity={error.severity}>
-            <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
+            <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
             {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
             <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
           </li>;
@@ -843,18 +858,18 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
   const filesLabel = doing.size === 1 ? ({ checked: "Files checked", verified: "Files verified", moved: "Files moved", copied: "Files copied", processed: "Files processed" } as const)[[...doing][0] as 'checked'] : "Files processed";
-  const warnings = gatherErrors(state).filter(error => error.severity === 'warning').length;
+  const warnings = collectErrors(state).filter(error => error.severity === 'warning').length;
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
-  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta ?? Math.max(...active.map(job => job.eta!)) : undefined;
+  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
   // Drives in use: those of running jobs and the destinations they write to; with nothing running, every connected drive.
   const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, requiredDestinations)] : Object.keys(state.driveActivity ?? {}));
-  const organizationJobs = jobs.filter(job => job.organization), runningOrganization = organizationJobs.find(job => activePhases.includes(job.phase));
-  const organizing = active.length > 0 && active.every(job => job.organization), planningJob = active.find(job => !job.organization && job.progress?.phase === 'planning');
+  const organizationJobs = jobs.filter(job => job.organization);
+  const organizing = active.length > 0 && active.every(job => job.organization);
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
   const verify = state.preferences.verifyCopies !== false;
   const overall = overviewFraction(latestJobs, verify);
@@ -1054,41 +1069,46 @@ export function RetainedOriginals({ job, act, busy, recoverySize }: { job: NonNu
   if (!retainedFiles && !job.undoable && !job.missing && !deletable) return null;
   const measured = recoverySize?.root === job.root && recoverySize.id === job.id ? recoverySize : undefined;
   const deleteChoice = (choice: 'open' | 'confirm' | 'cancel') => {
-    const next = nextDeleteRecoveryStep(deleteStep, choice);
+    const next = nextConfirmStep(deleteStep, choice);
     if (choice === 'open') act({ type: 'measureOrganizationRecovery', root: job.root, id: job.id });
     setDeleteStep(next.step);
-    if (next.delete) act({ type: 'deleteOrganizationRecovery', root: job.root, id: job.id });
+    if (next.delete) act({ type: 'recovery', op: 'delete', root: job.root, id: job.id });
   };
   const size = bytes(job.retainedBytes ?? 0);
   return <section className="organization-retained" data-testid="organization-retained">
     {retainedFiles > 0 && <p><Icon icon={Info} size={15} />{t("{count} originals ({size}) kept for undo.", { count: formatNumber(retainedFiles), size })}</p>}
     {(job.missing ?? 0) > 0 && <p><Icon icon={Info} size={15} />{t("{count} organized files are no longer where this organization put them.", { count: formatNumber(job.missing!) })}</p>}
     <div className="rule-actions">
-      {job.undoable && <Button icon={RotateCcw} disabled={busy} onClick={() => act({ type: 'undoOrganization', root: job.root, id: job.id })}>{t("Undo organization")}</Button>}
+      {job.undoable && <Button icon={RotateCcw} disabled={busy} onClick={() => act({ type: 'recovery', op: 'undo', root: job.root, id: job.id })}>{t("Undo organization")}</Button>}
       {retainedFiles > 0 && <Button icon={Trash2} disabled={busy || !job.finalizable} onClick={() => setConfirming(true)}>{t("Release {size}", { size })}</Button>}
       <Button kind="danger" icon={Trash2} data-testid="delete-recovery" disabled={busy || !deletable} title={deletable ? undefined : t("Finish or undo this organization before deleting its recovery files.")} onClick={() => deleteChoice('open')}>{t("Delete recovery files")}</Button>
     </div>
-    {confirming && <ReleaseConfirm size={size} root={job.root} onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); act({ type: 'finalizeOrganization', root: job.root, id: job.id }); }} />}
+    {confirming && <ReleaseConfirm size={size} root={job.root} onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); act({ type: 'recovery', op: 'finalize', root: job.root, id: job.id }); }} />}
     {deleteStep !== 'closed' && <DeleteRecoveryConfirm key={deleteStep} step={deleteStep} root={job.root} size={measured} onCancel={() => deleteChoice('cancel')} onConfirm={() => deleteChoice('confirm')} />}
   </section>;
 }
 
+/** The skeleton every confirmation shares: a sheet with a title, a body and Cancel / danger buttons. A 'second' step opens with Cancel focused, so Return never confirms by accident. */
+export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
+  const { t } = useTranslation();
+  const dialog = useRef<HTMLDialogElement>(null), heading = useId();
+  const close = useAnimatedClose(dialog, onCancel);
+  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
+  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby={heading} data-testid={testId} onCancel={event => { event.preventDefault(); close(); }}>
+    <div className="dialog-heading"><h2 id={heading}>{title}</h2></div>
+    <div className="activity-content">{children}</div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
+  </dialog>;
+}
 export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {
   const { t } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="release-heading" data-testid="release-confirm" onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="release-heading">{t("Release {size}?", { size })}</h2></div>
-    <div className="activity-content"><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></div>
-    <div className="dialog-footer"><Button onClick={close}>{t("Cancel")}</Button><Button kind="danger" icon={Trash2} onClick={onConfirm}>{t("Release {size}", { size })}</Button></div>
-  </dialog>;
+  return <ConfirmSheet title={t("Release {size}?", { size })} confirmLabel={t("Release {size}", { size })} testId="release-confirm" onCancel={onCancel} onConfirm={onConfirm}><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></ConfirmSheet>;
 }
 
 /** Deleting recovery files asks twice: the first sheet says undo goes away and how much is freed, the
  * second asks again with the exact amount, Cancel focused. Only confirming the second deletes. */
 export type DeleteRecoveryStep = 'closed' | 'first' | 'second';
-export function nextDeleteRecoveryStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
+export function nextConfirmStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
   if (choice === 'cancel') return { step: 'closed', delete: false };
   if (choice === 'open') return { step: step === 'closed' ? 'first' : step, delete: false };
   if (step === 'first') return { step: 'second', delete: false };
@@ -1099,21 +1119,13 @@ export const recoveryDeletable = (job: NonNullable<AppState['organizationRecover
 
 export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }: { step: 'first' | 'second'; root: string; size?: AppState['recoverySize']; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  // The second sheet opens with Cancel focused, so Return never deletes by accident.
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!) } : undefined;
   const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{size?.progress ? t("Measuring: {completed} files", { completed: formatNumber(size.progress.completed) }) : t("Measuring recovery files…")}</p>;
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-recovery-heading" data-testid={`delete-recovery-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="delete-recovery-heading">{step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")}</h2></div>
-    <div className="activity-content">
-      {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
-      {detail}<p className="recovery-root">{root}</p>
-    </div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
-  </dialog>;
+  return <ConfirmSheet step={step} title={step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")} confirmLabel={step === 'first' ? t("Continue…") : t("Delete permanently")} confirmDisabled={!amount} testId={`delete-recovery-${step}`} onCancel={onCancel} onConfirm={onConfirm}>
+    {step === 'first' ? <><p>{t("You will no longer be able to undo it.")}</p>{amount && <p>{t("{size} will be freed.", { size: amount.size })}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) of recovery data. This cannot be undone.", amount)}</p>}
+    {detail}<p className="recovery-root">{root}</p>
+  </ConfirmSheet>;
 }
 
 // What to do with files that have no capture date, no camera and no known origin, or unreadable metadata.
@@ -1175,19 +1187,14 @@ function AppearanceControls({ preferences, act }: { preferences: Preferences; ac
 }
 
 export function ImportDesk({ state, act, inspect, onOrganization, onSettings, needsChoice = [] }: { state: AppState; act: Dispatch; inspect: (path: string) => void; onOrganization: () => void; onSettings: () => void; needsChoice?: string[] }) {
-  const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const { t } = useTranslation();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const jobs = state.jobs;
   const active = jobs.filter(job => activePhases.includes(job.phase));
-  const queued = jobs.slice().reverse().filter(job => job.phase === 'queued');
   // The order queued jobs will start in, as the importer publishes it; longest waiting first otherwise.
-  const startOrder = state.queueOrder ?? queued.map(job => job.id);
+  const startOrder = state.queueOrder ?? [];
   const selectedJob = jobs.find(job => job.id === selectedJobId && !job.organization) ?? jobs.find(job => job.inventory && !job.organization);
   const latestJobs = jobs.filter((job,index)=>!job.organization && jobs.findIndex(item=>item.source.id===job.source.id)===index);
-  const progressJobs = latestJobs;
-  const transferred = progressJobs.reduce((sum, job) => sum + (job.progress?.bytes ?? 0), 0);
-  const total = progressJobs.reduce((sum, job) => sum + (job.progress?.totalBytes ?? 0), 0);
-  const speed = active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0);
   const idleSources = state.sources.filter(source => !jobs.some(job => job.source.id === source.id));
   // Organizations read a drive or folder too: each one's latest run is a card, ahead of the drives.
   const organizationCards = jobs.filter((job, index) => job.organization && jobs.findIndex(item => item.organization && item.source.id === job.source.id) === index);
@@ -1201,12 +1208,10 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const position = (id: string) => { const index = state.sources.findIndex(source => source.id === id); return index < 0 ? Infinity : index; };
   const cards = [...latestJobs.map(job => ({ id: job.source.id, job, source: job.source })), ...idleSources.map(source => ({ id: source.id, job: undefined as Job | undefined, source }))].sort((a, b) => position(a.id) - position(b.id));
   const movable = (card: typeof cards[number], index: number) => index > 0 && sourceSelected(card.source) && (!card.job || card.job.phase === 'queued' || (card.job.phase === 'stopped' && !!card.job.paused));
-  const requiredDestinations = state.preferences.copyMode==='single'?1:2;
-  const readyDestinations=(state.destinationStatus??[]).filter(disk=>disk.available&&state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
   return <div className="desk-page">
     {state.preferences.showDashboard !== false && <ImportDashboard state={state} act={act} />}
     <div className="workbench-columns"><div className="source-workspace">
-      <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions">{state.preferences.showDashboard === false && <Button kind="quiet" icon={Gauge} data-testid="show-dashboard-desk" aria-label={t("Show the import overview")} title={t("Show the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: true } })} />}<div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout ?? 'list') === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div><label className="parallel-source-control" title={t("Current copies finish before a lower limit takes effect.")}><span className="parallel-source-label">{t("Parallel sources")}</span><input id="parallel-source-limit" aria-label={t("Maximum parallel sources")} type="range" min={1} max={10} step={1} value={state.preferences.parallel} onChange={event => act({type:'preferences',patch:{parallel:Number(event.target.value)}})} /><output htmlFor="parallel-source-limit">{t("{count} of 10",{count:state.preferences.parallel})}</output></label><span className="connected-count">{t("{count} connected", { count: state.sources.length })}</span><Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scanSources' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button></div></div>
+      <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions">{state.preferences.showDashboard === false && <Button kind="quiet" icon={Gauge} data-testid="show-dashboard-desk" aria-label={t("Show the import overview")} title={t("Show the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: true } })} />}<div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout ?? 'list') === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div><label className="parallel-source-control" title={t("Current copies finish before a lower limit takes effect.")}><span className="parallel-source-label">{t("Parallel sources")}</span><input id="parallel-source-limit" aria-label={t("Maximum parallel sources")} type="range" min={1} max={10} step={1} value={state.preferences.parallel} onChange={event => act({type:'preferences',patch:{parallel:Number(event.target.value)}})} /><output htmlFor="parallel-source-limit">{t("{count} of 10",{count:state.preferences.parallel})}</output></label><span className="connected-count">{t("{count} connected", { count: state.sources.length })}</span><Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scan' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button></div></div>
         <div className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
           {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
           {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
@@ -1522,7 +1527,6 @@ function Speed({ value }: { value: number }) {
   useEffect(() => { shown.current = unit; });
   return <>{formatSpeed(value, language, unit)}</>;
 }
-const hasSpeed = (progress: Progress) => progress.speed > 0 || (progress.fileRate ?? 0) > 0;
 /** How fast a step reads: bytes per second, or files per second while checking metadata. */
 function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
@@ -1609,21 +1613,14 @@ export function RevealButton({ path, act, name }: { path: string; act: Dispatch;
  * verified files and how much space, the second asks again with Cancel focused. Only the second confirmation deletes. */
 export function OriginalsConfirm({ step, name, size, onCancel, onConfirm }: { step: 'first' | 'second'; name: string; size?: AppState['originalsSize']; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!), name } : undefined;
   const none = measured && size.files === 0;
   const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Counting verified originals…")}</p>;
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-originals-heading" data-testid={`delete-originals-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="delete-originals-heading">{step === 'first' ? t("Delete originals already in the backup?") : t("Delete originals permanently?")}</h2></div>
-    <div className="activity-content">
-      {step === 'first' ? <><p>{t("Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.")}</p>{amount && !none && <p>{t("{count} files ({size}) will be deleted from {name}.", amount)}</p>}{none && <p>{t("No verified originals to delete.")}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.", amount)}</p>}
-      {detail}{measured && !!size.kept && <p className="muted">{t("{count} files will stay where they are.", { count: formatNumber(size.kept) })}</p>}
-    </div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} disabled={!amount || none} onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Delete permanently")}</Button></div>
-  </dialog>;
+  return <ConfirmSheet step={step} title={step === 'first' ? t("Delete originals already in the backup?") : t("Delete originals permanently?")} confirmLabel={step === 'first' ? t("Continue…") : t("Delete permanently")} confirmDisabled={!amount || none} testId={`delete-originals-${step}`} onCancel={onCancel} onConfirm={onConfirm}>
+    {step === 'first' ? <><p>{t("Only files that were copied and verified by checksum in the backup are deleted. Files that were not copied stay where they are.")}</p>{amount && !none && <p>{t("{count} files ({size}) will be deleted from {name}.", amount)}</p>}{none && <p>{t("No verified originals to delete.")}</p>}</> : amount && <p>{t("This permanently deletes {count} files ({size}) from {name}. Each is checked against its copy in the backup first. This cannot be undone.", amount)}</p>}
+    {detail}{measured && !!size.kept && <p className="muted">{t("{count} files will stay where they are.", { count: formatNumber(size.kept) })}</p>}
+  </ConfirmSheet>;
 }
 
 /** The separate "Delete originals already in the backup" step on a finished folder import's card. */
@@ -1633,7 +1630,7 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
   if (job.source.transport !== 'folder' || job.organization || !(job.phase === 'complete' || job.phase === 'error' && errorTotal(job) === 0 && !job.failedFiles)) return null;
   const measured = size?.jobId === job.id ? size : undefined;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
-    const next = nextDeleteRecoveryStep(step, choice);
+    const next = nextConfirmStep(step, choice);
     if (choice === 'open') act({ type: 'measureOriginals', jobId: job.id });
     setStep(next.step);
     if (next.delete) act({ type: 'deleteOriginals', jobId: job.id });
@@ -1657,7 +1654,7 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
   const retry = job.retryable ? <Button icon={RotateCcw} data-testid="retry-button" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: job.id })}>{t("Retry")}</Button> : null;
   if (!job.skippablePath) return <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}{skipAll}</div></div>;
   const file = job.skippablePath;
-  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
@@ -1709,7 +1706,7 @@ export function SharedCapacityNote({ drive }: { drive: DriveContext }) {
 /** A folder on the drive that also holds the backup: copying uses space here, organizing in place does not. */
 export function SameDriveNotice({ sourceId, act, disabled = false }: { sourceId: string; act: Dispatch; disabled?: boolean }) {
   const { t } = useTranslation();
-  return <div className="source-notice source-same-drive" data-testid="same-drive-destination"><p><Icon icon={Info} size={14} />{t("This folder is on the same drive as your backup. Importing copies the files, which uses space on this drive.")}</p><Button icon={FolderCog} disabled={disabled} data-testid="organize-instead" onClick={() => act({ type: 'organizeSourceFolder', sourceId })}>{t("Organize instead (move, no extra space)")}</Button></div>;
+  return <div className="source-notice source-same-drive" data-testid="same-drive-destination"><p><Icon icon={Info} size={14} />{t("This folder is on the same drive as your backup. Importing copies the files, which uses space on this drive.")}</p><Button icon={FolderCog} disabled={disabled} data-testid="organize-instead" onClick={() => act({ type: 'organizeFolder', sourceId })}>{t("Organize instead (move, no extra space)")}</Button></div>;
 }
 
 // A drive or folder that holds a backup destination: planning leaves the backup folder out.
@@ -1734,7 +1731,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
   const included = sourceSelected(source), excluded = !included && !job;
   const statusText = excluded ? t("Not selected · won't be imported") : paused ? t("Paused") : already ? t("Already imported") : status;
   return <article data-source-id={source.id} className={`source-row ${selected ? 'source-selected' : ''} ${job?.phase === 'error' ? 'source-error' : ''} ${excluded ? 'source-unselected' : selectionKnown(source) ? 'source-included' : ''} ${already ? 'source-already' : ''} ${needsChoice ? 'source-needs-choice' : ''}`}>
-    <div className="source-row-top"><div className="source-device"><Icon icon={icon} size={21} /></div><div className="source-identity"><h3 title={source.name}>{source.name}</h3><span className={`source-status ${excluded ? 'unselected' : paused ? 'paused' : already ? 'already' : job?.phase ?? 'ready'}`}><Icon icon={excluded ? Pause : paused ? Pause : already ? CheckCheck : statusIcon} size={13} /><span key={statusText} className="source-status-text">{statusText}</span>{job?.backup && <span className="small-tag">{t("Folder backup")}</span>}</span>{drive && <DriveLabel drive={drive} />}</div><div className="source-row-actions">{canMoveUp && <Button kind="quiet" icon={ArrowUpToLine} data-testid="move-to-top" aria-label={t("Move {name} to the top", { name: source.name })} title={t("Move to the top")} onClick={() => act({ type: 'moveToTop', sourceId: source.id })} />}{selectionKnown(source) && <SelectionChip source={source} act={act} disabled={active || queued} />}<Button kind="quiet" icon={scanning ? LoaderCircle : ScanLine} disabled={excluded || source.transport === 'camera' || reviewBusy || active || queued || scanning} aria-label={t("Scan media on {name}", { name: source.name })} title={source.transport === 'camera' ? t("Use Review for USB cameras.") : t("Read photo and video formats without copying files")} onClick={() => act({ type: 'scanSource', sourceId: source.id })}>{scanning ? t("Scanning…") : t("Scan media")}</Button>{!active && !queued && <Button kind={mirrorReview ? 'primary' : 'quiet'} icon={Eye} disabled={excluded || !configured || reviewBusy} aria-label={t("Review import from {name}", { name: source.name })} title={t("Review files before copying")} onClick={() => act({ type: 'preview', sourceId: source.id })}>{t("Review")}</Button>}{active || queued ? <><Button icon={Pause} disabled={!!job?.stopping} aria-label={t("Pause {name}", { name: source.name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} disabled={job?.stopping === 'stop'} aria-label={t("Stop source")} title={t("Stop source")} onClick={() => act({ type: 'stop', jobId: job!.id })} /></> : <Button icon={paused ? Play : ArrowDownToLine} kind={paused ? 'primary' : 'secondary'} disabled={excluded || !configured || startBlocked} onClick={() => act({ type: 'start', sourceId: source.id })}>{paused ? t("Continue") : t("Import")}</Button>}</div></div>
+    <div className="source-row-top"><div className="source-device"><Icon icon={icon} size={21} /></div><div className="source-identity"><h3 title={source.name}>{source.name}</h3><span className={`source-status ${excluded ? 'unselected' : paused ? 'paused' : already ? 'already' : job?.phase ?? 'ready'}`}><Icon icon={excluded ? Pause : paused ? Pause : already ? CheckCheck : statusIcon} size={13} /><span key={statusText} className="source-status-text">{statusText}</span>{job?.backup && <span className="small-tag">{t("Folder backup")}</span>}</span>{drive && <DriveLabel drive={drive} />}</div><div className="source-row-actions">{canMoveUp && <Button kind="quiet" icon={ArrowUpToLine} data-testid="move-to-top" aria-label={t("Move {name} to the top", { name: source.name })} title={t("Move to the top")} onClick={() => act({ type: 'moveToTop', sourceId: source.id })} />}{selectionKnown(source) && <SelectionChip source={source} act={act} disabled={active || queued} />}<Button kind="quiet" icon={scanning ? LoaderCircle : ScanLine} disabled={excluded || source.transport === 'camera' || reviewBusy || active || queued || scanning} aria-label={t("Scan media on {name}", { name: source.name })} title={source.transport === 'camera' ? t("Use Review for USB cameras.") : t("Read photo and video formats without copying files")} onClick={() => act({ type: 'scan', sourceId: source.id })}>{scanning ? t("Scanning…") : t("Scan media")}</Button>{!active && !queued && <Button kind={mirrorReview ? 'primary' : 'quiet'} icon={Eye} disabled={excluded || !configured || reviewBusy} aria-label={t("Review import from {name}", { name: source.name })} title={t("Review files before copying")} onClick={() => act({ type: 'preview', sourceId: source.id })}>{t("Review")}</Button>}{active || queued ? <><Button icon={Pause} disabled={!!job?.stopping} aria-label={t("Pause {name}", { name: source.name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} disabled={job?.stopping === 'stop'} aria-label={t("Stop source")} title={t("Stop source")} onClick={() => act({ type: 'stop', jobId: job!.id })} /></> : <Button icon={paused ? Play : ArrowDownToLine} kind={paused ? 'primary' : 'secondary'} disabled={excluded || !configured || startBlocked} onClick={() => act({ type: 'start', sourceId: source.id })}>{paused ? t("Continue") : t("Import")}</Button>}</div></div>
     {already && <ProgressDisplay calm className="progress-in-card" testId="already-imported" fraction={1} finished label={t("{name} copy progress", { name: source.name })} count={progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")} />}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {drive?.onDestination && <SameDriveNotice sourceId={source.id} act={act} disabled={active || queued || !!reviewBusy} />}
@@ -1823,7 +1820,7 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
 }
 
 function SourceMediaSummary({ source, inventory, scanning }: { source: Source; inventory?: Inventory; scanning?: boolean; cameraInfo?: SourceCameraInfo }) {
-  const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const summary = useMemo(() => {
     const photos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};
     const videos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};
@@ -1969,7 +1966,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.missingRoot ? t("Library folder not found") : job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && !job.missingRoot && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.missingRoot ? t("Library folder not found") : job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && !job.missingRoot && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
     </div>
 
   </div>;
@@ -2009,7 +2006,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
       </SettingsSection>
       <SettingsSection title={t("Edited exports folder")} icon={Folder}>
         <TextPreference label={t("Edited exports folder")} value={editedFolder} placeholder="editied" onSave={editedFolder => act({type:'preferences',patch:{editedFolder}})} description={t("Edited exports go here, inside each month folder.")} />
-        <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath),'2026','202610',editedFolder,'Nikon Z6III','DSC_0001.jpg']} testId="edited-export-preview" />
+        <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath), ...samplePath(editedTemplate(editedFolder)), 'DSC_0001.jpg']} testId="edited-export-preview" />
       </SettingsSection>
   </div>;
 }

@@ -1,9 +1,3 @@
-/** "342.9 GB/2.00 TB", or "120.5/500.0 GB" when both sizes share a unit: the free/total line for a narrow sidebar. */
-export function shortCapacity(free:number,total:number,bytes:(value:number)=>string):string {
- const a=bytes(free),b=bytes(total),unit=(text:string)=>text.match(/\s(\S+)$/)?.[1];
- return unit(a)!==undefined&&unit(a)===unit(b)?`${a.slice(0,-unit(a)!.length-1)}/${b}`:`${a}/${b}`;
-}
-
 /** Measured capacity lines: each full text's natural width and the width it has now. */
 export interface SidebarLine {natural:number;available:number;}
 /**

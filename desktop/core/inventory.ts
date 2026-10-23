@@ -5,7 +5,7 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { isOldReceiptName } from './legacy-names';
 import { noteOldReceipt } from './old-records';
-import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
+import { checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
 /** Entries of a folder looked at (lstat) at once. */
 const LISTING_STATS=8;

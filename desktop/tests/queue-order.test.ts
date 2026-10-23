@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {orderSources,nextQueued,moveToFront,queueOrder} from '../queue-order';
+import {orderSources,nextRunnable,moveToFront,queueOrder} from '../queue-order';
 
 test('sources moved to the top come first, most recent move first, others keep their order',()=>{
  const sources=['a','b','c','d'].map(id=>({id}));
@@ -17,9 +17,9 @@ test('queued jobs start in card order: moved drives first, most recent move firs
  // state.jobs holds the newest job first.
  const jobs=[job('jc','c'),job('jrun','a','copying'),job('jb','b')];
  assert.deepEqual(queueOrder(jobs,[]),['jb','jc']);
- assert.equal(nextQueued(jobs,[])?.id,'jb');
+ assert.equal(nextRunnable(jobs,[],()=>true)?.id,'jb');
  assert.deepEqual(queueOrder(jobs,['c']),['jc','jb'],'already queued, then moved');
- assert.equal(nextQueued([job('x','x','complete')],[]),undefined);
+ assert.equal(nextRunnable([job('x','x','complete')],[],()=>true),undefined);
 });
 
 test('a drive moved while idle or paused keeps its priority for the job it starts later',()=>{
@@ -28,7 +28,7 @@ test('a drive moved while idle or paused keeps its priority for the job it start
  assert.deepEqual(queueOrder(a,['d']),['jd','jb']);
  // C: B is queued, paused C is moved to the top, then continued (a new job, the newest).
  const c=[job('jc2','c'),job('jc1','c','stopped'),job('jb','b')];
- assert.equal(nextQueued(c,['c'])?.id,'jc2');
+ assert.equal(nextRunnable(c,['c'],()=>true)?.id,'jc2');
 });
 
 test('organization jobs and drives never moved keep their oldest-first order after moved drives',()=>{

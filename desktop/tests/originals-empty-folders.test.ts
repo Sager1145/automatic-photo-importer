@@ -96,11 +96,42 @@ test('a symlinked folder is never entered or removed, and a separately chosen so
   assert.equal(result.folders, 0);
 });
 
-test('an aborted run removes no folders', async t => {
-  const { source, files } = await fixture(t, ['a/one.jpg', 'b/two.jpg', 'c/three.jpg']);
+/** Six files, each alone in its own folder: the pool of four has finished one file when the fifth starts. */
+const stoppedMidRun = async (t: test.TestContext) => {
+  const { source, files } = await fixture(t, ['a/1.jpg', 'b/2.jpg', 'c/3.jpg', 'd/4.jpg', 'e/5.jpg', 'f/6.jpg']);
   const control = new AbortController();
-  await assert.rejects(deleteOriginals(source, files, { signal: control.signal, onProgress: completed => { if (completed === 1) control.abort(); } }));
-  for (const folder of ['a', 'b', 'c']) assert.equal(await exists(path.join(source, folder)), true);
+  const result = await deleteOriginals(source, files, { signal: control.signal, onProgress: completed => { if (completed === 4) control.abort(); } });
+  return { source, files, result };
+};
+
+test('a stop mid-run returns every file already deleted, with stopped set', async t => {
+  const { files, result } = await stoppedMidRun(t);
+  assert.equal(result.stopped, true);
+  assert.ok(result.deleted.length >= 1, 'at least the file that finished before the stop is reported');
+  assert.equal(result.deleted.length + result.kept.length, files.length, 'every file is accounted for');
+  assert.equal(result.bytes, result.deleted.reduce((sum, item) => sum + item.size, 0));
+  for (const item of result.deleted) assert.equal(await exists(item.source), false, 'reported deleted, so it is gone');
+  for (const item of result.kept) { assert.equal(item.reason, 'stopped'); assert.equal(await exists(item.source), true); }
+});
+
+test('a stop leaves every folder alone, even those its deletions emptied', async t => {
+  const { source, files, result } = await stoppedMidRun(t);
+  assert.equal(result.stopped, true);
+  assert.ok(result.deleted.length >= 1);
+  assert.equal(result.folders, 0);
+  for (const folder of ['a', 'b', 'c', 'd', 'e', 'f']) assert.equal(await exists(path.join(source, folder)), true, `${folder} stays`);
+  assert.equal(files.length, 6);
+});
+
+test('a stop during the stat pass before the first read ends the run as stopped with nothing deleted', async t => {
+  const { source, files } = await fixture(t, ['a/one.jpg', 'b/two.jpg']);
+  const control = new AbortController(); control.abort();
+  const result = await deleteOriginals(source, files.map(file => ({ ...file, identity: 'known' })), { signal: control.signal, changeTimes: true });
+  assert.equal(result.stopped, true);
+  assert.equal(result.deleted.length, 0);
+  assert.equal(result.folders, 0);
+  assert.deepEqual(result.kept.map(item => item.reason), ['stopped', 'stopped']);
+  for (const file of files) assert.equal(await exists(file.source), true);
 });
 
 test('the summary line and the history message count the removed folders in every language', () => {

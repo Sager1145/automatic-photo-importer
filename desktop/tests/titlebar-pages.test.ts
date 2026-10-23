@@ -15,7 +15,7 @@ const ids=(html:string)=>[...html.matchAll(/data-testid="([^"]+)"/g)].map(match=
 const button=(html:string,id:string)=>html.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))![0];
 
 test('each page shows its own top-bar buttons, and All errors on every page',()=>{
- assert.deepEqual(ids(titlebar({page:'desk'})),['global-start','global-stop','global-automatic','show-errors']);
+ assert.deepEqual(ids(titlebar({page:'desk'})),['global-start','global-stop','global-automatic','titlebar-overview','show-errors']);
  assert.deepEqual(ids(titlebar({page:'drives'})),['show-errors','refresh-drives']);
  assert.deepEqual(ids(titlebar({page:'organization'})),['titlebar-review-organization','titlebar-organize','show-errors']);
  assert.deepEqual(ids(titlebar({page:'settings'})),['show-errors']);
@@ -51,4 +51,14 @@ test('the organization buttons are disabled when the page disables them',()=>{
 test('the new top-bar labels are translated',()=>{
  assert.match(titlebar({page:'drives'},'ja'),/ドライブを更新/);
  assert.match(titlebar({page:'organization'},'zh-Hans'),/整理控制/);
+});
+
+test('the desk top bar has an Overview toggle that follows and flips showDashboard',()=>{
+ const toggle=(showDashboard?:boolean,act:(action:unknown)=>void=()=>{})=>titlebar({page:'desk',act:act as Props['act'],state:state({preferences:{...preferences,...(showDashboard===undefined?{}:{showDashboard})}})});
+ for(const [shown,pressed] of [[undefined,'true'],[true,'true'],[false,'false']] as const) {
+  const html=button(toggle(shown),'titlebar-overview');
+  assert.match(html,new RegExp(`aria-pressed="${pressed}"`));
+ }
+ assert.match(toggle(true),/titlebar-overview[^>]*>(<svg.*?<\/svg>)?Overview</);
+ assert.equal(ids(titlebar({page:'settings'})).includes('titlebar-overview'),false);
 });

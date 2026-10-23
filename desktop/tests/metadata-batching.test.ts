@@ -37,7 +37,7 @@ test('batched routing reads give exactly the results of reading each file alone'
   for(const name of names)await fs.mkdir(path.join(root,'batched'),{recursive:true}).then(()=>fs.copyFile(path.join(root,'alone',name),path.join(root,'batched',name)));
   await fs.writeFile(path.join(root,'alone','BROKEN.JPG'),'not an image at all');await fs.copyFile(path.join(root,'alone','BROKEN.JPG'),path.join(root,'batched','BROKEN.JPG'));
   const all=[...names,'BROKEN.JPG'];
-  const read=(folder:string)=>Promise.all(all.map(name=>metadata(path.join(root,folder,name),{preview:false,details:false})));
+  const read=(folder:string)=>Promise.all(all.map(name=>metadata(path.join(root,folder,name),{details:false})));
 
   setRoutingBatch(1);
   const alone=await read('alone');
@@ -61,8 +61,8 @@ test('routing reads of one file at the same time share one request and the cache
   const original=ExifTool.prototype.readRaw as (...args:unknown[])=>Promise<unknown>;
   t.mock.method(ExifTool.prototype,'readRaw',function(this:ExifTool,...args:unknown[]){calls++;return original.apply(this,args);});
   const file=path.join(root,'one.JPG');
-  const results=await Promise.all([1,2,3].map(()=>metadata(file,{preview:false,details:false})));
-  await metadata(file,{preview:false,details:false});
+  const results=await Promise.all([1,2,3].map(()=>metadata(file,{details:false})));
+  await metadata(file,{details:false});
   assert.equal(calls,1);
   assert.deepEqual(results[0],results[2]);
 });
@@ -82,7 +82,7 @@ test('500 files read with the check concurrency go out in batches averaging at l
     await new Promise(resolve=>setTimeout(resolve,3+Math.floor(random()*8)));
     return names.map(name=>({SourceFile:name}));
   } as never);
-  await mapPool(files,CHECK_CONCURRENCY,async file=>{await new Promise(resolve=>setTimeout(resolve,Math.floor(random()*6)));return metadata(file,{preview:false,details:false});});
+  await mapPool(files,CHECK_CONCURRENCY,async file=>{await new Promise(resolve=>setTimeout(resolve,Math.floor(random()*6)));return metadata(file,{details:false});});
   const mean=sizes.reduce((sum,size)=>sum+size,0)/sizes.length;
   assert.equal(sizes.reduce((sum,size)=>sum+size,0),500);
   assert.ok(mean>=14,`mean batch ${mean.toFixed(1)} over ${sizes.length} requests`);

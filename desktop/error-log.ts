@@ -89,18 +89,12 @@ export class ErrorLog{
  clear(ids:string[]){for(const id of ids)this.cleared.add(id);this.revision++;}
 }
 
-/** Clears the listed errors in one go (a whole group), never touching the other severity when one is given. */
-export function clearErrorIds(log:ErrorLog,state:AppState,ids:string[],severity?:Severity){
- const wanted=new Set(ids),errors=gatherErrors(state).filter(error=>wanted.has(error.id)&&(!severity||error.severity===severity)),app=errors.find(error=>error.kind==='app');
+/** Clears the listed errors (one, or a whole group), or every error when no ids are given; with a severity, only those of it.
+ * Clearing warnings never clears errors, and the reverse. Jobs keep their errors; only the shared app error is reset at its source. */
+export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:string[];severity?:Severity}={}){
+ const wanted=ids&&new Set(ids),errors=gatherErrors(state).filter(error=>(!wanted||wanted.has(error.id))&&(!severity||error.severity===severity));
  log.clear(errors.map(error=>error.id));
- if(app)state.error=undefined;
-}
-/** Clears one error, or all of one severity (all of both when none is given). Clearing warnings never clears errors, and the reverse.
- * Jobs keep their errors; only the shared app error is reset at its source. */
-export function clearErrors(log:ErrorLog,state:AppState,id?:string,severity?:Severity){
- const errors=gatherErrors(state).filter(error=>!severity||error.severity===severity),app=errors.find(error=>error.kind==='app');
- log.clear(id?errors.filter(error=>error.id===id).map(error=>error.id):errors.map(error=>error.id));
- if(app&&(!id||id===app.id))state.error=undefined;
+ if(errors.some(error=>error.kind==='app'))state.error=undefined;
 }
 
 /** A cheap fingerprint of everything gatherErrors reads: counts and short strings, never the paths. Equal fingerprints mean equal errors. */

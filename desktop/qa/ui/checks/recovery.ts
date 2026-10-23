@@ -14,13 +14,13 @@ export const recoveryChecks=():Check[]=>[
   if(!recovery)throw new SkipCheck('no finished organization in this run');
   await h.nav('Organization');await h.until('recovery list on the Organization page',"document.querySelector('.organization-recovery')");
   const before=new Set((await h.state()).jobs.map(job=>job.id));
-  const resume=JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root});
+  const resume=JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root});
   await h.js(`Promise.all([window.importer.action(${resume}),window.importer.action(${resume})])`);
   await h.waitFor('recheck finish',async()=>!(await h.state()).jobs.some(job=>running.includes(job.phase)),{timeoutMs:60000});
   const created=(await h.state()).jobs.filter(job=>!before.has(job.id));
   assert.equal(created.length,1,'Double Resume must create only one recovery job');
   assert.equal(created[0]!.phase,'complete',english(created[0]!.detail));
-  await h.action({type:'clearError'});
+  await h.action({type:'clearErrors'});
  }},
  {id:'recovery-leftovers-counter',stage:'recovery',title:'Looking for leftover files shows a counter that keeps moving',covers:['live progress counters','leftover files'],skip:async h=>h.hooks?undefined:'needs the QA injection hook',run:async h=>{
   await h.nav('Settings');

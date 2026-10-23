@@ -43,3 +43,8 @@ test('the preferences handler drops locked keys while busy, paused or queued, an
   }
   assert.deepEqual(acceptedPreferences(patch, settingsLocked(state([]))), patch);
 });
+
+test('a Remove duplicates scan or removal locks job settings like a job does',()=>{
+ for(const status of ['scanning','removing'])assert.equal(settingsLocked(state([],{duplicates:{status}})),true,status);
+ for(const status of ['idle','ready'])assert.equal(settingsLocked(state([],{duplicates:{status}})),false,status);
+});

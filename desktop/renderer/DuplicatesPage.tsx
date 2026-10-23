@@ -5,7 +5,7 @@ import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, 
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
-import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ReleaseConfirm, activePhases, nextDeleteRecoveryStep, showSheet, useAnimatedClose, type DeleteRecoveryStep } from './RootApp';
+import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, type DeleteRecoveryStep } from './RootApp';
 
 type Dispatch = (action: Action) => void;
 /** Groups shown per page: only these are drawn and only their previews are fetched, so thousands of groups stay responsive. */
@@ -123,18 +123,11 @@ export function GroupView({ item, number, thumbs, exifs, onDecide, disabled = fa
 /** The two-step confirmation: the first sheet says what happens, the second asks again with the exact amount and Cancel focused. */
 export function DuplicatesConfirm({ step, summary, name, onCancel, onConfirm }: { step: 'first' | 'second'; summary: Pick<RemovalSummary, 'groups' | 'files' | 'bytes'> & { earlier?: number }; name: string; onCancel: () => void; onConfirm: () => void }) {
   const { t, formatNumber, formatBytes } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const values = { files: formatNumber(summary.files), groups: formatNumber(summary.groups), size: formatBytes(summary.bytes), name };
   const earlierNote = summary.earlier ? <p className="field-error" data-testid="duplicates-earlier-warning">{t("{count} of these files were placed by an earlier organization; removing them ends that organization's Undo.", { count: formatNumber(summary.earlier) })}</p> : null;
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="duplicates-confirm-heading" data-testid={`duplicates-confirm-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id="duplicates-confirm-heading">{step === 'first' ? t("Remove duplicates from {name}?", { name }) : t("Remove {files} files?", values)}</h2></div>
-    <div className="activity-content">
-      {step === 'first' ? <><p>{t("{files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.", values)}</p><p>{t("Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.")}</p>{earlierNote}</> : <><p>{t("The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.", values)}</p>{earlierNote}</>}
-    </div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid="duplicates-confirm-button" onClick={onConfirm}>{step === 'first' ? t("Continue…") : t("Remove {files} files", values)}</Button></div>
-  </dialog>;
+  return <ConfirmSheet step={step} title={step === 'first' ? t("Remove duplicates from {name}?", { name }) : t("Remove {files} files?", values)} confirmLabel={step === 'first' ? t("Continue…") : t("Remove {files} files", values)} testId={`duplicates-confirm-${step}`} confirmTestId="duplicates-confirm-button" onCancel={onCancel} onConfirm={onConfirm}>
+    {step === 'first' ? <><p>{t("{files} files in {groups} groups will be moved to the recovery area, freeing {size} once released.", values)}</p><p>{t("Nothing is deleted yet. You can undo this, and the space is freed only when you release the removed files.")}</p>{earlierNote}</> : <><p>{t("The kept file of each group is checked first. The other {files} files ({size}) move to the recovery area and can be put back with Undo.", values)}</p>{earlierNote}</>}
+  </ConfirmSheet>;
 }
 
 export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecovery[]; act: Dispatch; busy: boolean }) {
@@ -149,12 +142,12 @@ export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecov
         {retained > 0 && <p className="muted"><Icon icon={Info} size={14} />{t("{count} originals ({size}) kept for undo.", { count: formatNumber(retained), size })}</p>}
         {job.error && <p className="field-error">{job.error}</p>}
         <div className="rule-actions">
-          {job.undoable && <Button icon={RotateCcw} disabled={busy} data-testid="duplicates-undo" onClick={() => act({ type: 'undoOrganization', root: job.root, id: job.id })}>{t("Undo")}</Button>}
+          {job.undoable && <Button icon={RotateCcw} disabled={busy} data-testid="duplicates-undo" onClick={() => act({ type: 'recovery', op: 'undo', root: job.root, id: job.id })}>{t("Undo")}</Button>}
           {retained > 0 && <Button icon={Trash2} disabled={busy || !job.finalizable} data-testid="duplicates-release" onClick={() => setReleasing(job)}>{t("Release {size}", { size })}</Button>}
         </div>
       </article>;
     })}</div>}
-    {releasing && <ReleaseConfirm size={formatBytes(releasing.retainedBytes ?? 0)} root={releasing.root} onCancel={() => setReleasing(undefined)} onConfirm={() => { act({ type: 'finalizeOrganization', root: releasing.root, id: releasing.id }); setReleasing(undefined); }} />}
+    {releasing && <ReleaseConfirm size={formatBytes(releasing.retainedBytes ?? 0)} root={releasing.root} onCancel={() => setReleasing(undefined)} onConfirm={() => { act({ type: 'recovery', op: 'finalize', root: releasing.root, id: releasing.id }); setReleasing(undefined); }} />}
   </section>;
 }
 
@@ -162,17 +155,18 @@ export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecov
 function useFileDetails(root: string | undefined, files: DuplicateFile[]) {
   const [thumbs, setThumbs] = useState<Record<string, Thumbnail | undefined>>({});
   const [exifs, setExifs] = useState<Record<string, Metadata | undefined>>({});
-  const requested = useRef({ root: '', paths: new Set<string>() });
+  // loaded: a result is in thumbs/exifs. flying: asked for and not back yet. Neither outlives its root.
+  const cache = useRef({ root: '', loaded: new Set<string>(), flying: new Set<string>() });
   const key = files.map(file => file.path).join('\0');
   useEffect(() => {
-    if (requested.current.root !== (root ?? '')) { requested.current = { root: root ?? '', paths: new Set() }; setThumbs({}); setExifs({}); }
+    if (cache.current.root !== (root ?? '')) { cache.current = { root: root ?? '', loaded: new Set(), flying: new Set() }; setThumbs({}); setExifs({}); }
   }, [root]);
   useEffect(() => {
     if (!root) return;
     let alive = true;
-    const seen = requested.current.root === root ? requested.current.paths : (requested.current = { root, paths: new Set() }).paths;
-    const queue = files.filter(file => !seen.has(file.path));
-    for (const file of queue) seen.add(file.path);
+    const mine = cache.current.root === root ? cache.current : (cache.current = { root, loaded: new Set(), flying: new Set() });
+    const queue = files.filter(file => !mine.loaded.has(file.path) && !mine.flying.has(file.path)), owned = queue.map(file => file.path);
+    for (const path of owned) mine.flying.add(path);
     const worker = async () => {
       for (let file = queue.shift(); file && alive; file = queue.shift()) {
         const full = absolutePath(root, file.path);
@@ -180,13 +174,16 @@ function useFileDetails(root: string | undefined, files: DuplicateFile[]) {
           window.importer.thumbnail(full).catch((): Thumbnail => ({ via: 'none', problem: 'unreadable' })),
           window.importer.exif(full).catch((): Metadata => ({ fields: {} })),
         ]);
-        if (!alive) return;
+        mine.flying.delete(file.path);
+        // A result that arrives after paging away still lands, unless the root changed meanwhile.
+        if (cache.current !== mine) return;
+        mine.loaded.add(file.path);
         setThumbs(current => ({ ...current, [file.path]: picture }));
         setExifs(current => ({ ...current, [file.path]: metadata }));
       }
     };
     for (let i = 0; i < 3; i++) void worker();
-    return () => { alive = false; for (const file of queue) seen.delete(file.path); };
+    return () => { alive = false; for (const path of owned) mine.flying.delete(path); };
   }, [root, key]);
   return { thumbs, exifs };
 }
@@ -209,7 +206,7 @@ export function duplicatesBusy(state: AppState): boolean {
 type Filter = 'all' | 'manual' | 'auto';
 
 export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch }) {
-  const { t, formatNumber, formatBytes, language } = useTranslation();
+  const { t, formatNumber, formatBytes } = useTranslation();
   const dup = state.duplicates ?? { scopes: [], status: 'idle' as const, revision: 0, groups: 0, files: 0 };
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -245,7 +242,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
   const running = dup.root ? state.jobs.find(job => job.organization && job.source.id === `duplicates:${dup.root}` && (activePhases.includes(job.phase) || job.phase === 'queued')) : undefined;
   const { summary } = plan;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
-    const next = nextDeleteRecoveryStep(confirm, choice);
+    const next = nextConfirmStep(confirm, choice);
     setConfirm(next.step);
     if (next.delete) act({ type: 'duplicatesRemove', level, decisions });
   };

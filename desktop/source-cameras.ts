@@ -102,7 +102,8 @@ export async function analyzeSourceCameras(
       entry.files += 1; entry.bytes += file.size; lenses.set(key,entry);
     } else noLens += 1;
     checked += 1;
-    if (checked % 8 === 0 || Date.now()-lastUpdate>1000) {lastUpdate=Date.now();onUpdate?.(summary('reading'));}
+    // Four summaries a second at most: each one copies every issue so far across the scan process boundary.
+    if (Date.now()-lastUpdate>=250) {lastUpdate=Date.now();onUpdate?.(summary('reading'));}
   }
   const result = summary(signal?.aborted ? 'stopped' : failures ? 'error' : 'complete');
   onUpdate?.(result);

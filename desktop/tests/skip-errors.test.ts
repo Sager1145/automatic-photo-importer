@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,execute} from '../core';
-import {MessageError,errorPath,filePath,toMessage} from '../messages';
+import {MessageError,filePath,toMessage} from '../messages';
+import {pathOf} from '../error-log';
 import {normalizePreferences,defaultPreferences} from '../preferences';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
 import {configureOrganizationRecovery} from '../core/index';
@@ -154,11 +155,11 @@ test('a job error in All errors names its job, so its Skip button reaches that j
  assert.equal(logged!.jobId,'job-1');assert.equal(filePath(logged!.message),'/card/DCIM/B.JPG');
 });
 
-test('an error that names a file can show it in Finder, including files skipped while planning',()=>{
+test('an error that names a file can show it in Finder, including files skipped while planning and plain text issues',()=>{
  const skipped={key:'error.fileSkipped' as const,params:{path:'/card/A.JPG',error:{key:'error.userSkipped' as const}}};
- assert.equal(errorPath(skipped),'/card/A.JPG');
- assert.equal(errorPath({key:'error.sourceChanged',params:{path:'/card/B.JPG'}}),'/card/B.JPG');
- assert.equal(errorPath({key:'text',params:{text:'EIO'}}),undefined);
+ assert.equal(pathOf(skipped),'/card/A.JPG');
+ assert.equal(pathOf({key:'error.sourceChanged',params:{path:'/card/B.JPG'}}),'/card/B.JPG');
+ assert.equal(pathOf({key:'text',params:{path:'/card/C.JPG'}}),'/card/C.JPG');
  // Only the file that stopped a job can be skipped; a file already skipped cannot.
  assert.equal(filePath(skipped),undefined);
 });
