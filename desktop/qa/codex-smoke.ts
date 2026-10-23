@@ -400,11 +400,18 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   });
   if(!uiOnly){
   await check('Five sources run and the sixth queues; Stop settles every job',async()=>{
-   await action({type:'preferences',patch:{parallel:5}});const started=await action({type:'start'});
-   assert.equal(started.jobs.filter(j=>['discovering','verifying','copying'].includes(j.phase)).length,5);assert.equal(started.jobs.filter(j=>j.phase==='queued').length,1);
-   const queuedOrganization=await action({type:'organize',destinationIndex:0});assert.equal(queuedOrganization.jobs.find(job=>job.organization)?.phase,'queued','Organization waits behind existing imports');await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click()");await wait(()=>js<boolean>("document.querySelector('.import-dashboard .progress-jobs')?.textContent.includes('Library organization')"),'queued organization in import dashboard');await shot('queued-organization-progress');
-   await fs.writeFile(path.join(report,'queue.json'),JSON.stringify(started,null,2));await action({type:'stop'});
-   await wait(async()=>(await state()).jobs.every(j=>['stopped','complete','error'].includes(j.phase)),'stop');assert.ok((await state()).jobs.some(j=>j.phase==='stopped'));
+   // The fixture copies finish within milliseconds, so Stop must be sent straight after the
+   // immediate state assertions; slower UI steps (navigation, screenshot) run after it settles.
+   await action({type:'preferences',patch:{parallel:5}});const earlier=new Set((await state()).jobs.map(j=>j.id));const started=await action({type:'start'});
+   const phases=started.jobs.map(j=>j.phase);
+   assert.equal(started.jobs.filter(j=>['discovering','verifying','copying'].includes(j.phase)).length,5,JSON.stringify(phases));assert.equal(started.jobs.filter(j=>j.phase==='queued').length,1);
+   const queuedOrganization=await action({type:'organize',destinationIndex:0});assert.equal(queuedOrganization.jobs.find(job=>job.organization)?.phase,'queued','Organization waits behind existing imports');
+   await fs.writeFile(path.join(report,'queue.json'),JSON.stringify(started,null,2));
+   await action({type:'stop'});
+   await wait(async()=>(await state()).jobs.every(j=>['stopped','complete','error'].includes(j.phase)),'stop');
+   const settled=(await state()).jobs.filter(j=>!earlier.has(j.id));assert.equal(settled.length,7,'six imports and the organization');
+   assert.ok(settled.some(j=>j.phase==='stopped'),'at least one job is stopped: '+JSON.stringify(settled.map(j=>j.phase)));
+   await js("Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()==='Import desk').click()");await wait(()=>js<boolean>("document.querySelector('.import-dashboard .progress-jobs')?.textContent.includes('Library organization')"),'organization listed in import dashboard');await shot('queued-organization-progress');
   });
   await check('Retry copies all source contents and a second run verifies duplicates',async()=>{
    const run=async()=>{const before=new Set((await state()).jobs.map(j=>j.id));await action({type:'start'});await wait(async()=>{const jobs=(await state()).jobs.filter(j=>!before.has(j.id));return jobs.length===6&&jobs.every(j=>['complete','error','stopped'].includes(j.phase));},'copy completion');const jobs=(await state()).jobs.filter(j=>!before.has(j.id));assert.ok(jobs.every(j=>j.phase==='complete'),JSON.stringify(jobs.map(j=>({phase:j.phase,detail:j.detail}))));return jobs;};
