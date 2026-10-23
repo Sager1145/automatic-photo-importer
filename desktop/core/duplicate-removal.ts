@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type { DuplicateGroup, DuplicateStrength, Progress } from '../shared';
-import type { ResolvedGroup } from '../duplicate-rules';
+import { classify, groupId, type ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
 import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
 
@@ -107,3 +107,17 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
 }
 const relativeTo = (root: string, file: string) => path.relative(root, file).split(path.sep).join('/');
 export type { DuplicateGroup };
+
+/** The groups and companions after a clean removal, without scanning the library again: removed files leave their
+ * groups (a group left with one file is gone, the others are classified anew), and a carried companion now follows the kept file. */
+export function afterRemoval(groups: DuplicateGroup[], companions: Map<string, string[]>, removal: RemovalResult): { groups: DuplicateGroup[]; companions: Map<string, string[]> } {
+  const gone = new Set(removal.report.filter(line => line.role === 'primary' && line.result === 'removed').map(line => line.file));
+  const moved = new Set(removal.report.filter(line => line.role === 'companion' && (line.result === 'removed' || line.result === 'carried')).map(line => line.file));
+  const next = new Map<string, string[]>();
+  for (const [primary, list] of companions) if (!gone.has(primary)) next.set(primary, list.filter(item => !moved.has(item)));
+  for (const line of removal.report) if (line.role === 'companion' && line.result === 'carried' && line.carriedTo) next.set(line.kept, [...next.get(line.kept) ?? [], line.carriedTo]);
+  return {
+    groups: groups.flatMap(group => { const files = group.files.filter(file => !gone.has(file.path)); return files.length > 1 ? [{ id: groupId(files), strength: classify(files), files }] : []; }),
+    companions: next,
+  };
+}

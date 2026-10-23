@@ -6,7 +6,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
-import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
 import {settingsLocked,lockedPreferenceKeys,jobPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
@@ -23,7 +23,7 @@ import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
-import {removeDuplicates} from './core/duplicate-removal';
+import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue} from './core/residue';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
@@ -115,7 +115,10 @@ interface Prepared {problems:ProblemFile[];review:Review;prefs:Preferences;optio
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
-const busy=()=>active.size>0;
+// A Duplicates scan holds the library's drive: imports and organizations wait for it (they are refused while it runs, queued jobs start after it).
+/** Library roots a running job writes to; a Duplicates scan of one of them is stale afterwards. */
+const touchedLibraries=new Map<string,string[]>();
+const busy=()=>active.size>0||!!duplicateControl;
 const stateChannel=createStateChannel(update=>{if(window&&!window.isDestroyed())window.webContents.send('importer:updated',update);});
 // Each job carries when it started running and when its current phase began, so elapsed time
 // can be shown; both are stamped as the state is published.
@@ -266,7 +269,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesUndone',{restored:undone.restored}):joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message(duplicates?'history.duplicatesUndone':'history.organizationUndone'),job.detail);}
   else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=progress.step==='history'?'verifying':'copying';job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
- }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
+ }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{if(kind!=='finalize'&&kind!=='delete')void duplicatesStale([root]);delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
   if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();}})()).finally(()=>{resumingOrganizations.delete(operation);void releaseIfIdle();});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
@@ -290,12 +293,12 @@ function enqueue(source:Source,backup=false,automatic=false){
  state.jobs.unshift(job);if(automatic)automaticallyQueued.add(job.id);seen.add(source.id);
  const finished=state.jobs.filter(j=>['complete','stopped','error'].includes(j.phase));if(finished.length>30){const remove=new Set(finished.slice(30).map(j=>j.id));state.jobs=state.jobs.filter(j=>!remove.has(j.id));}
 }
-function pump(){if(state.review||state.busyReview||organizationJobIds.size)return;while(active.size<state.preferences.parallel){
+function pump(){if(state.review||state.busyReview||organizationJobIds.size||duplicateControl)return;while(active.size<state.preferences.parallel){
  const job=nextQueued(state.jobs,sourceOrder);if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
  organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
- void settle(run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...skip})).finally(()=>{if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
+ void settle(run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...skip})).finally(()=>{void duplicatesStale(touchedLibraries.get(job.id)??[]);touchedLibraries.delete(job.id);if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
  if(organization)break;
 }}
 // Nothing here may touch a drive once the work is done, so macOS can eject it at once. exiftool and the
@@ -507,6 +510,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('plan.json',{producer:'desktop-app',jobId:job.id,kind,sourceFolders,plans,skipped:job.inventory?.skipped??[],failed,inventory:job.inventory});
   await saveReport('context.json',{producer:'desktop-app',started:new Date().toISOString(),preferences:prefs,source:job.source});
   const reserved=reservations.get(job.id)!;
+  touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
   job.phase='copying';
   const verified:Record<string,{sha256:string;identity:string}>={};
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,notes}=await executeDestinations(plans,{
@@ -604,11 +608,29 @@ async function scanDuplicatesAction(){
   const real=await fs.realpath(root).catch(()=>{throw new MessageError('error.duplicatesUnavailable');});
   const result=await scanDuplicates(real,{metadata:file=>metadata(file,{preview:false,details:false}),index:await destinationIndex(real,await identity(real))},{editedFolder:state.preferences.editedFolder,signal:control.signal,onProgress:progress=>{dup.progress=progress;progressEmit();}});
   duplicateGroups=result.groups;duplicateCompanions=result.companions;
+  dup.earlier=[...await placedByEarlierJournals(real,control.signal).catch(()=>new Set<string>())];
   Object.assign(dup,{files:result.files,groups:result.groups.length,scannedAt:new Date().toISOString(),revision:dup.revision+1,status:'ready' as const});
  }catch(error){
   duplicateGroups=[];Object.assign(dup,{groups:0,files:0,revision:dup.revision+1,status:'idle' as const});
   if(!control.signal.aborted)throw error;
- }finally{dup.progress=undefined;if(duplicateControl===control)duplicateControl=undefined;emit();void releaseIfIdle();}
+ }finally{dup.progress=undefined;if(duplicateControl===control)duplicateControl=undefined;emit();pump();void releaseIfIdle();}
+}
+/** After a removal that ran cleanly: drop the removed files from the groups, and move carried companions, in memory. */
+function applyRemoval(removal:RemovalResult){
+ const next=afterRemoval(duplicateGroups,duplicateCompanions,removal);
+ const gone=removal.report.filter(line=>line.role==='primary'&&line.result==='removed').length,removed=new Set(removal.report.filter(line=>line.role==='primary'&&line.result==='removed').map(line=>line.file));
+ duplicateGroups=next.groups;duplicateCompanions=next.companions;
+ dup.earlier=dup.earlier?.filter(item=>!removed.has(item));
+ Object.assign(dup,{files:Math.max(0,dup.files-gone),groups:duplicateGroups.length,revision:dup.revision+1});
+}
+/** A job changed this library: the scan no longer describes it, so it must be run again before anything is removed. */
+async function duplicatesStale(roots:string[]){
+ if(!dup.root||dup.status!=='ready')return;
+ const own=dup.root,mine=[own,await fs.realpath(own).catch(()=>own)];
+ for(const root of roots){
+  const real=await fs.realpath(root).catch(()=>root);
+  if(mine.some(item=>within(item,real)||within(real,item))){duplicateGroups=[];Object.assign(dup,{status:'idle' as const,groups:0,files:0,earlier:undefined,revision:dup.revision+1});emit();return;}
+ }
 }
 async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string>){
  const root=dup.root,scope=root?duplicateScope(root):undefined;
@@ -623,9 +645,10 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
  state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);dup.status='removing';emit();
  void settle((async()=>{
   const reports=path.join(app.getPath('userData'),'operation-reports',job.id);
+  let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
@@ -636,7 +659,12 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=control.signal.aborted?message('job.stopped'):toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}
   finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);dup.status='idle';await refreshOrganizations().catch(()=>{});emit();
    // The library changed: look again (records make this quick).
-   if(!active.size&&dup.root===root){const result=dup.result;await scanDuplicatesAction().catch(error=>{state.error=toMessage(error);emit();});dup.result=result;emit();}
+   // The library changed only by this removal: update the groups in memory. A failed run is looked at again.
+   if(dup.root===root){
+    const result=dup.result;
+    if(removal&&!removal.result?.errors.length&&dup.status==='idle'){applyRemoval(removal);dup.status='ready';dup.result=result;emit();}
+    else if(!active.size){await scanDuplicatesAction().catch(error=>{state.error=toMessage(error);emit();});dup.result=result;emit();}
+   }
    pump();void releaseIfIdle();}
  })());
 }

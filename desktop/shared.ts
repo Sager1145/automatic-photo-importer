@@ -40,7 +40,7 @@ export interface Thumbnail {src?:string;via:'system'|'embedded'|'none';problem?:
 /** A library Remove duplicates can look through: one destination's backup folder, or a chosen folder. */
 export interface DuplicateScope {root:string;name:string;destination?:string;}
 /** The groups themselves are fetched with DesktopAPI.duplicateGroups when `revision` changes, so progress updates stay small. */
-export interface DuplicatesState {scopes:DuplicateScope[];root?:string;name?:string;status:'idle'|'scanning'|'ready'|'removing';progress?:Progress;revision:number;groups:number;files:number;scannedAt?:string;result?:{removed:number;bytes:number;carried:number;left:number;errors:number;id?:string};}
+export interface DuplicatesState {scopes:DuplicateScope[];root?:string;name?:string;status:'idle'|'scanning'|'ready'|'removing';progress?:Progress;revision:number;groups:number;files:number;scannedAt?:string;/** Files (relative to the root) an earlier organization placed; removing them supersedes it and ends its Undo (see summarize). */earlier?:string[];result?:{removed:number;bytes:number;carried:number;left:number;errors:number;id?:string};}
 export interface Metadata {fingerprint?:DuplicateExif;edited?:boolean;camera?:string;date?:string;fields:Record<string,unknown>;exposure?:Exposure;shutterCount?:string;shutterNote?:string;preview?:string;}
 /** digest is absent until a copy streams the source ("computed during copy"); planning hashes
  * only when a same-size file already sits at a candidate destination. sourceIdentity is the

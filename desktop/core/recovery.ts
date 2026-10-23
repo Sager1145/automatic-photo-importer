@@ -888,6 +888,24 @@ export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'r
  await jsonFile(path.join(jobPath(transfer.root,id),'manifest.json'),signed(manifest as unknown as Record<string,unknown>));await roots(manifest);
  return {id,result:await locked(jobPath(transfer.root,id),()=>run(manifest,signal,onProgress))};
 }
+/** The files (relative to `root`, with `/`) that an earlier, still live journal of this library placed or kept. Removing
+ * one supersedes that journal, which ends its Undo, so Remove duplicates warns before it does. Best effort: a
+ * journal that cannot be read is skipped. */
+export async function placedByEarlierJournals(root:string,signal?:AbortSignal):Promise<Set<string>> {
+ const placed=new Set<string>();
+ let ids:string[];
+ try{await adoptLegacyStorage(root);ids=await fs.readdir(path.join(root,storage));}catch{return placed;}
+ for(const id of ids){
+  checkAbort(signal);
+  if(!uuid.test(id))continue;
+  try{
+   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,undefined,false);
+   if(state.superseded||state.undoComplete)continue;
+   for(const entry of prior.entries)placed.add(path.relative(root,entry.destination).split(path.sep).join('/'));
+  }catch(error){if(isAbort(error))throw error;}
+ }
+ return placed;
+}
 /** Resume, or recheck a finished organization. A journal from before the event log is first
  * converted to it (compactLegacyEvents), which only this explicit action does. */
 export async function resumeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean}={}):Promise<ReorganizationResult> {

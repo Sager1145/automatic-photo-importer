@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { configureOrganizationRecovery, getOrganizationRecovery, finalizeOrganization, undoOrganization, deleteOrganizationRecovery } from '../core/recovery';
+import { configureOrganizationRecovery, placedByEarlierJournals, getOrganizationRecovery, finalizeOrganization, undoOrganization, deleteOrganizationRecovery } from '../core/recovery';
 import { scanDuplicates, dropDuplicateStores } from '../core/duplicates';
-import { removeDuplicates, companionTarget } from '../core/duplicate-removal';
+import { removeDuplicates, afterRemoval, companionTarget } from '../core/duplicate-removal';
 import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
 import { identity } from '../core/paths';
 import { chooseKeeper, organizedPath, resolveGroups, summarize } from '../duplicate-rules';
@@ -229,4 +229,38 @@ test('a lookalike (EXIF) group is removed only while the inode and modified time
   const next = await scan(root, { 'one.JPG': same, 'two.JPG': same });
   const done = await removeDuplicates(root, resolveGroups(next.groups, 1, { [next.groups[0]!.id]: 'a/one.JPG' }), next.companions);
   assert.equal(done.removed, 1);
+});
+
+test('the summary counts files an earlier journal placed, and drops them again after an undo', async t => {
+  const root = await library(t);
+  await write(root, 'a/one.JPG', 'identical bytes'); await write(root, 'b/two.JPG', 'identical bytes');
+  const first = await scan(root);
+  const removal = await removeDuplicates(root, resolveGroups(first.groups, 1, { [first.groups[0]!.id]: 'a/one.JPG' }), first.companions);
+  assert.equal(removal.removed, 1);
+  const placed = await placedByEarlierJournals(root);
+  assert.deepEqual([...placed], ['a/one.JPG'], 'the kept file belongs to the journal');
+  // A later pair whose copy to remove is that file would supersede the journal.
+  const later = [group('sha', 'later', file('a/one.JPG'), file('c/three.JPG'))];
+  const resolved = resolveGroups(later, 1, { later: 'c/three.JPG' });
+  assert.equal(summarize(resolved).earlier, undefined, 'only reported when asked');
+  assert.equal(summarize(resolved, placed).earlier, 1);
+  assert.equal(summarize(resolveGroups(later, 1, { later: 'a/one.JPG' }), placed).earlier, 0);
+  await undoOrganization(root, removal.id!);
+  assert.equal((await placedByEarlierJournals(root)).size, 0, 'an undone journal supersedes nothing');
+});
+test('after a removal the groups are updated in memory exactly as a new scan would find them', async t => {
+  const root = await library(t);
+  await write(root, 'a/one.JPG', 'identical bytes'); await write(root, 'b/two.JPG', 'identical bytes'); await write(root, 'c/three.JPG', 'identical bytes');
+  await write(root, 'd/x.JPG', 'other photo'); await write(root, 'e/y.JPG', 'other photo');
+  const before = await scan(root);
+  assert.equal(before.groups.length, 2);
+  const keepOne = before.groups.find(item => item.files.length === 3)!;
+  const removal = await removeDuplicates(root, resolveGroups(before.groups, 1, { [keepOne.id]: 'a/one.JPG' }), before.companions);
+  assert.equal(removal.removed, 2);
+  const memory = afterRemoval(before.groups, before.companions, removal);
+  dropDuplicateStores();
+  const again = await scan(root);
+  const shape = (list: DuplicateGroup[]) => list.map(item => [item.strength, item.files.map(f => f.path)]);
+  assert.deepEqual(shape(memory.groups), shape(again.groups));
+  assert.deepEqual(memory.groups.map(item => item.id), again.groups.map(item => item.id));
 });

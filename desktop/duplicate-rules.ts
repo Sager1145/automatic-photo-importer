@@ -119,11 +119,13 @@ export function resolveGroups(groups: DuplicateGroup[], level: DuplicateLevel, d
     return { group, auto, suggested, keep, remove: keep === undefined || keep === 'all' ? [] : group.files.filter(file => file.path !== keep), needsDecision: keep === undefined };
   });
 }
-export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; }
-export function summarize(resolved: ResolvedGroup[]): RemovalSummary {
+export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; /** Files to remove that an earlier organization placed: removing them supersedes it and ends its Undo. Present when `earlier` is given. */ earlier?: number; }
+export function summarize(resolved: ResolvedGroup[], earlier?: ReadonlySet<string> | readonly string[]): RemovalSummary {
+  const placed = earlier && new Set(earlier);
   const removing = resolved.filter(item => item.remove.length);
   return {
     groups: removing.length, files: removing.reduce((sum, item) => sum + item.remove.length, 0), bytes: removing.reduce((sum, item) => sum + item.remove.reduce((n, file) => n + file.size, 0), 0),
     undecided: resolved.filter(item => item.needsDecision).length, automatic: resolved.filter(item => item.auto).length, manual: resolved.filter(item => !item.auto).length,
+    ...(placed ? { earlier: removing.reduce((sum, item) => sum + item.remove.filter(file => placed.has(file.path)).length, 0) } : {}),
   };
 }
