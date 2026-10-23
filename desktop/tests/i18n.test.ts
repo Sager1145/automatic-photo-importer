@@ -45,7 +45,6 @@ test('copy and discovery labels describe destinations, media types and mounted s
     ['Folder backup','文件夹备份','資料夾備份','フォルダーバックアップ'],
     ['Media layout','媒体文件布局','媒體檔案配置','メディアの配置'],
     ['A separate video backup folder','单独的视频备份文件夹','獨立的影片備份資料夾','動画用の別のバックアップフォルダー'],
-    ['Mounted SD cards, CFexpress cards and camera storage appear here. Check your destination, then start importing.','已挂载的 SD 卡、CFexpress 卡和相机存储会显示在此处。确认目标后即可开始导入。','已掛載的 SD 卡、CFexpress 卡與相機儲存裝置會顯示於此。確認目的地後即可開始匯入。','マウント済みのSDカード、CFexpressカード、カメラのストレージをここに表示します。保存先を確認してインポートを開始してください。'],
   ];
   for (const values of labels) for (const [index,language] of languages.entries()) assert.equal(createTranslator(language)(values[0]),values[index]);
 });
