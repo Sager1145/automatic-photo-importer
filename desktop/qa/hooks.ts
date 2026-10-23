@@ -20,6 +20,8 @@ export interface QaHooks {
  hold():()=>void;
  /** Ids of jobs waiting at the gate. */
  held():ReadonlySet<string>;
+ /** When set, what the metadata sheet gets instead of reading the file (fixture metadata). clear() removes it. */
+ inspect?:(file:string)=>unknown;
  /** Called by a starting import: resolves at once unless held. */
  gate(jobId:string,signal:AbortSignal):Promise<void>;
 }
@@ -28,7 +30,7 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
  const saved=new Map<keyof AppState,unknown>();
  const waiting=new Set<string>();
  let release:Promise<void>|undefined,open:(()=>void)|undefined;
- return {
+ const hooks:QaHooks={
   peek:()=>state,
   addJobs(jobs){
    if(jobs.some(job=>!job.id.startsWith(SYNTHETIC)||job.phase==='queued'))throw new Error('Synthetic jobs need a qa: id and must not be queued.');
@@ -39,7 +41,7 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
   clear(){
    state.jobs=state.jobs.filter(job=>!job.id.startsWith(SYNTHETIC));
    for(const [key,value] of saved){if(value===undefined)delete state[key];else (state as unknown as Record<string,unknown>)[key]=value;}
-   saved.clear();emit();
+   saved.clear();hooks.inspect=undefined;emit();
   },
   hold(){
    if(!release)release=new Promise(resolve=>{open=resolve;});
@@ -53,4 +55,5 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
    finally{waiting.delete(jobId);}
   },
  };
+ return hooks;
 }

@@ -88,7 +88,8 @@ export const importChecks=(ctx:Context):Check[]=>[
   // Fixture-only: the real preview UI runs through its bridge, without native dialogs or user files.
   const photo:Metadata={camera:'Fixture camera',date:'2025-06-26T13:50:35+08:00',exposure:{lens:'Fixture 24–70mm',aperture:2.8,iso:400,exposureTime:1/125,focalLength:35,exposureCompensation:0.3},shutterCount:'123',shutterNote:'Fixture shutter note',fields:{'EXIF:Model':'Fixture camera','EXIF:ISO':400}};
   let selected={path:path.join(ctx.root,'source-1','photo.png'),metadata:photo};
-  ipcMain.removeHandler('importer:inspect');ipcMain.handle('importer:inspect',()=>selected.metadata);
+  // Through the QA hook when there is one, so the real handler stays for later checks; else replaced for the rest of the run.
+  if(h.hooks)h.hooks.inspect=()=>selected.metadata;else{ipcMain.removeHandler('importer:inspect');ipcMain.handle('importer:inspect',()=>selected.metadata);}
   const open=async(name:string)=>{await h.js(`Array.from(document.querySelectorAll('.review-source-button')).find(button=>button.textContent.includes(${JSON.stringify(name)})).click()`);await h.until('metadata dialog',"document.querySelector('.metadata-dialog')?.open===true");};
   const close=async()=>{await h.click('[data-testid=metadata-close]');await h.until('animated metadata close',"document.querySelector('.metadata-dialog')===null");};
   try{
@@ -115,7 +116,7 @@ export const importChecks=(ctx:Context):Check[]=>[
     assert.equal(await h.js<string>("document.querySelector('[data-testid=metadata-timezone]').textContent"),'UTC+08:00');
     await h.shot('video-metadata-'+language);await close();
    }
-  }finally{ipcMain.removeHandler('importer:inspect');ipcMain.handle('importer:inspect',(_event,file:string)=>{throw new Error(`Inspecting ${path.basename(String(file))} is not available after the QA metadata check`);});}
+  }finally{if(h.hooks)h.hooks.inspect=undefined;}
  }},
  {id:'import-rule-invalidates-review',stage:'imports',title:'Changing an unknown-file rule invalidates a ready import review',covers:['review invalidation'],run:async h=>{
   const ready=await h.action({type:'preview',sourceId:'fixture:1'});assert.ok(ready.review);const before=ready.jobs.length;

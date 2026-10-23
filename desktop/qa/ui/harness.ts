@@ -1,13 +1,14 @@
 // The QA harness: helpers every check uses, and the runner that gives each check a clean start, a time budget,
 // a timing and a screenshot when it fails. Waits poll a condition; nothing sleeps for a fixed time.
 import {nativeTheme,screen,type BrowserWindow} from 'electron';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {Action,AppState,Preferences} from '../../shared';
 import {createStateReceiver,type StateUpdate} from '../../state-channel';
 import {lockedPreferenceKeys,settingsLocked} from '../../settings-lock';
-import type {QaHooks} from '../hooks';
+import {SYNTHETIC,type QaHooks} from '../hooks';
 import {Heartbeat,pulses} from './heartbeat';
 
 export type Page='Import desk'|'Drives'|'Organization'|'Duplicates'|'History'|'Settings';
@@ -39,10 +40,12 @@ const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 export class Harness {
  readonly report:string;
  /** Waits and budgets stretch with the machine's load (1 to 3 times). */
- readonly scale:number;
+ get scale():number{return Math.min(3,Math.max(1,os.loadavg()[0]!/Math.max(1,os.cpus().length)));}
  readonly heartbeat=new Heartbeat(10000);
  private receiver=createStateReceiver();
- private token={cancelled:false};
+ /** Each check runs with its own token, carried through its awaits: a check abandoned after its budget stops at its
+  * next harness call even while the next check runs. */
+ private tokens=new AsyncLocalStorage<{cancelled:boolean}>();
  private initial!:{content:[number,number];theme:typeof nativeTheme.themeSource};
  private emulated=false;
  private metrics=false;
@@ -54,7 +57,6 @@ export class Harness {
  deadline=Infinity;
  constructor(readonly window:BrowserWindow,readonly root:string,readonly hooks?:QaHooks){
   this.report=path.join(root,'artifacts');
-  this.scale=Math.min(3,Math.max(1,os.loadavg()[0]!/Math.max(1,os.cpus().length)));
  }
  /** Call once the boot splash is gone. */
  async start(){
@@ -62,7 +64,7 @@ export class Harness {
   this.navLabels=await this.js<string[]>("Array.from(document.querySelectorAll('.nav-item')).map(b=>b.textContent.trim())");
   const [width,height]=this.window.getContentSize();this.initial={content:[width!,height!],theme:nativeTheme.themeSource};
  }
- private alive(){if(this.token.cancelled)throw new Cancelled();}
+ private alive(){if(this.tokens.getStore()?.cancelled)throw new Cancelled();}
  /** Runs JavaScript in the page. A renderer that does not answer within 30 s (times the load scale) fails the check instead of hanging the run. */
  async js<T>(source:string):Promise<T>{
   this.alive();let timer:NodeJS.Timeout|undefined;
@@ -75,7 +77,8 @@ export class Harness {
  async action(value:Action):Promise<AppState>{await this.js<void>(`window.importer.action(${JSON.stringify(value)})`);return this.state();}
  /** Polls `test` until it holds. The error names what was awaited and, when given, what was last seen. */
  async waitFor(label:string,test:()=>Promise<boolean>|boolean,options:{timeoutMs?:number;seen?:()=>Promise<unknown>|unknown;interval?:number}={}):Promise<void>{
-  const end=Date.now()+(options.timeoutMs??20000)*this.scale;
+  // No wait outlasts the run's deadline, so the report is always written in time.
+  const end=Math.min(Date.now()+(options.timeoutMs??20000)*this.scale,this.deadline);
   for(;;){
    this.alive();
    if(await test())return;
@@ -152,6 +155,11 @@ export class Harness {
   await this.js(`(()=>{for(const key of ${JSON.stringify(Object.keys(this.notes))})delete window[key];})()`);this.notes={};
   const [width,height]=this.window.getContentSize();if(this.metrics||width!==this.initial.content[0]||height!==this.initial.content[1])await this.size(...this.initial.content);
   await this.closeOverlays();
+  // Real work a failed check left running would change what the next check sees: stop it and wait.
+  if((await this.state()).jobs.some(job=>!job.id.startsWith(SYNTHETIC)&&['queued','discovering','verifying','copying'].includes(job.phase))){
+   await this.action({type:'stop'});
+   await this.waitFor('leftover jobs stopped',async()=>!(await this.state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),{timeoutMs:30000});
+  }
   const s=await this.state();
   if(s.review&&!s.busyReview)await this.action({type:'discardReview'});
   const want:Partial<Preferences>={language:'en',textScale:1.25,sourceLayout:'list',appearance:'system',showDashboard:true};
@@ -181,18 +189,18 @@ export class Harness {
    const left=this.deadline-Date.now()-(check.stage==='final'?0:20000);
    if(left<5000){results.push({...base,status:'failed',ms:0,error:'Not run: the run ran out of time before this check'});console.error(`QA FAIL [${check.stage}] ${check.title}: not run, out of time`);continue;}
    console.log(`QA RUN  [${check.stage}] ${check.id}`);
-   this.token={cancelled:false};this.current=check.id;
+   this.current=check.id;const token={cancelled:false};
    const started=Date.now();
    try{
     await this.baseline();baselineFailures=0;
-    const reason=await check.skip?.(this);
+    const reason=await this.tokens.run(token,()=>check.skip?.(this));
     if(reason){results.push({...base,status:'skipped',ms:Date.now()-started,reason});console.log(`QA SKIP [${check.stage}] ${check.title}: ${reason}`);continue;}
     const budget=Math.min((check.budgetMs??90000)*this.scale,left);let timer:NodeJS.Timeout|undefined;
-    try{await Promise.race([check.run(this),new Promise((_,reject)=>{timer=setTimeout(()=>{this.token.cancelled=true;reject(new Error(`Exceeded its ${Math.round(budget/1000)} s budget`));},budget);})]);}
+    try{await Promise.race([this.tokens.run(token,()=>check.run(this)),new Promise((_,reject)=>{timer=setTimeout(()=>{token.cancelled=true;reject(new Error(`Exceeded its ${Math.round(budget/1000)} s budget`));},budget);})]);}
     finally{clearTimeout(timer);}
     const ms=Date.now()-started;results.push({...base,status:'passed',ms});console.log(`QA PASS [${check.stage}] ${check.title} (${(ms/1000).toFixed(1)} s)`);
    }catch(error){
-    this.token={cancelled:false};
+    token.cancelled=true;
     if(error instanceof SkipCheck){results.push({...base,status:'skipped',ms:Date.now()-started,reason:error.message});console.log(`QA SKIP [${check.stage}] ${check.title}: ${error.message}`);try{await this.baseline();}catch{baselineFailures++;}continue;}
     const ms=Date.now()-started,screenshot=path.join('failures',check.id+'.png');
     console.error(`QA FAIL [${check.stage}] ${check.title} (${(ms/1000).toFixed(1)} s)`,error);
