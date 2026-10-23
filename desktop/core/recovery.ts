@@ -89,7 +89,8 @@ export const ORGANIZATIONS='Organizations',POINTERS='Pointers',JOURNAL='journal.
 export interface ConvertedFrom {path:string;records:number;sha256:string;}
 /** Where a journal is. v5: its folder in a store (paths inside are checked against the store). Earlier version:
  * its folder in the library, read by the converter only (paths checked against the library). */
-interface Location {folder:string;journal:string;scope:string;store?:Store;eventsFrom:number;convertedFrom?:ConvertedFrom;}
+interface Location {folder:string;journal:string;scope:string;store?:Store;eventsFrom:number;convertedFrom?:ConvertedFrom;/** The converter only: the library was renamed only by case since the journal recorded it; its folders are
+ * checked by identity and by path key. */caseRenamed?:boolean;}
 const locations=new WeakMap<Manifest,Location>();
 function where(m:Manifest):Location {const at=locations.get(m);if(!at)throw new Error('Unknown organization record location');return at;}
 const jobFolder=(m:Manifest)=>where(m).folder;
@@ -206,10 +207,10 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
 async function readLegacyEvents(m:Manifest,onRead?:(read:number,total:number,name?:string)=>void):Promise<{state:JournalState;records:string[]}> {
  const state=emptyState(),apply=applier(m,state),rebased=rebasedEvent(m),applied:string[]=[];
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));applied.push(text);};
- const job=jobFolder(m);await contained(path.join(job,'.event-check'),m.root);const names=await fs.readdir(job);let read=0;
+ const job=jobFolder(m);await contained(path.join(job,'.event-check'),scopeOf(m));const names=await fs.readdir(job);let read=0;
  const seen=new Set<string>(),once=(text:string)=>{const record=text.trim();if(record&&!seen.has(record)){seen.add(record);parse(record);}};
  const readLog=async()=>{
-  const file=path.join(job,eventLog);await contained(file,m.root);const handle=await regularHandle(file);
+  const file=path.join(job,eventLog);await contained(file,scopeOf(m));const handle=await regularHandle(file);
   try{
    const size=Number((await handle.stat()).size);if(size>maxEventLog)throw new Error('Recovery journal is too large');
    const bytes=Buffer.alloc(size);if(bytes.length)await handle.read(bytes,0,bytes.length,0);
@@ -254,11 +255,15 @@ async function savedOriginal(m:Manifest,index:number,state:JournalState):Promise
  for(const slot of state.slots.get(index)??[]){const file=originalPath(m,index,slot);await contained(file,scopeOf(m));if(await maybeStat(file)){if(saved)throw new Error('Multiple recovery originals require inspection');saved=file;}}
  return saved;
 }
+/** The same folder, renamed only by case since it was recorded (the converter only). */
+async function caseRenamedUnchanged(folder:string,expected:string):Promise<void>{
+ if(await identity(folder)!==expected||pathKey(await fs.realpath(folder))!==pathKey(folder))throw new Error(`Destination identity changed; scan again: ${folder}`);
+}
 async function roots(m:Manifest):Promise<void> {
- await rootUnchanged(m.root,m.rootIdentity);await rootUnchanged(m.source,m.sourceIdentity);
+ const at=where(m),unchanged=at.caseRenamed?caseRenamedUnchanged:rootUnchanged;
+ await unchanged(m.root,m.rootIdentity);await unchanged(m.source,m.sourceIdentity);
  const library=await fs.lstat(m.root,{bigint:true});
  if(library.dev!==(await fs.lstat(m.source,{bigint:true})).dev)throw new Error('Recovery source and destination must remain on the same filesystem');
- const at=where(m);
  // Originals and staged copies move between the library and the store with rename(2) and link(2): one volume.
  if(at.store){await storeUnchanged(at.store);if((await fs.lstat(at.store.path,{bigint:true})).dev!==library.dev)throw new Error('Recovery records and the library must remain on the same filesystem');}
  await contained(at.folder,at.scope);
@@ -339,10 +344,10 @@ async function locateJob(root:string,id:string):Promise<Found>{
  return found[0]!;
 }
 /** Read a located journal's manifest. `checkRoots` false: for a folder renamed only by case, whose journals record its old name. */
-async function openJournal(found:Found,root:string,id:string,checkRoots=true):Promise<Manifest>{
+async function openJournal(found:Found,root:string,id:string,checkRoots=true,caseRenamed=false):Promise<Manifest>{
  const head=await readJournalHead(found.journal,found.store.path,true),convertedFrom=validConvertedFrom(head.header.convertedFrom);
  const m=manifestFrom(head.header,head.entries!,root,id);
- locations.set(m,{folder:found.folder,journal:found.journal,scope:found.store.path,store:found.store,eventsFrom:head.eventsFrom,...(convertedFrom?{convertedFrom}:{})});
+ locations.set(m,{folder:found.folder,journal:found.journal,scope:found.store.path,store:found.store,eventsFrom:head.eventsFrom,...(convertedFrom?{convertedFrom}:{}),...(caseRenamed?{caseRenamed:true}:{})});
  await rebaseMount(m);if(checkRoots)await roots(m);return m;
 }
 async function readManifest(root:string,id:string):Promise<Manifest> {
@@ -392,8 +397,10 @@ async function readLegacyManifest(root:string,id:string):Promise<Manifest> {
  if(path.resolve(root)!==root||await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');
  const job=legacyJobPath(root,id),file=path.join(job,'manifest.json');await contained(file,root);
  const handle=await regularHandle(file);let value:unknown;try{if((await handle.stat()).size>64*1024*1024)throw new Error('Recovery journal is too large');value=JSON.parse(await handle.readFile('utf8'));}finally{await handle.close();}
- const manifest=validateManifest(authenticated(value),root,id);
- locations.set(manifest,{folder:job,journal:path.join(job,eventLog),scope:root,eventsFrom:0});
+ // A library renamed only by case since: read under the name the journal recorded (on a case-insensitive volume it is the same folder).
+ const claimed=(value as {root?:unknown})?.root,recorded=typeof claimed==='string'&&claimed!==root&&pathKey(claimed)===pathKey(root)?claimed:root;
+ const manifest=validateManifest(authenticated(value),recorded,id);
+ locations.set(manifest,{folder:job,journal:path.join(job,eventLog),scope:root,eventsFrom:0,...(recorded!==root?{caseRenamed:true}:{})});
  await rebaseMount(manifest);await roots(manifest);return manifest;
 }
 /** The mount each journal was read under: a device number names a mount, not a disk. */
@@ -1611,7 +1618,10 @@ export const journalConversion={
  async convertedFromOf(target:ConversionTarget):Promise<ConvertedFrom|undefined>{return validConvertedFrom((await readJournalHead(target.journal,target.store.path,false)).header.convertedFrom);},
  /** N4: read a journal file (the temporary one, or the committed one) with the v5 reader, without its successor. */
  async replay(target:ConversionTarget,file:string,root:string,id:string):Promise<{manifest:Manifest;state:JournalState}>{
-  const m=await openJournal({store:target.store,folder:target.folder,journal:file},root,id);
+  // A library renamed only by case keeps the name the journal recorded.
+  const recorded=(await readJournalHead(file,target.store.path,false)).header.root;
+  const claimed=typeof recorded==='string'&&recorded!==root&&pathKey(recorded)===pathKey(root)?recorded:root;
+  const m=await openJournal({store:target.store,folder:target.folder,journal:file},claimed,id,true,claimed!==root);
   try{return {manifest:m,state:await readEvents(m,undefined,undefined,false)};}
   finally{for(const key of [...finishedJournals.keys()])if(key.startsWith(file+'\0'))finishedJournals.delete(key);}
  },

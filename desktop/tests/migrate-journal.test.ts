@@ -199,3 +199,14 @@ test('a conversion committed into the library\'s store is finished there even wh
  assert.equal(await exists(path.join(f.base,'Photo Importer Data','Organizations',f.id)),false);
  await converted(f);
 });
+
+test('a library renamed only by case converts; its journal keeps the name it recorded, and works again once renamed back',async t=>{
+ const f=await legacyLibrary(t);
+ const renamed=path.join(f.base,'Library');await fs.rename(f.root,renamed);
+ const result=await migrateDrive([renamed]);
+ assert.deepEqual(result.problems,[]);assert.equal(result.converted,1);
+ assert.equal(await exists(path.join(renamed,'Photo Importer Recovery')),false,'the earlier version\'s folder is gone');
+ assert.ok(await exists(path.join(renamed,'Photo Importer Data','Organizations',f.id,'journal.jsonl')));
+ await fs.rename(renamed,f.root);
+ await converted(f);
+});
