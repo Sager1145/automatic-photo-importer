@@ -837,14 +837,18 @@ interface Run {
   transfer:TransferPlan;result:ExecutionResult;recovery:RecoveryIndex;index?:DestinationIndex;error?:Error;
   batches:{family:PlanEntry[];staged:Map<string,Staged>;failed:boolean;errors:string[]}[];pending:Set<string>;
   bytes:number;completed:number;failed:number;counted:Set<string>;phase:NonNullable<Progress['phase']>;started:number;totalBytes:number;
+  /** Bytes of the files staged for this run, of those published so far, and whether any was published by copying instead of linking. */
+  stagedBytes:number;verifiedBytes:number;publishCopy:boolean;
 }
 /** Copy the same reviewed entries to several destinations. Each source file is
  * read once for all of them; checks, publication and errors stay per destination.
  * A destination that cannot start returns an Error in its slot; Stop throws. */
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
-  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0)}));
-  const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...skippedOf(run.transfer),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file});};
+  const runs:Run[]=transfers.map(transfer=>({transfer,result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[]})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false}));
+  const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...skippedOf(run.transfer),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file,
+   // What the time-left estimate counts: copying moves bytes; verifying publishes the staged files (bytes of files already in the backup add files only).
+   work:run.phase==='copying'?{files:run.completed,bytes:run.bytes,totalFiles:run.transfer.entries.length,totalBytes:Math.max(run.totalBytes,run.bytes)}:{files:run.completed,bytes:run.verifiedBytes,totalFiles:run.transfer.entries.length,totalBytes:run.stagedBytes,...(run.publishCopy?{publishCopy:true}:{})}});};
   // A failed group stops counting as done and is reported as failed, once.
   const fail=(run:Run,batch:Run['batches'][number],error:unknown)=>{if(!batch.failed){run.failed+=batch.family.length;for(const entry of batch.family)if(run.counted.delete(entry.id))run.completed--;}batch.failed=true;batch.errors.push(`${path.basename(batch.family[0]!.source)}: ${message(error)}`);};
   // Errors of families handled side by side, in file order.
@@ -889,7 +893,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       runs.forEach((run,position)=>{if(run.error||!run.pending.has(id))return;const {batch,entry}=owners[position]!.get(id)!;if(!batch.failed)targets.push({run,position,batch,entry});});
       if(!targets.length) return;
       const results=await stageMany(targets.map(({run,position,entry})=>({entry,transfer:run.transfer,recovery:run.recovery,onBytes:count=>{run.bytes+=count;progress(position,path.basename(entry.source));}})),signal);
-      results.forEach((value,slot)=>{const {run,position,batch,entry}=targets[slot]!;if(value instanceof Error)fail(run,batch,value);else{batch.staged.set(entry.id,value);if(!batch.failed){run.counted.add(entry.id);run.completed++;}progress(position,path.basename(entry.source));}});
+      results.forEach((value,slot)=>{const {run,position,batch,entry}=targets[slot]!;if(value instanceof Error)fail(run,batch,value);else{batch.staged.set(entry.id,value);if(!batch.failed){run.counted.add(entry.id);run.completed++;}run.stagedBytes+=entry.size;progress(position,path.basename(entry.source));}});
     });
     for(const run of runs)report(run);
     // Destinations are verified one after another; within one, families run side by side and
@@ -953,7 +957,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.
               if(!temporary)throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
-              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
+              try{const bound=await publish(temporary,item.destination,entry,transfer,options,recovery,signal);if(bound!==temporary.verifiedStat)run.publishCopy=true;if(bound)published.push({file:item.destination,sha256:entry.digest!,stat:bound});if(entry.sourceIdentity&&options.verify!==false)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);result.copied++;i++;}
               catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);
@@ -967,6 +971,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
         },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file)]);
+        run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
         staged.clear();
         progress(position,path.basename(family[family.length-1]!.source));
       });

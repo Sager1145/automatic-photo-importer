@@ -116,7 +116,7 @@ export class StepFit {
 
 export type JobKind='import'|'organization'|'duplicates'|'finalize'|'undo'|'originals';
 export interface StepTotal {files:number;bytes:number;/** false: bytes are not known beforehand (they follow the observed mix). */bytesKnown?:boolean;}
-export interface JobModelOptions {kind:JobKind;book:PriorBook;totals?:Record<string,StepTotal>;verify?:boolean;publish?:'link'|'copy';releasing?:boolean;removing?:boolean;/** Totals come from a listing estimate. */estimated?:boolean;}
+export interface JobModelOptions {kind:JobKind;book:PriorBook;totals?:Record<string,StepTotal>;verify?:boolean;publish?:'link'|'copy';/** Totals come from a listing estimate. */estimated?:boolean;}
 export interface JobSnapshot {step?:number;job?:number;low?:number;high?:number;uncertainty:number;/** Model-seconds of work done / in all, and their ratio. */cost:{done:number;total:number};fraction:number;stepFraction:number;}
 export interface StepSummary extends Coef {step:string;T:number;F:number;G:number;observed:number;windows:number;}
 
@@ -124,10 +124,10 @@ interface StepState {total?:StepTotal;done:{files:number;bytes:number};fit?:Step
 const empty:JobSnapshot={uncertainty:1,cost:{done:0,total:0},fraction:0,stepFraction:0};
 
 /** The steps of a job in order. 'verifying' stands for the import's last step, named by whether it verifies and how it publishes. */
-export function stepOrder(options:Pick<JobModelOptions,'kind'|'verify'|'publish'|'releasing'|'removing'>):string[]{
+export function stepOrder(options:Pick<JobModelOptions,'kind'|'verify'|'publish'>):string[]{
  switch(options.kind){
-  case 'import':return ['checking','candidates','comparing','existing',...(options.removing?['removing']:[]),'copying',`${options.verify===false?'publish':'verifying'}:${options.publish??'link'}`];
-  case 'organization':return ['checking','reading','history','earlier','confirming','moving','stashing','tidying',...(options.releasing?['verifying:checking','releasing']:[])];
+  case 'import':return ['checking','candidates','comparing','existing','removing','copying',`${options.verify===false?'publish':'verifying'}:${options.publish??'link'}`];
+  case 'organization':return ['checking','reading','history','earlier','confirming','moving','stashing','tidying','verifying:checking','releasing'];
   case 'duplicates':return ['verifying:checking','history','earlier','confirming','moving','stashing','tidying'];
   case 'finalize':return ['verifying:checking','releasing'];
   case 'undo':return ['verifying:checking','restoring'];
@@ -138,12 +138,13 @@ export function stepOrder(options:Pick<JobModelOptions,'kind'|'verify'|'publish'
 /** A job: its steps in order, the current one fitted from its progress and the rest from the book. */
 export class JobModel {
  private order:string[];
+ private book:PriorBook;
  private readonly states=new Map<string,StepState>();
  private current?:string;
  private publish:'link'|'copy';
  private readonly ended:StepSummary[]=[];
  constructor(private readonly options:JobModelOptions){
-  this.publish=options.publish??'link';
+  this.publish=options.publish??'link';this.book=options.book;
   this.order=stepOrder({...options,publish:this.publish});
   for(const [step,total] of Object.entries(options.totals??{}))this.setTotal(step,total);
  }
@@ -163,10 +164,20 @@ export class JobModel {
   if(this.current===before)this.current=after;
   this.order=this.order.map(step=>step===before?after:step);
  }
+/** Whether this model has the step (otherwise the caller estimates it some other way). */
+ covers(step:string){return this.order.includes(this.resolve(step));}
+ /** End the current step (the job ended or stopped): its fit joins the steps to save. */
+ finish(){
+  if(this.current===undefined)return;
+  const state=this.states.get(this.current);
+  if(state&&state.status==='active')this.finish_(this.current,state);
+ }
  /** Steps that ended since the last call, with their final fits (for saving as priors). */
  drain():StepSummary[]{return this.ended.splice(0);}
- private choice(step:string,state:StepState){return state.choice??(state.choice=this.options.book.lookup(step));}
- private finish(step:string,state:StepState){
+ private choice(step:string,state:StepState){return state.choice??(state.choice=this.book.lookup(step));}
+ /** Use other starting coefficients for the steps not yet reached (the drives became known). */
+ setBook(book:PriorBook){this.book=book;for(const state of this.states.values())if(state.status==='ahead')state.choice=undefined;}
+ private finish_(step:string,state:StepState){
   if(state.status==='active'&&state.fit){
    state.coef=state.fit.theta();
    const summary=state.fit.summary();
@@ -180,7 +191,7 @@ export class JobModel {
   const key=this.resolve(step),index=this.order.indexOf(key);
   if(index<0)return this.snapshot();
   if(this.current!==key){
-   if(this.current!==undefined){const before=this.states.get(this.current);if(before&&before.status==='active')this.finish(this.current,before);}
+   if(this.current!==undefined){const before=this.states.get(this.current);if(before&&before.status==='active')this.finish_(this.current,before);}
    for(const [position,other] of this.order.entries()){
     const state=this.state(other);
     if(position<index&&state.status==='ahead'){state.status='skipped';state.total={files:0,bytes:0};state.done={files:0,bytes:0};}
@@ -208,7 +219,7 @@ export class JobModel {
    const total=state.total,known=!!total&&(total.files>0||total.bytes>0);
    const choice=this.choice(step,state),isCurrent=step===this.current;
    const coef=isCurrent&&state.fit?state.fit.theta():state.coef??choice.coef;
-   const cost=(files:number,bytes:number)=>coef.a*files+coef.b*bytes/GB;
+   const cost=(files:number,bytes:number)=>coef.a*files+coef.b*(total?.bytesKnown===false?0:bytes)/GB;
    if(state.status==='done'){const final=total?cost(total.files,total.bytes):cost(state.done.files,state.done.bytes);done+=final;all+=final;continue;}
    if(!known){if(isCurrent)missing=true;continue;}
    all+=cost(total!.files,total!.bytes);done+=cost(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));

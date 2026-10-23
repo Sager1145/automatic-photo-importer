@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {plan} from '../core/index';
+import {syncBuiltinESMExports} from 'node:module';
+import {plan,execute} from '../core/index';
 import {executeDestinations} from '../core/destinations';
 import type {Progress} from '../shared';
 
@@ -38,4 +39,43 @@ test('video-root: the photo and video plans of one destination do not reset the 
  const seen:Progress[]=[];
  await executeDestinations(plans,{signal:new AbortController().signal,reorganize:false,validate:async()=>{},settled:()=>{},progress:(_index,value)=>seen.push({...value})});
  checkVerifying(seen,7);
+});
+
+const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}};
+const metadata=async()=>({fields:{}});
+async function run(source:string,root:string){
+ const {plans}=await plan(source,[root],options,metadata),seen:Progress[]=[];
+ await execute(plans[0]!,undefined,value=>seen.push({...value}));
+ return seen.filter(value=>value.phase==='verifying'&&!value.step);
+}
+
+test('verify work counts the staged bytes published; files already in the backup add files only',async t=>{
+ const base=await temporary(t),source=path.join(base,'s'),root=path.join(base,'r');
+ await fs.mkdir(source);await fs.mkdir(root);
+ for(let i=0;i<4;i++)await fs.writeFile(path.join(source,`a${i}.bin`),Buffer.alloc(1000*(i+1),i+1));
+ const first=await run(source,root);
+ assert.equal(first[0]!.work!.bytes,0);
+ assert.equal(first.at(-1)!.work!.bytes,10000);
+ assert.equal(first.at(-1)!.work!.totalBytes,10000);
+ assert.equal(first.at(-1)!.work!.totalFiles,4);
+ assert.equal(first.at(-1)!.work!.publishCopy,undefined,'a same-volume link is not a copy');
+ await fs.writeFile(path.join(source,'new0.bin'),Buffer.alloc(300,9));await fs.writeFile(path.join(source,'new1.bin'),Buffer.alloc(200,8));
+ const second=await run(source,root);
+ const last=second.at(-1)!.work!;
+ assert.equal(last.totalFiles,6);
+ assert.equal(last.files,6);
+ assert.equal(last.totalBytes,500,'only the two new files were staged');
+ assert.equal(last.bytes,500);
+ assert.equal(second[0]!.work!.bytes,0);
+});
+
+test('publishing by copying (a file system without hard links) is reported',async t=>{
+ const base=await temporary(t),source=path.join(base,'s'),root=path.join(base,'r');
+ await fs.mkdir(source);await fs.mkdir(root);
+ for(let i=0;i<3;i++)await fs.writeFile(path.join(source,`a${i}.bin`),Buffer.alloc(2000,i+1));
+ t.mock.method(fs,'link',async()=>{throw Object.assign(new Error('not permitted'),{code:'EPERM'});});
+ syncBuiltinESMExports();
+ const verifying=await run(source,root);
+ assert.equal(verifying.at(-1)!.work!.publishCopy,true);
+ assert.equal(verifying.at(-1)!.work!.bytes,6000);
 });

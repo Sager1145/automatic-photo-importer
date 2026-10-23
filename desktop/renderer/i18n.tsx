@@ -723,6 +723,9 @@ under a minute|不到 1 分钟|不到 1 分鐘|1 分未満
 about {minutes} min|约 {minutes} 分钟|約 {minutes} 分鐘|約 {minutes} 分
 about {hours} h {minutes} min|约 {hours} 小时 {minutes} 分钟|約 {hours} 小時 {minutes} 分鐘|約 {hours} 時間 {minutes} 分
 about {hours} h|约 {hours} 小时|約 {hours} 小時|約 {hours} 時間
+about {low}–{high} min|约 {low}–{high} 分钟|約 {low}–{high} 分鐘|約 {low}～{high} 分
+about {low}–{high} h|约 {low}–{high} 小时|約 {low}–{high} 小時|約 {low}～{high} 時間
+{completed} of {total} files verified · {size} of {totalSize}|已校验 {completed}/{total} 个文件 · {size}/{totalSize}|已驗證 {completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件を検証済み · {totalSize} 中 {size}
 Move {name} to the top|将 {name} 移到最上方|將 {name} 移到最上方|{name} を一番上へ移動
 Move to the top|移到最上方|移到最上方|一番上へ移動
 Drive reconnected|驱动器已重新连接|磁碟已重新連接|ドライブが再接続されました

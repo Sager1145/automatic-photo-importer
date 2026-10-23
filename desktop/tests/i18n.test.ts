@@ -864,3 +864,19 @@ test('locked settings use a hover explanation in every language, never an error'
   assert.ok(!readFileSync(new URL('../main.ts', import.meta.url), 'utf8').includes('error.settingsLocked'));
   assert.ok(!readFileSync(new URL('../messages.ts', import.meta.url), 'utf8').includes('error.settingsLocked'));
 });
+
+test('time-left ranges and the verifying byte count read naturally in every language', async () => {
+  const { formatEstimate, progressCount } = await import('../renderer/RootApp');
+  const expected = { en: ['about 2–4 h', 'about 20–40 min'], 'zh-Hans': ['约 2–4 小时', '约 20–40 分钟'], 'zh-Hant': ['約 2–4 小時', '約 20–40 分鐘'], ja: ['約 2～4 時間', '約 20～40 分'] } as const;
+  for (const language of languages) {
+    const t = createTranslator(language);
+    assert.equal(formatEstimate(3 * 3600, t, { low: 2 * 3600, high: 4 * 3600 }), expected[language][0], language);
+    assert.equal(formatEstimate(30 * 60, t, { low: 20 * 60, high: 40 * 60 }), expected[language][1], language);
+    assert.equal(formatEstimate(3 * 3600, t, { low: 2.8 * 3600, high: 3.2 * 3600 }), formatEstimate(3 * 3600, t), 'a narrow range is one value');
+    const verifying = progressCount({ phase: 'verifying', completed: 34863, total: 43539, bytes: 0, totalBytes: 167e9, speed: 0, file: '', work: { files: 34863, bytes: 24e9, totalFiles: 43539, totalBytes: 167e9 } }, t, value => formatNumber(value, language), false, value => formatBytes(value, language));
+    assert.match(verifying, /34,863/);
+    assert.match(verifying, /24(\.0)? GB/, language);
+    assert.match(verifying, /167(\.0)? GB/, language);
+    assert.ok(!progressCount({ phase: 'verifying', completed: 1, total: 2, bytes: 0, totalBytes: 0, speed: 0, file: '' }, t, String).includes('GB'));
+  }
+});

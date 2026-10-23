@@ -21,7 +21,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  // Publication workspace is one related family per destination, as requiredTransferSpace reserved it.
  const workspace=plans.map(plan=>requiredTransferSpace(plan)-bytesOf(plan));
  const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
- const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>);
+ const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>),works=slots.map(()=>undefined as Progress['work']);
  const finished=new Set<number>();
  const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];warnings?:ExecutionIssue[];notes:string[]};
  const report=(slot:number,value:Progress)=>{
@@ -34,7 +34,12 @@ export async function executeDestinations(plans:TransferPlan[],options:{
   const done=()=>latest.reduce((count,item,other)=>count+(verifying?finished.has(other)?slots[other].part.entries.length:phases[other]==='verifying'?item.completed:0:item.completed),0);
   const sum=(key:'bytes'|'completed')=>key==='completed'?done():latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
   const grown=own.some(other=>pending[other]>initialPending[other]);
-  options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed')},own.reduce((rest,other)=>rest+Math.max(0,pending[other]-latest[other].bytes),0)+(grown?fullWorkspace[index]:workspace[index]));
+  works[slot]=value.work;
+  // The same rule for the estimate's own counts: while verifying, a waiting piece counts nothing and a finished one all it staged.
+  const stagedBytes=latest.reduce((count,item,other)=>count+(verifying&&(finished.has(other)||phases[other]==='verifying')?works[other]?.totalBytes??item.bytes:item.bytes),0);
+  const verifiedBytes=latest.reduce((count,item,other)=>count+(finished.has(other)?works[other]?.totalBytes??item.bytes:phases[other]==='verifying'?works[other]?.bytes??0:0),0);
+  const work=verifying?{files:sum('completed'),bytes:verifiedBytes,totalFiles:total,totalBytes:stagedBytes,...(works.some(item=>item?.publishCopy)?{publishCopy:true}:{})}:{files:sum('completed'),bytes:sum('bytes'),totalFiles:total,totalBytes:pending.reduce((a,b)=>a+b,0)};
+  options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed'),work},own.reduce((rest,other)=>rest+Math.max(0,pending[other]-latest[other].bytes),0)+(grown?fullWorkspace[index]:workspace[index]));
  };
  const failed=(index:number,error:unknown)=>result.errors.push(`Destination ${index+1}: ${error instanceof Error?error.message:String(error)}`);
  if(options.reorganize){

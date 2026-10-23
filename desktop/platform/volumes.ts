@@ -10,7 +10,7 @@ import { cameraSources } from './camera-bridge';
 
 const exec = promisify(execFile);
 const commandOptions = { timeout: 8000, maxBuffer: 4 * 1024 * 1024, windowsHide: true };
-export interface MountedVolume { path:string; name?:string; volumeId?:string; physicalId?:string; removable?:boolean; external?:boolean; virtual?:boolean; diskImage?:boolean; readOnly?:boolean; total?:number; free?:number; }
+export interface MountedVolume { path:string; name?:string; volumeId?:string; physicalId?:string; removable?:boolean; external?:boolean; virtual?:boolean; diskImage?:boolean; readOnly?:boolean; total?:number; free?:number; /** File system type (exfat, msdos, apfs, ntfs...), lowercase; used to predict how files are published. */fsType?:string; }
 
 /** Only camera directory layouts or OS-identified removable media are automatic sources. */
 export function classifyVolume(volume:MountedVolume, children:string[]) {
@@ -29,7 +29,7 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
     const disk=parent ?? device;
     for (const mount of (Array.isArray(device.mountpoints) ? device.mountpoints : [device.mountpoint])) {
       if(typeof mount!=='string' || !mount.startsWith('/')) continue;
-      result.push({path:mount,name:device.label || path.basename(mount),volumeId:device.uuid || device.path,physicalId:disk.path || `/dev/${disk.name}`,removable:bool(disk.rm)||disk.tran==='mmc',external:bool(disk.hotplug)||disk.tran==='usb',readOnly:bool(device.ro),total:finite(device.size),free:finite(device.fsavail)});
+      result.push({path:mount,name:device.label || path.basename(mount),volumeId:device.uuid || device.path,physicalId:disk.path || `/dev/${disk.name}`,removable:bool(disk.rm)||disk.tran==='mmc',external:bool(disk.hotplug)||disk.tran==='usb',readOnly:bool(device.ro),total:finite(device.size),free:finite(device.fsavail),fsType:fsType(device.fstype)});
     }
     for(const child of objects(device.children)) walk(child,disk);
   }
@@ -37,8 +37,9 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
   return result;
 }
 export function parseWindowsVolumes(data:unknown):MountedVolume[] {
-  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || v.Path,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining)}));
+  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || v.Path,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
 }
+function fsType(value:unknown):string|undefined {return typeof value==='string'&&value.trim()?value.trim().toLowerCase():undefined;}
 function finite(value:unknown):number|undefined {const n=Number(value); return value!==null && value!==undefined && value!=='' && Number.isFinite(n) && n>=0 ? n : undefined;}
 function plistJSON(plist:string):Promise<any> {
   return new Promise((resolve,reject)=>{
@@ -69,11 +70,11 @@ export function resolveMacPhysicalIdentity(volume:MountedVolume, stores:Map<stri
 async function macVolume(mount:string):Promise<MountedVolume> {
   const {stdout}=await exec('/usr/sbin/diskutil',['info','-plist',mount],commandOptions);
   const info=await plistJSON(stdout);
-  return {path:info.MountPoint || mount,name:info.VolumeName || path.basename(mount),volumeId:info.VolumeUUID || info.DiskUUID || info.DeviceIdentifier,physicalId:info.APFSContainerReference || info.ParentWholeDisk || info.DeviceIdentifier,diskImage:/disk image/i.test(String(info.BusProtocol??'')),virtual:/virtual/i.test(String(info.VirtualOrPhysical??'')) || /apfs/i.test(String(info.FilesystemType??info.FileSystemPersonality??'')) || !!info.APFSContainerReference,removable:bool(info.RemovableMedia)||bool(info.Removable),external:info.Internal===false,readOnly:info.Writable===false||bool(info.ReadOnlyVolume),total:finite(info.VolumeTotalSpace??info.TotalSize),free:finite(info.VolumeFreeSpace)};
+  return {path:info.MountPoint || mount,name:info.VolumeName || path.basename(mount),volumeId:info.VolumeUUID || info.DiskUUID || info.DeviceIdentifier,physicalId:info.APFSContainerReference || info.ParentWholeDisk || info.DeviceIdentifier,diskImage:/disk image/i.test(String(info.BusProtocol??'')),virtual:/virtual/i.test(String(info.VirtualOrPhysical??'')) || /apfs/i.test(String(info.FilesystemType??info.FileSystemPersonality??'')) || !!info.APFSContainerReference,removable:bool(info.RemovableMedia)||bool(info.Removable),external:info.Internal===false,readOnly:info.Writable===false||bool(info.ReadOnlyVolume),total:finite(info.VolumeTotalSpace??info.TotalSize),free:finite(info.VolumeFreeSpace),fsType:fsType(info.FilesystemType??info.FileSystemType)};
 }
 async function linuxVolumes():Promise<MountedVolume[]> {
   try {
-    const {stdout}=await exec('lsblk',['--json','--bytes','--output','NAME,PATH,TYPE,RM,HOTPLUG,TRAN,RO,MOUNTPOINTS,UUID,LABEL,SIZE,FSAVAIL'],commandOptions);
+    const {stdout}=await exec('lsblk',['--json','--bytes','--output','NAME,PATH,TYPE,RM,HOTPLUG,TRAN,RO,MOUNTPOINTS,UUID,LABEL,SIZE,FSAVAIL,FSTYPE'],commandOptions);
     return parseLinuxVolumes(JSON.parse(stdout));
   } catch {
     // util-linux may be absent or older. Mounted filesystem roots still support camera discovery.
@@ -83,7 +84,7 @@ async function linuxVolumes():Promise<MountedVolume[]> {
 }
 async function windowsVolumes():Promise<MountedVolume[]> {
   // This script is constant: no filesystem paths or other user input enter PowerShell code.
-  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[int]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
+  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[int]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
   const encoded=Buffer.from(script,'utf16le').toString('base64');
   const {stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],commandOptions);
   return parseWindowsVolumes(JSON.parse(stdout.replace(/^\uFEFF/,'')));

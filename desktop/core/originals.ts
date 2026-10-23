@@ -38,12 +38,14 @@ type Outcome={deleted:true}|{kept:KeptReason;error?:string};
  * Files are checked through a small pool: the source is hashed, then every backup copy at once, so the reads
  * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
  * the report is assembled in input order afterwards. */
-export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;onProgress?:(completed:number,total:number,file:string)=>void}={}):Promise<OriginalsResult> {
+export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** bytesDone/bytesTotal: what is re-read, counting the source and each backup copy of every file. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
-  let completed=0;
+  let completed=0,bytesDone=0;
+  const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length),bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
     checkAbort(options.signal);
-    options.onProgress?.(completed++,files.length,file.source);
+    options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
+    bytesDone+=reads(file);
     try {
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
       if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
@@ -74,6 +76,6 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     if('deleted' in outcome) {result.deleted.push({source:file.source,size:file.size});result.bytes+=file.size;}
     else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
   });
-  options.onProgress?.(completed,files.length,'');
+  options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
   return result;
 }
