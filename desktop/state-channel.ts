@@ -1,6 +1,6 @@
 import type {AppState,Inventory,Job,Review} from './shared';
 
-type StateFields=Omit<AppState,'jobs'|'sourceInventories'|'review'|'errorLog'|'history'>;
+type StateFields=Omit<AppState,'jobs'|'sourceInventories'|'review'|'errorLog'|'history'|'duplicates'>&{duplicates?:Omit<NonNullable<AppState['duplicates']>,'earlier'>};
 type JobUpdate=Omit<Job,'inventory'|'errors'|'problemFiles'>&{inventoryRef?:string;errorsRef:string;problemFilesRef?:string};
 /** Large details cross IPC only when their reference changes. Job errors grow in place, so their length is part of the reference. */
 export interface StateUpdate {
@@ -11,24 +11,34 @@ export interface StateUpdate {
  sourceInventories:Record<string,string>;
  errorLogRef?:string;
  historyRef:string;
+ duplicatesEarlierRef?:string;
  details:Record<string,unknown>;
  review?:Review|null;
 }
 export function createStateChannel(send:(update:StateUpdate)=>void){
  let revision=0,nextDetail=0;
  const ids=new WeakMap<object,{id:string;version:number}>();
+ /** Inventory.listing is for main's reuse only; the stripped copy is built once per inventory. */
+ const stripped=new WeakMap<Inventory,Inventory>();
+ function outbound(value:object){
+  if(!('listing' in value))return value;
+  let copy=stripped.get(value as Inventory);if(!copy){const {listing:_listing,...rest}=value as Inventory;copy=rest;stripped.set(value as Inventory,copy);}
+  return copy;
+ }
  let retained=new Set<string>(),previousReview:Review|undefined;
  function update(state:AppState,reset=false):StateUpdate{
   const details:Record<string,unknown>={},current=new Set<string>();
   function reference(value:object,version=0):string{
    let known=ids.get(value);if(!known||known.version!==version){known={id:String(++nextDetail),version};ids.set(value,known);}
-   current.add(known.id);if(reset||!retained.has(known.id))details[known.id]=value;return known.id;
+   current.add(known.id);if(reset||!retained.has(known.id))details[known.id]=outbound(value);return known.id;
   }
-  const {jobs,sourceInventories,review,errorLog,history,...fields}=state;
+  const {jobs,sourceInventories,review,errorLog,history,duplicates,...rest}=state;
+  const {earlier,...duplicateFields}=duplicates??{} as NonNullable<AppState['duplicates']>;
+  const fields:StateFields={...rest,...(duplicates?{duplicates:duplicateFields as NonNullable<StateFields['duplicates']>}:{})};
   const jobUpdates=jobs.map(({inventory,errors,problemFiles,...job})=>({...job,errorsRef:reference(errors,errors.length),...(inventory?{inventoryRef:reference(inventory)}:{}),...(problemFiles?{problemFilesRef:reference(problemFiles)}:{})}));
   const sourceRefs=Object.fromEntries(Object.entries(sourceInventories??{}).map(([id,inventory])=>[id,reference(inventory)]));
   const result:StateUpdate={revision:++revision,...(reset?{reset:true}:{}),state:fields,jobs:jobUpdates,sourceInventories:sourceRefs,
-   ...(errorLog?{errorLogRef:reference(errorLog)}:{}),historyRef:reference(history),details,
+   ...(errorLog?{errorLogRef:reference(errorLog)}:{}),historyRef:reference(history),...(earlier?{duplicatesEarlierRef:reference(earlier)}:{}),details,
    ...(reset||review!==previousReview?{review:review??null}:{})};
   if(!reset){retained=current;previousReview=review;}return result;
  }
@@ -52,7 +62,8 @@ export function createStateReceiver(){
    }
    const jobs=update.jobs.map(({inventoryRef,errorsRef,problemFilesRef,...job})=>({...job,errors:detail<Job['errors']>(errorsRef),...(inventoryRef?{inventory:detail<Inventory>(inventoryRef)}:{}),...(problemFilesRef?{problemFiles:detail<NonNullable<Job['problemFiles']>>(problemFilesRef)}:{})}));
    const sources=Object.fromEntries(Object.entries(update.sourceInventories).map(([source,id])=>[source,detail<Inventory>(id)]));
-   current={...update.state,jobs,sourceInventories:sources,history:detail<AppState['history']>(update.historyRef),
+   const duplicates=update.state.duplicates?{...update.state.duplicates,...(update.duplicatesEarlierRef?{earlier:detail<string[]>(update.duplicatesEarlierRef)}:{})}:undefined;
+   current={...update.state,...(duplicates?{duplicates}:{}),jobs,sourceInventories:sources,history:detail<AppState['history']>(update.historyRef),
     ...(update.errorLogRef?{errorLog:detail<NonNullable<AppState['errorLog']>>(update.errorLogRef)}:{}),
     review:Object.hasOwn(update,'review')?update.review??undefined:current?.review};
    for(const id of details.keys())if(!used.has(id))details.delete(id);

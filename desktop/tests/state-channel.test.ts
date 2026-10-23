@@ -69,3 +69,23 @@ test('job errors, problem files, the error log and history cross once until they
  value.history=[{id:'i',date:'2026-10-24',title:text('Import'),detail:text('Again')},...value.history];value.errorLog={at:{},cleared:['a']};channel.publish(value);
  receiver.apply(updates.at(-1)!);assert.equal(receiver.snapshot()!.history.length,2);assert.deepEqual(receiver.snapshot()!.errorLog!.cleared,['a']);
 });
+
+test('an inventory crosses without its folder listing, and an unchanged earlier-placed list is not resent',()=>{
+ const updates:StateUpdate[]=[],channel=createStateChannel(update=>updates.push(wire(update))),receiver=createStateReceiver(),value=state();
+ const files={...inventory(),listing:{backup:false,folders:[['/card','id',['a']] as [string,string,string[]]]}};
+ value.sourceInventories={card:files};value.jobs=[{id:'job',source:value.sources[0],phase:'copying',detail:text('Copying'),errors:[],backup:false,inventory:files}];
+ const earlier=['a/1.jpg','a/2.jpg'];value.duplicates={scopes:[],status:'ready',revision:1,groups:0,files:0,earlier};
+ channel.publish(value);receiver.apply(wire(channel.snapshot(value)));
+ const received=receiver.snapshot()!;
+ assert.equal(Object.hasOwn(received.sourceInventories!.card,'listing'),false);assert.equal(Object.hasOwn(received.jobs[0].inventory!,'listing'),false);
+ assert.equal(received.sourceInventories!.card.media,1);assert.ok(files.listing,'main keeps its own listing');
+ assert.equal(received.sourceInventories!.card,received.jobs[0].inventory,'one stripped copy is shared');
+ assert.deepEqual(received.duplicates!.earlier,earlier);assert.equal(Object.hasOwn(received.duplicates!,'duplicatesEarlierRef'),false);
+ const kept=received.duplicates!.earlier;
+ value.duplicates={...value.duplicates,revision:2};channel.publish(value);const quiet=updates.at(-1)!;assert.deepEqual(quiet.details,{});receiver.apply(quiet);
+ assert.equal(receiver.snapshot()!.duplicates!.earlier,kept);assert.equal(receiver.snapshot()!.duplicates!.revision,2);
+ value.duplicates={...value.duplicates,earlier:['b/3.jpg']};channel.publish(value);assert.equal(Object.keys(updates.at(-1)!.details).length,1);receiver.apply(updates.at(-1)!);
+ assert.deepEqual(receiver.snapshot()!.duplicates!.earlier,['b/3.jpg']);
+ value.duplicates={...value.duplicates,earlier:undefined};channel.publish(value);receiver.apply(updates.at(-1)!);
+ assert.equal(receiver.snapshot()!.duplicates!.earlier,undefined);
+});
