@@ -118,7 +118,11 @@ export class MemoryGovernor {
 /** Extra memory held by child processes (the scan worker), supplied by the main process. */
 let childMemory: () => number = () => 0;
 export const setChildMemory = (read: () => number): void => { childMemory = read; };
-export const governor = new MemoryGovernor({ usage: () => process.memoryUsage().rss + childMemory(), limit: memoryBudgetBytes });
+/** This process's memory: the private bytes Electron measures (`process.getProcessMemoryInfo()`, in KB) when known, else RSS, which also counts shared and file-backed pages. */
+export const privateOrRss = (info: { private?: number } | undefined, rss: number): number => info && Number.isFinite(info.private) && info.private! > 0 ? info.private! * 1024 : rss;
+let mainMemory: () => number = () => process.memoryUsage().rss;
+export const setMainMemory = (read: () => number): void => { mainMemory = read; };
+export const governor = new MemoryGovernor({ usage: () => mainMemory() + childMemory(), limit: memoryBudgetBytes });
 
 /** At most cpuWorkers-style `cap()` calls at once, the rest queue in order (used for thumbnail decoding). A slot passes straight to the next waiter. */
 export function limiter(cap: () => number): <T>(work: () => Promise<T>) => Promise<T> {

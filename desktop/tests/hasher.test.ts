@@ -29,3 +29,17 @@ test('a dropped hash leaves the next one on the same worker unaffected',async()=
  const hash=hasher();await hash.update(Buffer.from('whole'));
  assert.equal(await hash.digest(),reference([Buffer.from('whole')]));
 });
+
+test('2 GB through 8 parallel hashers keeps arrayBuffers and RSS bounded and digests exact',async()=>{
+ const chunk=randomBytes(1024*1024),perHasher=256,hashers=8;
+ const expected=(()=>{const hash=createHash('sha256');for(let i=0;i<perHasher;i++)hash.update(chunk);return hash.digest('hex');})();
+ const baseline=process.memoryUsage();let peakBuffers=0,peakRss=0;
+ const sample=setInterval(()=>{const usage=process.memoryUsage();peakBuffers=Math.max(peakBuffers,usage.arrayBuffers-baseline.arrayBuffers);peakRss=Math.max(peakRss,usage.rss-baseline.rss);},5);
+ try {
+  const digests=await Promise.all(Array.from({length:hashers},async()=>{const hash=hasher();for(let i=0;i<perHasher;i++)await hash.update(chunk);return hash.digest();}));
+  for(const digest of digests)assert.equal(digest,expected);
+ } finally {clearInterval(sample);}
+ const limit=200*1024*1024;
+ assert.ok(peakBuffers<limit,`arrayBuffers grew ${peakBuffers}`);
+ assert.ok(peakRss<limit,`rss grew ${peakRss}`);
+});
