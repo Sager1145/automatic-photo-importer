@@ -113,9 +113,9 @@ async function interrupted(t:test.TestContext,when:'before'|'after'){
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
  import {deleteOrganizationRecovery,configureOrganizationRecovery} from ${JSON.stringify(module)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
- const rename=filesystem.rename,rm=filesystem.rm;
+ const rename=filesystem.rename,unlink=filesystem.unlink;
  filesystem.rename=async(...args)=>{if(${JSON.stringify(when)}==='before'&&String(args[1]).includes('deleting-'))process.exit(91);return rename(...args);};
- filesystem.rm=async(...args)=>{if(${JSON.stringify(when)}==='after'&&String(args[0]).includes('deleting-'))process.exit(91);return rm(...args);};
+ filesystem.unlink=async(...args)=>{if(${JSON.stringify(when)}==='after'&&String(args[0]).includes('deleting-'))process.exit(91);return unlink(...args);};
  await deleteOrganizationRecovery(${JSON.stringify(root)},${JSON.stringify(job!.id)});process.exit(0);`);
  const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});
  assert.equal(child.status,91,child.stderr);await fs.unlink(script);

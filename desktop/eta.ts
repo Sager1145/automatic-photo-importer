@@ -95,7 +95,7 @@ const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`
 /** Stages whose total is an estimate (a share), not a count: a listing, and a look through folders for leftovers. */
 const estimated=(key:string)=>key==='planning:listing'||key==='planning:scanning';
 /** Stages that read or write data: they report bytes per second once bytes move, files per second until then. Every other stage counts files. */
-const dataKeys=new Set(['planning:reading','planning:comparing','copying:','copying:moving','verifying:']);
+const dataKeys=new Set(['planning:reading','planning:comparing','planning:index','copying:','copying:moving','verifying:']);
 /** Bytes a listing will find: the job's own estimate (an earlier listing of the scope), else the drive's used space; 0 when unknown. */
 const listingTotal=(progress:EtaInput,context:EtaContext)=>progress.totalBytes>progress.bytes?progress.totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0;
 /** The model's name for what a progress is doing; undefined for steps it does not model (listing, downloading, scanning). */

@@ -986,7 +986,7 @@ export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }:
   useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!) } : undefined;
-  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Measuring recovery files…")}</p>;
+  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{size?.progress ? t("Measuring: {completed} files", { completed: formatNumber(size.progress.completed) }) : t("Measuring recovery files…")}</p>;
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-recovery-heading" data-testid={`delete-recovery-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id="delete-recovery-heading">{step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")}</h2></div>
     <div className="activity-content">
@@ -1187,7 +1187,7 @@ export function progressFraction(progress: NonNullable<Job['progress']>): number
   // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
   const files = basis.total ? basis.completed / basis.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
   // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
-  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
+  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning' || progress.step === 'measuring')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
   return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
 }
