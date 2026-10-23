@@ -1266,3 +1266,5 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 @keyframes progress-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.source-steps li[data-state=active] .step-mark svg{animation:none}}
 .mini-steps i[data-state=pending] svg{display:none}
+.settings-fieldset:disabled .settings-section,.segmented[title]:has(button:disabled){opacity:.5;cursor:not-allowed}
+.settings-fieldset:disabled :disabled,.segmented[title] button:disabled{cursor:not-allowed}

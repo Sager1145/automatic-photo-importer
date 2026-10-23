@@ -655,15 +655,14 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
     { id: 'drives', icon: Usb, title: t("Drives"), summary: t("{count} remembered", { count: formatNumber(Object.keys(p.rememberedDevices ?? {}).length) }) },
     { id: 'general', icon: Settings2, title: t("General"), summary: `${localeNames[p.language] ?? p.language} · ${Math.round(p.textScale * 100)}%` },
   ];
-  const locked = busy && <div className="notice"><Icon icon={Info} />{t("Settings are locked while an import, organization or review is running, queued or paused. Stop it completely to change them.")}</div>;
+  const lockTip = busy ? t("Locked while an import is running. Change it after the job finishes or is paused.") : undefined;
   const panels: Record<SettingsCategory, ReactNode> = {
     importing: <>
       <SettingsSection title={t("Starting imports")} icon={Radio}>
         <Switch checked={p.automatic} onChange={automatic => act({ type: 'preferences', patch: { automatic } })} label={t("Automatic import")} detail={t("Imports start as soon as a selected drive connects.")} />
         <div className="settings-row"><label htmlFor="settings-parallel">{t("Drives at once")}</label><div className="text-size-control"><input id="settings-parallel" type="range" min={1} max={10} step={1} value={p.parallel} onChange={event => act({ type: 'preferences', patch: { parallel: Number(event.target.value) } })} /><strong>{formatNumber(p.parallel)}</strong></div></div>
       </SettingsSection>
-      {locked}
-      <fieldset className="settings-fieldset" disabled={busy}>
+      <fieldset className="settings-fieldset" disabled={busy} title={lockTip}>
         <SettingsSection title={t("Copying")} icon={ShieldCheck}>
           <Switch checked={p.verifyCopies !== false} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
           <Switch checked={p.skipFileErrors !== false} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
@@ -673,13 +672,13 @@ export function SettingsPage({state,act,busy}:{state:AppState;act:Dispatch;busy:
         <SettingsSection title={t("Other file rules")} icon={FileQuestion}><FileRules preferences={p} act={act} /></SettingsSection>
       </fieldset>
     </>,
-    destinations: <>{locked}<fieldset className="settings-fieldset" disabled={busy}>
+    destinations: <><fieldset className="settings-fieldset" disabled={busy} title={lockTip}>
       <SettingsSection title={t("Backup location")} icon={HardDrive}><DestinationBay state={state} act={act} configure /><TextPreference label={t("Backup folder")} value={p.basePath} placeholder="photobackup" onSave={basePath => act({ type: 'preferences', patch: { basePath } })} description={t("Leave empty to use the drive itself.")} /></SettingsSection>
     </fieldset></>,
-    folders: <>{locked}<fieldset className="settings-fieldset" disabled={busy}><FolderSettings state={state} act={act} /></fieldset></>,
+    folders: <><fieldset className="settings-fieldset" disabled={busy} title={lockTip}><FolderSettings state={state} act={act} /></fieldset></>,
     organization: <>
       <SettingsSection title={t("Backup folder check")} icon={ShieldCheck}>
-        <div className="segmented" role="group" aria-label={t("Check the backup folder")}>{(['off', 'ask', 'auto'] as const).map(mode => <button key={mode} type="button" aria-pressed={(p.autoOrganizeBackup ?? 'ask') === mode} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: mode } })}>{{ off: t("Off"), ask: t("Ask"), auto: t("Automatic") }[mode]}</button>)}</div>
+        <div className="segmented" role="group" title={lockTip} aria-label={t("Check the backup folder")}>{(['off', 'ask', 'auto'] as const).map(mode => <button key={mode} type="button" aria-pressed={(p.autoOrganizeBackup ?? 'ask') === mode} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: mode } })}>{{ off: t("Off"), ask: t("Ask"), auto: t("Automatic") }[mode]}</button>)}</div>
         <p className="settings-row-note">{p.autoOrganizeBackup === 'auto' ? t("Misplaced files are moved into place after each import.") : p.autoOrganizeBackup === 'off' ? t("Not checked automatically.") : t("Checked after each import. You choose when to move files.")}</p>
       </SettingsSection>
       <SettingsSection title={t("Leftover files")} icon={Trash2}><LeftoverFiles state={state} act={act} busy={busy} /></SettingsSection>

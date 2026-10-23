@@ -7,7 +7,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
 import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
-import {settingsLocked,lockedPreferenceKeys,jobPreferences} from './settings-lock';
+import {settingsLocked,jobPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
@@ -647,10 +647,9 @@ async function action(input:Action):Promise<void>{
   case 'preferences':{
    const patch=input.patch;
    if(patch.editedFolder!==undefined&&(typeof patch.editedFolder!=='string'||!patch.editedFolder.trim()||patch.editedFolder!==patch.editedFolder.trim()||/[{}\\/:\x00-\x1f]/.test(patch.editedFolder)||['.','..'].includes(patch.editedFolder)))throw new MessageError('error.editedFolderName');
-   // Display and queue settings apply at once. Settings a job reads are refused, not silently dropped,
+   // Display and queue settings apply at once. Settings a job reads are ignored without an error (the UI greys them out),
    // while any job runs, waits in the queue or is paused, or a review is open: stop it completely first.
    const idle=!busy()&&!settingsLocked(state),before=state.preferences;
-   if(!idle&&lockedPreferenceKeys(patch).length)throw new MessageError('error.settingsLocked');
    const accepted=Object.fromEntries(Object.entries(patch).filter(([key])=>livePreferences.has(key)||idle&&jobPreferences.has(key)));
    state.preferences=normalizePreferences({...before,...accepted},before);
    nativeTheme.themeSource=state.preferences.appearance;
