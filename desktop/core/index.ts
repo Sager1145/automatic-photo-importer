@@ -970,6 +970,8 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       checkAbort(signal);const item=allocated[i]!,entry=item.entry;
       await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
       if(await existingMatches(item.destination,entry.size,()=>resolve(entry),root,checks,signal)===true) {await present(entry,item.destination);i++;continue;}
+      // The preflight found this file present: if it is not now, it is not copied here; a fresh retry is safe (as on the staged path).
+      if(!run.pending.has(entry.id)) throw new Error(`Destination changed after copy preparation; retry: ${item.destination}`);
       if(run.appleDouble) await run.appleDouble.noteExisting(item.destination);
       try { members.push(await begin(entry,item.destination));i++; }
       catch(error) {
@@ -1116,7 +1118,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       checked=transfer.entries.length;existing('');
       report(run);
       // Files already verified at their destination need no copy and count as done.
-      for(const batch of run.batches)if(!batch.failed)for(const entry of batch.family)if(!run.pending.has(entry.id)){run.counted.add(entry.id);run.completed++;}
+      // A direct destination counts such a file only when its own pass has confirmed it (finished or found present).
+      if(!run.direct)for(const batch of run.batches)if(!batch.failed)for(const entry of batch.family)if(!run.pending.has(entry.id)){run.counted.add(entry.id);run.completed++;}
     } catch(error) { if(isAbort(error))throw error; run.error=toError(error); }
     // Direct destinations: each family is written to its final names, checked and finished in place.
     for(const [position,run] of runs.entries()) {

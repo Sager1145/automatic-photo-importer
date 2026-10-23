@@ -1,6 +1,7 @@
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
+import * as fsSync from 'node:fs';
 import fsPatchable from 'node:fs/promises';
 import childProcess, {execFile} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
@@ -222,6 +223,23 @@ test('only an exFAT volume is direct: it is recognised by its UUID, and an APFS 
   assert.equal(await directCapable(env.root,'0:0'),true,'the answer does not depend on a path or device number');
   const apfs=await fs.realpath(os.tmpdir());
   assert.equal(await directCapable(apfs,await identity(apfs)),false);
+});
+
+test('files the preflight found already present count as done only once each is confirmed, and one that vanishes meanwhile fails with a retry instead of being copied again',async t=>{
+  const env=await ready(t);if(!env) return;
+  const first=await execute((await plan(env.card,[env.root],options,metadata)).plans[0]!);
+  assert.equal(first.copied,FILES);
+  const again=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
+  assert.ok(again.entries.every(entry=>entry.skip));
+  const gone=again.entries[5]!.destination,counts:number[]=[];
+  const result=await execute(again,undefined,progress=>{
+    if(progress.phase==='planning'&&progress.step==='existing'&&progress.completed===progress.total&&progress.file==='') fsSync.unlinkSync(gone);
+    if(progress.phase==='copying') counts.push(progress.completed);
+  });
+  assert.ok(counts.length>0&&counts[0]!<=1,`the first count is ${counts[0]}, not the preflight's ${FILES}`);
+  assert.ok(result.errors.some(error=>/Destination changed after copy preparation; retry/.test(error)),result.errors.join(' | '));
+  assert.equal(await fs.lstat(gone).then(()=>true,()=>false),false,'it was not copied again');
+  assert.equal(result.skipped,FILES-1);
 });
 
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{
