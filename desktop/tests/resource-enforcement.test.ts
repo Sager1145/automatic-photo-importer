@@ -6,7 +6,7 @@ import os from 'node:os';
 import { DeviceStreams, CHUNK, cpuWorkers as devicesCpuWorkers } from '../core/devices';
 import { hasherWorkerCount, pendingChunks } from '../core/hasher';
 import { exiftoolProcs, routingCacheLimit } from '../platform/metadata';
-import { MemoryGovernor, MB, cpuWorkers, resourceLimits, setResourceLimits, uvThreadpoolSize } from '../resource-limits';
+import { MemoryGovernor, MB, limiter, scanHeapMB, cpuWorkers, resourceLimits, setResourceLimits, uvThreadpoolSize } from '../resource-limits';
 import { raiseThreadpool, THREADPOOL_SIZE } from '../threadpool';
 
 const host = { cores: 10, totalMemBytes: 16 * 1024 * MB };
@@ -87,4 +87,18 @@ test('the libuv pool follows the saved thread limit (twice it, 4 to 16) and neve
   const fallback: NodeJS.ProcessEnv = {};
   raiseThreadpool(fallback);
   assert.equal(fallback.UV_THREADPOOL_SIZE, String(THREADPOOL_SIZE), 'without saved settings the old size stays');
+});
+
+test('thumbnail decoding runs at most cpuWorkers(4) at once, in order, and a slot passes straight to the next', async () => {
+  await withLimits({ maxCpuThreads: 2 }, async () => {
+    const slots = limiter(() => cpuWorkers(4));
+    let active = 0, peak = 0; const order: number[] = [];
+    await Promise.all([0, 1, 2, 3, 4, 5].map(index => slots(async () => { active++; peak = Math.max(peak, active); order.push(index); await new Promise(resolve => setTimeout(resolve, 10)); active--; })));
+    assert.equal(peak, 2);
+    assert.deepEqual(order, [0, 1, 2, 3, 4, 5]);
+  });
+});
+test('the scan process heap follows the budget, never below 1 GB', async () => {
+  await withLimits({ memoryLimitMB: 4096 }, () => assert.equal(scanHeapMB(), 2048));
+  await withLimits({ memoryLimitMB: 512 }, () => assert.equal(scanHeapMB(), 1024));
 });

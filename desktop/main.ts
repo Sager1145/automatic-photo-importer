@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
+import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
@@ -34,6 +34,7 @@ import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
+import {setResourceLimits,resourceLimits,governor,setChildMemory,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
@@ -127,6 +128,11 @@ const store=()=>path.join(app.getPath('userData'),'settings.json');
 /** Library roots a running job writes to; a Duplicates scan of one of them is stale afterwards. */
 const touchedLibraries=new Map<string,string[]>();
 const busy=()=>active.size>0||!!duplicateControl;
+// CPU and memory limits (Settings > Performance): applied to the next job; pools restart when idle (releaseIfIdle).
+const applyLimits=()=>{setResourceLimits({maxCpuThreads:state.preferences.maxCpuThreads,memoryLimitMB:state.preferences.memoryLimitMB});};
+let lastUsageMB=0,overLimit=false;
+const resourceUse=():ResourceUse=>{const host=hostNow(),limits=resourceLimits();return {threads:limits.maxCpuThreads,memoryMB:Math.round(lastUsageMB),limitMB:limits.memoryLimitMB,cores:host.cores,totalMemMB:Math.round(host.totalMemBytes/MB),...(overLimit?{warning:true}:{})};};
+const thumbnailSlots=limiter(()=>cpuWorkers(4));
 const stateChannel=createStateChannel(update=>{if(window&&!window.isDestroyed())window.webContents.send('importer:updated',update);});
 // Each job carries when it started running and when its current phase began, so elapsed time
 // can be shown; both are stamped as the state is published.
@@ -149,7 +155,7 @@ const etaTracker=new EtaTracker();
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
-const emit=()=>{activityLoop?.wake();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const emit=()=>{activityLoop?.wake();state.resources=resourceUse();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 function progressEmit(){const now=Date.now();if(now-lastEmit>100){lastEmit=now;emit();}}
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
@@ -159,7 +165,7 @@ async function initializeRecoveryKey(){
  try{await fs.lstat(keyPath);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;const temporary=keyPath+'.'+randomUUID()+'.new';const file=await fs.open(temporary,'wx',0o600);try{await file.writeFile(randomBytes(32));await file.sync();}finally{await file.close();}try{await fs.link(temporary,keyPath);await syncDirectory(directory);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}finally{await fs.unlink(temporary);}}
  const info=await fs.lstat(keyPath);if(!info.isFile()||info.isSymbolicLink())throw new Error('The organization recovery key is unavailable.');const key=await fs.readFile(keyPath);if(key.length!==32)throw new Error('The organization recovery key is invalid.');configureOrganizationRecovery(key);
 }
-async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
+async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail});state.history=state.history.slice(0,50);void save().catch(()=>{});}
 async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...state.preferences.destinations])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
 async function refresh(){
@@ -781,7 +787,7 @@ async function action(input:Action):Promise<void>{
    // while any job runs, waits in the queue or is paused, or a review is open: stop it completely first.
    const before=state.preferences;
    const accepted=acceptedPreferences(patch,busy()||settingsLocked(state));
-   state.preferences=normalizePreferences({...before,...accepted},before);
+   state.preferences=normalizePreferences({...before,...accepted},before);applyLimits();
    nativeTheme.themeSource=state.preferences.appearance;
    if(before.automatic&&!state.preferences.automatic)for(const j of state.jobs)if(j.phase==='queued'&&automaticallyQueued.has(j.id)){j.phase='stopped';j.detail=message('job.automaticDisabled');}
    if(state.preferences.autoOrganizeBackup==='off'){misplacedControl?.abort();state.misplacedFiles={};}else scheduleMisplacedCheck(true);
@@ -864,6 +870,13 @@ async function action(input:Action):Promise<void>{
  emit();
 }
 async function boot(){
+ // Soft memory governor: main plus the scan worker against the limit; above 90% new files wait, above 100% a warning shows.
+ setChildMemory(()=>app.getAppMetrics().filter(item=>item.type==='Utility').reduce((sum,item)=>sum+item.memory.workingSetSize*1024,0));
+ governor.observe({
+  onChange:(usage,limit)=>{const moved=Math.round(usage/16)!==Math.round(lastUsageMB/16);lastUsageMB=usage;const cleared=overLimit&&usage<limit*0.9;if(cleared)overLimit=false;if(busy()&&(moved||cleared))emit();},
+  onWarn:(usage,limit)=>{overLimit=true;console.warn(`Memory use ${usage} MB is above the ${limit} MB limit; new files wait until it drops.`);if(busy())emit();},
+ });
+ governor.start();
  let hardwareReportRoot:string|undefined;
  if(hardwareTest){const requested=process.argv.find(arg=>arg.startsWith('--hardware-report-root='))?.slice('--hardware-report-root='.length);const temporary=await fs.realpath(os.tmpdir());hardwareReportRoot=await fs.realpath(requested??await fs.mkdtemp(path.join(os.tmpdir(),'photo-importer-a006-release-')));if(!within(hardwareReportRoot,temporary)||hardwareReportRoot===temporary)throw new Error('Hardware reports require a dedicated existing temporary folder.');app.setPath('userData',path.join(hardwareReportRoot,'user-data'));}
  if(qaFixtureRoot){const root=await fs.realpath(qaFixtureRoot);if(!within(root,await fs.realpath(os.tmpdir())))throw new Error('QA fixtures must be in the system temporary directory.');app.setPath('userData',path.join(root,'user-data'));}
@@ -881,7 +894,7 @@ async function boot(){
  ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{await action(value);}catch(e){state.error=toMessage(e);emit();}});
  ipcMain.handle('importer:inspect',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file),{preview:false});}finally{inspecting--;void releaseIfIdle();}});
- ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{return await thumbnail(await allowed(file),{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)});}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
  await window.loadFile(renderer);await refresh();timer=setInterval(()=>void refresh(),5000);
  if(process.platform==='darwin'&&!hardwareTest){activityLoop=startActivityLoop({sampler:driveSampler,wanted:()=>!!window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized()||busy()||scanControls.size>0||!!state.review||!!state.busyReview,publish:activity=>{state.driveActivity=activity;emit();}});window.on('show',()=>activityLoop?.wake());window.on('restore',()=>activityLoop?.wake());window.on('focus',()=>activityLoop?.wake());}

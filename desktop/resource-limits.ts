@@ -61,6 +61,9 @@ export function savedLimits(userData: string, host: Host = hostNow()): Limits {
   } catch { return defaultLimits(host); }
 }
 
+/** V8 heap ceiling for the read-only scan process: half the memory budget, at least 1 GB (a large card's listing must fit). The renderer is left alone: a heap flag there could crash the interface. */
+export const scanHeapMB = (): number => Math.max(1024, Math.floor(current.memoryLimitMB / 2));
+
 /** The saved thread limit alone, or undefined when nothing valid is saved (a fresh install keeps the packaged 16-thread pool). */
 export function savedCpuThreads(userData: string, host: Host = hostNow()): number | undefined {
   try {
@@ -81,6 +84,8 @@ export class MemoryGovernor {
   /** Work started inside governed work (a copy that hashes its file) is part of it and never waits again: that could deadlock. */
   private inside = new AsyncLocalStorage<true>();
   constructor(private readonly options: { usage: () => number; limit: () => number; onWarn?: (usageMB: number, limitMB: number) => void; onChange?: (usageMB: number, limitMB: number) => void }) {}
+  /** Listen to the governor (the main process shows memory use and the over-limit warning). */
+  observe(handlers: { onWarn?: (usageMB: number, limitMB: number) => void; onChange?: (usageMB: number, limitMB: number) => void }): void { Object.assign(this.options, handlers); }
   /** Look at memory now: pause, resume and warn as needed. */
   check(): void {
     const usage = this.options.usage(), limit = this.options.limit(), ratio = usage / limit;
@@ -114,3 +119,13 @@ export class MemoryGovernor {
 let childMemory: () => number = () => 0;
 export const setChildMemory = (read: () => number): void => { childMemory = read; };
 export const governor = new MemoryGovernor({ usage: () => process.memoryUsage().rss + childMemory(), limit: memoryBudgetBytes });
+
+/** At most cpuWorkers-style `cap()` calls at once, the rest queue in order (used for thumbnail decoding). A slot passes straight to the next waiter. */
+export function limiter(cap: () => number): <T>(work: () => Promise<T>) => Promise<T> {
+  let running = 0;
+  const queue: (() => void)[] = [];
+  return async work => {
+    if (running >= Math.max(1, cap())) await new Promise<void>(resolve => queue.push(resolve)); else running++;
+    try { return await work(); } finally { const next = queue.shift(); if (next) next(); else running--; }
+  };
+}
