@@ -6,8 +6,7 @@ import {readFileSync} from 'node:fs';
 // its cleanup, and the converter of earlier records must say why (logDeletion, or the converter's `deleted`), so the
 // log can account for each removal. A scan, so a new unlink cannot be added silently. Not deletions: the old name of a
 // hard-link move (link, then unlink), and removeTree's own files (its callers log the tree).
-const files=['core/index.ts','core/residue.ts','core/originals.ts','core/import-recovery.ts','core/app-store.ts','core/recovery.ts',
-  'core/migrate/journals.ts','core/migrate/receipts.ts','core/migrate/caches.ts','core/migrate/folders.ts','core/migrate/pointers.ts'];
+const files=['core/index.ts','core/residue.ts','core/originals.ts','core/import-recovery.ts','core/app-store.ts','core/recovery.ts'];
 const LOG=/logDeletion\(|deleted\(|deletedDetail\(/g;
 /** Whether a log call follows the deletion at `at` in the same block: braces never close between them (so not after
  * a pool's callback, a loop or an if has ended), within one statement's reach. The one block that may end is the

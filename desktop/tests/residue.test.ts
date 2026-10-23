@@ -11,7 +11,7 @@ import {appendLines,sealedLine,storeFor} from '../core/app-store';
 import {findResidue,cleanResidue,type ResidueItem} from '../core/residue';
 import {stagePathFor,openReceiptsFor,segmentsFor} from './fixtures/receipts';
 import {journalFolderFor} from './fixtures/records';
-import {legacyReceipt} from './fixtures/legacy-records';
+import {oldReceipt} from './fixtures/old-records';
 import type {Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -121,7 +121,7 @@ test('residue lists only the app\'s own leftovers in the records folder, with re
   assert.equal(found.files,found.items.filter(item=>!(item.kind==='receipt'&&item.rid)).length);
 });
 
-test('cleaning removes the residue and closes receipts; automatic cleaning keeps resumable copies; Clean up also looks at what the earlier version left',async t=>{
+test('cleaning removes the residue and closes receipts; automatic cleaning keeps resumable copies',async t=>{
   const f=await littered(t);
   const automatic=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]}),{keepResumable:true});
   assert.ok(automatic.removed.files>0);
@@ -131,9 +131,9 @@ test('cleaning removes the residue and closes receipts; automatic cleaning keeps
   assert.ok(await open(f.root,f.bound.rid));
   for(const removed of [f.oldIndexTemp,f.sidecar,f.besideStore,f.aside,f.camera1,f.preview])assert.equal(await exists(removed),false,removed);
   for(const kept of [f.freshIndexTemp,f.labelled,f.second.destination,f.third.destination,f.inUse,f.oldPartial,...f.user])assert.ok(await exists(kept),kept);
-  const manual=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse],legacy:true}));
+  const manual=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]}));
   assert.equal(await exists(f.resumable),false);assert.equal(await exists(f.orphan),false);assert.equal(await open(f.root,f.resumableReceipt.rid),false);
-  assert.equal(await exists(f.oldPartial),false,'an earlier version\'s staged copy without a receipt goes with Clean up');
+  assert.equal(await exists(f.oldPartial),true,'an earlier version\'s staged copy is never touched');
   assert.equal(manual.left.files,0);
   for(const file of f.user)assert.equal(await fs.readFile(file,'utf8'),'user data');
 });
@@ -237,7 +237,7 @@ test('a complete staged copy whose card file changed or vanished is recoverable:
     const found=await findResidue([f.root]);
     assert.equal(kindOf(found,f.copy),'recoverable',change);
     assert.deepEqual({files:found.recoverable.files,bytes:found.recoverable.bytes},{files:1,bytes:4000});assert.ok(found.recoverable.folder?.endsWith(path.join('Imports','Staging')));
-    await cleanResidue(found,{keepResumable:true});await cleanResidue(await findResidue([f.root,],{legacy:true}));
+    await cleanResidue(found,{keepResumable:true});await cleanResidue(await findResidue([f.root,],{}));
     assert.ok(await exists(f.copy),change);assert.ok(await open(f.root,f.receipt.rid),change);
   }
 });
@@ -360,16 +360,15 @@ test('ended organizations holding no kept original are deleted automatically, th
   assert.deepEqual(listed,[renamed.id,keeping.id].sort());
 });
 
-test('the automatic check never walks the library; Clean up also removes what the earlier version left there',async t=>{
+test('neither the automatic check nor Clean up walks the library: what an earlier version left there is never listed or removed',async t=>{
   const f=await staged(t);
   const oldPartial=path.join(path.dirname(f.entry.destination),`photo-importer-${randomUUID()}.partial`);await fs.mkdir(path.dirname(oldPartial),{recursive:true});await fs.writeFile(oldPartial,Buffer.alloc(800));
-  const receipt=await legacyReceipt({kind:'stage',file:oldPartial,source:f.source,destination:f.entry.destination,sha256:'',sourceStat:f.receipt.record.sourceStat,root:f.root,rootIdentity:f.receipt.record.rootIdentity,sourceRoot:f.receipt.record.sourceRoot,sourceIdentity:f.receipt.record.sourceIdentity,parentIdentity:'0:0',fileIdentity:'1:2:3'});
-  const found=await findResidue([f.root]);
-  assert.ok(!found.items.some(item=>item.path===oldPartial||item.path===receipt));
-  const manual=await findResidue([f.root],{legacy:true});
-  assert.equal(kindOf(manual,oldPartial),'kept');assert.equal(kindOf(manual,receipt),'kept');
-  await cleanResidue(manual);
-  assert.equal(await exists(oldPartial),false);assert.equal(await exists(receipt),false);
+  const receipt=await oldReceipt(oldPartial);
+  for(const found of [await findResidue([f.root]),await findResidue([f.root,])]){
+    assert.ok(!found.items.some(item=>item.path===oldPartial||item.path===receipt));
+    await cleanResidue(found);
+  }
+  assert.equal(await exists(oldPartial),true);assert.equal(await exists(receipt),true);
 });
 
 test('a receipt opened in one segment and closed in the next lets both segments go, oldest first',async t=>{
@@ -406,7 +405,7 @@ test('a complete staged copy whose card file changed or went is kept by the auto
     const automaticResult=await cleanResidue(found,{keepResumable:true});
     assert.equal(automaticResult.removed.files,0,change);assert.ok(await exists(f.copy),change);assert.ok(await open(f.root,f.receipt.rid),change);
     assert.equal(automaticResult.left.recoverable.files,1,change);
-    const manual=await cleanResidue(await findResidue([f.root],{legacy:true}));
+    const manual=await cleanResidue(await findResidue([f.root],{}));
     assert.equal(manual.removed.files,0,change);assert.ok(await exists(f.copy),`${change}: Clean up keeps it`);assert.ok(await open(f.root,f.receipt.rid),change);
     assert.equal(manual.left.recoverable.files,1,change);
   }

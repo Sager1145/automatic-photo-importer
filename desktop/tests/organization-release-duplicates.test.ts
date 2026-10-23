@@ -74,14 +74,12 @@ test('organization never creates hidden folders; its records folder is visible',
  assert.equal((await core.findMisplaced(f.root,f.root,options,metadata)).count,0,'the records folder is never organized');
 });
 
-test('records an earlier version left in its hidden folder are listed as being converted, and organizing is refused meanwhile',async t=>{
+test('records an earlier version left in its hidden folder that this Mac did not seal are never read, listed or changed, and do not stop organizing',async t=>{
  const f=await fixture(t);
  // The earlier version's folder holding a journal (its manifest) this build did not write and never reads.
  const id='6b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f',old=path.join(f.root,'.photo-importer-recovery',id);
  await fs.mkdir(old,{recursive:true});await fs.writeFile(path.join(old,'manifest.json'),'{}');
- const listed=await core.getOrganizationRecovery(f.root);
- assert.deepEqual(listed.map(item=>[item.id,item.converting]),[[id,true]]);
- await assert.rejects(core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false}),/being converted/);
- assert.equal(await fs.readFile(f.duplicate,'utf8'),'same bytes','nothing was moved');
+ assert.deepEqual(await core.getOrganizationRecovery(f.root),[],'an old folder is not a journal list');
+ await core.executeReorganization(await prepare(f.root),undefined,undefined,{...rename,releaseDuplicates:false});
  assert.equal(await fs.readFile(path.join(old,'manifest.json'),'utf8'),'{}','the old records are left as they are');
 });

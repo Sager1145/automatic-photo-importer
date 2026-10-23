@@ -90,7 +90,7 @@ export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>
   if (!progress) return undefined;
   switch (progress.step) {
     case 'listing': case 'scanning': return 'scan';
-    case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'converting': case 'preparing': case 'index': return 'read';
+    case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'preparing': case 'index': return 'read';
     case 'comparing': case 'locating': case 'existing': case 'confirming': case 'mirroring': return 'compare';
     case 'moving': return 'move';
     case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': case 'cleaning': case 'measuring': return 'tidy';

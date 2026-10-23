@@ -93,7 +93,7 @@ test('looking for the later organization that took files over counts the journal
 });
 
 test('every new progress label and job message exists in all four languages',()=>{
- const labels=['Reading later organizations: {completed} of {total}','Reading earlier organization records: {completed} of {total}','Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}','Converting the organization record: {completed} of {total}','Removing old record files: {completed} of {total}','Measuring: {completed} files','Preparing destinations: {completed} of {total}','Comparing the backup with the drive: {completed} of {total}','Loading the destination index: {size} of {totalSize}','Reading organization history is paused while a job uses the drive. It continues afterwards.'];
+ const labels=['Reading later organizations: {completed} of {total}','Reading earlier organization records: {completed} of {total}','Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}','Removing old record files: {completed} of {total}','Measuring: {completed} files','Preparing destinations: {completed} of {total}','Comparing the backup with the drive: {completed} of {total}','Loading the destination index: {size} of {totalSize}','Reading organization history is paused while a job uses the drive. It continues afterwards.'];
  for(const label of labels)for(const catalog of Object.values(translationCatalogs))assert.ok(catalog[label],`${label} in ${Object.keys(catalog).length} entries`);
  for(const key of ['job.readingLater','job.readingEarlier','job.cleaning','job.measuring'] as const){
   const entry=backendMessages[key];

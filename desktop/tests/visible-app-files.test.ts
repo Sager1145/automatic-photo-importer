@@ -6,8 +6,6 @@ import os from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {plan,execute,findMisplaced,executeReorganization,configureOrganizationRecovery} from '../core/index';
 import {DestinationIndex} from '../core/destination-index';
-import {migrateDrive} from '../core/migrate/index';
-import {legacyReceipt} from './fixtures/legacy-records';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
 import {ignoredName} from '../core/inventory';
 import {findResidue,cleanResidue} from '../core/residue';
@@ -50,20 +48,8 @@ test('an import, a drive backup and an organization leave no hidden file, and no
  assert.equal((await findMisplaced(library,library,options,metadata)).count,0);
 });
 
-test('a hidden drive marker left by an older version is adopted and keeps the folder this drive owns',async t=>{
- const f=await fixture(t),backup=()=>plan(f.source,[f.root],{...options,backup:true,drive},metadata);
- await execute((await backup()).plans[0]!);
- const folder=path.join(f.root,'Drive backups','Travel SSD'),visible=path.join(folder,'photo-importer-drive.json'),legacy=path.join(folder,'.photo-importer-drive.json');
- await fs.rename(visible,legacy);
- const again=(await backup()).plans[0]!;
- assert.ok(again.entries.every(entry=>entry.destination.startsWith(folder+path.sep)),'the folder is still this drive\'s');
- assert.deepEqual(await execute(again),{copied:0,skipped:1,errors:[]});
- assert.ok(await exists(visible));assert.equal(await exists(legacy),false);
- assert.equal(JSON.parse(await fs.readFile(visible,'utf8')).identity,drive.identity);
- // With both present the visible one decides.
- await fs.writeFile(legacy,JSON.stringify({identity:'someone-else'}));
- assert.deepEqual(await execute((await backup()).plans[0]!),{copied:0,skipped:1,errors:[]});
- // Neither marker is user data.
+test('neither drive marker name is user data',async t=>{
+ const f=await fixture(t);
  await fs.writeFile(path.join(f.source,'photo-importer-drive.json'),'{}');await fs.writeFile(path.join(f.source,'.photo-importer-drive.json'),'{}');
  const names=(await plan(f.source,[f.root],{...options,backup:true},metadata)).inventory.files.map(file=>file.relative);
  assert.deepEqual(names,['A.JPG']);
@@ -82,24 +68,7 @@ test('the destination index is sealed in the records folder: one sealed by anoth
  assert.deepEqual(await dotted(f.root),[]);
 });
 
-test('a hidden staged copy and receipt left by an older version are moved into the records folder by the converter and resumed',async t=>{
- const f=await fixture(t),transfer=(await plan(f.source,[f.root],options,metadata)).plans[0]!,entry=transfer.entries[0]!;
- await fs.mkdir(path.dirname(entry.destination),{recursive:true});
- const partial=path.join(path.dirname(entry.destination),`.import-${randomUUID()}.partial`);
- await fs.writeFile(partial,f.data.subarray(0,500_000));
- const stat=await fs.lstat(partial,{bigint:true}),source=await fs.lstat(entry.source,{bigint:true});
- const receipt=await legacyReceipt({kind:'stage',file:partial,source:entry.source,destination:entry.destination,sha256:'',sourceStat:{dev:String(source.dev),ino:String(source.ino),size:String(source.size),mtime:String(source.mtimeNs),ctime:String(source.ctimeNs)},root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(partial)),fileIdentity:`${stat.dev}:${stat.ino}:${stat.birthtimeNs}`});
- const hidden=path.join(path.dirname(receipt),path.basename(receipt).replace(/^photo-importer-/,'.import-'));await fs.rename(receipt,hidden);
- assert.deepEqual((await migrateDrive([f.root])).problems,[]);
- assert.deepEqual(await fs.readdir(path.dirname(entry.destination)),[],'the staged copy and its receipt left the media folder');
- const result=await execute((await plan(f.source,[f.root],options,metadata)).plans[0]!);
- assert.deepEqual(result,{copied:1,skipped:0,errors:[]});
- assert.deepEqual(await fs.readFile(entry.destination),f.data);
- assert.equal((await fs.lstat(entry.destination,{bigint:true})).ino,stat.ino,'the old bytes were continued, not copied again');
- assert.deepEqual(await fs.readdir(path.dirname(entry.destination)),[path.basename(entry.destination)]);
-});
-
-test('residue cleanup and the scanner recognise both the visible and the older hidden names',async t=>{
+test('residue cleanup never walks the library, and the scanner recognises both the visible and the older hidden names',async t=>{
  const f=await fixture(t),leftovers:string[]=[];
  const folder=path.join(f.root,'2024');await fs.mkdir(folder);
  for(const prefix of ['','.']){
@@ -108,12 +77,11 @@ test('residue cleanup and the scanner recognise both the visible and the older h
   leftovers.push(path.join(f.root,`${prefix}photo-importer-index-${id}.tmp`));
  }
  for(const file of leftovers)await fs.writeFile(file,'x');
- // The earlier version's leftovers in the library are Clean up's (the automatic check looks only at the records folder).
- assert.deepEqual((await findResidue([f.root])).items,[]);
- const found=await findResidue([f.root],{legacy:true});
- assert.deepEqual(found.items.map(item=>item.path).sort(),[...leftovers].sort());
+ // What an earlier version left in the library is never listed, cleaned or deleted: only the records folder is looked at.
+ const found=await findResidue([f.root]);
+ assert.deepEqual(found.items,[]);
  await cleanResidue(found);
- for(const file of leftovers)assert.equal(await exists(file),false,file);
+ for(const file of leftovers)assert.equal(await exists(file),true,file);
  for(const name of ['Photo Importer Data','photo importer data','photo-importer-drive.json','.photo-importer-drive.json','photo-importer-index.json','.photo-importer-index.json',`photo-importer-${UUID_V4}.partial`,`.import-${UUID_V4}.partial`,`photo-importer-stage-${UUID_V4}.json`,`.import-intent-${UUID_V4}.json`,`photo-importer-index-${UUID_V4}.tmp`,`.photo-importer-index-${UUID_V4}.tmp`])
   assert.ok(ignoredName(name),name);
  for(const name of ['photo-importer-notes.json','photo-importer-index-notes.tmp','photo-importer-holiday.partial','photo-importer-stage-1.json','photo-importer-index.json.bak','my photo-importer-drive.json'])
