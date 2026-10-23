@@ -10,7 +10,11 @@ import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameStat,
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
 interface RecordData {version:1;kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:Snapshot;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;}
-export interface OwnedPartial {file:string;stat:BigIntStats;journal:string;journalStat:BigIntStats;record:RecordData;}
+export interface OwnedPartial {file:string;stat:BigIntStats;journal:string;journalStat:BigIntStats;record:RecordData;/** A receipt written before its file was created: no file was there (stat is the receipt's). */absent?:boolean;}
+/** What clearing a receipt needs. */
+export type Receipt=Pick<OwnedPartial,'journal'|'journalStat'|'record'>;
+/** The identity recorded in a receipt written before its file exists. */
+const CREATING='creating';
 // Scoped to one plan/execution: directory enumeration is linear even for a
 // camera folder with thousands of files. A cached name never grants ownership;
 // every candidate is freshly authenticated, opened and checked before writing.
@@ -37,16 +41,17 @@ const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JS
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
 /** exFAT names a file without a start cluster by a temporary (negative) inode, replaced when data
  * first reaches the disk or the volume is mounted again: such a receipt binds by device and birth time. */
-const binds=(s:BigIntStats,recorded:string)=>{if(fileIdentity(s)===recorded)return true;const [dev,ino,birth]=recorded.split(':');return !!ino&&ino.startsWith('-')&&String(s.dev)===dev&&String(s.birthtimeNs)===birth;};
+const binds=(s:BigIntStats,recorded:string)=>{if(recorded===CREATING)return s.size===0n&&s.nlink===1n;if(fileIdentity(s)===recorded)return true;const [dev,ino,birth]=recorded.split(':');return !!ino&&ino.startsWith('-')&&String(s.dev)===dev&&String(s.birthtimeNs)===birth;};
 /** A device number names a mount, not a disk: after a re-attach the recorded dev is read as the
  * current one while the recorded root/source folder is still the same inode at the same path. */
-async function rebaseMount(record:RecordData):Promise<RecordData>{
+const sourceRebased=new WeakSet<RecordData>();
+export async function rebaseMount(record:RecordData):Promise<RecordData>{
  const swap=(value:string,dev:string)=>value.replace(/^\d+:/,dev+':');
  const out:RecordData={...record,sourceStat:record.sourceStat&&{...record.sourceStat}};
  const root=await fs.lstat(record.root,{bigint:true}).catch(()=>undefined);
  if(root?.isDirectory()&&String(record.rootIdentity).split(':')[1]===String(root.ino)){const dev=String(root.dev);out.rootIdentity=swap(out.rootIdentity,dev);out.parentIdentity=swap(out.parentIdentity,dev);out.fileIdentity=swap(out.fileIdentity,dev);}
  const source=typeof record.sourceRoot==='string'?await fs.lstat(record.sourceRoot,{bigint:true}).catch(()=>undefined):undefined;
- if(source?.isDirectory()&&String(record.sourceIdentity).split(':')[1]===String(source.ino)){const dev=String(source.dev);out.sourceIdentity=swap(out.sourceIdentity,dev);if(out.sourceStat)out.sourceStat.dev=dev;}
+ if(source?.isDirectory()&&String(record.sourceIdentity).split(':')[1]===String(source.ino)){const dev=String(source.dev);if(String(record.sourceIdentity).split(':')[0]!==dev)sourceRebased.add(out);out.sourceIdentity=swap(out.sourceIdentity,dev);if(out.sourceStat)out.sourceStat.dev=dev;}
  return out;
 }
 const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.json$/;
@@ -55,7 +60,9 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
  * is still there, whether the receipt still binds it, and for a stage, whether that copy could
  * continue from its unchanged source (or a card not connected now). owned: it names a file in its
  * own folder. stale: the recorded source card is present and the source is missing or changed
- * (size or mtime), so the copy cannot continue; a card not connected proves nothing. */
+ * (size or mtime), so the copy cannot continue; a card not connected proves nothing. A source
+ * volume whose device number had to be rewritten is not proven to be the same card (another one
+ * may be mounted at the same path), so it is never stale. */
 export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean}>{
  const record=await rebaseMount((await readRecord(journal,root)).record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
@@ -65,22 +72,30 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  // unchanged; only the same card holding a changed or removed file ends the copy's use.
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
- const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
+ const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
  return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale};
 }
 
 /** Record exclusive creation durably before the first byte is written. */
 export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<OwnedPartial> {
+ return {file,stat,...await writeReceipt(kind,file,fileIdentity(stat),entry,transfer,index)};
+}
+/** Record, before a name is created, that this app is about to create it exclusively: a crash right
+ * after leaves an empty file the receipt owns, which the next import resumes or replaces in place. */
+export function recordCreation(file:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<Receipt> {
+ return writeReceipt('publication',file,CREATING,entry,transfer,index);
+}
+async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<Receipt> {
  await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(file,transfer.root);await contained(entry.source,transfer.source);
  const sourceStat=await fs.lstat(entry.source,{bigint:true});
  if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
- const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileIdentity(stat)};
+ const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId};
  const journal=path.join(path.dirname(file),`photo-importer-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;
  try {await handle.writeFile(JSON.stringify(sealImportRecord({...record})));await handle.sync();journalStat=await handle.stat({bigint:true});}finally{await handle.close();}
  await syncParents(journal,transfer.root);
  remember(await receiptNames(path.dirname(journal),transfer.root,index),path.basename(journal),record);
- return {file,stat,journal,journalStat,record};
+ return {journal,journalStat,record};
 }
 
 async function prefixMatches(file:string,source:string,length:number,signal?:AbortSignal):Promise<boolean>{
@@ -111,7 +126,12 @@ export async function findPartial(kind:Kind,entry:PlanEntry,root:string,index:Re
    if(kind==='publication'?record.file!==entry.destination:!/^(?:\.import|photo-importer)-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
    await rootUnchanged(root,record.rootIdentity);await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);await contained(record.file,root);
    if(await identity(folder)!==record.parentIdentity)continue;
-   const source=await fs.lstat(entry.source,{bigint:true}),stat=await fs.lstat(record.file,{bigint:true});
+   const source=await fs.lstat(entry.source,{bigint:true});
+   if(kind==='publication'&&record.fileIdentity===CREATING&&!await fs.lstat(record.file,{bigint:true}).then(()=>true,error=>code(error)==='ENOENT'?false:Promise.reject(error))){
+    if(!sourceMatches(source,record.sourceStat))continue;
+    return {file:record.file,stat:journalStat,journal,journalStat,record,absent:true};
+   }
+   const stat=await fs.lstat(record.file,{bigint:true});
    if(!sourceMatches(source,record.sourceStat)||!stat.isFile()||stat.nlink!==1n||!binds(stat,record.fileIdentity)||stat.size>BigInt(entry.size))continue;
    if(!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
    if(!sameStat(stat,await fs.lstat(record.file,{bigint:true}))||!sameStat(source,await fs.lstat(entry.source,{bigint:true})))continue;
@@ -127,8 +147,23 @@ export async function openPartial(partial:OwnedPartial,root:string){
  const output=await fs.open(partial.file,constants.O_RDWR|(constants.O_NOFOLLOW??0));
  try{if(!sameStat(partial.stat,await output.stat({bigint:true}))||!sameStat(partial.stat,await fs.lstat(partial.file,{bigint:true})))throw new Error('Incomplete copy changed before resuming');return output;}catch(error){await output.close();throw error;}
 }
+/** Once a destination is complete and verified, every authenticated publication receipt for it is
+ * moot: the one written before its name was created, and an older one a kill left behind between
+ * writing a newer receipt and removing it. */
+export async function releaseCreations(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<void>{
+ const folder=path.dirname(entry.destination),names=(await receiptNames(folder,root,index)).get(recordKey({kind:'publication',source:entry.source,destination:entry.destination,sha256:entry.digest??''}));
+ if(!names?.size)return;
+ for(const name of [...names.keys()]){
+  const journal=path.join(folder,name);
+  try {
+   const {record,journalStat}=await readRecord(journal,root);
+   if(record.kind!=='publication'||record.destination!==entry.destination||record.file!==entry.destination||record.root!==root)continue;
+   await clearPartialRecord({journal,journalStat,record},root,index);
+  }catch{/* Unreadable or already gone: nothing to release. */}
+ }
+}
 /** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. */
-export async function clearPartialRecord(partial:OwnedPartial,root:string,index:RecoveryIndex,sync=true):Promise<void>{
+export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
  await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));

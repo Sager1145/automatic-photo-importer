@@ -191,7 +191,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('Errors stay on top: at 200% the error toast is the topmost element at its centre, also on the frames after each page switch',async()=>{
    const original=(await state()).preferences.textScale,[width,height]=window.getContentSize();
    // The toast is hit first at its centre and sits in the top layer; no transition is running over it.
-   const probe="(()=>{const t=document.querySelector('[data-testid=error-toast]');if(!t)return {present:false};const r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {present:true,topLayer:t.matches(':popover-open'),topmost:!!hit&&t.contains(hit),transition:!!document.documentElement.dataset.transition};})()";
+   const probe="(()=>{const t=document.querySelector('[data-error-layer]');if(!t)return {present:false};const r=t.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {present:true,topLayer:t.matches(':popover-open'),topmost:!!hit&&t.contains(hit),transition:!!document.documentElement.dataset.transition};})()";
    // Switch pages and probe two frames later, when a transition would already be drawing.
    const go=async(label:string)=>js<Record<string,unknown>>(`(async()=>{Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(label)}).click();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return ${probe};})()`);
    const onTop={present:true,topLayer:true,topmost:true,transition:false};
@@ -200,7 +200,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
     window.setContentSize(1000,720);await action({type:'preferences',patch:{textScale:2}});await wait(()=>js<boolean>("getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim()==='2'"),'200 percent text');
     await clearToast();await go('Import desk');await settle();
     await action({type:'preferences',patch:{unknownDefault:'ask'}});
-    await wait(()=>js<boolean>("document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')===true"),'error toast in the top layer');
+    await wait(()=>js<boolean>("document.querySelector('[data-error-layer]')?.matches(':popover-open')===true"),'error or warning toast in the top layer');
     await settle();settled=await js(probe);await shot('error-toast-on-top-200');
     for(const page of ['Drives','Organization','Import desk'])during.push(await go(page));
    }finally{
@@ -416,7 +416,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
   await check('Organization applies changed folder settings and can recheck its recovery journal',async()=>{
    if(organizationOnly){await fs.copyFile(path.join(root,'source-1','photo.png'),path.join(root,'destination','unorganized.png'));await fs.copyFile(path.join(root,'source-1','clip.mp4'),path.join(root,'destination','unorganized.mp4'));}
    await action({type:'preferences',patch:{basePath:'organized-library'}});
-   const reviewed=await action({type:'previewOrganization',destinationIndex:0});assert.equal(reviewed.review?.kind,'reorganize');assert.ok(reviewed.review!.plans[0].entries.length>=2);assert.equal(reviewed.review!.plans[0].source,path.join(root,'destination'));assert.equal(reviewed.review!.plans[0].root,path.join(root,'destination','organized-library'));
+   const reviewed=await action({type:'previewOrganization',destinationIndex:0});assert.equal(reviewed.review?.kind,'reorganize');{const reviewedPlan=reviewed.review!.plans[0];/* Video-root is the default layout, so videos are planned into their own folder. */assert.ok(reviewedPlan.entries.length+(reviewedPlan.videos?.entries.length??0)>=2,JSON.stringify({photos:reviewedPlan.entries.length,videos:reviewedPlan.videos?.entries.length}));}assert.equal(reviewed.review!.plans[0].source,path.join(root,'destination'));assert.equal(reviewed.review!.plans[0].root,path.join(root,'destination','organized-library'));
    const previous=new Set((await state()).jobs.map(job=>job.id));await js("Promise.all([window.importer.action({type:'applyReview'}),window.importer.action({type:'applyReview'})])");await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'organization finish');
    assert.equal((await state()).jobs.filter(job=>!previous.has(job.id)).length,1,'Double Apply must create only one organization job');
    await action({type:'refreshOrganization'});const recovery=(await state()).organizationRecovery?.find(job=>job.status==='complete');assert.ok(recovery,JSON.stringify((await state()).jobs));

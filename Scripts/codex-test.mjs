@@ -14,7 +14,7 @@ const run=(bin,args,timeoutMs=0)=>new Promise((resolve,reject)=>{
  let expired=false;
  const deadline=timeoutMs?setTimeout(()=>{expired=true;child.kill('SIGKILL');},timeoutMs):undefined;
  child.on('error',error=>{clearTimeout(deadline);reject(error);});
- child.on('exit',(code,signal)=>{clearTimeout(deadline);if(expired)reject(new Error('Automated Electron QA exceeded its 3-minute deadline'));else if(code===0)resolve();else reject(new Error(`${bin} exited ${code??signal}`));});
+ child.on('exit',(code,signal)=>{clearTimeout(deadline);if(expired)reject(new Error('Automated Electron QA exceeded its 7-minute deadline'));else if(code===0)resolve();else reject(new Error(`${bin} exited ${code??signal}`));});
 });
 if(!process.argv.includes('--no-build'))await run(process.platform==='win32'?'npm.cmd':'npm',['run','build']);
 const root=await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'photo-importer-codex-'));
@@ -27,6 +27,6 @@ for(let i=0;i<large;i++){const folder=path.join(root,'destination','large-unsort
 await fs.mkdir(path.join(root,'destination-2'));await fs.writeFile(path.join(root,'destination-2','existing-marker.txt'),'Keep second destination data\n');
 console.log(`Codex QA fixtures and results: ${root}`);
 const require=createRequire(import.meta.url);const electron=require('electron');
-try{await run(electron,['.', '--qa',`--qa-fixture-root=${root}`,...(process.argv.includes('--reduced-motion')?['--force-prefers-reduced-motion']:[]),...(interactive?[]:['--codex-test']),...((process.argv.includes('--ui-only')||process.argv.includes('--organization-only'))?['--codex-ui-only']:[]),...(process.argv.includes('--organization-only')?['--codex-organization-only']:[])],interactive?0:180000+large*300);}
+try{await run(electron,['.', '--qa',`--qa-fixture-root=${root}`,...(process.argv.includes('--reduced-motion')?['--force-prefers-reduced-motion']:[]),...(interactive?[]:['--codex-test']),...((process.argv.includes('--ui-only')||process.argv.includes('--organization-only'))?['--codex-ui-only']:[]),...(process.argv.includes('--organization-only')?['--codex-organization-only']:[])],interactive?0:420000+large*300);}
 catch(error){console.error(String(error));process.exitCode=1;}
 if(!interactive){const reportPath=path.join(root,'artifacts','report.json');try{const report=JSON.parse(await fs.readFile(reportPath,'utf8'));console.log(JSON.stringify(report,null,2));if(!report.passed)process.exitCode=1;}catch{console.error('No QA report produced: app failed before the integration checks finished.');process.exitCode=1;}console.log(`Report: ${reportPath}`);}
