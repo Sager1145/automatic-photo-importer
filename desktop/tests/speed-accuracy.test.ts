@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { plan as planDestinations, execute, configureOrganizationRecovery } from '../core/index';
 import { EtaTracker, RateMeter, stampEstimates } from '../eta';
-import type { AppState, Job, Progress } from '../shared';
+import type { AppState, Job, Metadata, Progress } from '../shared';
 
 const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
@@ -69,6 +73,8 @@ function simulate(sc: Scenario) {
 const scenarios: [string, Scenario][] = [
   ['copy 5,000 x 200 KB', { files: 5000, size: 200e3, bw: 100 * MB / 1000, pre: 5, post: 20, workers: 4, phase: 'copying' }],
   ['copy 20 x 2 GB', { files: 20, size: 2e9, bw: 100 * MB / 1000, pre: 5, post: 20, workers: 4, phase: 'copying' }],
+  ['verify 5,000 x 200 KB', { files: 5000, size: 200e3, bw: 400 * MB / 1000, pre: 0, post: 10, workers: 4, phase: 'verifying' }],
+  ['verify 40 x 1 GB', { files: 40, size: 1e9, bw: 400 * MB / 1000, pre: 0, post: 10, workers: 4, phase: 'verifying' }],
 ];
 for (const [name, scenario] of scenarios) {
   test(`${name}: after 5 s, at least 90% of the shown speeds are within 10% of the true 5 s rate`, () => {
@@ -99,4 +105,40 @@ test('a copy shows no speed until its window holds 2 s, and never the lifetime a
   assert.equal(job.progress!.speed, 0);
   report(3, 300e6);
   assert.equal(job.progress!.speed, 100e6);
+});
+
+test('the verify rate is labelled "Verify read" in every language, and copy rates are not', async () => {
+  const { ProgressDisplay } = await import('../renderer/RootApp');
+  const { createTranslator, I18nProvider, languages } = await import('../renderer/i18n');
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const render = (speed: object) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ProgressDisplay, { label: 'x', speed: { speed: 123e6, ...speed } as never }) }));
+    assert.ok(render({ phase: 'verifying' }).includes(`${t('Verify read')} 123 MB/s`), `${language}: verify label`);
+    assert.ok(!render({ phase: 'copying' }).includes(t('Verify read')), `${language}: copy has no label`);
+    assert.notEqual(t('Verify read'), language === 'en' ? '' : 'Verify read', `${language}: translated`);
+  }
+});
+
+test('verification reports the bytes it hashed as it reads, so a large file moves the verify speed before it is published', async t => {
+  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'photo-speed-')));
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  const source = path.join(base, 'source'), root = path.join(base, 'destination');
+  await fs.mkdir(source); await fs.mkdir(root);
+  const size = 6 * 1024 * 1024;
+  await fs.writeFile(path.join(source, 'DSC0001.ARW'), Buffer.alloc(size, 7));
+  const metadata = async (): Promise<Metadata> => ({ camera: 'Sony A7', date: '2024-02-03T12:00:00Z', fields: {} });
+  const planned = (await planDestinations(source, [root], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'format', unknownRules: {} }, metadata)).plans[0]!;
+  const seen: Progress[] = [];
+  const result = await execute(planned, undefined, progress => seen.push({ ...progress }));
+  assert.deepEqual(result.errors, []);
+  const verifying = seen.filter(progress => progress.phase === 'verifying');
+  assert.ok(verifying.every(progress => progress.hashedBytes !== undefined), 'every verifying report carries hashedBytes');
+  assert.ok(seen.filter(progress => progress.phase === 'copying').every(progress => progress.hashedBytes === undefined), 'copying reports do not');
+  const steps = new Set(verifying.map(progress => progress.hashedBytes!));
+  assert.ok(steps.size > 2, `hashed bytes grow in several steps while the file is read: ${[...steps]}`);
+  assert.ok(Math.max(...steps) >= size, 'at least the staged copy was read');
+  assert.ok(verifying.every((progress, index) => index === 0 || progress.hashedBytes! >= verifying[index - 1]!.hashedBytes!), 'never decreases');
 });

@@ -731,6 +731,7 @@ Staging files from interrupted imports, organization scratch copies and camera d
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
 Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
 {count} files/s|{count} 个文件/秒|{count} 個檔案/秒|{count} ファイル/秒
+Verify read|校验读取|校驗讀取|検証の読み込み
 {time} left|剩余{time}|剩餘{time}|残り{time}
 {count} already in the backup|备份中已有 {count} 个|備份中已有 {count} 個|バックアップに {count} 件が既にあります
 {time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）

@@ -299,8 +299,9 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  // Until the window holds 2 s of history no speed is shown: the transfer's own lifetime average is not used, it counts time spent before the data moved.
  const speeds=(id:string,progress:Progress)=>{
   const key=stageKey(progress);live.push(id+':bytes',id+':files');
-  // Verification counts the bytes of the files published; without that, its bytes follow the share of files verified.
-  const total=key==='verifying:'&&progress.work?progress.work.bytes:key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
+  // Verification speed counts the bytes hashed so far (they move as each file is read); a report without that counts the bytes of the files
+  // published, and without those, follows the share of files verified.
+  const total=key==='verifying:'&&progress.hashedBytes!==undefined?progress.hashedBytes:key==='verifying:'&&progress.work?progress.work.bytes:key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
   const measured=tracker.measure(id+':bytes',key,total,now),files=tracker.measure(id+':files',key,progress.completed,now);
   let speed=0;
   if(dataKeys.has(key)){speed=measured??0;if(!(speed>0))speed=0;}
