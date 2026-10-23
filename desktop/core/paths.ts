@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { hasher } from './hasher';
-import { streams, mountOf, filesystemOf } from './devices';
+import { streams, mountOf, volumeOf } from './devices';
 import { execFile } from 'node:child_process';
 
 export function checkAbort(signal?:AbortSignal):void {
@@ -223,25 +223,24 @@ export async function digest(file:string,signal?:AbortSignal,onBytes?:(bytes:num
 }
 export function pathKey(file:string):string { return file.normalize('NFC').toLowerCase(); }
 
-const directRoots=new Map<string,Promise<boolean>>();
-/** Whether files may be written straight to their final names under `root`: only on macOS exFAT and FAT volumes, which cannot
- * hard-link (LINK_MAX 1, or the caller says so) and where no name can be published atomically anyway, so a staging file buys
- * nothing. Every other volume (APFS, network and FUSE volumes, whose birth times are unproven) keeps the staged path. Answered once per volume. */
-export function directCapable(root:string,rootIdentity:string,exclusiveCopy=false):Promise<boolean> {
-  if(process.platform!=='darwin') return Promise.resolve(false);
-  const key=`${root}\0${rootIdentity}\0${exclusiveCopy}`;
-  let found=directRoots.get(key);
-  if(!found) {
-    const answer=async():Promise<boolean> => {
-      const type=await filesystemOf(await mountOf(root));
-      if(type!=='exfat'&&type!=='msdos') return false;
-      if(exclusiveCopy) return true;
-      const links=await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim())));
-      return links==='1';
-    };
-    // A tool that fails or times out (a busy machine) is asked again once and, if it still fails, answers "staged" for this run only: it is not remembered.
-    found=(async()=>{try { return await answer(); } catch { return answer().catch(()=>{directRoots.delete(key);return false;}); }})();
-    directRoots.set(key,found);
-  }
-  return found;
+const directVolumes=new Map<string,Promise<boolean>>();
+/** Whether files may be written straight to their final names under `root`: only macOS exFAT volumes (LINK_MAX 1 unless the caller
+ * says so), which can neither hard-link nor publish a name atomically, so a staging file buys nothing. FAT (msdos) stays staged until
+ * its local-time timestamps are probed; APFS, network and FUSE volumes, whose birth times are unproven, keep the staged path too.
+ * Answered once per volume UUID, so a path or device number reused by another volume is never taken for the old one. A tool that
+ * fails (a busy machine) is asked again once after a pause; if it still fails the answer is "staged" for this call only. */
+export async function directCapable(root:string,_rootIdentity:string,exclusiveCopy=false):Promise<boolean> {
+  if(process.platform!=='darwin') return false;
+  const answer=async():Promise<boolean> => {
+    const {uuid,type}=await volumeOf(await mountOf(root));
+    if(type!=='exfat') return false;
+    const key=`${uuid??''}\0${exclusiveCopy}`;
+    const check=async()=>exclusiveCopy||(await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim()))))==='1';
+    if(!uuid) return check();
+    let found=directVolumes.get(key);
+    if(!found){found=check();directVolumes.set(key,found);found.catch(()=>directVolumes.delete(key));}
+    return found;
+  };
+  try { return await answer(); }
+  catch { await new Promise(resolve=>setTimeout(resolve,500)); return answer().catch(()=>false); }
 }

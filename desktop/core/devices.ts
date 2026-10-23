@@ -22,10 +22,11 @@ export async function mountOf(file:string):Promise<string> {
   if(!mount) throw new Error('No mount point');
   return mount;
 }
-/** The file system type of the volume mounted at `mount` (macOS `mount` lists it first in the parentheses), or undefined. */
-export async function filesystemOf(mount:string):Promise<string|undefined> {
-  const line=(await run('/sbin/mount',[])).split('\n').find(item=>item.includes(` on ${mount} (`));
-  return line?.slice(line.lastIndexOf(` on ${mount} (`)+` on ${mount} (`.length).match(/^[^,)]+/)?.[0];
+/** The volume mounted at `mount`, from diskutil: its UUID (the same volume under any path or device number) and file system type ("exfat", "msdos", "apfs"...). */
+export async function volumeOf(mount:string):Promise<{uuid?:string;type?:string}> {
+  const info=await run('/usr/sbin/diskutil',['info','-plist',mount]);
+  const text=(name:string)=>info.match(new RegExp(`<key>${name}</key>\\s*<string>([^<]*)</string>`))?.[1];
+  return {uuid:text('VolumeUUID'),type:text('FilesystemType')};
 }
 /** macOS: diskutil names the bus and medium. Linux: sysfs. Anything else stays unknown. */
 async function classify(file:string,dev:bigint):Promise<DeviceKind> {

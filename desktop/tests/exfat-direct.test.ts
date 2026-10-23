@@ -10,7 +10,8 @@ import {promisify} from 'node:util';
 import {createHash, randomBytes} from 'node:crypto';
 import {plan, execute, configureOrganizationRecovery} from '../core/index';
 import {findResidue, cleanResidue} from '../core/residue';
-import {STREAMS} from '../core/devices';
+import {STREAMS, mountOf, volumeOf} from '../core/devices';
+import {directCapable, identity} from '../core/paths';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import type {Metadata} from '../shared';
 
@@ -211,6 +212,16 @@ test('a read-back mismatch in a file resumed from an earlier run keeps the file 
   assert.ok(await fs.lstat(partial!).then(()=>true,()=>false),'the file this run did not create stays');
   const receipts=await Promise.all((await leftovers(env.root)).filter(file=>file.endsWith('.json')).map(file=>fs.readFile(file,'utf8').catch(()=>'')));
   assert.ok(receipts.some(text=>text.includes(path.basename(partial!))),'its receipt stays');
+});
+
+test('only an exFAT volume is direct: it is recognised by its UUID, and an APFS folder is not',async t=>{
+  const env=await ready(t);if(!env) return;
+  const volume=await volumeOf(await mountOf(env.root));
+  assert.equal(volume.type,'exfat');assert.match(volume.uuid??'',/^[0-9A-F-]{36}$/i,'the volume has a UUID');
+  assert.equal(await directCapable(env.root,await identity(env.root)),true);
+  assert.equal(await directCapable(env.root,'0:0'),true,'the answer does not depend on a path or device number');
+  const apfs=await fs.realpath(os.tmpdir());
+  assert.equal(await directCapable(apfs,await identity(apfs)),false);
 });
 
 test('a direct copy writes no staging file, reads each backup file once, and flushes a handful of times per file',async t=>{
