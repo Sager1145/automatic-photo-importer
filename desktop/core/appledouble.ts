@@ -38,7 +38,7 @@ export function inspectAppleDouble(buffer:Buffer):AppleDoubleVerdict {
     if(offset+length>buffer.length)return unsafe('entry runs past the end of the file');
     // macOS always writes a resource fork entry: empty, zero padding, or Apple's stub "left blank" fork. Anything else is a real one.
     if(id===RESOURCE_FORK){if(length>0&&!zeroed(buffer,offset,offset+length)&&!buffer.subarray(offset,offset+length).equals(BLANK_FORK))return unsafe('has a resource fork');continue;}
-    if(id===FINDER_INFO){const verdict=inspectFinderInfo(buffer,offset,length);if(!verdict.safe)return verdict;continue;}
+    if(id===FINDER_INFO){if(offset!==50)return unsafe('unexpected Finder info layout');const verdict=inspectFinderInfo(buffer,offset,length);if(!verdict.safe)return verdict;continue;}
     if(!zeroed(buffer,offset,offset+length))return unsafe(`has AppleDouble entry ${id}`);
   }
   return {safe:true};
@@ -46,6 +46,8 @@ export function inspectAppleDouble(buffer:Buffer):AppleDoubleVerdict {
 /** The Finder info entry: 32 bytes of Finder info, 2 of padding, then the extended attributes (an "ATTR" block). */
 function inspectFinderInfo(buffer:Buffer,offset:number,length:number):AppleDoubleVerdict {
   const end=offset+length;
+  // 32 bytes alone, or 32 + 2 padding + an attribute block; anything in between is not a layout macOS writes.
+  if(length!==FINDER_INFO_SIZE&&length<FINDER_INFO_SIZE+2)return unsafe('unexpected Finder info length');
   if(!zeroed(buffer,offset,Math.min(end,offset+FINDER_INFO_SIZE)))return unsafe('has Finder info (tags or label)');
   if(zeroed(buffer,offset,end))return {safe:true};
   const header=offset+FINDER_INFO_SIZE+2;
@@ -74,15 +76,18 @@ export interface AppleDoubleReport {
   orphans:number;
   /** Failures to look at or remove one; the job goes on and the file stays. */
   warnings:string[];
+  /** Folders the sweep could not read. */
+  folderWarnings:string[];
 }
 const MAX_WARNINGS=20;
-export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,warnings:[]});
+export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,warnings:[],folderWarnings:[]});
 export function addAppleDoubleReport(total:AppleDoubleReport,part:AppleDoubleReport|undefined):void {
   if(!part)return;
   total.removed+=part.removed;total.kept+=part.kept;total.orphans+=part.orphans;
   for(const warning of part.warnings)if(total.warnings.length<MAX_WARNINGS)total.warnings.push(warning);
+  for(const warning of part.folderWarnings)if(total.folderWarnings.length<MAX_WARNINGS)total.folderWarnings.push(warning);
 }
-export const appleDoubleActivity=(report:AppleDoubleReport)=>report.removed+report.kept+report.orphans+report.warnings.length>0;
+export const appleDoubleActivity=(report:AppleDoubleReport)=>report.removed+report.kept+report.orphans+report.warnings.length+report.folderWarnings.length>0;
 
 /** "._" + name, in the same folder; undefined for a name that already is one. */
 export const sidecarOf=(file:string)=>{const name=path.basename(file);return name.startsWith('._')?undefined:path.join(path.dirname(file),'._'+name);};
@@ -101,7 +106,10 @@ export class AppleDoubleCleaner {
   private protects(file:string,root:string):boolean {
     return path.relative(root,path.dirname(file)).split(path.sep).some(part=>this.protectedNames.has(part.toLowerCase()));
   }
-  private warn(file:string,error:unknown){if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);}
+  /** A "._" file that could not be judged or removed: it stays. */
+  warn(file:string,error:unknown){if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);}
+  /** A folder that could not be read, so its "._" files were not looked at. */
+  warnFolder(folder:string,error:unknown){this.report.folderWarnings.push(`${folder}: ${text(error)}`);this.report.folderWarnings.splice(MAX_WARNINGS);}
   /** Import: call before the file is created. A "._" already there is not ours (an orphan from earlier): it is kept, counted, and never removed by this job. */
   async noteExisting(file:string):Promise<void> {
     const sidecar=sidecarOf(file);
@@ -128,36 +136,40 @@ export class AppleDoubleCleaner {
       await this.remove(sidecar,root,'removed');
     }catch(error){this.warn(sidecar,error);}
   }
-  /** "._X" files in the tree whose X is a media or companion file beside them, or is gone altogether (orphans). */
-  async sweep(root:string,signal?:AbortSignal):Promise<void> {
-    const device=(await fs.lstat(root,{bigint:true})).dev;
-    const walk=async(folder:string):Promise<void> => {
-      signal?.throwIfAborted();
-      let entries:import('node:fs').Dirent[];
-      try{entries=await fs.readdir(folder,{withFileTypes:true});}catch(error){this.warn(folder,error);return;}
-      const names=new Set(entries.map(entry=>entry.name.normalize('NFC').toLowerCase()));
-      for(const entry of entries){
-        const file=path.join(folder,entry.name);
-        if(entry.isDirectory()){
-          if(this.protectedNames.has(entry.name.toLowerCase()))continue;
-          try{if((await fs.lstat(file,{bigint:true})).dev!==device)continue;}catch(error){this.warn(file,error);continue;}
-          await walk(file);continue;
-        }
-        if(!entry.name.startsWith('._')||entry.name.length<3||!entry.isFile())continue;
-        const main=entry.name.slice(2);
-        if(names.has(main.normalize('NFC').toLowerCase())){
-          // The main file is there: only media and their companions count, and it must be a plain file.
-          if(mediaKindForPath(main)==='Other'&&!sidecars.has(path.extname(main).slice(1).toLowerCase()))continue;
-          try{if(!(await fs.lstat(path.join(folder,main))).isFile())continue;}catch(error){this.warn(file,error);continue;}
-          await this.remove(file,root,'removed');
-        } else {
-          // Gone from the listing: confirm with the filesystem before treating it as an orphan.
-          try{await fs.lstat(path.join(folder,main));continue;}catch(error){if(code(error)!=='ENOENT'){this.warn(file,error);continue;}}
-          await this.remove(file,root,'orphans');
-        }
+  /** "._X" files in the given folders (not below them) whose X is a media or companion file beside them, or is gone altogether
+   * (orphans). Never throws: a folder that cannot be read is reported and skipped, and a stop ends the sweep quietly. */
+  async sweep(root:string,folders:Iterable<string>,signal?:AbortSignal,onFolder?:(done:number,folder:string)=>void):Promise<void> {
+    let device:bigint;
+    try{device=(await fs.lstat(root,{bigint:true})).dev;}catch(error){this.warnFolder(root,error);return;}
+    let done=0;
+    for(const folder of folders){
+      if(signal?.aborted)return;
+      onFolder?.(++done,folder);
+      if(this.protects(path.join(folder,'.x'),root))continue;
+      try{
+        await contained(path.join(folder,'.x'),root);
+        if((await fs.lstat(folder,{bigint:true})).dev!==device)continue;
+        await this.sweepFolder(folder,root);
+      }catch(error){if(code(error)!=='ENOENT')this.warnFolder(folder,error);}
+    }
+  }
+  private async sweepFolder(folder:string,root:string):Promise<void> {
+    const entries=await fs.readdir(folder,{withFileTypes:true});
+    const names=new Set(entries.map(entry=>entry.name.normalize('NFC').toLowerCase()));
+    for(const entry of entries){
+      if(!entry.name.startsWith('._')||entry.name.length<3||!entry.isFile())continue;
+      const file=path.join(folder,entry.name),main=entry.name.slice(2);
+      if(names.has(main.normalize('NFC').toLowerCase())){
+        // The main file is there: only media and their companions count, and it must be a plain file.
+        if(mediaKindForPath(main)==='Other'&&!sidecars.has(path.extname(main).slice(1).toLowerCase()))continue;
+        try{if(!(await fs.lstat(path.join(folder,main))).isFile())continue;}catch(error){this.warn(file,error);continue;}
+        await this.remove(file,root,'removed');
+      } else {
+        // Gone from the listing: confirm with the filesystem before treating it as an orphan.
+        try{await fs.lstat(path.join(folder,main));continue;}catch(error){if(code(error)!=='ENOENT'){this.warn(file,error);continue;}}
+        await this.remove(file,root,'orphans');
       }
-    };
-    await walk(root);
+    }
   }
   /** The safety check and the removal of one "._" file; a missing file is nothing to do. */
   private async remove(sidecar:string,root:string,count:'removed'|'orphans'):Promise<void> {

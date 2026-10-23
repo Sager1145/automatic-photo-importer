@@ -782,8 +782,10 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  };
  const tidyCopied=async(entry:Entry)=>{
   if(!sidecars)return;
-  const placed=await maybeStat(entry.destination);
-  if(placed)await sidecars.besideFile(entry.destination,m.root,stat=>sameStat(stat,placed));
+  try{
+   const placed=await maybeStat(entry.destination);
+   if(placed)await sidecars.besideFile(entry.destination,m.root,stat=>sameStat(stat,placed));
+  }catch(error){sidecars.warn(entry.destination,error);}
  };
  const progress=(file:string)=>onProgress?.({phase:'copying',step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file,...renames});
  // Verify the whole batch before moving any source, including completed jobs.
@@ -849,13 +851,27 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await validateOriginal(saved,entry,m.root,true,signal);await checkpoint(m,'stashed',index);result.moved++;
    await sidecars?.besideGone(entry.source,m.source);
   }
-  // Then the "._" files already in the library: beside a media file or companion, or left without their main file.
-  if(sidecars)await sidecars.sweep(m.root,signal);
   // Closing the journal, then the emptied folders: each counted, the journal last.
   const folders=m.keepFolders?0:emptiable(m,state.finalized).length;
   const tidy=(done:number,file:string)=>onProgress?.({phase:'copying',step:'tidying',completed:done,total:folders+1,bytes:0,totalBytes:0,speed:0,file,renames:true});
   tidy(0,'');
   await checkpoint(m,'complete');
+  // The organization is complete: what follows can only add warnings. The "._" files already in the folders this
+  // organization touched, beside a media file or companion or left without their main file.
+  if(sidecars){
+   const touched=new Map<string,string>();
+   for(const [index,entry] of m.entries.entries()){
+    if(state.handedOff.has(index))continue;
+    touched.set(path.dirname(entry.destination),m.root);
+    if(entry.move)touched.set(path.dirname(entry.source),m.source);
+   }
+   const total=touched.size,scoped=new Map<string,string[]>();
+   for(const [folder,scope] of touched)scoped.set(scope,[...(scoped.get(scope)??[]),folder]);
+   let looked=0;
+   try{
+    for(const [scope,folders] of scoped)await sidecars.sweep(scope,folders,signal,(_done,folder)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total,bytes:0,totalBytes:0,speed:0,file:path.basename(folder),renames:true});});
+   }catch(error){sidecars.warnFolder(m.root,error);}
+  }
   // The user can keep emptied source folders; the choice is part of the signed journal.
   await removeSiblingPointers(m);
   if(!m.keepFolders)await removeEmptySourceFolders(m,state.finalized,signal,(done,folder)=>tidy(done,path.basename(folder)));
