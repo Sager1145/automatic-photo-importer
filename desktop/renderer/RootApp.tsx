@@ -4,7 +4,7 @@ import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
@@ -21,7 +21,7 @@ import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
-import { remainingBucket, remainingRange } from '../eta-format';
+import { DisplayHold, remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 import { validNoMetadataFolder } from '../no-metadata';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
@@ -140,15 +140,32 @@ export function ProgressDisplay(props: ProgressDisplayProps) {
     <ProgressFile file={props.file} />
   </div>;
 }
-/** Time left for an operation that is not a job (a review, a check, a listing). */
-function progressLeft(progress: Pick<Progress, 'eta' | 'total' | 'share'>, t: ReturnType<typeof createTranslator>): string | undefined {
-  return progress.eta !== undefined ? t("{time} left", { time: formatRemaining(progress.eta, t) }) : progress.total > 0 || progress.share !== undefined ? t("Estimating time left…") : undefined;
+/** The time-left display holds of this window, one per job id (or other timed operation), so every place that shows a time left shows
+ * the same held, rounded value (eta-format's DisplayHold). The main process sends the model's seconds. Without a provider (a component
+ * rendered on its own) a time is shown as given. */
+export const EtaHolds = createContext<Map<string, DisplayHold> | undefined>(undefined);
+type Held = (key: string, seconds: number | undefined) => number | undefined;
+function useHeld(): Held {
+  const holds = useContext(EtaHolds);
+  return (key, seconds) => {
+    if (!holds) return seconds;
+    if (seconds === undefined) { holds.delete(key); return undefined; }
+    let hold = holds.get(key);
+    if (!hold) { hold = new DisplayHold(); holds.set(key, hold); }
+    return hold.next(seconds, Date.now());
+  };
 }
-/** An operation that is not a job, shown with the shared layout: a review, the backup folder check, the leftover check, the recovery listing. */
-export function OperationProgress({ progress, label, testId, className }: { progress?: Progress; label: string; testId?: string; className?: string }) {
+/** Time left for an operation that is not a job (a review, a check, a listing). */
+function progressLeft(progress: Pick<Progress, 'eta' | 'total' | 'share'>, t: ReturnType<typeof createTranslator>, eta = progress.eta): string | undefined {
+  return eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : progress.total > 0 || progress.share !== undefined ? t("Estimating time left…") : undefined;
+}
+/** An operation that is not a job, shown with the shared layout: a review, the backup folder check, the leftover check, the recovery listing.
+ * `holdKey` names it for the time-left hold; by default its test id and label. */
+export function OperationProgress({ progress, label, testId, className, holdKey }: { progress?: Progress; label: string; testId?: string; className?: string; holdKey?: string }) {
   const { t, formatNumber, formatBytes } = useTranslation();
+  const eta = useHeld()(holdKey ?? `${testId ?? ''}:${label}`, progress?.eta);
   if (!progress) return <ProgressDisplay label={label} testId={testId} className={className} />;
-  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t)} file={progress.file} step={stepKind(progress)} />;
+  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t, eta)} file={progress.file} step={stepKind(progress)} />;
 }
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
 export function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
@@ -311,6 +328,7 @@ export default function RootApp() {
   const [connectionError, setConnectionError] = useState('');
   const [inspectionErrors, setInspectionErrors] = useState<string[]>([]);
   const localErrorTimes = useRef(new Map<string, string>());
+  const holds = useRef(new Map<string, DisplayHold>()).current;
   const [page, setPage] = useState<Page>('desk');
   // The Organization page and the top bar act on the same destination.
   const [organizationDestination, setOrganizationDestination] = useState(0);
@@ -399,7 +417,7 @@ export default function RootApp() {
     setInspectionErrors(list => list.filter(detail => !local.has(detail)));
     if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else { const real = ids.filter(id => !id.startsWith('local:')); if (real.length) act({ type: 'clearErrors', ids: real, ...(severity ? { severity } : {}) }); }
   };
-  return <I18nProvider language={language}><div className="app-shell">
+  return <I18nProvider language={language}><EtaHolds.Provider value={holds}><div className="app-shell">
     <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import desk") : page === 'drives' ? t("Drives") : page === 'organization' ? t("Organization") : page === 'duplicates' ? t("Remove duplicates") : page === 'settings' ? t("Settings") : t("Import history")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><BrandLogo className="brand-logo" /><strong>{t("Photo Importer")}</strong></div>
@@ -425,7 +443,7 @@ export default function RootApp() {
     <ErrorToast errors={errors} hidden={errorsOpen} onView={() => setErrorsOpen(true)} />
     {promptOpen && <NewDrivePrompt state={state} act={act} skip={dismissedDrives} onDismiss={ids => { setDismissedDrives(current => [...new Set([...current, ...ids])]); setPromptOpen(false); }} onDone={() => setPromptOpen(false)} />}
     {preview && <MetadataDialog preview={preview} onClose={closePreview} act={act} />}
-  </div></I18nProvider>;
+  </div></EtaHolds.Provider></I18nProvider>;
 }
 
 // Each drive shows its capacity and a compact 1·2·3 Scanning/Copying/Verifying status.
@@ -531,8 +549,9 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)), ...(same.length && same.every(part => part.paused) ? { paused: true } : {}) };
 }
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
-function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
+function SidebarDestinationStatus({ activity, path }: { activity: DestinationActivity; path: string }) {
   const { t, formatNumber, formatBytes, language } = useTranslation();
+  const eta = useHeld()(`destination:${path}`, activity.eta);
   const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), 'checking-files': t("Checking files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
   const step = ({ receiving: 'copy', 'checking-files': activity.layer ?? 'read', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
   const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
@@ -542,7 +561,7 @@ function SidebarDestinationStatus({ activity }: { activity: DestinationActivity 
   const from = first === undefined ? undefined : more > 0 ? t("from {name} (+{count} more)", { name: first, count: formatNumber(more) }) : t("from {name}", { name: first });
   const count = activity.total > 0 ? activity.totalBytes > 0 ? t("{completed} of {total} files · {size} of {totalSize}", { completed: formatNumber(activity.completed), total: formatNumber(activity.total), size: formatBytes(activity.bytes), totalSize: formatBytes(activity.totalBytes) }) : t("{completed} of {total} files", { completed: formatNumber(activity.completed), total: formatNumber(activity.total) }) : undefined;
   const speed = activity.speed > 0 ? formatSpeed(activity.speed, language) : activity.fileRate > 0 ? t("{count} files/s", { count: numberIn(activity.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
-  const left = activity.eta !== undefined ? t("{time} left", { time: formatRemaining(activity.eta, t) }) : undefined;
+  const left = eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined;
   const rates = [speed, left].filter(Boolean).join(' · ');
   return <div className="sidebar-dest-status" role="group" aria-label={t("Destination status")}>
     <div className="sidebar-dest-line"><span data-testid="sidebar-destination-status" data-kind={activity.kind} {...(step ? { 'data-step': step } : {})} className="sidebar-dest-label">{labels[activity.kind]}</span>{from && <small className="sidebar-dest-from" title={activity.sources.join(', ')}>{from}</small>}{busy && percent !== undefined && <small className="sidebar-dest-percent">{formatNumber(percent)}%</small>}</div>
@@ -564,7 +583,7 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
       const online = status?.available !== false, name = filename(path) || path;
       const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
-        <SidebarDestinationStatus activity={destinationActivity(state, path)} />
+        <SidebarDestinationStatus activity={destinationActivity(state, path)} path={path} />
         <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} />
         <SidebarOldRecords state={state} path={path} act={act} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
@@ -850,7 +869,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
-  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined;
+  const raw = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined, remaining = useHeld()('total', raw);
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
@@ -860,7 +879,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const organizing = active.length > 0 && active.every(job => job.organization);
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
   const verify = state.preferences.verifyCopies !== false;
-  const overall = overviewFraction(latestJobs, verify);
+  const overall = overviewFraction(latestJobs);
   // No job, no planned bytes: only "No transfer planned" is shown, with an empty bar and no percentage.
   const nothingPlanned = !(total > 0 && transferred > 0) && !lead?.progress && !active.length && overall === undefined;
   const doneFiles = (job: Job) => job.progress ? (doing.size === 1 && doing.has('copied') ? copyBasis(job.progress).completed : job.progress.completed) : 0;
@@ -876,10 +895,10 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
-        empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && totalFraction(job, verify) === 1)}
+        empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && cardFraction(job) === 1)}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={combinedSpeed(active)}
-        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
+        startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, scaledRange(state.etaTotal && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined, raw!, remaining)) }) : undefined}
         step={stepKind(lead?.progress)} stages={totalStageLayers(latestJobs, verify)} paused={totalPaused(latestJobs)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
@@ -1458,33 +1477,27 @@ export function ProgressTiming({ startedAt, endedAt, left, etaTestId = 'eta' }: 
   return <span className="progress-elapsed" data-testid="timing"><Icon icon={Timer} size={12} />{time && <span data-testid="elapsed">{endedAt ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>}{time && left && ' · '}{left && <em className="progress-eta" data-testid={etaTestId}>{left}</em>}</span>;
 }
 /** A job's elapsed time with its time left, and its total time once it ends. */
-function jobTiming(job: Job, t: ReturnType<typeof createTranslator>): { startedAt?: string; endedAt?: string; left?: string } {
+function jobTiming(job: Job, t: ReturnType<typeof createTranslator>, held: Held): { startedAt?: string; endedAt?: string; left?: string } {
   const running = isRunning(job), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
   const startedAt = running || (finished && job.phaseStartedAt) ? job.startedAt : undefined;
-  return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left: running ? jobRemaining(job, t) : undefined };
+  const left = jobRemaining(job, t, held, running);
+  return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left };
 }
-/** The bar of a job's card: files for renames and organizations, the step's own share otherwise; a finished job is full. */
+/** How far a whole job is: the share of its work the main process measured (every step weighted by what it costs, the same number the
+ * overview adds up); a finished job is full. Undefined while nothing is measured, so the bar is indeterminate rather than guessed. */
 export function cardFraction(job: Job): number | undefined {
   if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
-  const progress = job.progress;
-  if (!progress) return undefined;
-  // The job's whole work (every step, weighted by what it costs), the same number the overview adds up.
-  if (job.fraction !== undefined) return job.fraction;
-  return job.organization || progress.renames ? organizationFraction(job) : progressFraction(progress);
-}
-/** The fraction the dashboard's total counts for one job: the card's own for renames and organizations, the whole import's otherwise. */
-function totalFraction(job: Job, verify: boolean): number | undefined {
-  return job.organization || job.progress?.renames ? organizationFraction(job) : importFraction(job, verify);
+  return job.progress ? job.fraction : undefined;
 }
 /** The dashboard's total: the work done by every job over the work of all, in the model's seconds (a finished job keeps its final cost). Jobs
- * the model has not measured yet count by size, as before. Below 100% until every job is complete. */
-export function overviewFraction(jobs: Job[], verify = true): number | undefined {
+ * the model has not costed yet count by size. Below 100% until every job is complete. */
+export function overviewFraction(jobs: Job[]): number | undefined {
   const costed = jobs.filter(job => job.cost && job.cost.total > 0);
   if (costed.length && costed.length === jobs.length) {
     const total = costed.reduce((sum, job) => sum + job.cost!.total, 0), done = costed.reduce((sum, job) => sum + (jobFinished(job) ? job.cost!.total : Math.min(job.cost!.done, job.cost!.total)), 0);
     return total > 0 ? (jobs.every(jobFinished) ? 1 : Math.min(.99, done / total)) : undefined;
   }
-  const measured = jobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
+  const measured = jobs.flatMap(job => { const fraction = cardFraction(job); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
   return measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
 }
 /** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
@@ -1500,13 +1513,19 @@ export function formatEstimate(seconds: number, t: ReturnType<typeof createTrans
   if (!wide) return formatRemaining(seconds, t);
   return wide.unit === 'min' ? t("about {low}–{high} min", { low: wide.low, high: wide.high }) : t("about {low}–{high} h", { low: wide.low, high: wide.high });
 }
-/** Time left for a running job, and for its current step when that ends well before the job does. */
-function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>): string | undefined {
-  const progress = job.progress;
+/** Time left for a running job, held per job id: the job's, or its current step's while the job's is still being estimated
+ * (held apart: a step's time is not the job's). A job that is not running lets its holds go. */
+function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>, held: Held, running: boolean): string | undefined {
+  const progress = running ? job.progress : undefined;
+  const all = held(job.id, progress && job.eta), step = held(`${job.id}:step`, progress && job.eta === undefined ? progress.eta : undefined);
   if (!progress) return undefined;
-  const step = progress.eta, all = job.eta ?? step;
-  if (all === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
-  return t("{time} left", { time: formatEstimate(all, t, job.etaRange) });
+  if (all === undefined && step === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
+  return t("{time} left", { time: all === undefined ? formatRemaining(step!, t) : formatEstimate(all, t, scaledRange(job.etaRange, job.eta!, all)) });
+}
+/** The model's range around `raw`, in proportion around the held value shown instead. */
+function scaledRange(range: { low: number; high: number } | undefined, raw: number, shown: number): { low: number; high: number } | undefined {
+  const ratio = raw > 0 ? shown / raw : 1;
+  return range && { low: range.low * ratio, high: range.high * ratio };
 }
 /** A speed whose unit holds near a boundary while this display stays on screen (see speedUnit). */
 function Speed({ value }: { value: number }) {
@@ -1529,22 +1548,6 @@ function ProgressSpeed({ progress }: { progress: SpeedInput }) {
   const rate = progress.fileRate && progress.fileRate > 0 ? t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
   if (progress.speed > 0) return <span className="progress-speed" data-testid="speed">{progress.phase === 'verifying' && !progress.step && <>{t("Verify read")} </>}<Speed value={progress.speed} />{rate && <> · <span data-testid="file-rate">{rate}</span></>}</span>;
   return rate ? <span className="progress-speed" data-testid="speed">{rate}</span> : null;
-}
-/** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */
-function organizationFraction(job: Job): number | undefined {
-  const progress = job.progress;
-  return job.phase === 'complete' ? 1 : !progress ? undefined : progress.phase === 'planning' ? progressFraction(progress) : progress.total ? progress.completed / progress.total : progressFraction(progress);
-}
-/** How far a whole import is: the main process measures it (every step weighted by what it costs). Until it has, a rough guess: reading the
- * source's metadata 10%, comparing with the destinations 10%, then copying, and verifying the last 10% when it runs. A finished import is 100%. */
-export function importFraction(job: Job, verify = true): number | undefined {
-  const progress = job.progress;
-  if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
-  if (!progress) return undefined;
-  if (job.fraction !== undefined) return job.fraction;
-  const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
-  if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' || progress.step === 'locating' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
-  return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
 }
 /** What a running job is doing, for the dashboard's total. */
 function leadStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
@@ -1616,6 +1619,7 @@ export function OriginalsConfirm({ step, name, size, onCancel, onConfirm }: { st
 export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; size?: AppState['originalsSize']; act: Dispatch; busy?: boolean }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const [step, setStep] = useState<DeleteRecoveryStep>('closed');
+  const originalsLeft = useHeld()(`originals:${job.id}`, job.deletingOriginals?.eta);
   if (job.source.transport !== 'folder' || job.organization || !(job.phase === 'complete' || job.phase === 'error' && errorTotal(job) === 0 && !job.failedFiles)) return null;
   const measured = size?.jobId === job.id ? size : undefined;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
@@ -1630,7 +1634,7 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
     <p><Icon icon={Info} size={14} />{t("Import: copy, source untouched")}</p>
     {done?.stopped && <p data-testid="originals-stopped"><Icon icon={CircleAlert} size={14} />{t("Stopped after {count} originals deleted ({size}); {kept} left in place", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept) })}</p>}
     {done && !done.stopped && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept), folders: formatNumber(done.folders ?? 0) })}</p>}
-    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{job.deletingOriginals.folders ? t("Removing empty folders: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.folders.completed), total: formatNumber(job.deletingOriginals.folders.total) }) : t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
+    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{job.deletingOriginals.folders ? t("Removing empty folders: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.folders.completed), total: formatNumber(job.deletingOriginals.folders.total) }) : t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{originalsLeft !== undefined && ` · ${t("{time} left", { time: formatRemaining(originalsLeft, t) })}`}</p>}
     {!!job.verifiedOriginals && <div className="rule-actions"><Button kind="danger" icon={Trash2} data-testid="delete-originals-button" disabled={busy || !!job.deletingOriginals} title={t("Deletes only source files verified in the backup")} onClick={() => choose('open')}>{t("Delete originals already in the backup")}</Button></div>}
     {step !== 'closed' && <OriginalsConfirm key={step} step={step} name={job.source.name} size={measured} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
@@ -1649,12 +1653,12 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
 export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const progress = job.progress, working = isRunning(job), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
-  const fraction = queued ? 0 : cardFraction(job);
+  const held = useHeld(), fraction = queued ? 0 : cardFraction(job);
   const count = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queued") : !progress ? undefined : progressCount(progress, t, formatNumber, true, formatBytes);
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
     <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={jobFinished(job)} count={count}
-      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job)} paused={jobPaused(job)} />
+      speed={working && progress ? progress : undefined} {...jobTiming(job, t, held)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job)} paused={jobPaused(job)} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
@@ -1664,9 +1668,9 @@ export function PlanningProgress({ progress, label }: { progress: Progress; labe
   return <OperationProgress progress={progress} label={label} testId="planning-progress" className="progress-planning" />;
 }
 // Listing: the estimated share listed (main measures it, see listing-estimate.ts). Metadata: share of media files read.
-export function ScanProgress({ sourceName, listing, cameraInfo }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo }) {
+export function ScanProgress({ sourceName, sourceId, listing, cameraInfo }: { sourceName: string; /** Names its time-left hold; two cards can share a name. */sourceId?: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
-  const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
+  const reading = cameraInfo?.status === 'reading', eta = useHeld()(`${reading ? 'camera' : 'scan'}:${sourceId ?? sourceName}`, reading ? cameraInfo.eta : listing?.eta);
   const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing?.share;
   const count = reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : listing ? t("Listing files…") : undefined;
   return <ProgressDisplay testId="scan-progress" className="progress-scan" step={reading ? 'read' : 'scan'} label={t("{name} scanning", { name: sourceName })} fraction={fraction}
@@ -1702,6 +1706,7 @@ function containsBackup(source: Source, destinations: string[]): boolean {
 
 export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
+  const held = useHeld();
   const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
   const active = !!job && isRunning(job);
   const queued = job?.phase === 'queued';
@@ -1722,7 +1727,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
     {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={!!job && jobFinished(job)}
       count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
-      speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined} step={stepKind(progress)} stages={job ? jobStageLayers(job, !verifyOff) : undefined} paused={!!job && jobPaused(job)}
+      speed={active ? progress : undefined} {...(job ? jobTiming(job, t, held) : {})} file={active ? progress.file : undefined} step={stepKind(progress)} stages={job ? jobStageLayers(job, !verifyOff) : undefined} paused={!!job && jobPaused(job)}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
     {progress && !already && progressSkippedNote(progress, t, formatNumber) && <p className="source-quiet-note" data-testid="already-in-backup"><Icon icon={CheckCheck} size={13} />{progressSkippedNote(progress, t, formatNumber)}</p>}
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
@@ -1734,7 +1739,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
       <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
     </div>
     {job?.space && !already && (job.phase === 'queued' || isRunning(job)) && <SourceSpace space={job.space} />}
-    {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} />}
+    {scanning && <ScanProgress sourceName={source.name} sourceId={source.id} listing={listing} cameraInfo={cameraInfo} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
@@ -1925,7 +1930,7 @@ function BackupCheck({ state, act, busy, organizeBusy, destinationIndex }: { sta
   return <section className="organization-action backup-check" aria-labelledby="backup-check-heading" data-testid="backup-check"><CardHeader icon={FolderCog} id="backup-check-heading" title={t("Backup folder")} detail={mode === 'auto' ? t("Misplaced files are moved into place after each import.") : mode === 'ask' ? t("Checked after each import. You choose when to move files.") : t("Not checked automatically.")}><Button kind={misplaced ? 'primary' : 'secondary'} icon={FolderCog} disabled={organizeBusy} onClick={() => act({ type: 'organizeBackup', destinationIndex })}>{t("Organize backup")}</Button></CardHeader>
     <div className="segmented" role="group" aria-label={t("Check the backup folder")}>{modes.map(item => <button key={item.value} type="button" aria-pressed={mode === item.value} disabled={busy} onClick={() => act({ type: 'preferences', patch: { autoOrganizeBackup: item.value } })}>{item.label}</button>)}</div>
     {state.misplacedProgress?.[destination] && <p className="folder-check-label" data-step="folder-check" data-testid="folder-check-label" role="status">{t("Checking {drive} folder layout", { drive: driveName(destination, destination.split(/[\\/]/).filter(Boolean).pop() ?? destination) })}</p>}
-    {state.misplacedProgress?.[destination] && <OperationProgress progress={state.misplacedProgress[destination]} label={t("Backup folder check progress")} testId="misplaced-progress" />}
+    {state.misplacedProgress?.[destination] && <OperationProgress progress={state.misplacedProgress[destination]} label={t("Backup folder check progress")} testId="misplaced-progress" holdKey={`misplaced:${destination}`} />}
     {found && (misplaced ? <p className="misplaced-files" data-testid="misplaced-files" role="status"><Icon icon={CircleAlert} size={15} /><span>{misplacedText(found.count, t, formatNumber)} · {formatBytes(found.bytes)}</span></p> : <p className="misplaced-files is-clean" role="status"><Icon icon={CheckCircle2} size={15} /><span>{t("Backup folder is in order.")}</span></p>)}
   </section>;
 }

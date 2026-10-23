@@ -54,7 +54,7 @@ renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subsc
 | 手选媒体文件夹 / 整盘备份 | `chooseSource {backup}` | 原生选目录；`allowFolderSource` 开关；`sourceInsideBackup` 在选择时拒绝已在备份里的源 |
 | 选择 / 移除目的地 | `chooseDestination` / `removeDestination` | `validateDestination(target,sources)`：拒绝相机卡、源内目录、可移动闪存、只读卷，并记下卷身份 |
 | 已保存目的地的身份校验 | 复制、整理、恢复前 | 同一个 `validateDestination(…,{identity})`；身份为空或不符即拒绝 |
-| 只读扫描 | `scanSource` / `scanSources` | `scanSourceInWorker` → utility process：`inventory` + `analyzeSourceCameras`；上次清单与元数据作为可校验的复用提示传入 |
+| 只读扫描 | `scanSource` / `scanSources` | `startScan` → utility process：`inventory` + `analyzeSourceCameras`；上次清单与元数据作为可校验的复用提示传入 |
 | 扫描记忆（跨重启） | 自动 | `platform/scan-memory.ts`：按卷 UUID 保存清单与路由元数据；使用前按目录名与文件 stat 重新校验 |
 | 已导入记忆 | 自动 | `scan-memory.rememberImported/loadImported`：stat 不变的卡文件直接用已验证的 SHA-256 |
 | 递归媒体识别、伴随文件、系统文件 | 扫描与计划共用 | `core/inventory.ts`；扩展名表唯一在 `media-formats.ts`；厂商系统文件目录在 `core/known-files.ts` |

@@ -356,7 +356,7 @@ test('the import overview shows total progress and sizes keep their decimals', a
   assert.equal(formatBytes(2_000_000_000, 'ja'), '2.0 GB');
   const source = { id: 'card', name: 'Card', path: '/card', transport: 'storage' as const };
   const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} }, sources: [source],
-    jobs: [{ id: 'job', source, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 10, total: 40, bytes: 1_250_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'a.NEF' } }], history: [], platform: 'darwin' };
+    jobs: [{ id: 'job', source, phase: 'copying', errors: [], backup: false, fraction: .375, progress: { phase: 'copying', completed: 10, total: 40, bytes: 1_250_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'a.NEF' } }], history: [], platform: 'darwin' };
   for (const language of languages) {
     const t = createTranslator(language);
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state, act: () => {} }) }));
@@ -564,7 +564,7 @@ test('scans show a percentage of used space, organizations show n of x with %, a
     assert.ok(scan.includes('25%') && scan.includes('aria-valuenow="25"'), `${language}: listing % of used space`);
     const planning = render(createElement(OrganizationProgress, { job: org() }));
     assert.ok(planning.includes(t('Starting…')), `${language}: planning label`);
-    const moving = render(createElement(OrganizationProgress, { job: org({ phase: 'copying', completed: 30, total: 120, bytes: 1, totalBytes: 4, speed: 0, file: '' }) }));
+    const moving = render(createElement(OrganizationProgress, { job: { ...org({ phase: 'copying', completed: 30, total: 120, bytes: 1, totalBytes: 4, speed: 0, file: '' }), fraction: .25 } }));
     assert.ok(moving.includes(t('{completed} of {total} files organized', { completed: 30, total: 120 })) && moving.includes('25%'), `${language}: n of x and %`);
     const desk = render(createElement(ImportDesk, { state: { preferences: { ...preferences, language }, sources: [source], jobs: [], history: [], platform: 'darwin', newDevices: ['stick'] }, act: () => {}, needsChoice: ['stick'], inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     assert.ok(desk.includes('source-needs-choice') && desk.includes('data-testid="needs-choice"') && desk.includes(t('Choose whether to import this drive.')), `${language}: red card after dismissing`);
@@ -627,17 +627,17 @@ test('planning shows files checked or read with a percentage, and jobs show elap
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const desk = (job: Job) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
-    const planning = desk({ id: 'j', source: card, phase: 'verifying', errors: [], backup: false, startedAt: new Date(Date.now() - 65000).toISOString(), progress: { phase: 'planning', step: 'checking', completed: 50, total: 200, bytes: 1, totalBytes: 4, speed: 0, file: 'a' } });
+    const planning = desk({ id: 'j', source: card, phase: 'verifying', errors: [], backup: false, fraction: .25, startedAt: new Date(Date.now() - 65000).toISOString(), progress: { phase: 'planning', step: 'checking', completed: 50, total: 200, bytes: 1, totalBytes: 4, speed: 0, file: 'a' } });
     assert.ok(planning.includes(t('{completed} of {total} files checked', { completed: '50', total: '200' })), `${language}: files checked`);
     assert.ok(planning.includes('aria-valuenow="25"'), `${language}: planning bar follows files checked`);
     assert.match(planning, /data-testid="elapsed"/, `${language}: elapsed while running`);
     const done = desk({ id: 'j', source: card, phase: 'complete', errors: [], backup: false, startedAt: start, phaseStartedAt: end, progress: { phase: 'verifying', completed: 4, total: 4, bytes: 4, totalBytes: 4, speed: 0, file: '' } });
     assert.ok(done.includes(t('Took {time}', { time: '1:02:05' })), `${language}: total time when finished`);
-    const organizing: Job = { id: 'o', source: { id: 'l', name: 'Backup organization', path: '/b', transport: 'folder' }, phase: 'verifying', organization: true, errors: [], backup: false, startedAt: start, progress: { phase: 'planning', step: 'reading', completed: 3, total: 10, bytes: 30, totalBytes: 40, speed: 0, file: 'x' } };
+    const organizing: Job = { id: 'o', source: { id: 'l', name: 'Backup organization', path: '/b', transport: 'folder' }, phase: 'verifying', organization: true, errors: [], backup: false, startedAt: start, fraction: .75, progress: { phase: 'planning', step: 'reading', completed: 3, total: 10, bytes: 30, totalBytes: 40, speed: 0, file: 'x' } };
     const reading = render(createElement(OrganizationProgress, { job: organizing }));
-    assert.ok(reading.includes(t('{completed} of {total} files read · {size} of {totalSize}', { completed: '3', total: '10', size: formatBytes(30, language), totalSize: formatBytes(40, language) })) && reading.includes('75%'), `${language}: reading shows bytes and uses them for %`);
-    const checking = render(createElement(OrganizationProgress, { job: { ...organizing, progress: { ...organizing.progress!, step: 'checking' } } }));
-    assert.ok(checking.includes(t('{completed} of {total} files checked', { completed: '3', total: '10' })) && checking.includes('30%'), `${language}: checking uses files for %`);
+    assert.ok(reading.includes(t('{completed} of {total} files read · {size} of {totalSize}', { completed: '3', total: '10', size: formatBytes(30, language), totalSize: formatBytes(40, language) })) && reading.includes('75%'), `${language}: reading shows bytes, and the bar the job's share`);
+    const checking = render(createElement(OrganizationProgress, { job: { ...organizing, fraction: .3, progress: { ...organizing.progress!, step: 'checking' } } }));
+    assert.ok(checking.includes(t('{completed} of {total} files checked', { completed: '3', total: '10' })) && checking.includes('30%'), `${language}: checking counts files, and the bar the job's share`);
   }
 });
 
@@ -822,7 +822,7 @@ test('a finished organization shows 100%, and one misplaced file is counted in t
     // Moves are renames: no bytes are copied even though the planned size is known.
     const done = render(createElement(OrganizationProgress, { job: { id: 'o', source, phase: 'complete', organization: true, errors: [], backup: false, progress: { phase: 'copying', completed: 1, total: 1, bytes: 0, totalBytes: 5e6, speed: 0, file: '' } } }));
     assert.ok(done.includes('100%') && !done.includes('>0%'), `${language}: complete reads 100%`);
-    const moving = render(createElement(OrganizationProgress, { job: { id: 'o', source, phase: 'copying', organization: true, errors: [], backup: false, progress: { phase: 'copying', completed: 3, total: 4, bytes: 0, totalBytes: 5e6, speed: 0, file: 'x' } } }));
+    const moving = render(createElement(OrganizationProgress, { job: { id: 'o', source, phase: 'copying', organization: true, errors: [], backup: false, fraction: .75, progress: { phase: 'copying', completed: 3, total: 4, bytes: 0, totalBytes: 5e6, speed: 0, file: 'x' } } }));
     assert.ok(moving.includes('75%'), `${language}: moves count files, not bytes`);
     const misplaced = { '/Volumes/A006': { count: 1, bytes: 2e6, checkedAt: '2026-10-21T10:00:00Z' } };
     const page = render(createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, busy: false }));

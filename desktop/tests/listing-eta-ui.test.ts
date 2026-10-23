@@ -51,10 +51,11 @@ test('past the estimate the time left stays sane and then gives way to estimatin
 });
 
 test('the byte fallback never claims days left when the count runs past the estimate',()=>{
- const tracker=new EtaTracker(),context={kind:'import' as const,destinations:1,verify:true,listingTotalBytes:800e9};
+ const tracker=new EtaTracker(),context={kind:'import' as const,destinations:1,verify:true};
  let seen=0;
  for(let second=0,bytes=400e9;bytes<=1200e9;second+=5,bytes+=5e9){
-  const eta=tracker.observe('review',{phase:'planning',step:'listing',completed:bytes/30e6,total:0,bytes,totalBytes:0},context,second*1000).step;
+  const {share}=listingEstimate({bytes:800e9},{files:bytes/30e6,bytes});
+  const eta=tracker.observe('review',{phase:'planning',step:'listing',completed:bytes/30e6,total:0,bytes,totalBytes:0,share},context,second*1000).step;
   if(eta!==undefined){seen++;assert.ok(Number.isFinite(eta)&&eta<24*3600,`sane time left at ${bytes}: ${eta}`);}
  }
  assert.ok(seen>0);

@@ -3,7 +3,8 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createTranslator, formatSpeed, I18nProvider, languages, speedUnit } from '../renderer/i18n';
-import { EtaTracker, RateMeter, stampEstimates } from '../eta';
+import { EtaTracker, stampEstimates } from '../eta';
+import { RateMeter } from '../rate-meter';
 import type { AppState, Job, Progress } from '../shared';
 
 const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };

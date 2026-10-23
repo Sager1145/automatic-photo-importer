@@ -1,92 +1,97 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EtaEstimator, EtaTracker, type EtaInput } from '../eta';
+import { EtaTracker, stampEstimates, type EtaInput } from '../eta';
+import { bucketSeconds } from '../eta-format';
+import { listingEstimate } from '../listing-estimate';
+import type { AppState, Job } from '../shared';
 
 const MB = 1e6;
-/** Feeds `seconds` of progress at `rate(t)` bytes per second, sampled every `step` seconds; returns every shown ETA. */
-function run(estimator: EtaEstimator, totalBytes: number, seconds: number, rate: (t: number) => number, state = { t: 0, bytes: 0 }, step = 1) {
-  const shown: (number | undefined)[] = [];
+const context = { kind: 'import' as const, destinations: 1, verify: true };
+const copying = (bytes: number, totalBytes: number, files = 0, totalFiles = 0) => ({ phase: 'copying' as const, completed: files, total: totalFiles, bytes, totalBytes });
+/** Feeds `seconds` of copy progress at `rate(t)` bytes per second, once a second on a fake clock; returns every result. */
+function run(tracker: EtaTracker, totalBytes: number, seconds: number, rate: (t: number) => number, state = { t: 0, bytes: 0 }) {
+  const shown: ReturnType<EtaTracker['observe']>[] = [];
   for (let end = state.t + seconds; state.t < end;) {
-    state.bytes = Math.min(totalBytes, state.bytes + rate(state.t) * step); state.t += step;
-    shown.push(estimator.update({ files: 0, bytes: state.bytes, totalFiles: 0, totalBytes }, state.t * 1000));
+    state.bytes = Math.min(totalBytes, state.bytes + rate(state.t)); state.t++;
+    shown.push(tracker.observe('j', copying(state.bytes, totalBytes, Math.floor(state.bytes / (10 * MB)), Math.ceil(totalBytes / (10 * MB))), context, state.t * 1000));
   }
   return shown;
 }
 
-test('a steady rate gives the true remaining time once warmed up, and nothing before', () => {
-  const estimator = new EtaEstimator({ perFileBytes: 0 });
-  assert.equal(estimator.update({ files: 0, bytes: 0, totalFiles: 0, totalBytes: 1000 * MB }, 0), undefined);
-  const shown = run(estimator, 1000 * MB, 300, () => 2 * MB, { t: 0, bytes: 0 });
-  assert.equal(shown[0], undefined, 'no estimate after one second');
-  const last = shown.at(-1)!;
-  assert.ok(Math.abs(last - 200) < 10, `about 200 s left, got ${last}`);
+test('a finished step and job read 0', () => {
+  const tracker = new EtaTracker(), state = { t: 0, bytes: 0 };
+  run(tracker, 1000 * MB, 60, () => 5 * MB, state);
+  const done = tracker.observe('j', { phase: 'verifying', completed: 100, total: 100, bytes: 1000 * MB, totalBytes: 1000 * MB }, context, (state.t + 20) * 1000);
+  assert.equal(done.job, 0); assert.equal(done.step, 0);
 });
 
-test('a rate change is followed within a minute without jumping', () => {
-  const estimator = new EtaEstimator({ perFileBytes: 0 }), state = { t: 0, bytes: 0 };
-  run(estimator, 6000 * MB, 200, () => 10 * MB, state);
-  const shown = run(estimator, 6000 * MB, 90, () => 5 * MB, state);
-  const truth = (6000 * MB - state.bytes) / (5 * MB);
-  assert.ok(Math.abs(shown.at(-1)! - truth) / truth < 0.15, `close to ${truth}, got ${shown.at(-1)}`);
-  for (let index = 1; index < shown.length; index++) assert.ok(shown[index]! < shown[index - 1]! * 1.2, 'rises gradually');
+test('a long stall raises the time left as it goes on, and it never reads 0 while work remains', () => {
+  const tracker = new EtaTracker(), state = { t: 0, bytes: 0 };
+  const before = run(tracker, 2000 * MB, 100, () => 5 * MB, state).at(-1)!.step!;
+  const brief = run(tracker, 2000 * MB, 10, () => 0, state).map(item => item.step!);
+  for (const value of brief) assert.ok(Math.abs(value / before - 1) < 0.1, `a brief stall leaves it near ${before}: ${value}`);
+  const long = run(tracker, 2000 * MB, 120, () => 0, state).map(item => item.step!);
+  for (let index = 1; index < long.length; index++) assert.ok(long[index]! >= long[index - 1]!, 'it only grows while stalled');
+  assert.ok(long.at(-1)! > before * 1.5, `a two-minute stall raises it: ${before} -> ${long.at(-1)}`);
+  for (const value of [...brief, ...long]) assert.ok(value >= 1);
 });
 
-test('a brief stall holds the estimate; a long stall raises it gradually; it never reaches zero early', () => {
-  const estimator = new EtaEstimator({ perFileBytes: 0 }), state = { t: 0, bytes: 0 };
-  const before = run(estimator, 1000 * MB, 100, () => 5 * MB, state).at(-1)!;
-  const brief = run(estimator, 1000 * MB, 10, () => 0, state);
-  for (const value of brief) assert.ok(value! > before * 0.85 && value! < before * 1.1, `held near ${before}, got ${value}`);
-  const long = run(estimator, 1000 * MB, 120, () => 0, state);
-  assert.ok(long.at(-1)! > before * 1.2, 'a long stall raises the estimate');
-  for (const value of [...brief, ...long]) assert.ok(value! >= 1, 'never zero while work remains');
-  const done = estimator.update({ files: 0, bytes: 1000 * MB, totalFiles: 0, totalBytes: 1000 * MB }, (state.t + 1) * 1000);
-  assert.equal(done, 0, 'zero only when finished');
+test('a job stores the model seconds, not a display bucket', () => {
+  const tracker = new EtaTracker();
+  const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true };
+  const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { ...copying(0, 10e9), speed: 0, file: '' } };
+  const preferences = { language: 'en', appearance: 'system', textScale: 1, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} } as AppState['preferences'];
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const seen: number[] = [];
+  for (let t = 0; t <= 40; t++) { job.progress = { ...copying(t * 37 * MB, 10e9, t * 3, 1000), speed: 0, file: '' }; stampEstimates(state, tracker, t * 1000); if (job.eta !== undefined) seen.push(job.eta); }
+  assert.ok(seen.length > 10);
+  assert.ok(seen.some(value => value !== bucketSeconds(value)), `raw seconds reach the state: ${seen.slice(-3)}`);
+  assert.ok(seen.every(value => value > 0 && Number.isFinite(value)));
 });
 
-test('a burst of tiny files before large videos does not swing the estimate wildly when files carry a cost', () => {
-  // Truth: 100 MB/s plus 10 ms per file. 3000 files of 200 kB, then 20 files of 2 GB.
-  const files = [...Array.from({ length: 3000 }, () => 200e3), ...Array.from({ length: 20 }, () => 2e9)];
-  const totalBytes = files.reduce((a, b) => a + b, 0), totalFiles = files.length;
-  const estimator = new EtaEstimator({ perFileBytes: 1 << 20 });
-  let t = 0, bytes = 0, done = 0, next = 1;
-  const shown: { t: number; value: number; truth: number }[] = [];
-  const truthLeft = (from: number, partial: number) => files.slice(from).reduce((sum, size) => sum + size / 100e6 + 0.01, 0) - partial;
-  estimator.update({ files: 0, bytes: 0, totalFiles, totalBytes }, 0);
-  for (const [index, size] of files.entries()) {
-    for (let copied = 0; copied < size;) {
-      const take = Math.min(size - copied, 50e6); copied += take; bytes += take; t += take / 100e6;
-      if (copied === size) { t += 0.01; done++; }
-      if (t >= next) { next = t + 1; const value = estimator.update({ files: done, bytes, totalFiles, totalBytes }, t * 1000); if (value !== undefined) shown.push({ t, value, truth: truthLeft(index + (copied === size ? 1 : 0), copied === size ? 0 : copied / 100e6) }); }
-    }
+test('a step without a total, and a listing without an estimate, give no time left', () => {
+  const tracker = new EtaTracker();
+  for (let t = 0; t <= 30; t++) {
+    assert.deepEqual(tracker.observe('a', { phase: 'planning', step: 'locating', completed: t * 10, total: 0, bytes: t * MB, totalBytes: 0 }, context, t * 1000), {});
+    assert.deepEqual(tracker.observe('b', { phase: 'planning', step: 'listing', completed: t * 10, total: 0, bytes: t * MB, totalBytes: 0 }, context, t * 1000), {});
   }
-  const settled = shown.filter(item => item.t > 30 && item.truth > 10);
-  for (const item of settled) assert.ok(Math.abs(item.value - item.truth) / item.truth < 0.5, `within 50% at ${item.t.toFixed(0)}s: ${item.value} vs ${item.truth}`);
-  for (let index = 1; index < shown.length; index++) assert.ok(shown[index]!.value <= shown[index - 1]!.value * 1.25 + 1, 'no jumps up');
 });
 
-test('unknown totals and files-only stages', () => {
-  const unknown = new EtaEstimator({ perFileBytes: 0 });
-  for (let t = 0; t < 30; t++) assert.equal(unknown.update({ files: t * 10, bytes: t * MB, totalFiles: 0, totalBytes: 0 }, t * 1000), undefined);
-  const metadata = new EtaEstimator({});
-  let last: number | undefined;
-  for (let t = 0; t <= 20; t++) last = metadata.update({ files: t * 40, bytes: t * 999 * MB, totalFiles: 4000, totalBytes: 1 }, t * 1000);
-  assert.ok(Math.abs(last! - 80) < 5, `files drive a metadata stage: ${last}`);
-  assert.equal(new EtaEstimator({}).update({ files: 5, bytes: 0, totalFiles: 3, totalBytes: 0 }, 0), 0, 'past the total means finished, never negative');
+test('every step is estimated by the model: a listing is an estimated-total step, a step outside the plan uses its own total', () => {
+  const tracker = new EtaTracker(), hint = { files: 20000 };
+  let listing: ReturnType<EtaTracker['observe']> = {};
+  for (let t = 0; t <= 30; t++) {
+    const found = { files: t * 200, bytes: t * 200 * 30 * MB }, estimate = listingEstimate(hint, found);
+    listing = tracker.observe('l', { phase: 'planning', step: 'listing', completed: found.files, total: estimate.total, bytes: found.bytes, totalBytes: estimate.totalBytes, share: estimate.share }, context, t * 1000);
+  }
+  // 6,000 of about 20,000 found in 30 s: about 70 s to go.
+  assert.ok(listing.step! > 50 && listing.step! < 95, `listing ${listing.step}`);
+  assert.equal(tracker.view('l').fraction, undefined, 'an estimated total says nothing of the job\'s share done');
+  let locating: ReturnType<EtaTracker['observe']> = {};
+  for (let t = 0; t <= 30; t++) locating = tracker.observe('x', { phase: 'planning', step: 'locating', completed: t * 10, total: 600, bytes: 0, totalBytes: 0 }, context, t * 1000);
+  assert.ok(locating.step! > 20 && locating.step! < 45, `locating ${locating.step}`);
 });
 
-test('the job estimate adds the stages still ahead and stays defined across a stage change', () => {
-  const tracker = new EtaTracker(), context = { kind: 'import' as const, destinations: 2, verify: true };
+test('the job estimate adds the steps still ahead and stays defined across a step change', () => {
+  const tracker = new EtaTracker();
   const checking = (t: number): EtaInput => ({ phase: 'planning', step: 'checking', completed: t * 40, total: 4000, bytes: t * 40 * 25 * MB, totalBytes: 100e9 });
-  let eta = tracker.observe('j', checking(0), context, 0);
-  for (let t = 1; t <= 20; t++) eta = tracker.observe('j', checking(t), context, t * 1000);
+  const two = { ...context, destinations: 2 };
+  let eta = tracker.observe('j', checking(0), two, 0);
+  for (let t = 1; t <= 20; t++) eta = tracker.observe('j', checking(t), two, t * 1000);
   assert.ok(eta.step! > 70 && eta.step! < 90, `checking ${eta.step}`);
-  // Copying 200 GB at the default 60 MB/s and verifying it take far longer than checking.
   assert.ok(eta.job! > eta.step! + 3000, `job includes copying and verifying: ${eta.job}`);
-  const comparing = tracker.observe('j', { phase: 'planning', step: 'comparing', completed: 0, total: 8000, bytes: 0, totalBytes: 200e9 }, context, 101000);
-  assert.equal(comparing.step, undefined, 'a new stage is estimating');
+  const comparing = tracker.observe('j', { phase: 'planning', step: 'comparing', completed: 0, total: 8000, bytes: 0, totalBytes: 200e9 }, two, 101000);
+  assert.equal(comparing.step, undefined, 'a new step is estimating');
   assert.ok(comparing.job! > 3000, 'the job estimate stays');
   tracker.forget([]);
-  assert.deepEqual(tracker.observe('j', checking(0), context, 0), {}, 'forgotten jobs start fresh');
-  const unknownStage = tracker.observe('k', { phase: 'planning', step: 'listing', completed: 10, total: 0, bytes: MB, totalBytes: 0 }, { kind: 'import', destinations: 1, verify: true }, 0);
-  assert.deepEqual(unknownStage, {});
+  assert.deepEqual(tracker.observe('j', checking(0), two, 0), {}, 'forgotten jobs start fresh');
+});
+
+test('a step outside the job\'s plan (a camera download) counts for time left, not for the job\'s share done', () => {
+  const tracker = new EtaTracker();
+  for (let t = 0; t <= 20; t++) tracker.observe('c', { phase: 'planning', step: 'downloading', completed: t * 5, total: 100, bytes: 0, totalBytes: 0 }, context, t * 1000);
+  assert.equal(tracker.view('c').fraction, undefined, 'the download says nothing of the import\'s share done');
+  for (let t = 21; t <= 40; t++) tracker.observe('c', { phase: 'planning', step: 'checking', completed: (t - 21) * 5, total: 100, bytes: (t - 21) * 5e7, totalBytes: 5e9 }, context, t * 1000);
+  const fraction = tracker.view('c').fraction!;
+  assert.ok(fraction > 0 && fraction < 0.5, `the import's own steps set the bar: ${fraction}`);
 });

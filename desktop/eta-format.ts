@@ -1,5 +1,5 @@
 /** How a time left is rounded for display, and how long a shown value is held before it changes. Pure: no clock, callers pass `now`.
- * The renderer's formatRemaining and the main process's DisplayHold share remainingBucket. See docs/eta-estimates.md. */
+ * Used by the renderer only: one DisplayHold per job id, and formatRemaining, share remainingBucket. See docs/eta-estimates.md. */
 
 /** What a time left reads as: under a minute, minutes (exact to 10, then to 5), hours and minutes, or whole hours (from 10 h). */
 export type RemainingBucket={unit:'under'}|{unit:'min';minutes:number}|{unit:'hm';hours:number;minutes:number}|{unit:'h';hours:number};

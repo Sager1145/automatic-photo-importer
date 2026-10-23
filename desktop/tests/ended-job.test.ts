@@ -17,11 +17,10 @@ const desk = async (jobs: Job[]) => {
 };
 
 test('a job that ended with every file verified is 100%, on the card and in the header', async () => {
-  const { cardFraction, importFraction, allVerified, jobFinished } = await import('../renderer/RootApp');
+  const { cardFraction, allVerified, jobFinished } = await import('../renderer/RootApp');
   for (const phase of ['error', 'stopped', 'complete'] as const) {
     const job = verifiedError({ phase });
     assert.equal(cardFraction(job), 1, phase);
-    assert.equal(importFraction(job), 1, phase);
   }
   assert.ok(allVerified(verifiedError()));
   assert.ok(jobFinished(verifiedError()));

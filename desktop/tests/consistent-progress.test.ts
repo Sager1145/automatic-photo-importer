@@ -154,7 +154,9 @@ test('the shared layout shows the bar, the count, the speed, the time and the fi
 
 // ---- interface fixes -----------------------------------------------------------------------
 
-const renameJob=(extra:Partial<Progress>={}):Job=>({id:'r',source:{id:'library:/Volumes/A006/photobackup',name:'Existing library',path:'/Volumes/A006/photobackup',transport:'folder'},phase:'copying',errors:[],backup:false,startedAt:new Date(Date.now()-60000).toISOString(),
+/** An organization's moves as the main process publishes them: planned as one, its fraction stamped by the time-left model. */
+const stamped=(job:Job):Job=>{const tracker=new EtaTracker();tracker.plan(job.id,{kind:'organization'});stampEstimates(stateWith({jobs:[job]}),tracker,0);return job;};
+const renameJob=(extra:Partial<Progress>={}):Job=>stamped({id:'r',source:{id:'library:/Volumes/A006/photobackup',name:'Existing library',path:'/Volumes/A006/photobackup',transport:'folder'},phase:'copying',errors:[],backup:false,startedAt:new Date(Date.now()-60000).toISOString(),
  progress:{phase:'copying',step:'moving',completed:29145,total:29145,bytes:0,totalBytes:539.1e9,speed:0,fileRate:85,file:'ZFC_8484.JPG',eta:5,startedAt:new Date(0).toISOString(),...extra}});
 const desk=(state:AppState)=>render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
 const bar=(html:string)=>Number(html.slice(html.indexOf('progress-in-card')).match(/aria-valuenow="(\d+)"/)?.[1]);
