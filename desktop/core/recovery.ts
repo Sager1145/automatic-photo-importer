@@ -130,7 +130,8 @@ function copyState(state:JournalState):JournalState{
   finalizing:new Set(state.finalizing),finalized:new Set(state.finalized),renameIntent:new Set(state.renameIntent),renamed:new Map(state.renamed),
   dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),handedOff:new Map(state.handedOff),migrationMoved:new Set(state.migrationMoved)};
 }
-/** Applies one authenticated event of journal `m` to `state`. Applying an event twice changes nothing. */
+/** Applies one authenticated event of journal `m` to `state`, exactly as the earlier version did (records counted
+ * once are the reader's job: a v5 line is read once, and an earlier version's record once by its text). */
 function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=>void {
  return record=>{
   if(record.id!==m.id||record.root!==m.root)throw new Error('Invalid recovery event scope');
@@ -148,7 +149,7 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
   if(!Number.isSafeInteger(record.index)||(record.index as number)<0||(record.index as number)>=m.entries.length)throw new Error('Invalid recovery entry index');
   const index=record.index as number;
   if(record.event==='finalize-intent'||record.event==='finalized')(record.event==='finalize-intent'?state.finalizing:state.finalized).add(index);
-  if(record.event==='stash-intent'){if(typeof record.slot!=='string'||!uuid.test(record.slot))throw new Error('Invalid recovery original slot');const slots=state.slots.get(index)??[];if(!slots.includes(record.slot))state.slots.set(index,[...slots,record.slot]);}
+  if(record.event==='stash-intent'){if(typeof record.slot!=='string'||!uuid.test(record.slot))throw new Error('Invalid recovery original slot');state.slots.set(index,[...(state.slots.get(index)??[]),record.slot]);}
   if(record.event==='migration-moved'){if(typeof record.slot!=='string'||!uuid.test(record.slot))throw new Error('Invalid recovery original slot');state.migrationMoved.add(`${index}/${record.slot}`);}
   if(record.event==='rename-intent')state.renameIntent.add(index);
   if(record.event==='rename-fallback')state.fallback.add(index);
@@ -162,7 +163,7 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
    state.handedOff.set(index,handOff as HandOff);
   }
   if(record.event==='renamed'||record.event==='timed'){const stat=record.stat as FileIdentity;if(!stat||['dev','ino','size','mtime','ctime'].some(key=>typeof (stat as unknown as Record<string,unknown>)[key]!=='string'))throw new Error('Invalid moved file identity');state.renamed.set(index,stat);state.dated.set(index,new Set([...(state.dated.get(index)??[]),stat.mtime]));}
-  if(record.event==='exclusive-created'){const stat=record.stat as FileIdentity;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');const known=state.exclusive.get(index)??[];if(!known.some(item=>JSON.stringify(item)===JSON.stringify(stat)))state.exclusive.set(index,[...known,stat]);}
+  if(record.event==='exclusive-created'){const stat=record.stat as FileIdentity;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');state.exclusive.set(index,[...(state.exclusive.get(index)??[]),stat]);}
  };
 }
 /** Identities recorded under an earlier mount are read as this mount's, like the manifest's. */
@@ -1116,6 +1117,9 @@ export async function recordsWeight(root:string):Promise<number>{
 }
 /** The pointer files kept for `folder`, in every store readers consult for it; for tests and First Aid. */
 export async function pointerFilesFor(folder:string):Promise<string[]>{return (await pointersIn(folder)).map(pointer=>pointer.file);}
+/** For tests: the comparable state of the v5 journal `id` of `root`, and of the earlier version's one as the converter reads it. */
+export async function journalStateFor(root:string,id:string):Promise<string>{return comparable(await readEvents(await readManifest(root,id),undefined,undefined,false));}
+export async function legacyStateFor(root:string,id:string):Promise<string>{await adoptLegacyStorage(root);return comparable((await readLegacyEvents(await readLegacyManifest(root,id))).state);}
 /** Where journal `id` of library `root` keeps its records (its folder in a store); for tests and First Aid. */
 export async function journalFolderFor(root:string,id:string):Promise<string>{return (await locateJob(root,id)).folder;}
 /** Resume, or recheck a finished organization. */
