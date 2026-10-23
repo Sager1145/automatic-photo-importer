@@ -156,17 +156,6 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
   }
   await contained(file,root);
 }
-export function validateRelative(folder:string):void {
-  if(!folder || path.isAbsolute(folder) || /[\\:\x00-\x1f\x7f]/u.test(folder) || folder.split('/').some(p=>!p || p==='.' || p==='..' || p.trim()!==p || /[. ]$/.test(p) || /[<>"|?*]/u.test(p) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p))) {
-    throw new Error(`Invalid relative folder: ${folder}`);
-  }
-}
-export function safeComponent(value:string):string {
-  let result=value.normalize('NFC').replace(/[\\/:\x00-\x1f\x7f<>"|?*]/gu,'-').trim().replace(/[. ]+$/u,'').slice(0,120);
-  if(!result || result==='.' || result==='..') result='Unknown files';
-  if(/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result)) result='_'+result;
-  return result;
-}
 export const fileFlags=constants.O_RDONLY | (constants.O_NOFOLLOW??0);
 export async function regularHandle(file:string) {
   if(!(await fs.lstat(file)).isFile()) throw new Error(`Unsafe non-regular source: ${file}`);

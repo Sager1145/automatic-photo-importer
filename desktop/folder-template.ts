@@ -1,6 +1,6 @@
-/** Folder templates: the tokens and their values, and the path builder in Settings. The template stays the
- * one stored form; core/index.ts folder() applies it to real files and Settings previews it, both through
- * templateValues/expandTemplate here. Node-free, so the renderer shares it. */
+/** Folder templates: the tokens and their values, the path builder in Settings, and the rule for the folder
+ * names a user types. The template stays the one stored form; core/index.ts folder() applies it to real files
+ * and Settings previews it, both through templateValues/expandTemplate here. Node-free, so the renderer shares it. */
 export interface FolderPath {
   /** date: <date folders>/<camera>; camera: <camera>/<date folders>. */
   order: 'date' | 'camera';
@@ -20,6 +20,23 @@ export function templateValues(capture: Date, camera: string): Record<string, st
 }
 /** Fills a template's tokens; a token without a value stays as written (the caller decides whether that is an error). */
 export const expandTemplate = (template: string, values: Record<string, string>) => template.replace(/\{([^{}]+)\}/g, (token, key: string) => Object.hasOwn(values, key) ? values[key]! : token);
+const DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+/** A relative folder path every destination file system accepts: no empty, dotted, padded or reserved part. Throws otherwise. */
+export function validateRelative(folder: string): void {
+  if (!folder || folder.startsWith('/') || /[\\:\x00-\x1f\x7f]/u.test(folder) || folder.split('/').some(p => !p || p === '.' || p === '..' || p.trim() !== p || /[. ]$/.test(p) || /[<>"|?*]/u.test(p) || DEVICE_NAME.test(p))) {
+    throw new Error(`Invalid relative folder: ${folder}`);
+  }
+}
+/** `value` made into one folder name every destination file system accepts (a camera or drive name). */
+export function safeComponent(value: string): string {
+  let result = value.normalize('NFC').replace(/[\\/:\x00-\x1f\x7f<>"|?*]/gu, '-').trim().replace(/[. ]+$/u, '').slice(0, 120);
+  if (!result || result === '.' || result === '..') result = 'Unknown files';
+  if (DEVICE_NAME.test(result)) result = '_' + result;
+  return result;
+}
+/** One folder name a user may choose (edited exports, unknown files): `safeComponent` leaves it unchanged, and it has no
+ * braces, which a template would read as a token. */
+export const validFolderName = (name: unknown): name is string => typeof name === 'string' && name === safeComponent(name) && !/[{}]/.test(name);
 /** Where edited exports go: the month, the edited folder, then the camera. */
 export const editedTemplate = (editedFolder: string) => `{year}/{yyyymm}/${editedFolder}/{camera}`;
 

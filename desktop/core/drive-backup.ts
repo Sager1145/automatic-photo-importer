@@ -4,8 +4,9 @@ import { randomUUID } from 'node:crypto';
 import type { MirrorRemoval, PlanEntry, TransferPlan } from '../shared';
 import { ignoredName } from './inventory';
 import type { DestinationIndex } from './destination-index';
-import { beneath, checkAbort, code, contained, makeParent, pathKey, safeComponent, statKey, syncDirectory, syncParents } from './paths';
+import { beneath, checkAbort, code, contained, makeParent, pathKey, statKey, syncDirectory, syncParents } from './paths';
 import { hostKeyConfigured, openV5, sealV5 } from './app-store';
+import { safeComponent } from '../folder-template';
 import { log, logDeletion } from '../logger';
 
 export const DRIVE_BACKUPS='Drive backups';

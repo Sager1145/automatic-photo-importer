@@ -12,8 +12,8 @@ import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirror
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
 import { destinationParts, fillFirst } from './allocation';
-import { editedTemplate, expandTemplate, templateValues } from '../folder-template';
-import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
+import { editedTemplate, expandTemplate, safeComponent, templateValues, validateRelative, validFolderName } from '../folder-template';
+import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, sameBirth, sameStat, statKey, unreliableIno, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
 import { streams, CHECK_CONCURRENCY } from './devices';
@@ -74,7 +74,7 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   const capture=validCalendar?candidate!:new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
   const values=templateValues(capture,safeComponent(info.camera?.trim()||info.origin||options.noMetadataFolder?.trim()||UNKNOWN_FILES_FOLDER));
   const editedFolder=options.editedFolder??'editied';
-  if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
+  if(!validFolderName(editedFolder))throw new MessageError('error.editedFolderName');
   const video=options.layout==='video-root'&&!!media?.video;
   const template=info.edited?editedTemplate(editedFolder):video&&options.videoTemplate?options.videoTemplate:options.template;
   // The template is checked, not the result: a camera name may itself contain braces.

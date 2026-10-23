@@ -3,11 +3,13 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { cacheRecord, readCache } from './user-caches';
+import { beneath } from '../core/paths';
 
 /** What the last folder check (or an import) knew about a destination library: which files sit where the folder
  * rules put them, each with the size, modification time (ns) and inode it had then. The next check skips reading
  * the metadata of a file whose key is unchanged. ctime is not part of the key: staging unlinks change it.
- * A missing, corrupt or differently scoped memory is empty, which only means a full check. */
+ * A missing, corrupt or differently scoped memory is empty, which only means a full check. The scope is routing-options.ts
+ * rulesScope; the library's folders are in its id. */
 export interface PlacedFile {relative:string;size:number;mtimeNs:bigint;ino:bigint;}
 export type Placement=Map<string,string>;
 interface Stored {version:1;scope:string;dirs:string[];d:number[];n:string[];s:number[];m:string[];i:string[];}
@@ -17,8 +19,6 @@ export const placementKey=(size:number,mtimeNs:bigint,ino:bigint)=>`${size}:${mt
 const hashOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,32);
 /** One memory per destination volume and library; the scope is stored inside and must match. */
 export const placementId=(volumeId:string,root:string,videoRoot?:string)=>hashOf([volumeId,path.resolve(root),videoRoot?path.resolve(videoRoot):'']);
-/** Everything that changes where a file belongs. */
-export const placementScope=(parts:{template:string;layout:string;videoTemplate?:string;editedFolder?:string;basePaths:string[];noMetadata?:string;noMetadataFolder?:string})=>hashOf([parts.template,parts.layout,parts.videoTemplate??'',parts.editedFolder??'',parts.basePaths,parts.noMetadata??'',parts.noMetadataFolder??'']);
 
 export async function loadPlacement(store:string,id:string,scope:string):Promise<Placement|undefined> {
   try {
@@ -70,7 +70,7 @@ export async function rememberEntries(store:string,id:string,scope:string,source
   await Promise.all(Array.from({length:Math.min(entries.length,16)},async()=>{
     while(next<entries.length) {
       const entry=entries[next++]!,relative=path.relative(source,entry.destination);
-      if(!roots.some(root=>{const inside=path.relative(root,entry.destination);return inside!==''&&!inside.startsWith('..')&&!path.isAbsolute(inside);})) continue;
+      if(!roots.some(root=>beneath(entry.destination,root))) continue;
       const stat=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
       if(stat?.isFile()&&stat.size===BigInt(entry.size)) found.push({relative,size:entry.size,mtimeNs:stat.mtimeNs,ino:stat.ino});
     }
