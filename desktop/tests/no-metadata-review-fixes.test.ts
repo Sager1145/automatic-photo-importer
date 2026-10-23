@@ -6,7 +6,7 @@ import os from 'node:os';
 import {plan,execute,executeReorganization,findMisplaced,getOrganizationRecovery,undoOrganization,configureOrganizationRecovery} from '../core/index';
 import {defaultPreferences} from '../preferences';
 import {ruleOptions} from '../routing-options';
-import {needsUnknownConfirmation} from '../unknown-confirm';
+import {unknownDecision} from '../unknown-confirm';
 import {routingScope} from '../platform/routing-memory';
 import {placementScope} from '../platform/placement-memory';
 import {validNoMetadataFolder} from '../no-metadata';
@@ -58,20 +58,29 @@ test('an exiftool Error alone does not make a file unknown; with no date and no 
   assert.deepEqual(found.noMetadata?.files.map(item=>[item.relative,item.reason]),[['IMG_2.JPG','unreadable']]);
 });
 
-test('unknown-type files with a camera rule are classified like other unknown files, once',async t=>{
+test('a camera-rule file takes its folder context: filed normally beside a dated camera file, unknown when the folder gives nothing',async t=>{
   const f=await fixture(t);
-  await f.put(f.source,'DCIM/A.NEF');await f.put(f.source,'DCIM/INDEX01.DSC');
+  await f.put(f.source,'DCIM/100NIKON/A.NEF');await f.put(f.source,'DCIM/100NIKON/INDEX01.DSC');
+  const alone=path.join(f.root,'alone');await f.put(alone,'LOOSE/INDEX02.DSC');
   const rules={dsc:{action:'camera' as const}};
-  const kept=await plan(f.source,[f.library],{...base,unknownRules:rules,noMetadata:'keep'},async()=>known);
-  assert.deepEqual(names(kept),['A.NEF']);assert.deepEqual(kept.noMetadata?.files.map(item=>item.relative),['DCIM/INDEX01.DSC']);
-  const filed=await plan(f.source,[f.library],{...base,unknownRules:rules,noMetadata:'folder'},async()=>known);
-  const mine=entries(filed).filter(entry=>entry.source.endsWith('INDEX01.DSC'));
-  assert.equal(mine.length,1);assert.equal(mine[0]!.destination,path.join(f.library,'Unknown files/DCIM/INDEX01.DSC'));
-  assert.equal(filed.noMetadata?.count,1);
+  const meta=async(file:string):Promise<Metadata>=>file.endsWith('A.NEF')?known:{fields:{}};
+  for(const mode of ['keep','folder'] as const){
+    const found=await plan(f.source,[f.library],{...base,unknownRules:rules,noMetadata:mode},meta);
+    assert.equal(found.noMetadata,undefined,mode);
+    const index=entries(found).filter(entry=>entry.source.endsWith('INDEX01.DSC'));
+    assert.equal(index.length,1,mode);assert.equal(index[0]!.destination,path.join(f.library,'2022/202205/Cam/INDEX01.DSC'));
+    const lone=await plan(alone,[f.library],{...base,unknownRules:rules,noMetadata:mode},meta);
+    assert.deepEqual(lone.noMetadata?.files.map(item=>item.relative),['LOOSE/INDEX02.DSC'],mode);
+    const loose=entries(lone);
+    if(mode==='keep')assert.equal(loose.length,0);else{assert.equal(loose.length,1);assert.equal(loose[0]!.destination,path.join(f.library,'Unknown files/LOOSE/INDEX02.DSC'));}
+  }
 });
 
 test('names a folder template can produce are refused',()=>{
-  for(const name of ['2024','202405','20240506','05','05 May','2024-05 May','Conflicts','con','a'.repeat(121)])assert.equal(validNoMetadataFolder(name),false,name);
+  for(const name of ['2024','202405','20240506','05','05 May','5 May','2024-05 May','2024-5 Mar','Conflicts','con','a'.repeat(121)])assert.equal(validNoMetadataFolder(name),false,name);
+  const taken=['editied','photobackup/raw','videobackup'];
+  for(const name of ['editied','EDITIED','photobackup','videobackup'])assert.equal(validNoMetadataFolder(name,taken),false,name);
+  assert.equal(validNoMetadataFolder('Unknown files',taken),true);
   for(const name of ['Unknown files','Ohne Datum','2024 trip'])assert.equal(validNoMetadataFolder(name),true,name);
 });
 
@@ -126,11 +135,14 @@ test('after switching from file dates to the folder, importing the same card aga
   assert.equal(await exists(path.join(f.library,'Unknown files/DCIM/SNAP_1.PNG')),false);
 });
 
-test('a card or library is only confirmed first when someone started it and unknown files were found',()=>{
-  const ask={found:true,automatic:false,confirmed:false,queuedAutomatically:false};
-  assert.equal(needsUnknownConfirmation(ask),true);
-  assert.equal(needsUnknownConfirmation({...ask,found:false}),false);
-  assert.equal(needsUnknownConfirmation({...ask,automatic:true}),false);
-  assert.equal(needsUnknownConfirmation({...ask,queuedAutomatically:true}),false);
-  assert.equal(needsUnknownConfirmation({...ask,confirmed:true}),false);
+test('a started job asks first only when nothing else holds the review, and waits its turn otherwise',()=>{
+  const ask={found:true,automatic:false,confirmed:false,queuedAutomatically:false,reviewOpen:false,othersRunning:false};
+  assert.equal(unknownDecision(ask),'park');
+  assert.equal(unknownDecision({...ask,found:false}),'run');
+  assert.equal(unknownDecision({...ask,automatic:true}),'run');
+  assert.equal(unknownDecision({...ask,queuedAutomatically:true}),'run');
+  assert.equal(unknownDecision({...ask,confirmed:true}),'run');
+  assert.equal(unknownDecision({...ask,reviewOpen:true}),'defer','a review is already open: no second one over it');
+  assert.equal(unknownDecision({...ask,othersRunning:true}),'defer','another job is running: a review cannot start over it');
+  assert.equal(unknownDecision({...ask,reviewOpen:true,automatic:true}),'run');
 });
