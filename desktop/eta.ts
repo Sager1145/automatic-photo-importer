@@ -4,6 +4,7 @@ import {LISTING_KNEE,listingShare} from './listing-estimate';
 import {DisplayHold,remainingRange} from './eta-format';
 import {FractionHold,JobModel,defaultBook,sharedDriveTotal,type JobKind,type PriorBook,type StepTotal} from './eta-model';
 import {PriorTable,layeredBook,type DriveInfo,type PriorContext,type PriorStore} from './eta-priors';
+import {log} from './logger';
 
 export interface EtaSample {files:number;bytes:number;totalFiles:number;totalBytes:number;}
 /** perFileBytes: the cost of one file in bytes, added to bytes (data stages); absent counts files only (metadata stages).
@@ -60,18 +61,25 @@ export class EtaEstimator {
  }
 }
 
-/** Bytes (or files) per second from successive totals: EWMA with a time-based alpha, so it follows a change within
- * seconds and falls during a stall (the state is republished every few seconds). Undefined for the first second. */
+/** Seconds of history a rate is measured over, and the least history it needs before it is shown. */
+const RATE_WINDOW=5000,RATE_MIN_SPAN=2000;
+/** Bytes (or files) per second from successive totals: the change over the last 5 s, found by interpolating the running total at the
+ * window's start, so every moment in it counts for its length and a burst or a pause of one file moves it little. Undefined until
+ * 2 s of history; a stall reads 0 once the window holds nothing but the stall; a total that goes down starts a new measure. */
 export class RateMeter {
- private last?:{at:number;value:number};private ewma?:number;private span=0;
+ private samples:{at:number;value:number}[]=[];
  next(value:number,now:number):number|undefined{
-  if(!this.last||value<this.last.value){this.last={at:now,value};this.ewma=undefined;this.span=0;return undefined;}
-  const dt=now-this.last.at;
-  if(dt>=250){
-   const rate=(value-this.last.value)/(dt/1000),alpha=1-Math.exp(-dt/5000);
-   this.ewma=this.ewma===undefined?rate:alpha*rate+(1-alpha)*this.ewma;this.span+=dt;this.last={at:now,value};
-  }
-  return this.span>=1000?this.ewma:undefined;
+  const samples=this.samples,last=samples[samples.length-1];
+  if(last&&(value<last.value||now<last.at)){samples.length=0;}
+  const latest=samples[samples.length-1];
+  if(latest&&now===latest.at)latest.value=value;else samples.push({at:now,value});
+  while(samples.length>2&&samples[1]!.at<=now-RATE_WINDOW)samples.shift();
+  if(samples.length<2)return undefined;
+  const first=samples[0]!;
+  let base=first.value,from=first.at;
+  if(first.at<now-RATE_WINDOW){const second=samples[1]!,share=(now-RATE_WINDOW-first.at)/(second.at-first.at);base=first.value+share*(second.value-first.value);from=now-RATE_WINDOW;}
+  const span=now-from;
+  return span>=RATE_MIN_SPAN?(value-base)/(span/1000):undefined;
  }
 }
 
@@ -95,7 +103,7 @@ const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`
 /** Stages whose total is an estimate (a share), not a count: a listing, and a look through folders for leftovers. */
 const estimated=(key:string)=>key==='planning:listing'||key==='planning:scanning';
 /** Stages that read or write data: they report bytes per second once bytes move, files per second until then. Every other stage counts files. */
-const dataKeys=new Set(['planning:reading','planning:comparing','copying:','copying:moving','verifying:']);
+const dataKeys=new Set(['planning:reading','planning:comparing','planning:index','copying:','copying:moving','verifying:']);
 /** Bytes a listing will find: the job's own estimate (an earlier listing of the scope), else the drive's used space; 0 when unknown. */
 const listingTotal=(progress:EtaInput,context:EtaContext)=>progress.totalBytes>progress.bytes?progress.totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0;
 /** The model's name for what a progress is doing; undefined for steps it does not model (listing, downloading, scanning). */
@@ -267,6 +275,7 @@ export class EtaTracker {
   if(!state.context)return;
   const span=state.shared.get(ended.step),shared=span&&span.total>0?span.shared/span.total:0,day=new Date(now).toISOString().slice(0,10);
   const result={a:ended.a,b:ended.b,T:ended.T,F:ended.F,G:ended.G,observed:ended.observed,shared};
+  log('trace','eta','fit',{kind:state.plan.kind,step:ended.step,a:ended.a,b:ended.b,T:ended.T,F:ended.F,G:ended.G,observed:ended.observed,sharedShare:Math.round(shared*100)/100,destinations:state.context.destinations.length});
   this.session.update(ended.step,state.context,result,day);
   this.store?.table.update(ended.step,state.context,result,day);
  }
@@ -289,18 +298,18 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  const since=(id:string)=>{live.push(id);return tracker.since(id,now);};
  // Every step shows how fast it goes: bytes per second where data is read or written (once bytes move), otherwise files per second
  // (renames, checks, deletes, listings, metadata). Both come from a rolling window over the step's running totals.
- // Copying and moving keep the average the transfer itself reported until the window has a measure.
+ // Until the window holds 2 s of history no speed is shown: the transfer's own lifetime average is not used, it counts time spent before the data moved.
  const speeds=(id:string,progress:Progress)=>{
   const key=stageKey(progress);live.push(id+':bytes',id+':files');
-  // Verification counts the bytes of the files published; without that, its bytes follow the share of files verified.
-  const total=key==='verifying:'&&progress.work?progress.work.bytes:key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
+  // Verification speed counts the bytes hashed so far (they move as each file is read); a report without that counts the bytes of the files
+  // published, and without those, follows the share of files verified.
+  const total=key==='verifying:'&&progress.hashedBytes!==undefined?progress.hashedBytes:key==='verifying:'&&progress.work?progress.work.bytes:key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
   const measured=tracker.measure(id+':bytes',key,total,now),files=tracker.measure(id+':files',key,progress.completed,now);
   let speed=0;
-  if(dataKeys.has(key)){speed=measured??(total>0?progress.speed:0);if(!(speed>0))speed=0;}
+  if(dataKeys.has(key)){speed=measured??0;if(!(speed>0))speed=0;}
   progress.speed=speed;
-  // Metadata checking shows both: files per second and the bytes of the files it has covered, per second.
-  if(key==='planning:checking'){progress.speed=measured&&measured>0?measured:0;if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;}
-  else if(speed>0)delete progress.fileRate;else if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;
+  // Metadata checking reads headers, not the files: it shows files per second only (its bytes are the size of the files covered, not data moved).
+  if(files!==undefined)progress.fileRate=files;else delete progress.fileRate;
  };
  /** An operation that is not a job: time left, when it began, and its speed. */
  const alone=(name:string,progress:Progress)=>{progress.eta=stepOnly(name,progress,{kind:'import',destinations:1,verify});progress.startedAt=since('start:'+name);speeds('speed:'+name,progress);};

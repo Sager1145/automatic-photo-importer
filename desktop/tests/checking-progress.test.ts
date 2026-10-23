@@ -15,17 +15,17 @@ const preferences = { language: 'en', appearance: 'system', textScale: 1.25, acc
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 const checking = (total: number, totalBytes: number): Job => ({ id: 'j', source: card, phase: 'verifying', errors: [], backup: false, progress: { phase: 'planning', step: 'checking', completed: 0, total, bytes: 0, totalBytes, speed: 0, file: 'a' } });
 
-test('metadata checking measures MB/s as well as files/s, and shows both', async () => {
+test('metadata checking measures and shows files/s only', async () => {
   const { PlanningProgress } = await import('../renderer/RootApp');
   const tracker = new EtaTracker(), job = checking(1000, 4e9);
   const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
   for (let s = 0; s <= 10; s++) { job.progress = { ...job.progress!, completed: s * 40, bytes: s * 40 * 4e6 }; stampEstimates(state, tracker, 2_000_000 + s * 1000); }
   assert.ok(job.progress!.fileRate! > 36 && job.progress!.fileRate! < 44, `${job.progress!.fileRate} files/s`);
-  assert.ok(job.progress!.speed > 150e6 && job.progress!.speed < 170e6, `${job.progress!.speed} B/s`);
+  assert.equal(job.progress!.speed, 0, 'the bytes of the files covered are not data moved');
   for (const language of languages) {
     const t = createTranslator(language);
-    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(PlanningProgress, { progress: { ...job.progress!, speed: 160e6, fileRate: 40 }, label: 'Review progress' }) }));
-    assert.ok(page.includes('160 MB/s'), `${language}: MB/s`);
+    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(PlanningProgress, { progress: { ...job.progress!, fileRate: 40 }, label: 'Review progress' }) }));
+    assert.ok(!page.includes('MB/s'), `${language}: no MB/s`);
     assert.ok(page.includes(t('{count} files/s', { count: '40' })), `${language}: files/s`);
     assert.ok(page.includes('data-testid="progress-file"'), `${language}: current file`);
   }

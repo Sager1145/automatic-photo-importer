@@ -4,6 +4,7 @@ import { beneath, code, contained, syncDirectory, within } from './paths';
 import { destinationEntries, destinationParts } from './allocation';
 import { isRecordFolderName } from './legacy-names';
 import type { TransferPlan } from '../shared';
+import { logDeletion } from '../logger';
 
 /** Files the operating system creates that are not user content. The app's own recovery
  * files (.import-*, photo-importer-*, .photo-importer-*) are deliberately absent: they are never removed here. */
@@ -32,9 +33,9 @@ export async function removeRedundantFolders(library:string,folders:string[],kee
       else removable=false;
     }
     if(!removable) return false;
-    for(const file of service) await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+    for(const file of service) {await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});logDeletion('folders',file,'operating-system service file in a folder whose media all moved','the folder holds only service files, no links, no user files and no app recovery data; inside the chosen folders and outside the kept backup',{folder});}
     try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST'].includes(code(error)??''))return false; throw error; }
-    await syncDirectory(path.dirname(folder));removed++;
+    logDeletion('folders',folder,'folder left with no user files after organizing','rmdir succeeded, which only removes empty folders; every entry was a service file or an already-swept subfolder',{serviceFiles:service.length});await syncDirectory(path.dirname(folder));removed++;
     return true;
   }
   for(const chosen of folders) {

@@ -6,14 +6,14 @@ import {FirstAidError,maybeLstat,renameChecked,renamedIdentity,storeFor,type Sto
 import {closeReceipts,isLegacyReceiptName,leftoverReceipt,openReceiptFor,openReceipts,stagingFolder} from '../import-recovery';
 import {isRecoveryName} from '../recovery';
 import {code,contained,digest,identity,sameStat,syncDirectory,unreliableIno} from '../paths';
-import {hit,message,passThrough,type MigrationContext} from './common';
+import {deleted,hit,message,passThrough,type MigrationContext} from './common';
 
 const legacyStage=/^(?:\.import|photo-importer)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.partial$/;
 /** Remove a file only while it is still the one looked at. */
-async function removeIfSame(file:string,stat:BigIntStats,scope:string):Promise<boolean>{
+async function removeIfSame(file:string,stat:BigIntStats,scope:string,reason:string):Promise<boolean>{
  await contained(file,scope);const now=await maybeLstat(file);
  if(!now?.isFile()||!sameStat(now,stat))return false;
- await fs.unlink(file);await syncDirectory(path.dirname(file));return true;
+ await fs.unlink(file);deleted(file,reason,'unchanged since it was read (same inode, size and date)');await syncDirectory(path.dirname(file));return true;
 }
 type Legacy=Awaited<ReturnType<typeof leftoverReceipt>>;
 type Open=Awaited<ReturnType<typeof openReceipts>>;
@@ -57,7 +57,7 @@ async function convertStage(receipt:string,found:Legacy,walkRoot:string,context:
    await sets.open(store,asRecord(record,{file:target,parentIdentity:stagingIdentity,fileIdentity:`${after.dev}:${after.ino}:${after.birthtimeNs}`}));
    await sets.close(store,[rid]);
   }
-  await removeIfSame(receipt,found.journalStat,walkRoot);
+  await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');
   await hit(context,'R3');
   return;
  }
@@ -72,26 +72,26 @@ async function convertReceipt(receipt:string,walkRoot:string,context:MigrationCo
  catch(error){if(passThrough(error))throw error;if(error instanceof SyntaxError||/authentication failed|too large|changed/i.test(message(error)))return;throw error;}
  const record=found.record;
  if(found.kind==='stage'){
-  if(!found.present){await removeIfSame(receipt,found.journalStat,walkRoot);return;}
+  if(!found.present){await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');return;}
   if(!found.owned||!found.file||!legacyStage.test(path.basename(found.file)))return;
   const stat=await fs.lstat(found.file,{bigint:true});
-  if(stat.size===0n){if(await removeIfSame(found.file,stat,walkRoot))await removeIfSame(receipt,found.journalStat,walkRoot);return;}
+  if(stat.size===0n){if(await removeIfSame(found.file,stat,walkRoot,'earlier version\'s staged copy that holds nothing to keep (empty, or stale and incomplete)'))await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');return;}
   if(!found.bound)return;
   // A dead copy (card present, source gone or changed) that is incomplete goes with its receipt; a complete one may be the only copy.
-  if(found.stale&&!found.complete){if(await removeIfSame(found.file,stat,walkRoot))await removeIfSame(receipt,found.journalStat,walkRoot);return;}
+  if(found.stale&&!found.complete){if(await removeIfSame(found.file,stat,walkRoot,'earlier version\'s staged copy that holds nothing to keep (empty, or stale and incomplete)'))await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');return;}
   await convertStage(receipt,found,walkRoot,context,sets);
   return;
  }
  // A publication receipt names a media path.
  const destination=record.file;
  const stat=typeof destination==='string'?await maybeLstat(destination):undefined;
- if(!stat){await removeIfSame(receipt,found.journalStat,walkRoot);return;}
- if(stat.isFile()&&record.sourceStat&&String(stat.size)===record.sourceStat.size&&record.sha256&&await digest(destination,context.signal).then(sha=>sha===record.sha256,()=>false)){await removeIfSame(receipt,found.journalStat,walkRoot);return;}
+ if(!stat){await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');return;}
+ if(stat.isFile()&&record.sourceStat&&String(stat.size)===record.sourceStat.size&&record.sha256&&await digest(destination,context.signal).then(sha=>sha===record.sha256,()=>false)){await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');return;}
  // Any other file there: the receipt is how a re-import finishes or replaces it. Moved into the log, unless already there.
  const store=await storeFor(record.root);
  if(![...await sets.get(store)].some(([,open])=>same(open,record)&&open.file===destination&&open.fileIdentity===record.fileIdentity))await sets.open(store,asRecord(record));
  await hit(context,'R1');
- await removeIfSame(receipt,found.journalStat,walkRoot);
+ await removeIfSame(receipt,found.journalStat,walkRoot,'earlier version\'s import receipt, converted or no longer needed');
  await hit(context,'R3');
 }
 /** R: every earlier-version receipt in the folders under `root` (record folders and hidden folders aside), counted

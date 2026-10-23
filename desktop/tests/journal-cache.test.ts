@@ -12,6 +12,7 @@ import {appendJournalLine,journalFileFor,journalFolderFor} from './fixtures/reco
 // version (tens of thousands of event files on a USB drive) would otherwise be read again by every
 // listing and before every organization. Only a finished, unchanged journal is cached.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+// These tests are about the read cache; the listing's automatic conversion (auto-conversion.test.ts) would empty the per-event files they set up.
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2026-10-03T12:00:00',fields:{}});
 const base={backup:false,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
 

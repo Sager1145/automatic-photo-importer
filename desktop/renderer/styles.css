@@ -47,7 +47,7 @@
   --success:#1f7a45;--success-soft:#e4f4ea;--warning:#a35a00;--warning-soft:#fff3df;--warning-border:#f3d5a4;
   --danger:#c4152a;--danger-soft:#fdeaec;--danger-border:#f4c1c7;
   /* One color per progress step; red and amber stay reserved for errors and warnings. */
-  --step-scan:#0a6893;--step-read:#4b4fd0;--step-compare:#8239b8;--step-copy:#086b60;--step-verify:#346c10;--step-move:#a82a7f;--step-tidy:#2458c9;--step-delete:#a0305f;--step-folder-check:#00758a;
+  --step-scan:#1376a8;--step-read:#3a2fd0;--step-compare:#b020c8;--step-copy:#0a7048;--step-verify:#437a08;--step-move:#c8187c;--step-tidy:#2a5fd0;--step-delete:#a8148a;--step-folder-check:#0e7a7a;
   --storage-used:#a1a1a6;
 
   /* Elevation */
@@ -78,7 +78,7 @@
   --accent-soft:#3c2725;--accent-border:#6d3f39;--accent-ring:rgba(255,123,107,.32);
   --success:#5fd38a;--success-soft:#1f3328;--warning:#ffb547;--warning-soft:#3a2f1c;--warning-border:#6a5229;
   --danger:#ff6b61;--danger-soft:#3e2326;--danger-border:#70383c;
-  --step-scan:#5cc2ee;--step-read:#a0a4ff;--step-compare:#c79bf2;--step-copy:#4fd8c4;--step-verify:#a6dd62;--step-move:#f08cd0;--step-tidy:#7fa8ff;--step-delete:#f08aa8;--step-folder-check:#5fd6ea;
+  --step-scan:#78e0fa;--step-read:#8a8aff;--step-compare:#e48cf6;--step-copy:#16b868;--step-verify:#96dc3c;--step-move:#f26cb4;--step-tidy:#6e96f5;--step-delete:#f08ad8;--step-folder-check:#13aaaa;
   --storage-used:#6e6e73;
   --shadow-1:0 1px 2px rgba(0,0,0,.3);
   --shadow-2:0 2px 10px rgba(0,0,0,.32),0 1px 2px rgba(0,0,0,.3);
@@ -194,7 +194,9 @@ input[type=range]:focus-visible{outline:2.5px solid var(--accent-fill);outline-o
 .checkbox-label{display:inline-flex;align-items:center;gap:.55rem;font-size:var(--text-footnote);font-weight:500;cursor:pointer}
 
 /* Progress */
-.progress-track{position:relative;height:.42rem;border-radius:var(--radius-capsule);background:var(--fill-2);overflow:hidden}
+.progress-track{position:relative;height:.42rem;border-radius:var(--radius-capsule);background:var(--fill-2);overflow:hidden;isolation:isolate}
+/* Stage layers stack in DOM order inside the track (later stages on top, no z-index), each growing from the left over the stages before it. */
+.progress-track>span[data-layer]{position:absolute;inset:0}
 .progress-track>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--accent-fill);transform-origin:left;transition:transform var(--slow) var(--ease-out)}
 .progress-discovering>span{animation:progress-scan 1.4s var(--ease-snappy) infinite}
 @keyframes progress-scan{from{transform:translateX(-100%)}to{transform:translateX(420%)}}
@@ -700,6 +702,9 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .settings-row>.button{justify-self:start}
 .text-size-control{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;min-width:0}
 .settings-row-note{grid-column:2;font-size:var(--text-caption);color:var(--label-secondary)}
+.diagnostics-note{margin:0;padding:.1rem 0 .55rem;font-size:var(--text-caption);color:var(--label-secondary);overflow-wrap:anywhere}
+.diagnostics-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;padding:.35rem 0 .55rem;min-width:0}
+.diagnostics-size{flex:1 0 100%;color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums}
 .performance-readout{grid-column:1;color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums}
 .text-size-control input{flex:1 1 6rem;min-width:6rem}
 .text-size-control strong{font-variant-numeric:tabular-nums;color:var(--accent);min-width:3ch}
@@ -1107,6 +1112,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
   *,*::before,*::after,::details-content{animation-duration:0s!important;animation-iteration-count:1!important;transition-duration:0s!important;transition-delay:0s!important;scroll-behavior:auto!important}
   ::view-transition-old(*),::view-transition-new(*),::view-transition-group(*){animation:none!important}
   .window-titlebar::after,.settings-section,.organization-action,.organization-recovery,.history-timeline article,.inventory-panel,.backup-action{animation:none!important}
+  .progress-track>span{transition:none}
   .progress-discovering>span{transform:none;width:100%!important;opacity:.45}
 }
 @media (prefers-reduced-transparency:reduce){
@@ -1316,7 +1322,11 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 /* Step colors: the same step has the same color in the card, the step list, the sidebar and the dashboard. */
 [data-step=scan]{--step:var(--step-scan)}[data-step=read]{--step:var(--step-read)}[data-step=compare]{--step:var(--step-compare)}[data-step=copy]{--step:var(--step-copy)}
 [data-step=verify]{--step:var(--step-verify)}[data-step=move]{--step:var(--step-move)}[data-step=tidy]{--step:var(--step-tidy)}[data-step=delete]{--step:var(--step-delete)}[data-step=folder-check]{--step:var(--step-folder-check)}
-.progress-display[data-step] .progress-track>span{background:var(--step)}
+.progress-track>span[data-step]{background:var(--step)}
+/* Paused is a status, not a stage: every layer takes the color of the "Paused" text, and the stage colors return on resume. */
+.progress-display[data-paused] .progress-track>span{background:var(--warning)}
+.source-steps[data-paused] li[data-step][data-state=done] .step-mark{background:var(--warning);color:var(--surface)}
+.mini-steps[data-paused] i[data-step][data-state=done]{background:var(--warning)}
 .progress-display[data-step] .progress-count,.progress-display[data-step] .progress-percent,.progress-display[data-step] .progress-speed{color:var(--step)}
 .progress-display[data-step] .progress-count{font-weight:550}
 .progress-display[data-step] .progress-speed{font-weight:600}
@@ -1348,6 +1358,17 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .drive-sparkline-area{fill:var(--accent);opacity:.15}
 .drive-activity-rates{display:flex;justify-content:space-between;gap:.5rem;color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .drive-activity-rates>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.sidebar-dest-status{display:grid;gap:.15rem;margin:0 .75rem 0 2.35rem;min-width:0;font-variant-numeric:tabular-nums}
+.sidebar-dest-line{display:flex;align-items:baseline;gap:.4rem;min-width:0}
+.sidebar-dest-label{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);font-weight:650;color:var(--step,var(--label-secondary))}
+.sidebar-dest-label:not([data-step]){color:var(--label-secondary)}
+.sidebar-dest-label[data-kind=offline]{color:var(--danger)}
+.sidebar-dest-from{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary)}
+.sidebar-dest-percent{flex:none;margin-left:auto;font-size:var(--text-caption);font-weight:650;color:var(--label-secondary);white-space:nowrap}
+.sidebar-dest-progress{display:grid;gap:.15rem;min-width:0}
+.sidebar-dest-bar{display:block;height:4px}
+.sidebar-dest-progress[data-paused] .sidebar-dest-bar>span{background:var(--warning)}
+.sidebar-dest-detail{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption);line-height:1.25;color:var(--label-secondary)}
 .sidebar-activity{display:flex;align-items:center;gap:.5rem;margin:.1rem .75rem 0 2.35rem;min-width:0}
 .sidebar-activity>small{flex:none;font-size:var(--text-caption);color:var(--label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .sidebar-activity-bar{flex:1;min-width:1.5rem;height:4px;border-radius:2px;background:var(--fill-2);overflow:hidden}

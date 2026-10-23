@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mediaKindForPath } from '../media-formats';
 import { sidecars } from './inventory';
 import { code, contained, markFolderChanged, sameStat } from './paths';
+import { log, logDeletion } from '../logger';
 
 /**
  * macOS AppleDouble "._<name>" files. On exFAT, FAT and other volumes without extended attributes, macOS
@@ -112,10 +113,10 @@ export class AppleDoubleCleaner {
     return path.relative(root,path.dirname(file)).split(path.sep).some(part=>this.protectedNames.has(part.toLowerCase()));
   }
   /** A "._" file that could not be judged or removed: it stays. */
-  warn(file:string,error:unknown){if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:file,detail:text(error)});}
-  private keep(sidecar:string){this.report.kept++;if(this.report.keptFiles.length<MAX_DETAILS)this.report.keptFiles.push(sidecar);}
+  warn(file:string,error:unknown){log('normal','appledouble','warning',{path:file,code:code(error)??'error',error});if(this.report.warnings.length<MAX_WARNINGS)this.report.warnings.push(`${file}: ${text(error)}`);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:file,detail:text(error)});}
+  private keep(sidecar:string,why='not provably bookkeeping only'){log('detailed','appledouble','kept',{path:sidecar,reason:why});this.report.kept++;if(this.report.keptFiles.length<MAX_DETAILS)this.report.keptFiles.push(sidecar);}
   /** A folder that could not be read, so its "._" files were not looked at. */
-  warnFolder(folder:string,error:unknown){this.report.folderWarnings.push(`${folder}: ${text(error)}`);this.report.folderWarnings.splice(MAX_WARNINGS);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:folder,detail:text(error),folder:true});}
+  warnFolder(folder:string,error:unknown){log('normal','appledouble','folder-warning',{path:folder,code:code(error)??'error',error});this.report.folderWarnings.push(`${folder}: ${text(error)}`);this.report.folderWarnings.splice(MAX_WARNINGS);if(this.report.failures.length<MAX_DETAILS)this.report.failures.push({path:folder,detail:text(error),folder:true});}
   /** Import: call before the file is created. A "._" already there is not ours (an orphan from earlier): it is kept, counted, and never removed by this job. */
   async noteExisting(file:string):Promise<void> {
     const sidecar=sidecarOf(file);
@@ -195,6 +196,7 @@ export class AppleDoubleCleaner {
       // Unchanged since it was read, so what is removed is what was judged.
       if(!sameStat(before,await fs.lstat(sidecar,{bigint:true}))){this.keep(sidecar);return;}
       await fs.unlink(sidecar);
+      logDeletion('appledouble',sidecar,count==='removed'?'AppleDouble sidecar beside its media file':'orphan AppleDouble sidecar: its main file is gone',`inspectAppleDouble: safe (bookkeeping attributes only); ${before.size} bytes; unchanged between reading and removal; lstat of the main file ${count==='removed'?'found a plain file':'found nothing'}`,{bytes:Number(before.size),kind:count});
       this.report[count]++;
       markFolderChanged(path.dirname(sidecar));
     }catch(error){this.warn(sidecar,error);}

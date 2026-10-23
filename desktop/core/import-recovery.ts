@@ -7,6 +7,7 @@ import {authenticateImportRecord} from './recovery';
 import {MessageError} from '../messages';
 import {appendLines,holdLog,LINE_CAPS,maybeLstat,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
 import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat} from './paths';
+import {log} from '../logger';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
@@ -137,6 +138,7 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
  const rid=randomUUID(),line=openLine(rid,record);
  if(Buffer.byteLength(line)>LINE_CAPS.receipt)throw new Error('Import receipt is too large');
  await appendReceipts(store,[line]);
+ log('detailed','exec','receipt-written',{kind,file,rid,source:entry.source});
  (await receiptSet(store,index)).open.set(rid,record);
  return {rid,store,record};
 }
@@ -210,10 +212,11 @@ export async function releaseCreations(entry:PlanEntry,root:string,index:Recover
  * every close is durable before this returns. */
 export async function clearPartialRecord(partial:Receipt,_root:string,index:RecoveryIndex,_sync=true):Promise<void>{
  await appendReceipts(partial.store,[closeLine(partial.rid)]);
+ log('detailed','exec','receipt-closed',{rid:partial.rid,recordKind:partial.record.kind,file:partial.record.file});
  (await receiptSet(partial.store,index)).open.delete(partial.rid);
 }
 /** Close receipts by rid in one append (the store cleanup, the converter). */
-export async function closeReceipts(store:Store,rids:string[]):Promise<void>{if(rids.length)await appendReceipts(store,rids.map(closeLine));}
+export async function closeReceipts(store:Store,rids:string[]):Promise<void>{if(!rids.length)return;await appendReceipts(store,rids.map(closeLine));log('detailed','exec','receipts-closed',{store:store.path,rids});}
 /** Write an open receipt for an existing record (the converter: an earlier version's receipt moved into the log). */
 export async function openReceiptFor(store:Store,record:RecordData):Promise<string>{
  const rid=randomUUID(),line=openLine(rid,record);if(Buffer.byteLength(line)>LINE_CAPS.receipt)throw new Error('Import receipt is too large');

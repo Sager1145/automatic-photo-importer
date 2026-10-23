@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {deletingPattern,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from '../recovery';
 import {code,contained,syncDirectory} from '../paths';
-import {bookkeepingOnly,hit,type MigrationContext} from './common';
+import {bookkeepingOnly,deleted,hit,type MigrationContext} from './common';
 
 const journalName=/^(?:manifest\.json|event-log\.jsonl|event-[a-f0-9-]+\.json|stage-[0-9a-f-]{36}\.partial|incomplete-[0-9a-f-]{36})$/;
 /** Whether a set-aside deletion holds only what the app wrote in a journal folder: journal records and staging
@@ -37,18 +37,18 @@ export async function removeOldFolders(folder:string,context:MigrationContext):P
   const left:string[]=[];
   for(const entry of await fs.readdir(storage,{withFileTypes:true})){
    const item=path.join(storage,entry.name);
-   if(entry.isFile()&&(entry.name==='.DS_Store'||entry.name.startsWith('._')&&await bookkeepingOnly(item)))await fs.unlink(item);
+   if(entry.isFile()&&(entry.name==='.DS_Store'||entry.name.startsWith('._')&&await bookkeepingOnly(item))){await fs.unlink(item);deleted(item,'Finder bookkeeping in an earlier version\'s records folder','.DS_Store or a bookkeeping-only "._" file');}
    // A journal folder set aside by a deletion that stopped: removed whole only while it holds nothing but what a
    // journal folder holds and no kept original; otherwise it stays (below) and is reported.
-   else if(entry.isDirectory()&&deletingPattern.test(entry.name)&&await provenDeletion(item))await fs.rm(item,{recursive:true,force:true});
+   else if(entry.isDirectory()&&deletingPattern.test(entry.name)&&await provenDeletion(item)){await fs.rm(item,{recursive:true,force:true});deleted(item,'journal folder set aside by a deletion that stopped','holds only journal files and no kept original');}
    else left.push(entry.name);
   }
   await syncDirectory(storage);
   if(left.length){context.problems.push(`Kept ${storage}: it still holds ${left.length} item${left.length===1?'':'s'} (${left.slice(0,3).join(', ')}).`);continue;}
-  try{await fs.rmdir(storage);await syncDirectory(folder);}
+  try{await fs.rmdir(storage);deleted(storage,'earlier version\'s records folder, everything in it converted','empty (non-recursive removal)');await syncDirectory(folder);}
   catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;context.problems.push(`Kept ${storage}: it is not empty.`);continue;}
   const side=path.join(folder,`._${name}`);
-  if(await bookkeepingOnly(side)){await fs.unlink(side);await syncDirectory(folder);}
+  if(await bookkeepingOnly(side)){await fs.unlink(side);deleted(side,'"._" file of a removed records folder','holds only bookkeeping');await syncDirectory(folder);}
   await hit(context,'F');
  }
 }

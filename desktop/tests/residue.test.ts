@@ -387,3 +387,27 @@ test('a receipt opened in one segment and closed in the next lets both segments 
   assert.deepEqual((await segmentsFor(f.root)).map(file=>path.basename(file)),['receipts-000003.jsonl']);
   assert.ok(await open(f.root,b));assert.equal(await open(f.root,a),false);
 });
+
+/** A complete staged copy (as large as its source) whose card file then changed or went. */
+async function completeStale(t:test.TestContext,change:'size'|'mtime'|'missing') {
+  const f=await staged(t,true);
+  if(change==='size') await fs.appendFile(f.source,'more');
+  else if(change==='mtime') await fs.utimes(f.source,new Date(1e12),new Date(1e12));
+  else await fs.unlink(f.source);
+  return f;
+}
+
+test('a complete staged copy whose card file changed or went is kept by the automatic check and by Clean up, with its receipt',async t=>{
+  for(const change of ['size','mtime','missing'] as const) {
+    const f=await completeStale(t,change);
+    const found=await findResidue([f.root]);
+    assert.equal(kindOf(found,f.copy),'recoverable',change);
+    assert.deepEqual(found.recoverable,{files:1,bytes:4000,folder:path.dirname(f.copy)},change);
+    const automaticResult=await cleanResidue(found,{keepResumable:true});
+    assert.equal(automaticResult.removed.files,0,change);assert.ok(await exists(f.copy),change);assert.ok(await open(f.root,f.receipt.rid),change);
+    assert.equal(automaticResult.left.recoverable.files,1,change);
+    const manual=await cleanResidue(await findResidue([f.root],{legacy:true}));
+    assert.equal(manual.removed.files,0,change);assert.ok(await exists(f.copy),`${change}: Clean up keeps it`);assert.ok(await open(f.root,f.receipt.rid),change);
+    assert.equal(manual.left.recoverable.files,1,change);
+  }
+});

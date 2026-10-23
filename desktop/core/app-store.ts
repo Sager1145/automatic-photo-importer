@@ -3,6 +3,7 @@ import {constants,type BigIntStats} from 'node:fs';
 import path from 'node:path';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {APP_DATA_FOLDER} from './legacy-names';
+import {logDeletion} from '../logger';
 import {beneath,code,contained,pathKey,syncDirectory,unreliableIno} from './paths';
 export {APP_DATA_FOLDER} from './legacy-names';
 
@@ -265,7 +266,7 @@ async function createStore(base:string):Promise<Store>{
  const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
  await writeNewFile(temporary,JSON.stringify(sealV5('store',{base,baseIdentity:`${baseStat.dev}:${baseStat.ino}`,minVersion:STORE_MIN_VERSION})));
  const file=path.join(folder,'store.json');
- if(await maybeLstat(file)){await fs.unlink(temporary).catch(()=>{});}
+ if(await maybeLstat(file)){await fs.unlink(temporary).then(()=>logDeletion('store',temporary,'store record written by a creation another one beat','written by this call'),()=>{});}
  else if(await renameChecked(temporary,file)!=='done')throw new Error(`Unable to create ${file}`);
  const store=await storeRecord(folder,base,baseStat);if(!store)throw new Error(`Unable to create ${file}`);
  return store;

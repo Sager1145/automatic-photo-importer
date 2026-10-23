@@ -1,6 +1,10 @@
 import * as fs from 'node:fs/promises';
 import {isAbort} from '../paths';
 import {APPLEDOUBLE_MAX_BYTES,inspectAppleDouble} from '../appledouble';
+import {logDeletion} from '../../logger';
+
+/** Log a file or folder the converter deletes, with why and what proved it safe. */
+export const deleted=(file:string,reason:string,proof:string,fields?:Record<string,string|number|boolean>)=>logDeletion('migrate',file,reason,proof,fields);
 
 /** The converter's steps, as the interface shows them. */
 export type MigrationStep='looking'|'converting'|'originals'|'removing'|'receipts'|'caches'|'cleanup';

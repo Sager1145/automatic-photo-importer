@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { beneath, checkAbort, code, contained, digest } from './paths';
 import { mapPool } from './devices';
+import { log, logDeletion } from '../logger';
 
 /** Files checked at once; each device's own stream limit (devices.ts) still caps the reads. */
 const VERIFY_CONCURRENCY=4;
@@ -63,6 +64,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       const after=await regular(file.source);
       if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs) return {kept:'changed'};
       await fs.unlink(file.source);
+      logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} re-read now at the source and at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
       return {deleted:true};
     } catch(error) {
       if(options.signal?.aborted) throw error;
@@ -75,6 +77,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
   const outcomes=await mapPool(files,VERIFY_CONCURRENCY,check);
   outcomes.forEach((outcome,index)=>{
     const file=files[index]!;
+    if(!('deleted' in outcome))log('detailed','originals','kept',{path:file.source,reason:outcome.kept,...(outcome.error?{error:outcome.error}:{})});
     if('deleted' in outcome) {result.deleted.push({source:file.source,size:file.size});result.bytes+=file.size;}
     else {result.kept.push({source:file.source,reason:outcome.kept});if(outcome.error)result.errors.push(outcome.error);}
   });

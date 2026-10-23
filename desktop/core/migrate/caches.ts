@@ -7,14 +7,14 @@ import {indexLocations,indexTarget,INDEX_FILE,LEGACY_INDEX_NAMES} from '../desti
 import {DUPLICATES_FILE,LEGACY_DUPLICATES_NAME} from '../duplicates';
 import {DRIVE_BACKUPS,DRIVE_MARKER,LEGACY_DRIVE_MARKER,markerIdentity,markerText} from '../drive-backup';
 import {code,contained,identity,sameStat,syncDirectory} from '../paths';
-import {hit,message,passThrough,type MigrationContext} from './common';
+import {deleted,hit,message,passThrough,type MigrationContext} from './common';
 
 const MAX_BYTES=256*1024*1024,TEMPORARY_AGE_MS=60*60*1000;
 const legacyTemporary=/^\.?photo-importer-(?:index|duplicates)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
 /** Remove a file only while it is still the one looked at. */
-async function removeIfSame(file:string,stat:BigIntStats,scope:string):Promise<void>{
+async function removeIfSame(file:string,stat:BigIntStats,scope:string,reason:string):Promise<void>{
  await contained(file,scope);const now=await maybeLstat(file);
- if(now?.isFile()&&sameStat(now,stat)){await fs.unlink(file);await syncDirectory(path.dirname(file));}
+ if(now?.isFile()&&sameStat(now,stat)){await fs.unlink(file);deleted(file,reason,'unchanged since it was read (same inode, size and date)');await syncDirectory(path.dirname(file));}
 }
 /** One earlier-version cache of `root` (index or duplicate store): written sealed into the store unless the store
  * already has one, then the old file removed while unchanged. One for another folder (another root identity) is
@@ -36,7 +36,7 @@ async function convertCache(root:string,file:string,kind:'index'|'duplicates',ve
    await hit(context,'C:written');
   }
  }
- await removeIfSame(file,before,root);
+ await removeIfSame(file,before,root,'earlier version\'s cache, converted or held by the store');
  await hit(context,'C');
 }
 /** The earlier version's drive marker in one drive's backup folder: rewritten sealed, then the hidden one removed. */
@@ -55,7 +55,7 @@ async function convertMarker(folder:string,root:string,context:MigrationContext)
   await fs.rename(temporary,visible);await syncDirectory(folder);
   await hit(context,'C:written');
  }
- if(old)await removeIfSame(hidden,old.stat,root);
+ if(old)await removeIfSame(hidden,old.stat,root,'earlier version\'s drive marker, converted');
  await hit(context,'C');
 }
 /** C: `root`'s destination index and duplicate store, its earlier version's temp files over an hour old, and the
@@ -67,7 +67,7 @@ export async function convertCaches(root:string,context:MigrationContext):Promis
  for(const name of await fs.readdir(root).catch(()=>[] as string[])){
   if(!legacyTemporary.test(name))continue;
   const file=path.join(root,name),stat=await maybeLstat(file);
-  if(stat?.isFile()&&Date.now()-Number(stat.mtimeNs/1000000n)>TEMPORARY_AGE_MS)await removeIfSame(file,stat,root).catch(note);
+  if(stat?.isFile()&&Date.now()-Number(stat.mtimeNs/1000000n)>TEMPORARY_AGE_MS)await removeIfSame(file,stat,root,'earlier version\'s cache temp file older than an hour').catch(note);
  }
  if(!hostKeyConfigured())return;
  const backups=path.join(root,DRIVE_BACKUPS);

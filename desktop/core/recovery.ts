@@ -9,6 +9,7 @@ import { streams, STREAMS } from './devices';
 import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
 import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
+import { log, log as writeLog, logDeletion } from '../logger';
 import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
@@ -109,7 +110,7 @@ function originalPath(m:Manifest,index:number,slot:string):string{return path.jo
 /** Finished journals' events, by journal file, kept for this app session: how far the journal was read
  * (only whole lines) and the resulting state. Every listing and every organization's check of earlier
  * journals would otherwise read them again. */
-interface JournalCache {ino:bigint;mark:LogMark;state:JournalState;}
+interface JournalCache {ino:bigint;mark:LogMark;state:JournalState;/** Records applied up to the mark. */records:number;}
 /** How far the log was applied, and its first and last bytes up to there, so a log rewritten rather
  * than appended to is recognized. */
 interface LogMark {ino:bigint;offset:number;size:bigint;mtime:bigint;head:Buffer;tail:Buffer;}
@@ -181,7 +182,8 @@ function parseEvent(text:string,rebased:(record:Record<string,unknown>)=>Record<
 /** `onRead`: bytes of events read so far, of those to read. `follow` false reads only this journal's own signed
  * events, without checking its successor. A journal's events are lines after its header and entries, read in 1 MiB
  * chunks; a finished journal read before in this session is read only past what was already applied. */
-async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number,name?:string)=>void,follow=true):Promise<JournalState> {
+async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:number,total:number,name?:string)=>void,follow=true,signal?:AbortSignal):Promise<JournalState> {
+ checkAbort(signal);
  if(chain.has(m.id))throw new Error('Organization supersession cycle');chain=new Set(chain).add(m.id);
  const at=where(m);if(!at.store)throw new Error('Records from an earlier version are read by the converter only');
  const rebased=rebasedEvent(m),cacheKey=`${at.journal}\0${m.rootIdentity}\0${mountDevices.get(m)??''}`,cached=finishedJournals.get(cacheKey);
@@ -193,21 +195,31 @@ async function readEvents(m:Manifest,chain=new Set<string>(),onRead?:(read:numbe
   const reuse=!!cached&&cached.ino===stat.ino&&Number(stat.size)>=cached.mark.offset&&(stat.size===cached.mark.size&&stat.mtimeNs===cached.mark.mtime||await logMark(handle,cached.mark.offset).then(now=>now.head.equals(cached.mark.head)&&now.tail.equals(cached.mark.tail)));
   state=reuse?copyState(cached!.state):emptyState();
   const from=reuse?cached!.mark.offset:at.eventsFrom,total=Math.max(0,Number(stat.size)-from),apply=applier(m,state);
-  onRead?.(0,total,path.basename(at.folder));
-  const {end}=await readLines(handle,at.journal,from,()=>LINE_CAPS.event,text=>{const record=parseEvent(text,rebased);if(record)apply(record);},{onTail:text=>{tail=parseEvent(text,rebased);},onBytes:position=>onRead?.(position-from,total,path.basename(at.folder))});
-  if(finished(state))finishedJournals.set(cacheKey,{ino:stat.ino,mark:await logMark(handle,end),state:copyState(state)});else finishedJournals.delete(cacheKey);
+  // Records read so far, of an estimate from the bytes read (exact once all are read).
+  // Before the first chunk: an estimate from the bytes to read (an event line is a few hundred bytes).
+  // A cached journal counts the records it had already applied.
+  const known=reuse?cached!.records:0;let records=known;const name=path.basename(at.folder);onRead?.(known,known+Math.max(1,Math.round(total/400)),name);
+  const {end}=await readLines(handle,at.journal,from,()=>LINE_CAPS.event,text=>{records++;const record=parseEvent(text,rebased);if(record)apply(record);},{onTail:text=>{tail=parseEvent(text,rebased);},onBytes:position=>{const done=position-from,fresh=records-known;onRead?.(records,done>=total?records:Math.max(records,known+Math.round(fresh*total/Math.max(1,done))),name);},signal});
+  onRead?.(records,records,name);
+  if(finished(state))finishedJournals.set(cacheKey,{ino:stat.ino,mark:await logMark(handle,end),state:copyState(state),records});else finishedJournals.delete(cacheKey);
  }finally{await handle.close();}
  // A last line without its newline (an append cut short, or one being written) counts, but is read again next time.
  if(tail)applier(m,state)(tail);
  state.converting=!!at.convertedFrom&&!state.migrationComplete;
- return finishJournalRead(m,state,chain,follow);
+ return finishJournalRead(m,state,chain,follow,onRead,signal);
 }
 /** The earlier version's journal, as it was read before: its event log and its one-file-per-event records (a record
  * in both counts once), in folder order. Returns the state and every applied record's text, in the order applied. */
-async function readLegacyEvents(m:Manifest,onRead?:(read:number,total:number,name?:string)=>void):Promise<{state:JournalState;records:string[]}> {
+/** Per-event files of an earlier version's journal that a stopped read (the converter giving way to a job) had
+ * already read, by journal folder: kept only while that folder, its manifest and its log are exactly as that read
+ * found them, so the next read takes only the rest. Every text is still authenticated when it is applied. */
+const partialReads=new Map<string,{dev:bigint;ino:bigint;manifest:string;log:string;texts:Map<string,string>}>();
+const manifestKey=(m:Manifest)=>createHash('sha256').update(JSON.stringify(m)).digest('hex');
+async function readLegacyEvents(m:Manifest,onRead?:(read:number,total:number,name?:string)=>void,signal?:AbortSignal):Promise<{state:JournalState;records:string[]}> {
+ checkAbort(signal);
  const state=emptyState(),apply=applier(m,state),rebased=rebasedEvent(m),applied:string[]=[];
  const parse=(text:string)=>{let value:unknown;try{value=JSON.parse(text);}catch(error){if(error instanceof SyntaxError)return;throw error;}apply(rebased(authenticated(value)));applied.push(text);};
- const job=jobFolder(m);await contained(path.join(job,'.event-check'),scopeOf(m));const names=await fs.readdir(job);let read=0;
+ const job=jobFolder(m);await contained(path.join(job,'.event-check'),scopeOf(m));const names=await fs.readdir(job);
  const seen=new Set<string>(),once=(text:string)=>{const record=text.trim();if(record&&!seen.has(record)){seen.add(record);parse(record);}};
  const readLog=async()=>{
   const file=path.join(job,eventLog);await contained(file,scopeOf(m));const handle=await regularHandle(file);
@@ -218,20 +230,40 @@ async function readLegacyEvents(m:Manifest,onRead?:(read:number,total:number,nam
    return bytes.toString('utf8').split('\n').filter(line=>{if(line.length<=2048)return true;try{JSON.parse(line);}catch{return false;}throw new Error('Invalid recovery event');});
   }finally{await handle.close();}
  };
- const texts:(string|string[]|undefined)[]=new Array(names.length);let next=0;
- const readOne=async(position:number)=>{
-  const name=names[position]!;
-  if(name===eventLog)texts[position]=await readLog();
-  else if(legacyEvent.test(name))texts[position]=await readEventFile(path.join(job,name),()=>new Error('Invalid recovery event'));
-  onRead?.(++read,names.length,name);
- };
- await Promise.all(Array.from({length:Math.min(await journalReaderCount(job),names.length)},async()=>{while(next<names.length)await readOne(next++);}));
- for(const text of texts){if(Array.isArray(text)){for(const line of text)once(line);}else if(text!==undefined)once(text);}
+ const own=await fs.lstat(job,{bigint:true}),logStat=await maybeStat(path.join(job,eventLog));
+ const logSignature=logStat?`${logStat.ino}:${logStat.size}:${logStat.mtimeNs}`:'';
+ const partial=partialReads.get(job),resumed=partial&&partial.dev===own.dev&&partial.ino===own.ino&&partial.manifest===manifestKey(m)&&partial.log===logSignature?partial.texts:undefined;
+ if(partial&&!resumed)partialReads.delete(job);
+ const started=performance.now(),texts:(string|string[]|undefined)[]=new Array(names.length),list=names.filter(name=>legacyEvent.test(name)),read=new Map<string,string>();
+ const logAt=names.indexOf(eventLog);
+ if(logAt>=0){checkAbort(signal);texts[logAt]=await readLog();}
+ // The log is one file; every other name counts as read once looked at. Per-event files: several at a time, in order.
+ let done=names.length-list.length,at=0,failure:unknown;if(done)onRead?.(done,names.length,eventLog);
+ const found:string[]=new Array(list.length);
+ await Promise.all(Array.from({length:Math.min(await journalReaderCount(job),list.length)},async()=>{while(at<list.length&&failure===undefined){
+  const position=at++,name=list[position]!;
+  try{checkAbort(signal);const text=resumed?.get(name)??await readEventFile(path.join(job,name),()=>new Error('Invalid recovery event'));found[position]=text;read.set(name,text);onRead?.(++done,names.length,name);}
+  catch(error){failure??=error;}
+ }}));
+ if(failure!==undefined){
+  // Stopped: what was read is kept for the next read.
+  if(isAbort(failure)){const kept=new Map(resumed);for(const [name,text] of read)kept.set(name,text);partialReads.set(job,{dev:own.dev,ino:own.ino,manifest:manifestKey(m),log:logSignature,texts:kept});}
+  throw failure;
+ }
+ let position=0;for(const [index,name] of names.entries())if(legacyEvent.test(name))texts[index]=found[position++];
+ if(read.size)writeLog('detailed','journal','legacy-read',{journal:m.id,files:read.size,ms:Math.round(performance.now()-started),filesPerSecond:Math.round(read.size/Math.max(0.001,(performance.now()-started)/1000))});
+ // Applied in batches, so a journal of tens of thousands of records never holds the event loop.
+ let count=0;
+ for(const text of texts){
+  if(Array.isArray(text)){for(const line of text)once(line);}else if(text!==undefined)once(text);
+  if(++count%500===0){checkAbort(signal);onRead?.(names.length,names.length,m.id);await new Promise<void>(resolve=>setImmediate(resolve));}
+ }
+ partialReads.delete(job);
  await finishJournalRead(m,state,new Set([m.id]),false);
  return {state,records:applied};
 }
 /** Checks that need the events of the whole journal, and its successor and hand-offs; never cached. */
-async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>,follow:boolean):Promise<JournalState> {
+async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>,follow:boolean,onRead?:(read:number,total:number,name?:string)=>void,signal?:AbortSignal):Promise<JournalState> {
  if(state.finalizing.size&&!state.complete)throw new Error('An incomplete organization cannot be finalized');
  for(const index of state.finalized)if(!state.finalizing.has(index))throw new Error('Finalized entry lacks a durable deletion intent');
  // Each hand-off names a signed journal that really moved this entry's file on from its destination.
@@ -246,7 +278,7 @@ async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>
   // must, like any successor, relocate one of its destinations; neither manifest need list the other.
   const destinations=new Set(m.entries.map(entry=>pathKey(entry.destination)));
   if(!successor.entries.some(next=>next.move&&next.source!==next.destination&&destinations.has(pathKey(next.source))))throw new Error('Organization successor does not relocate a prior destination');
-  await readEvents(successor,chain);
+  await readEvents(successor,chain,onRead,true,signal);
  }
  return state;
 }
@@ -469,7 +501,7 @@ async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:Abo
  const output=await fs.open(staged,'wx',0o600);
  // Stages are expendable verified copies: a failed or stopped copy removes its own.
  try{await copyThroughStage(staged,output,entry,index,m,input,signal,onBytes);}
- catch(error){try{await contained(staged,scopeOf(m));await fs.unlink(staged);}catch{/* Already gone, or left for the residue cleanup. */}throw error;}
+ catch(error){try{await contained(staged,scopeOf(m));await fs.unlink(staged);logDeletion('organize',staged,'recovery stage of a copy that failed or was stopped','stage created by this copy with an exclusive open; it is expendable and the original is untouched',{error});}catch{/* Already gone, or left for the residue cleanup. */}throw error;}
 }
 async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<void> {
  let source:fs.FileHandle;try{source=await regularHandle(input);}catch(error){await output.close();throw error;}
@@ -485,7 +517,7 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
  if(!await targetMatches(entry,m,signal))throw new Error('Destination disappeared after publication');
  // Retained originals are never unlinked; only the stage is.
- await contained(staged,scopeOf(m));await fs.unlink(staged);await checkpoint(m,'published',index);
+ await contained(staged,scopeOf(m));await fs.unlink(staged);logDeletion('organize',staged,'recovery stage after its copy was published and verified',`SHA-256 ${entry.digest} matched at the stage and at the published destination ${entry.destination}`,{bytes:entry.size});await checkpoint(m,'published',index);
 }
 /** Only reviewed obsolete source parents can be removed, and only by nonrecursive rmdir.
  * Stashed originals are independent of these paths, so recovery remains usable.
@@ -502,7 +534,7 @@ async function removeEmptySourceFolders(m:Manifest,finalized:Set<number>,signal?
   checkAbort(signal);done++;onFolder?.(done,folder);if(folder===m.root||folder===m.source||m.libraries?.includes(folder))continue;
   await contained(folder,m.source);const stat=await maybeStat(folder);if(!stat)continue;
   if(!stat.isDirectory()||stat.isSymbolicLink()||await identity(folder)!==expected)throw new Error('Original folder changed; retained without cleanup');
-  try{await fs.rmdir(folder);await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
+  try{await fs.rmdir(folder);logDeletion('organize',folder,'original folder left empty after its files were organized','rmdir only removes empty folders; the folder identity matched the journal',{});await syncDirectory(path.dirname(folder));}catch(error){if(!['ENOTEMPTY','EEXIST'].includes(code(error)??''))throw error;}
  }
 }
 /** The folders next to `root` on the same drive (none when `root` is a drive's top folder, so the
@@ -523,18 +555,20 @@ async function handOffMatches(m:Manifest,index:number,handOff:HandOff,manifests:
 /** Later journals that could have moved this journal's files on: in its own folder, the folders it
  * lists or leaves pointers in, and the folders next to its own. Read once per operation. */
 type Successors=Map<string,{root:string;m:Manifest;state:JournalState;index:number}>;
-async function laterMoves(m:Manifest):Promise<Successors>{
- const moves:Successors=new Map(),neighbours=await neighbourFolders(m.root);
- for(const folder of new Set([m.root,...pointerFolders(m),...neighbours])){
-  for(const {id} of await journalsIn(folder).catch(()=>[])){
-   if(id===m.id)continue;
-   // Only a finished, never undone journal can have taken a file over for good.
-   const later=await readManifest(folder,id).catch(()=>undefined);if(!later)continue;
-   const state=await readEvents(later,undefined,undefined,false).catch(()=>undefined);
-   if(!state?.complete||state.undone.size||state.undoComplete)continue;
-   for(const [index,entry] of later.entries.entries())if(entry.move&&state.renamed.has(index))moves.set(pathKey(entry.source),{root:folder,m:later,state,index});
-  }
+async function laterMoves(m:Manifest,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<Successors>{
+ const moves:Successors=new Map(),neighbours=await neighbourFolders(m.root),candidates:[string,string][]=[];
+ for(const folder of new Set([m.root,...pointerFolders(m),...neighbours]))
+  for(const {id} of await journalsIn(folder).catch(()=>[]))if(id!==m.id)candidates.push([folder,id]);
+ let done=0;onLater?.(0,candidates.length,'');
+ for(const [folder,id] of candidates){
+  checkAbort(signal);onLater?.(done++,candidates.length,id);
+  // Only a finished, never undone journal can have taken a file over for good.
+  const later=await readManifest(folder,id).catch(()=>undefined);if(!later)continue;
+  const state=await readEvents(later,undefined,undefined,false,signal).catch(error=>{if(isAbort(error))throw error;return undefined;});
+  if(!state?.complete||state.undone.size||state.undoComplete)continue;
+  for(const [index,entry] of later.entries.entries())if(entry.move&&state.renamed.has(index))moves.set(pathKey(entry.source),{root:folder,m:later,state,index});
  }
+ onLater?.(candidates.length,candidates.length,'');
  return moves;
 }
 /** The hand-off for an entry whose file is gone from its destination: a later complete journal moved
@@ -552,11 +586,11 @@ async function findHandOff(m:Manifest,index:number,state:JournalState,moves:Succ
  * published copy, or one whose original was kept or released; older journals record no 'published'). */
 const placed=(state:JournalState,index:number)=>state.renamed.has(index)||state.published.has(index)||!!state.slots.get(index)?.length||state.finalizing.has(index);
 /** Record, before anything moves, each entry a later complete journal has taken over. */
-async function recordHandOffs(m:Manifest,state:JournalState):Promise<void>{
+async function recordHandOffs(m:Manifest,state:JournalState,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<void>{
  let moves:Successors|undefined;
  for(const [index,entry] of m.entries.entries()){
   if(state.handedOff.has(index)||!placed(state,index)||await maybeStat(entry.destination))continue;
-  moves??=await laterMoves(m);
+  moves??=await laterMoves(m,onLater,signal);
   const handOff=await findHandOff(m,index,state,moves);if(!handOff)continue;
   await checkpoint(m,'handed-off',index,{...handOff});state.handedOff.set(index,handOff);
  }
@@ -624,7 +658,7 @@ async function removeSiblingPointers(m:Manifest):Promise<void>{
   try{
    const file=path.join(directory,`journal-${m.id}.json`);
    await contained(file,store.path);const stat=await maybeStat(file);if(!stat?.isFile())continue;
-   await fs.unlink(file);await syncDirectory(directory);
+   await fs.unlink(file);logDeletion('organize',file,'sibling pointer of a finished journal',`pointer file named journal-${m.id}.json kept for a folder this journal listed, now that the journal owns nothing more`);await syncDirectory(directory);
    await fs.rmdir(directory).then(()=>syncDirectory(path.dirname(directory)),()=>{});
    if(store.base===folder)await removeEmptyStore(store);
   }catch{/* Left as an inert pointer; the store cleanup removes it. */}
@@ -641,7 +675,7 @@ async function removeEmptyStore(store:Store):Promise<void>{
  if(names.includes(POINTERS)){if((await fs.readdir(pointers)).some(name=>!finder(name)))return;}
  for(const name of names.filter(finder))await fs.unlink(path.join(store.path,name)).catch(()=>{});
  if(names.includes(POINTERS)){for(const name of await fs.readdir(pointers))await fs.unlink(path.join(pointers,name)).catch(()=>{});await fs.rmdir(pointers);}
- await fs.unlink(path.join(store.path,'store.json'));await fs.rmdir(store.path);await syncDirectory(store.base);
+ await fs.unlink(path.join(store.path,'store.json'));await fs.rmdir(store.path);logDeletion('organize',store.path,'records folder made only for pointers, now empty','it held only its own store record, an empty Pointers folder and Finder bookkeeping',{});await syncDirectory(store.base);
  const beside=path.join(store.base,`._${APP_DATA_FOLDER}`);if((await maybeStat(beside))?.isFile())await fs.unlink(beside).catch(()=>{});
 }
 /** For the store cleanup: a pointer temp file left by a crash, a pointer whose folder is not the one it is kept
@@ -664,8 +698,8 @@ export async function storePointerLeftover(store:Store,file:string):Promise<bool
 }
 /** For the store cleanup: whether journal `id` of `root` is in a terminal state (complete and finalized, undone or
  * superseded). A journal that cannot be read, or is still pending, is not. */
-export async function journalTerminal(root:string,id:string):Promise<boolean>{
- try{return finished(await readEvents(await readManifest(root,id),undefined,undefined,false));}catch{return false;}
+export async function journalTerminal(root:string,id:string,onRead?:(read:number,total:number)=>void):Promise<boolean>{
+ try{return finished(await readEvents(await readManifest(root,id),undefined,onRead,false));}catch{return false;}
 }
 /** Signals a pointer file that cannot be read or trusted; the scan then looks for its journal. */
 class DamagedPointer extends Error{constructor(readonly file:string,readonly id:string,reason:string){super(`Damaged sibling journal pointer ${file} (${reason})`);}}
@@ -772,7 +806,7 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
    // already refuses resume, undo and finalize, so its successor is not read here: a successor's
    // folder removed later (a sibling backup folder) must not block organizing this one. The
    // recovery listing, resume, undo and finalize still check that successor in full.
-   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false);
+   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:id}),false,signal);
    // The backup folders that journal was organized together with may hold its live partners.
    folders.push(...prior.libraries??[]);
    // Superseded journals are skipped even if their log shows unfinished work (left by a
@@ -802,8 +836,9 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
  for(const prior of predecessors){
   checkAbort(signal);
   await locked(lockKey(prior.root,prior.id),async()=>{
-   const state=await readEvents(prior,undefined,undefined,false);
-   if(state.superseded||state.undoComplete)return;if(unfinished(state))throw finish(prior.id);
+   const state=await readEvents(prior,undefined,(completed,total)=>onProgress?.({phase:'verifying',step:'earlier',completed,total,bytes:0,totalBytes:0,speed:0,file:prior.id}),false,signal);
+   if(state.superseded||state.undoComplete){log('detailed','journal','supersession',{prior:prior.id,successor:m.id,decision:'skip',reason:state.superseded?'already superseded':'already undone'});return;}if(unfinished(state)){log('detailed','journal','supersession',{prior:prior.id,successor:m.id,decision:'blocked',reason:'prior organization is unfinished'});throw finish(prior.id);}
+   log('detailed','journal','supersession',{prior:prior.id,successor:m.id,decision:'superseded',reason:'prior journal is complete and fully finalized, undone or otherwise finished'});
    await checkpoint(prior,'superseded',undefined,{successor:m.id,...(prior.root!==m.root?{successorRoot:m.root}:{})});
   });
  }
@@ -876,7 +911,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
  let source=await maybeStat(entry.source),target=await maybeStat(entry.destination);
  if(state.renameIntent.has(index)){
   // Finish or redo an interrupted move from what is on disk.
-  if(source&&target&&sameHardLink(source,target)){await fs.unlink(entry.source);await finishMove(entry,index,m,state,note);return 'moved';}
+  if(source&&target&&sameHardLink(source,target)){await fs.unlink(entry.source);logDeletion('organize',entry.source,'second name of a file whose move was interrupted','source and destination are two hard links of one inode (same device, inode, link count >= 2)',{destination:entry.destination});await finishMove(entry,index,m,state,note);return 'moved';}
   if(source&&target&&source.dev===target.dev&&source.ino===target.ino)throw new Error(`Two names point at one file entry without a hard link; nothing was removed. Check the drive: ${entry.source}`);
   // An inode number can be reused on exFAT; confirm the contents before accepting the move.
   if(!source&&target&&movedIdentity(target,entry,state.dated.get(index))&&await digest(entry.destination,signal)===entry.digest){await finishMove(entry,index,m,state,note);return 'moved';}
@@ -896,6 +931,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
   source=await fs.lstat(entry.source,{bigint:true});target=await fs.lstat(entry.destination,{bigint:true});
   if(!sameHardLink(source,target))throw appeared();
   await fs.unlink(entry.source);
+  log('trace','organize','moved',{from:entry.source,to:entry.destination,method:'link+unlink',bytes:entry.size,index});
  } catch(error) {
   if(code(error)==='EEXIST')throw appeared();
   if(code(error)==='EXDEV'){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}
@@ -913,7 +949,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
 const verifiedPasses=new Map<string,Map<number,string>>();
 async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{full?:boolean;appleDouble?:AppleDoubleCleaner}={}):Promise<ReorganizationResult> {
  // A journal written one file per event can hold tens of thousands: its first read reports how many are read.
- const state=await readEvents(m,undefined,(completed,total,name)=>onProgress?.({phase:'verifying',step:'history',completed,total,bytes:0,totalBytes:0,speed:0,file:name??m.id}));
+ const state=await readEvents(m,undefined,(completed,total,name)=>onProgress?.({phase:'verifying',step:'history',completed,total,bytes:0,totalBytes:0,speed:0,file:name??m.id}),true,signal);
  if(state.converting)throw new MessageError('error.recordsConverting');
  if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
  if(state.undoComplete||state.undone.size)throw new Error(`Organization ${m.id} was undone`);
@@ -944,7 +980,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  const progress=(file:string)=>onProgress?.({phase:'copying',step:'moving',completed,total:m.entries.length,bytes,totalBytes,speed:bytes/Math.max((performance.now()-started)/1000,0.001),file,...renames});
  // Verify the whole batch before moving any source, including completed jobs.
  try {
-  await roots(m);await writeSiblingPointers(m);await recordHandOffs(m,state);await supersedePriorOrganizations(m,signal,onProgress,state);
+  await roots(m);await writeSiblingPointers(m);await recordHandOffs(m,state,(completed,total,file)=>onProgress?.({phase:'verifying',step:'later',completed,total,bytes:0,totalBytes:0,speed:0,file}),signal);await supersedePriorOrganizations(m,signal,onProgress,state);
   // Moves cannot wait for a later check: confirm every file that will move, by stat
   // only, before the first one does. Any change stops the run with nothing moved.
   if(m.strategy==='rename')for(const [index,entry] of m.entries.entries()){
@@ -1092,14 +1128,16 @@ export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'r
 /** The files (relative to `root`, with `/`) that an earlier, still live journal of this library placed or kept. Removing
  * one supersedes that journal, which ends its Undo, so Remove duplicates warns before it does. Best effort: a
  * journal that cannot be read is skipped. */
-export async function placedByEarlierJournals(root:string,signal?:AbortSignal):Promise<Set<string>> {
+export async function placedByEarlierJournals(root:string,signal?:AbortSignal,/** Which journal it is on (1-based, of how many) and how many of its records are read. */onProgress?:(update:{journal:number;journals:number;read:number;total:number;file:string})=>void):Promise<Set<string>> {
  const placed=new Set<string>();
  let ids:string[];
  try{ids=(await journalsIn(root)).map(journal=>journal.id);}catch{return placed;}
+ let at=0;
  for(const id of ids){
   checkAbort(signal);
+  const journal=++at;onProgress?.({journal,journals:ids.length,read:0,total:0,file:id});
   try{
-   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,undefined,false);
+   const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(read,total)=>onProgress?.({journal,journals:ids.length,read,total,file:id}),false,signal);
    if(state.superseded||state.undoComplete)continue;
    for(const entry of prior.entries)placed.add(path.relative(root,entry.destination).split(path.sep).join('/'));
   }catch(error){if(isAbort(error))throw error;}
@@ -1138,7 +1176,7 @@ export async function resumeOrganization(root:string,id:string,signal?:AbortSign
 /** Listing skips media reads. A recheck reads file contents for every entry the first time in a session
  * and for a full recheck, and later only for entries changed since their last verified pass (on exFAT and
  * FAT "changed" means size or dates; finalize and undo always read contents). */
-export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string})=>void}={}):Promise<OrganizationRecovery[]> {
+export async function getOrganizationRecovery(root:string,options:{verifyContents?:boolean;/** Also list replaced and fully undone organizations, whose recovery files can only be deleted. */includeEnded?:boolean;/** Hears how far this folder's journals are read: the share (0 to 1), entries looked at so far, and the journal or event file it is on. */onProgress?:(update:{share:number;looked:number;file:string;/** While a journal's events are read: bytes read so far and in all. */read?:number;total?:number;/** While a later organization is looked for that took this one's files over. */later?:{done:number;total:number}})=>void;/** Stops the listing between files; finished journals read so far are kept for the next listing. */signal?:AbortSignal}={}):Promise<OrganizationRecovery[]> {
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(await fs.realpath(root)!==root)throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
@@ -1147,18 +1185,20 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  for(const {id,error} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error});
  // The earlier version's journals are listed as being converted; nothing of them is read here.
  for(const id of (await legacyJournalIds(root)).filter(id=>!ids.includes(id)))jobs.push({id,root,converting:true,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false});
- const report=(position:number,within:number,file:string)=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file});
+ const report=(position:number,within:number,file:string,counts?:{read:number;total:number},later?:{done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(later?{later}:{})});
+ const {signal}=options;
  report(0,0,'');
  for(const [position,id] of ids.entries()) {
+  checkAbort(signal);
   const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
-  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id));if(state.converting){job.converting=true;jobs.push(job);continue;}if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
+  try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id,{read,total}),true,signal);if(state.converting){job.converting=true;jobs.push(job);continue;}if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
    if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
-    looked++;if(index%50===0)report(position,.5+.5*index/Math.max(1,m.entries.length),id);
+    looked++;checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);
     // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
-    if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m))){
+    if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m,(done,total,file)=>report(position,.5,file||id,undefined,{done,total}),signal))){
      // Any kept original of it stays, but is not among those a finalize would release.
      job.completed++;continue;
     }
@@ -1190,7 +1230,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
    }
    if(all&&state.complete)job.status='complete';
    job.finalizable=job.status==='complete'&&job.retainedFiles!>0&&!state.finalizing.size;
-  }catch(error){job.error=error instanceof Error?error.message:String(error);}
+  }catch(error){if(isAbort(error))throw error;job.error=error instanceof Error?error.message:String(error);}
   jobs.push(job);
  }
  return jobs;
@@ -1201,7 +1241,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
 export interface OrganizationFinalization {removed:number;bytes:number;finalized:number;handedOff:number;}
 /** Finalize and undo first check every entry, then change them: `completed` is the entry being
  * handled, 1-based, out of `total` journal entries. */
-export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'deleting';completed:number;total:number;file:string;}
+export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'deleting'|'history'|'later'|'measuring';completed:number;total:number;file:string;}
 /** Explicitly release verified retained duplicates; never delete ordinary source paths.
  * All finalized entries become target-based, allowing a separate explicit
  * dedupe to remove unrelocated duplicate source paths. This call never does so.
@@ -1210,33 +1250,36 @@ export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'
  */
 export async function finalizeOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationFinalization>{
  return locked(lockKey(root,id),async()=>{
-  checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
+  // Every slow call inside an entry can repeat the last report, so a long entry never looks frozen.
+  let last:OrganizationProgress|undefined;const report=(progress:OrganizationProgress)=>{last=progress;onProgress?.(progress);},tick=()=>{if(last)onProgress?.(last);};
+  checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);
   if(state.converting)throw new MessageError('error.recordsConverting');
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
   // A finalize in progress still owns its files: its pointers stay until it finishes.
-  await writeSiblingPointers(m);await recordHandOffs(m,state);
+  await writeSiblingPointers(m);await recordHandOffs(m,state,(completed,total,file)=>onProgress?.({step:'later',completed,total,file}),signal);
   // Check every entry before authorizing the first deletion, including entries
   // that stay at their original paths and previously finalized destinations.
   for(const [index,entry]of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
+   checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
    if(state.undone.size)throw new Error('This organization was undone');
    // A later organization took this file over: its kept original, if any, is kept, not released
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
    if(state.renamed.has(index)){const target=await maybeStat(entry.destination);if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
-   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');continue;}
+   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal))throw new Error('Finalized destination unavailable');tick();continue;}
    const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!entry.move)await parents(entry,m);
    if(entry.move){
     if(source)throw new Error('Original path reappeared; retained originals preserved');
-    if(saved)await validateOriginal(saved,entry,scopeOf(m),true,signal);
+    if(saved){await validateOriginal(saved,entry,scopeOf(m),true,signal);tick();}
     else if(!state.finalizing.has(index))throw new Error('Retained original unavailable without a finalization intent');
    }else if(!state.finalizing.has(index))await validateOriginal(entry.source,entry,m.source,false,signal);
    if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable; retained originals preserved');
+   tick();
   }
   const result:OrganizationFinalization={removed:0,bytes:0,finalized:0,handedOff:0};
   for(const [index,entry]of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
+   checkAbort(signal);report({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index))){result.handedOff++;continue;}
    // A moved file has no kept duplicate to release.
    if(state.renamed.has(index))continue;
@@ -1247,19 +1290,20 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    // Publish and synchronize the remaining copy before the authenticated intent.
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    if(!await targetMatches(entry,m,signal))throw new Error('Destination unavailable; retained originals preserved');
-   await syncFile(entry.destination);await syncParents(entry.destination,m.root);
+   tick();await syncFile(entry.destination);await syncParents(entry.destination,m.root);tick();
    if(!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed while synchronizing');
    if(!entry.move){
     if(saved)throw new Error('Unexpected retained original');
     if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal);await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
    }else if(saved){
-    await validateOriginal(saved,entry,scopeOf(m),true,signal);const originalStat=await fs.lstat(saved,{bigint:true});
+    await validateOriginal(saved,entry,scopeOf(m),true,signal);tick();const originalStat=await fs.lstat(saved,{bigint:true});
     if(!state.finalizing.has(index)){await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
     checkAbort(signal);await roots(m);await contained(saved,scopeOf(m));await contained(entry.destination,m.root);
     if(await maybeStat(entry.source)||!matches(await fs.lstat(saved,{bigint:true}),snapshot(originalStat))||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('A verified file changed before finalization');
-    await fs.unlink(saved);await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
+    await fs.unlink(saved);logDeletion('release',saved,'retained original released after the organization was finalized',`SHA-256 ${entry.digest} validated at the retained copy and at the organized file ${entry.destination}; the original path is empty; both files unchanged until removal`,{bytes:entry.size,destination:entry.destination,duplicatesJournal:m.kind==='duplicates'});tick();await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
    }else if(!state.finalizing.has(index))throw new Error('Retained original disappeared before authorization');
    if(!state.finalized.has(index)){await checkpoint(m,'finalized',index);state.finalized.add(index);}
+   tick();
    result.finalized++;
   }
   await removeSiblingPointers(m);
@@ -1277,14 +1321,15 @@ export interface OrganizationUndo {restored:number;removed:number;handedOff:numb
  * so a finalized organization is refused. Nothing is overwritten or removed unchecked. */
 export async function undoOrganization(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void):Promise<OrganizationUndo>{
  return locked(lockKey(root,id),async()=>{
-  checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m);
+  let last:OrganizationProgress|undefined;const report=(progress:OrganizationProgress)=>{last=progress;onProgress?.(progress);},tick=()=>{if(last)onProgress?.(last);};
+  checkAbort(signal);const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);
   if(state.converting)throw new MessageError('error.recordsConverting');
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(state.finalizing.size||state.finalized.size)throw new Error('Kept originals were already released, so this organization cannot be undone');
   const result:OrganizationUndo={restored:0,removed:0,handedOff:0};
   if(state.undoComplete)return result;
   // Until the undo completes, the folders it restores into must be found by other organizations.
-  await writeSiblingPointers(m);await recordHandOffs(m,state);
+  await writeSiblingPointers(m);await recordHandOffs(m,state,(completed,total,file)=>onProgress?.({step:'later',completed,total,file}),signal);
   // A file a later organization took over stays with it: undoing that one brings it back first.
   const handedOff=async(index:number)=>{const handOff=state.handedOff.get(index);return !!handOff&&!await maybeStat(m.entries[index]!.destination)&&!!await maybeStat(handOff.destination);};
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
@@ -1319,22 +1364,22 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   // from both places are all named, and nothing is changed.
   const missing:string[]=[];
   for(const [index,entry] of m.entries.entries()){
-   checkAbort(signal);onProgress?.({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});if(state.undone.has(index))continue;
+   checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});if(state.undone.has(index))continue;
    await contained(entry.source,m.source);await contained(entry.destination,m.root);
-   if(await handedOff(index))continue;
+   if(await handedOff(index))continue;tick();
    if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
-   const saved=await savedOriginal(m,index,state);
-   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,scopeOf(m),true,signal);}
+   const saved=await savedOriginal(m,index,state);tick();
+   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,scopeOf(m),true,signal);tick();}
   }
   if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
   for(const [step,index] of [...m.entries.keys()].reverse().entries()){
-   checkAbort(signal);onProgress?.({step:'restoring',completed:step+1,total:m.entries.length,file:m.entries[index]!.source});if(state.undone.has(index))continue;await roots(m);
+   checkAbort(signal);report({step:'restoring',completed:step+1,total:m.entries.length,file:m.entries[index]!.source});if(state.undone.has(index))continue;await roots(m);
    const entry=m.entries[index]!,handed=await handedOff(index);if(handed)result.handedOff++;
    // A moved file a later organization took over is left with it; a kept original still comes back.
    if(handed&&moved(index)){}
    else if(moved(index)){
     const where=await movedState(index,entry);
-    if(where==='pair'){await fs.unlink(entry.destination);await syncParents(entry.destination,m.root);}
+    if(where==='pair'){await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'organized name removed while undoing a move','the original path and this name are two hard links of one inode',{restoredTo:entry.source});await syncParents(entry.destination,m.root);}
     else if(where==='moved')await restore(entry.destination,entry.source);
     if(where!=='none'){
      // Restore the reviewed Modified date; the bytes were never changed.
@@ -1348,16 +1393,16 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     }
    } else {
     const saved=await savedOriginal(m,index,state);
-    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;}
+    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;tick();}
     // Only a copy this organization published is removed, and only once the reviewed
     // original is verified at its own path, so the copy is never the last one.
     if(state.published.has(index)&&await maybeStat(entry.destination)&&await maybeStat(entry.source)){
      // Restoring a kept original moves its change time; its contents are still hashed.
-     await validateOriginal(entry.source,entry,m.source,true,signal);
-     if(await targetMatches(entry,m,signal)){await fs.unlink(entry.destination);await syncParents(entry.destination,m.root);result.removed++;}
+     await validateOriginal(entry.source,entry,m.source,true,signal);tick();
+     if(await targetMatches(entry,m,signal)){tick();await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'copy this organization published, removed by Undo',`the original was restored and verified at ${entry.source} (SHA-256 ${entry.digest}) and this copy still matched the journal`,{bytes:entry.size});await syncParents(entry.destination,m.root);result.removed++;}
     }
    }
-   await checkpoint(m,'undone',index);state.undone.add(index);
+   tick();log('trace','undo','entry-undone',{index,source:entry.source,destination:entry.destination});await checkpoint(m,'undone',index);state.undone.add(index);
   }
   await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
   await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:0,retainedBytes:0,status:'undone'});
@@ -1390,15 +1435,30 @@ async function readEventFile(file:string,tooBig:()=>Error):Promise<string>{
  }finally{await handle.close();}
 }
 /** Files and bytes under `folder`; links are counted, not followed. */
-async function tally(folder:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
- let files=0,bytes=0;const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
- // Several at a time: a journal from an earlier version holds tens of thousands of small files.
+/** Files and bytes under `folder`; links are counted, not followed. `onFiles` hears the running count. */
+async function tally(folder:string,signal?:AbortSignal,onFiles?:(files:number,estimate:number)=>void):Promise<{files:number;bytes:number}>{
+ const total={files:0,bytes:0};let estimate=0;
+ const walk=async(current:string):Promise<void>=>{
+  const entries=await fs.readdir(current,{withFileTypes:true});let next=0;estimate+=entries.length;
+  // Several at a time: a journal from an earlier version holds tens of thousands of small files.
+  await Promise.all(Array.from({length:Math.min(await journalReaderCount(current),entries.length)},async()=>{while(next<entries.length){
+   checkAbort(signal);const entry=entries[next++]!,file=path.join(current,entry.name);
+   if(entry.isDirectory())await walk(file);
+   else{const stat=await maybeStat(file);if(stat){total.files++;total.bytes+=Number(stat.size);onFiles?.(total.files,Math.max(estimate,total.files));}}
+  }}));
+ };
+ onFiles?.(0,0);await walk(folder);
+ return total;
+}
+/** Remove a folder and everything in it, counting the files as they go; a stop leaves what is left of it. */
+export async function removeTree(folder:string,signal?:AbortSignal,onFile?:(removed:number)=>void,counter={removed:0}):Promise<void>{
+ const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
  await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),entries.length)},async()=>{while(next<entries.length){
   checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);
-  if(entry.isDirectory()){const inner=await tally(file,signal);files+=inner.files;bytes+=inner.bytes;}
-  else{const stat=await maybeStat(file);if(stat){files++;bytes+=Number(stat.size);}}
+  if(entry.isDirectory())await removeTree(file,signal,onFile,counter);
+  else{await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});onFile?.(++counter.removed);}
  }}));
- return {files,bytes};
+ await fs.rmdir(folder);
 }
 /** This journal's pointers (and their crash leftovers) in the folders it leaves them in. */
 async function ownPointers(m:Manifest):Promise<{file:string;folder:string;size:number}[]>{
@@ -1416,9 +1476,9 @@ async function journalFolder(m:Manifest):Promise<string>{
  return folder;
 }
 /** What deleting this organization's recovery files would remove: files and bytes. */
-export async function measureOrganizationRecovery(root:string,id:string,signal?:AbortSignal):Promise<{files:number;bytes:number}>{
+export async function measureOrganizationRecovery(root:string,id:string,signal?:AbortSignal,/** Files counted so far, and an estimate of all (the entries found so far). */onFiles?:(files:number,estimate:number)=>void):Promise<{files:number;bytes:number}>{
  const m=await openJournal(await locateJob(root,id),root,id,false);
- const size=await tally(await journalFolder(m),signal);
+ const size=await tally(await journalFolder(m),signal,onFiles);
  for(const pointer of await ownPointers(m)){size.files++;size.bytes+=pointer.size;}
  return size;
 }
@@ -1431,21 +1491,23 @@ function deletable(m:Manifest,state:JournalState):void{
  * go first; without this journal, they could no longer be checked. Read in this journal's folder, the
  * folders it lists or leaves pointers in, its neighbours, the folders pointers here name, and the folders
  * each journal found lists. A journal that cannot be read stops the deletion: it may name this one. */
-async function dependents(m:Manifest):Promise<string[]>{
- const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
+async function dependents(m:Manifest,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<string[]>{
+ let done=0,found=0;const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
  for(const {store,file} of await pointersIn(m.root).catch(()=>[])){const pointed=await siblingPointer(m.root,file,store.path).catch(()=>undefined);if(pointed&&!folders.includes(pointed))folders.push(pointed);}
  const unreadable=(id:string,folder:string,error:unknown)=>new Error(`Organization ${id} in ${folder} cannot be read, so it is not known whether it still relies on this one; nothing was deleted (${error instanceof Error?error.message:String(error)})`);
  for(let position=0;position<folders.length;position++){
   const folder=folders[position]!;
   // Only a journal converted from the earlier version can be named by one not converted yet: those go first.
   if(where(m).convertedFrom)await refuseUnconverted(folder);
-  for(const {id} of await journalsIn(folder)){
-   if(id===m.id)continue;
+  const listed=(await journalsIn(folder)).filter(journal=>journal.id!==m.id);
+  found+=listed.length;onLater?.(done,found,folder);
+  for(const {id} of listed){
+   checkAbort(signal);onLater?.(done++,found,id);
    // One another host signed was never written by this app.
    const other=await readManifest(folder,id).catch(error=>{if(code(error)==='ENOENT'||error instanceof Error&&error.message.startsWith('Recovery journal authentication failed'))return undefined;throw unreadable(id,folder,error);});
    if(!other)continue;
    for(const library of other.libraries??[])if(!folders.includes(library))folders.push(library);
-   const state=await readEvents(other,undefined,undefined,false).catch(error=>{throw unreadable(id,folder,error);});
+   const state=await readEvents(other,undefined,undefined,false,signal).catch(error=>{if(isAbort(error))throw error;throw unreadable(id,folder,error);});
    const replaced=state.superseded===m.id&&(state.successorRoot??other.root)===m.root;
    const handed=!state.undoComplete&&[...state.handedOff.values()].some(handOff=>handOff.successor===m.id&&handOff.successorRoot===m.root);
    if(replaced||handed)names.push(id);
@@ -1536,8 +1598,8 @@ function forgetJournal(id:string):void{
  * of every listing. */
 export async function deleteOrganizationRecovery(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void,options:{/** The store cleanup: never releases a kept original; refused if one would have to be. */automatic?:boolean}={}):Promise<RecoveryDeletion>{
  const check=async()=>{
-  const m=await readManifest(root,id),state=await readEvents(m);deletable(m,state);
-  const needed=await dependents(m);
+  const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);deletable(m,state);
+  const needed=await dependents(m,(done,total,file)=>onProgress?.({step:'later',completed:done,total,file}),signal);
   if(needed.length)throw new Error(`Organization ${needed.join(', ')} still relies on this organization's records; delete ${needed.length===1?'that one':'those'} first`);
   return {m,state};
  };
@@ -1552,16 +1614,19 @@ export async function deleteOrganizationRecovery(root:string,id:string,signal?:A
  return locked(lockKey(root,id),async()=>{
   checkAbort(signal);const {m,state}=await check(),folder=await journalFolder(m);
   await checkJournalFolder(m,state,folder,signal,onProgress);
-  const size=await tally(folder,signal),pointers=await ownPointers(m);
+  const size=await tally(folder,signal,(files,estimate)=>onProgress?.({step:'measuring',completed:files,total:estimate,file:folder})),pointers=await ownPointers(m);
   checkAbort(signal);
   const parent=path.dirname(folder),aside=path.join(parent,`deleting-${id}-${randomUUID()}`);await contained(aside,scopeOf(m));
   if(await renameChecked(folder,aside)!=='done')throw new Error(`Unable to set ${folder} aside`);
   forgetJournal(id);
   onProgress?.({step:'deleting',completed:0,total:size.files,file:folder});
-  await fs.rm(aside,{recursive:true,force:true});await syncDirectory(parent);
+  // File by file, so the count moves; a stop leaves the folder set aside, which the store cleanup removes.
+  await removeTree(aside,signal,removed=>onProgress?.({step:'deleting',completed:removed,total:size.files,file:folder}));
+  logDeletion('recovery',folder,options.automatic?'ended organization records deleted by the automatic cleanup':'recovery files deleted at the user\'s request (Delete recovery files)',`journal ${id} checked: finished, finalized or undone, no kept original without a checked copy elsewhere, no other journal naming it; ${size.files} files, ${size.bytes} bytes set aside under a deleting- name (both names checked) before removal`,{files:size.files,bytes:size.bytes});
+  await syncDirectory(parent);
   result.files+=size.files;result.bytes+=size.bytes;
   for(const pointer of pointers){
-   try{await fs.unlink(pointer.file);await syncDirectory(path.dirname(pointer.file));result.files++;result.bytes+=pointer.size;}catch{/* Left as an inert pointer; the store cleanup removes it. */}
+   try{await fs.unlink(pointer.file);logDeletion('recovery',pointer.file,'sibling pointer of the deleted recovery journal',`pointer belongs to journal ${id}`,{bytes:pointer.size});await syncDirectory(path.dirname(pointer.file));result.files++;result.bytes+=pointer.size;}catch{/* Left as an inert pointer; the store cleanup removes it. */}
    await fs.rmdir(path.dirname(pointer.file)).then(()=>syncDirectory(path.dirname(path.dirname(pointer.file))),()=>{});
   }
   onProgress?.({step:'deleting',completed:size.files,total:size.files,file:folder});
@@ -1617,12 +1682,12 @@ export const journalConversion={
  /** The header's record of where a journal came from. */
  async convertedFromOf(target:ConversionTarget):Promise<ConvertedFrom|undefined>{return validConvertedFrom((await readJournalHead(target.journal,target.store.path,false)).header.convertedFrom);},
  /** N4: read a journal file (the temporary one, or the committed one) with the v5 reader, without its successor. */
- async replay(target:ConversionTarget,file:string,root:string,id:string):Promise<{manifest:Manifest;state:JournalState}>{
+ async replay(target:ConversionTarget,file:string,root:string,id:string,onRead?:(read:number,total:number,name?:string)=>void):Promise<{manifest:Manifest;state:JournalState}>{
   // A library renamed only by case keeps the name the journal recorded.
   const recorded=(await readJournalHead(file,target.store.path,false)).header.root;
   const claimed=typeof recorded==='string'&&recorded!==root&&pathKey(recorded)===pathKey(root)?recorded:root;
   const m=await openJournal({store:target.store,folder:target.folder,journal:file},claimed,id,true,claimed!==root);
-  try{return {manifest:m,state:await readEvents(m,undefined,undefined,false)};}
+  try{return {manifest:m,state:await readEvents(m,undefined,onRead,false)};}
   finally{for(const key of [...finishedJournals.keys()])if(key.startsWith(file+'\0'))finishedJournals.delete(key);}
  },
  same:(a:JournalState,b:JournalState)=>comparable(a)===comparable(b),

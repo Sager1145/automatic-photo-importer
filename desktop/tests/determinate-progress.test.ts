@@ -85,7 +85,8 @@ test('reading a journal reports the history step with the event file it is on',a
 test('the tracker measures files per second',()=>{
  const tracker=new EtaTracker();
  assert.equal(tracker.measure('x','planning:listing',0,0),undefined);
- assert.ok((tracker.measure('x','planning:listing',500,1000)??0)>0);
+ assert.equal(tracker.measure('x','planning:listing',500,1000),undefined,'a rate needs 2 s of history');
+ assert.ok((tracker.measure('x','planning:listing',1000,2000)??0)>0);
 });
 test('a long path is cut in the middle',()=>{
  const long='2026/'+'folder/'.repeat(20)+'IMG_0001.NEF';

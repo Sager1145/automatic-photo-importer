@@ -69,7 +69,7 @@ export async function migrateDrive(roots:string[],options:Omit<MigrationContext,
    for(const folder of m?journalConversion.pointerFolders(m):[])if(!folders.includes(folder))folders.push(folder);
   }
  }
- for(const folder of folders)await convertPointers(folder,context);
+ for(const [position,folder] of folders.entries()){report('cleanup',position,folders.length,path.basename(folder));await convertPointers(folder,context);}
  // Receipts: one walk per top folder (a folder inside another is walked with it), once.
  const walk:string[]=[];for(const root of options.walk??roots){const real=await fs.realpath(root).catch(()=>undefined);if(real&&!walk.includes(real))walk.push(real);}
  for(const root of walk.filter(root=>!walk.some(other=>beneath(root,other)))){

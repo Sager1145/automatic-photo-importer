@@ -28,6 +28,7 @@ const operations:Operation[]=[
  {name:'import checking',step:'checking',phase:'planning',unit:'files',count:/files checked/,file:true,at:s=>({...base,phase:'planning',step:'checking',...files(s)})},
  {name:'import reading',step:'reading',phase:'planning',unit:'bytes',count:/files read/,file:true,at:s=>({...base,phase:'planning',step:'reading',bytes:s*100e6,completed:s*5})},
  {name:'import comparing',step:'comparing',phase:'planning',unit:'bytes',count:/Checking the destination/,file:true,at:s=>({...base,phase:'planning',step:'comparing',bytes:s*100e6,completed:s*5})},
+ {name:'import locating',step:'locating',phase:'planning',unit:'files',count:/Looking for files already in the backup/,file:true,at:s=>({...base,phase:'planning',step:'locating',...files(s)})},
  {name:'import existing',step:'existing',phase:'planning',unit:'files',count:/already on the destination/,file:true,at:s=>({...base,phase:'planning',step:'existing',...files(s)})},
  {name:'earlier organization',step:'earlier',phase:'verifying',unit:'files',count:/earlier organization/,file:true,at:s=>({...base,phase:'verifying',step:'earlier',...files(s)})},
  {name:'organization history',step:'history',phase:'verifying',unit:'files',count:/organization history/,file:true,at:s=>({...base,phase:'verifying',step:'history',...files(s)})},
@@ -47,6 +48,15 @@ const operations:Operation[]=[
  {name:'delete recovery files',step:'deleting',phase:'copying',unit:'files',count:/files deleted/,file:true,at:s=>({...base,phase:'copying',step:'deleting',...files(s)})},
  {name:'mirror removals',step:'removing',phase:'copying',unit:'files',count:/extra files set aside/,file:true,renames:true,at:s=>({...base,phase:'copying',step:'removing',...files(s),renames:true})},
  {name:'camera download',step:'downloading',phase:'planning',unit:'files',count:/files downloaded/,file:false,at:s=>({...base,phase:'planning',step:'downloading',bytes:0,totalBytes:0,file:'',...files(s)})},
+ {name:'later organizations',step:'later',phase:'verifying',unit:'files',count:/later organizations/,file:true,at:s=>({...base,phase:'verifying',step:'later',...files(s)})},
+ {name:'earlier organization records',step:'records',phase:'planning',unit:'files',count:/earlier organization records/,file:true,at:s=>({...base,phase:'planning',step:'records',...files(s)})},
+ {name:'earlier organizations by journal',step:'journals',phase:'planning',unit:'files',count:/journal 1 of 3/,file:true,at:s=>({...base,phase:'planning',step:'journals',journal:{index:1,count:3},...files(s)})},
+ {name:'converting the record',step:'converting',phase:'planning',unit:'files',count:/Converting the organization record/,file:true,at:s=>({...base,phase:'planning',step:'converting',...files(s)})},
+ {name:'removing old record files',step:'cleaning',phase:'planning',unit:'files',count:/Removing old record files/,file:true,at:s=>({...base,phase:'planning',step:'cleaning',...files(s)})},
+ {name:'measuring recovery files',step:'measuring',phase:'planning',unit:'files',count:/Measuring: \d+ files/,file:true,at:s=>({...base,phase:'planning',step:'measuring',total:1000,...files(s),share:Math.min(.9,s/10)})},
+ {name:'preparing destinations',step:'preparing',phase:'planning',unit:'files',count:/Preparing destinations/,file:true,at:s=>({...base,phase:'planning',step:'preparing',...files(s)})},
+ {name:'comparing the backup with the drive',step:'mirroring',phase:'planning',unit:'files',count:/Comparing the backup with the drive/,file:true,at:s=>({...base,phase:'planning',step:'mirroring',...files(s)})},
+ {name:'loading the destination index',step:'index',phase:'planning',unit:'bytes',count:/Loading the destination index/,file:true,at:s=>({...base,phase:'planning',step:'index',total:10e9,completed:s*100e6,bytes:s*100e6,totalBytes:10e9})},
  {name:'leftover files look',step:'scanning',phase:'planning',unit:'files',count:/files looked at/,file:true,at:s=>({...base,phase:'planning',step:'scanning',completed:s*40,total:0,bytes:0,totalBytes:0,share:Math.min(.9,s/8)})},
 ];
 const stepsOf=(source:string)=>source.match(/step\?:([^;]+);completed/)![1]!.split('|').map(item=>item.trim().replace(/'/g,''));
@@ -71,7 +81,7 @@ for(const item of operations)for(const where of ['job','review','misplaced','res
  const progress=stamp(item,where);
  assert.notEqual(progressFraction(progress),undefined,'a determinate fraction');
  assert.ok(progressFraction(progress)!<=.99+1e-9||progress.step==='checking','never full before the end');
- if(item.unit==='bytes'){assert.ok(progress.speed>0,`bytes/s ${progress.speed}`);assert.ok(!progress.fileRate);}
+ if(item.unit==='bytes'){assert.ok(progress.speed>0,`bytes/s ${progress.speed}`);assert.ok(progress.fileRate!>0,`files/s beside the bytes ${progress.fileRate}`);}
  else{assert.equal(progress.speed,0);assert.ok(progress.fileRate!>0,`files/s ${progress.fileRate}`);}
  assert.ok(progress.eta!==undefined&&progress.eta>0,`time left ${progress.eta}`);
  assert.ok(progress.eta! < 1e6);
@@ -261,4 +271,14 @@ test('the recovery listing reports its share as it reads',async t=>{
  await core.getOrganizationRecovery(root,{includeEnded:true,onProgress:update=>updates.push(update)});
  assert.ok(updates.length>=2&&updates.every(update=>update.share>=0&&update.share<=1));
  assert.ok(updates.at(-1)!.looked>=1);
+});
+
+test('looking for files already in the backup first counts the files listed (no total), then files of the total',()=>{
+ const t=createTranslator('en'),format=(value:number)=>String(value);
+ const listing:Progress={...base,phase:'planning',step:'locating',completed:1200,total:0,totalBytes:0};
+ assert.match(progressCount(listing,t,format,false,value=>`${value} B`),/1200 files found/);
+ assert.equal(progressFraction(listing),0);
+ const counting:Progress={...listing,completed:300,total:1200};
+ assert.match(progressCount(counting,t,format,false,value=>`${value} B`),/Looking for files already in the backup: 300 of 1200/);
+ assert.equal(progressFraction(counting),.25);
 });

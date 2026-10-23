@@ -294,7 +294,9 @@ test('finalizing and undoing report n of x progress through their checking and t
  const p=await singlePlan(root,root,options,metadata);assert.deepEqual((await core.executeReorganization(p,undefined,undefined,{strategy:'rename'})).errors,[]);
  const [job]=await core.getOrganizationRecovery(root);
  const seen:{step:string;completed:number;total:number}[]=[];
- const released=await core.finalizeOrganization(root,job!.id,undefined,progress=>seen.push({step:progress.step,completed:progress.completed,total:progress.total}));
+ // A report may repeat between slow calls inside one entry, so each is a heartbeat; counts are compared without the repeats.
+ const distinct=(list:{step:string;completed:number;total:number}[],item:{step:string;completed:number;total:number})=>{const last=list.at(-1);if(!last||last.step!==item.step||last.completed!==item.completed||last.total!==item.total)list.push(item);};
+ const released=await core.finalizeOrganization(root,job!.id,undefined,progress=>distinct(seen,{step:progress.step,completed:progress.completed,total:progress.total}));
  assert.equal(released.removed,1);
  const checking=seen.filter(item=>item.step==='checking'),releasing=seen.filter(item=>item.step==='releasing');
  assert.deepEqual(checking.map(item=>item.completed),[1,2]);assert.ok(checking.every(item=>item.total===2));
@@ -305,7 +307,7 @@ test('finalizing and undoing report n of x progress through their checking and t
  for(const name of ['C.JPG','D.JPG']){await fs.mkdir(path.join(other,'incoming'),{recursive:true});await fs.writeFile(path.join(other,'incoming',name),name);}
  const q=await singlePlan(other,other,options,metadata);assert.deepEqual((await core.executeReorganization(q,undefined,undefined,{strategy:'rename'})).errors,[]);
  const [moved]=await core.getOrganizationRecovery(other);const undoing:{step:string;completed:number;total:number}[]=[];
- assert.equal((await core.undoOrganization(other,moved!.id,undefined,progress=>undoing.push({step:progress.step,completed:progress.completed,total:progress.total}))).restored,2);
+ assert.equal((await core.undoOrganization(other,moved!.id,undefined,progress=>distinct(undoing,{step:progress.step,completed:progress.completed,total:progress.total}))).restored,2);
  assert.deepEqual(undoing.filter(item=>item.step==='checking').map(item=>item.completed),[1,2]);
  assert.deepEqual(undoing.filter(item=>item.step==='restoring').at(-1),{step:'restoring',completed:2,total:2});
 });
