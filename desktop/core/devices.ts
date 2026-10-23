@@ -106,3 +106,12 @@ export class DeviceStreams {
 }
 /** The process-wide slots: every whole-file stream of every job goes through them. */
 export const streams=new DeviceStreams();
+
+/** Whether another job may start reading a device: jobs on one physical device share its stream
+ * limit (a spinning disk serves one, so two folders on it take turns while folders on other
+ * disks run in parallel). `running` holds the devices of the jobs already going; a source with
+ * no known device (a card reader or camera) is never held back. */
+export function deviceHasRoom(drive:{device:string;kind?:DeviceKind}|undefined,running:readonly ({device:string}|undefined)[]):boolean {
+  if(!drive) return true;
+  return running.filter(item=>item?.device===drive.device).length<STREAMS[drive.kind??'unknown'];
+}

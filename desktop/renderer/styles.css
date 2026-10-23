@@ -1246,3 +1246,9 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .sidebar-drive [data-testid=reveal]{flex:none;opacity:0;transition:opacity .15s ease}
 .sidebar-drive:hover [data-testid=reveal],.sidebar-drive [data-testid=reveal]:focus-visible{opacity:1}
 @media (hover:none){.sidebar-drive [data-testid=reveal]{opacity:1}}
+
+.source-drive{display:inline-flex;align-items:center;gap:.3rem;max-width:100%;min-width:0;font-size:var(--text-caption);color:var(--label-secondary)}
+.source-drive>span:not(.small-tag){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-drive svg{flex:none}
+.source-same-drive{flex-wrap:wrap;justify-content:space-between}
+.source-same-drive p{display:flex;align-items:center;gap:.45rem;margin:0;flex:1 1 16rem}
