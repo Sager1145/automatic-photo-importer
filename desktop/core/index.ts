@@ -665,7 +665,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
       input=await regularHandle(entry.source);
       const before=await input.stat({bigint:true});
       if(before.size!==BigInt(entry.size) || (entry.sourceIdentity!==undefined && statKey(before)!==entry.sourceIdentity)) throw sourceChanged(entry);
-      for(const open of opened) if(!open.staged.record&&importRecoveryAvailable()) try { await open.output.sync(); open.staged.record=await recordPartial('stage',open.staged.file,await open.output.stat({bigint:true}),open.target.entry,open.target.transfer,open.target.recovery); } catch(error) { await abandonStage(open,error); }
+      for(const open of opened) if(!open.staged.record&&importRecoveryAvailable()) try { open.staged.record=await recordPartial('stage',open.staged.file,await open.output.stat({bigint:true}),open.target.entry,open.target.transfer,open.target.recovery); } catch(error) { await abandonStage(open,error); }
       // SHA-256 of exactly the bytes written, computed on a worker thread (the chunk is copied first).
       const hash=hasher(), buffer=Buffer.allocUnsafe(chunk);let position=0,streamDigest:string;
       try {
@@ -805,7 +805,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
     catch(error) { if(creating&&!owned) await clearPartialRecord(creating,transfer.root,recovery).catch(()=>{}); throw error; }
     try {
       if(!owned||creating){
-        await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);
+        owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);
         // The creation receipt only covers receipt -> wx -> this receipt; its name-only binding ends here.
         if(creating) await clearPartialRecord(creating,transfer.root,recovery);
       }
@@ -821,8 +821,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
     }finally{await output.close();}
   }
   await rootUnchanged(transfer.root,transfer.rootIdentity); await contained(destination,transfer.root);
-  // A copy was already synced after its last write and timestamps.
-  if(!copy) await syncFile(destination);
+  // A linked file's data and dates were flushed with the staged copy; the new name is made durable by syncParents below. A copy was flushed after its last write and timestamps.
   if(copy&&options.verify===false) bound=undefined;
   else if(copy) {
     const before=await fs.lstat(destination,{bigint:true});
