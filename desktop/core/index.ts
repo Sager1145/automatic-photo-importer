@@ -21,6 +21,7 @@ import { buildGroups } from '../duplicate-rules';
 import { beginOrganization, importRecoveryAvailable, type OrganizationEntry } from './recovery';
 import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError,toMessage} from '../messages';
+import type {PlacedFile} from '../platform/placement-memory';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
 
@@ -40,7 +41,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;}
+interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -155,10 +156,10 @@ export async function plan(source:string,roots:string[],options:Options,metadata
 /** Read-only check of an organized library: the files in `source` (relative to it) that are not
  * where the folder rules put them under `root` (and the video root of the video-root layout).
  * `source` is the library itself or a folder holding it. Nothing is read beyond names, sizes and metadata. */
-export async function findMisplaced(source:string,root:string,options:Omit<Options,'reorganize'|'misplacedOnly'|'backup'|'drive'>&{backup?:boolean},metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{count:number;bytes:number;files:string[]}> {
-  const {plans:[found]}=await planOnce(source,[root],{...options,backup:false,reorganize:true,misplacedOnly:true},metadata,signal,onProgress);
+export async function findMisplaced(source:string,root:string,options:Omit<Options,'reorganize'|'misplacedOnly'|'backup'|'drive'>&{backup?:boolean},metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{count:number;bytes:number;files:string[];placed:PlacedFile[]}> {
+  const {plans:[found],placed=[]}=await planOnce(source,[root],{...options,backup:false,reorganize:true,misplacedOnly:true},metadata,signal,onProgress);
   const entries=[...found?.entries??[],...found?.videos?.entries??[]];
-  return {count:entries.length,bytes:entries.reduce((sum,entry)=>sum+entry.size,0),files:entries.map(entry=>path.relative(found!.source,entry.source))};
+  return {count:entries.length,bytes:entries.reduce((sum,entry)=>sum+entry.size,0),files:entries.map(entry=>path.relative(found!.source,entry.source)),placed};
 }
 /** Planning progress: `count` files of `detail.total` done. Every plan first checks each file
  * (metadata and identity, without reading contents); library organization then reads the files
@@ -166,7 +167,7 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
 /** step 'listing': files found so far (total and share are estimates, see listing-estimate.ts); 'checking': metadata of every file; 'reading': files organization moves;
  * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, totalBytes 0). */
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates';total:number;bytes:number;totalBytes:number;share?:number})=>void;
-async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates}> {
+async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[]}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
   if(options.reorganize&&roots.length!==1)throw new Error('Review one organization destination at a time.');
@@ -225,12 +226,28 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // files library organization will move or when a same-size file already occupies a destination.
   // Metadata reads overlap (ExifTool runs several processes); issues keep file order.
   const issues:{path:string;message:string}[][]=files.map(()=>[]);let done=0,next=0,failure:unknown;
+  // A library check skips files remembered as in place. A changed file is checked with its neighbours (same folder or
+  // the one above it), so families and companions still see each other's metadata.
+  const trusted=new Set<string>();let trustedFiles:InventoryFile[]=[];
+  if(options.misplacedOnly&&options.inPlace) {
+    let at=0;
+    await Promise.all(Array.from({length:Math.min(files.length,CHECK_CONCURRENCY)},async()=>{
+      while(at<files.length) {
+        const file=files[at++]!;checkAbort(signal);
+        try {const stat=await fs.lstat(file.path,{bigint:true});if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size===BigInt(file.size)&&options.inPlace!(file.relative,file.size,stat.mtimeNs,stat.ino))trusted.add(file.path);}
+        catch(error) {if(isAbort(error))throw error;}
+      }
+    }));
+    const hot=new Set<string>();
+    for(const file of files) if(!trusted.has(file.path)) {const dir=path.dirname(file.path);hot.add(dir);hot.add(path.dirname(dir));}
+    for(const file of files) if(trusted.has(file.path)) {const dir=path.dirname(file.path);if(hot.has(dir)||hot.has(path.dirname(dir)))trusted.delete(file.path);}
+  }
   async function examine(file:InventoryFile,position:number):Promise<void> {
     await contained(file.path,sourceRoot);
     const originalStat=await fs.lstat(file.path,{bigint:true});
     if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new MessageError('error.sourceChanged',{path:file.path});
     mtimes.set(file.path,originalStat.mtime);
-    if(!options.backup && file.kind!=='Other') {
+    if(!options.backup && file.kind!=='Other' && !trusted.has(file.path)) {
       try {const info=await metadata(file.path);for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string)))issues[position]!.push({path:file.path,message});infos.set(file.path,{camera:info.camera,origin:info.origin,date:info.date,edited:info.edited,contentId:info.contentId,make:info.make,fingerprint:info.fingerprint,fields:{}});} catch(error) {if(isAbort(error)) throw error;issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
     }
     if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:file.path});
@@ -245,6 +262,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }));
   if(failure!==undefined) throw failure;
   for(const found of issues) if(found.length) (scan.issues??=[]).push(...found);
+  if(trusted.size) {trustedFiles=files.filter(file=>trusted.has(file.path));files=files.filter(file=>!trusted.has(file.path));}
   // Live Photos: a .mov beside a same-stem HEIC/HEIF/JPG is that still's companion when their ContentIdentifiers
   // agree. When either lacks one, the stem alone decides, but only for an Apple still. This needs the metadata
   // just read, so it runs here rather than in the inventory.
@@ -426,7 +444,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     for(let index=prepared.length-1;index>=0;index--) if(pathKey(path.join(rootOf(prepared[index]!).root,prepared[index]!.relative))===pathKey(prepared[index]!.entry.source)) prepared.splice(index,1);
     if(options.misplacedOnly) {
       const listed=(part:Root,kind:'photos'|'videos'):TransferPlan=>({source:sourceRoot,root:part.root,rootIdentity:part.identity,entries:prepared.filter(item=>item.root===kind).map(({entry,relative})=>({...entry,destination:path.join(part.root,relative)}))});
-      return {inventory:scan,plans:[{...listed(library,'photos'),...(library.videos?{videos:listed(library.videos,'videos')}:{})}],failures:[...failures].map(([path,error])=>({path,error})),problems:[]};
+      const moving=new Set(prepared.map(item=>item.entry.source));
+      const placed=[...trustedFiles,...files].flatMap(file=>{const stat=sourceStats.get(file.path);return stat&&!failures.has(file.path)&&!moving.has(file.path)?[{relative:file.relative,size:file.size,mtimeNs:stat.mtimeNs,ino:stat.ino}]:[];});
+      return {inventory:scan,plans:[{...listed(library,'photos'),...(library.videos?{videos:listed(library.videos,'videos')}:{})}],failures:[...failures].map(([path,error])=>({path,error})),problems:[],placed};
     }
     let position=0,hashed=0,hashedBytes=0;const movingBytes=prepared.reduce((sum,{entry})=>sum+entry.size,0);
     await Promise.all(Array.from({length:Math.min(prepared.length,PLAN_CONCURRENCY)},async()=>{
