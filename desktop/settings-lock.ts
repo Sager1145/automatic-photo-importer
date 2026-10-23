@@ -5,7 +5,7 @@ export const activeJobPhases:readonly string[]=['discovering','verifying','copyi
 
 /** Settings a job reads while it runs or when it continues after a pause; changing one midway
  * could file half a job one way and half another, so they wait until every job has fully stopped. */
-export const jobPreferences:ReadonlySet<string>=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','removeEmptySourceFolders','collectProblemFiles','releaseDuplicatesAfterOrganizing','autoOrganizeBackup','unknownDefault','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder']);
+export const jobPreferences:ReadonlySet<string>=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','removeEmptySourceFolders','collectProblemFiles','removeAppleDouble','releaseDuplicatesAfterOrganizing','autoOrganizeBackup','unknownDefault','basePath','template','mediaLayout','videoBasePath','videoTemplate','allowFolderSource','editedFolder']);
 
 /** True while any job is running, queued or paused, or a review is open or being built, or a source is scanned. */
 export function settingsLocked(state:Pick<AppState,'jobs'>&{review?:unknown;busyReview?:unknown;scanningSources?:readonly string[]}):boolean {

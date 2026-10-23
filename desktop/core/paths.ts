@@ -45,6 +45,8 @@ export async function syncDirectory(folder:string):Promise<void> {
 // A sync in progress is shared: a caller that would skip the folder waits for it instead, and
 // gets its failure, so nobody returns before the folder is on disk.
 const changedFolders=new Set<string>(),durableFolders=new Set<string>(),syncing=new Map<string,Promise<void>>();
+/** A folder whose entries changed outside a publication (a file removed from it): the next synchronization that passes through it as an ancestor covers it. */
+export function markFolderChanged(folder:string):void {changedFolders.add(folder);}
 export async function syncParents(file:string,root:string):Promise<void> {
   for(let folder=path.dirname(file),own=true;;folder=path.dirname(folder),own=false){
     // An ancestor unchanged since a sync of it started is covered by that sync.

@@ -5,7 +5,7 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
-const sidecars=new Set('xmp aae thm xml moi wav m4a mp3 aac srt dop cos'.split(' '));
+export const sidecars=new Set('xmp aae thm xml moi wav m4a mp3 aac srt dop cos'.split(' '));
 const videoOnly=new Set('xml moi srt thm wav m4a mp3 aac'.split(' '));
 /** Low-resolution proxies: real video, kept with their original or imported alone. */
 const proxies=new Set(['lrf','lrv']);

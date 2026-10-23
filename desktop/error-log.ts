@@ -5,7 +5,7 @@ export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
 /** An error failed or stopped something. A warning is informational: nothing was left undone. */
 export type Severity='error'|'warning';
 /** Message keys that are only ever warnings. Every other key is an error. */
-const warningKeys=new Set<string>(['error.userSkipped','error.folderCleanup','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped']);
+const warningKeys=new Set<string>(['error.userSkipped','error.folderCleanup','job.appleDouble','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped']);
 /** The severity a message has by itself: informational notes are warnings, anything that failed or stopped a job is an error.
  * A file skipped on purpose (by the user) is a warning; a file skipped because it failed is an error. Metadata problems (kind 'metadata') are warnings: the file is still handled. */
 export function severityOf(value:Message,kind?:ErrorKind):Severity{
