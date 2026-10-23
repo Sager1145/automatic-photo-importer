@@ -15,3 +15,11 @@ export function settingsLocked(state:Pick<AppState,'jobs'>&{review?:unknown;busy
 
 /** The keys of a settings change that must wait until nothing is running. */
 export function lockedPreferenceKeys(patch:Partial<Preferences>):string[] {return Object.keys(patch).filter(key=>jobPreferences.has(key));}
+
+/** Display and queue settings that apply at once, even while work is active. */
+export const livePreferences:ReadonlySet<string>=new Set(['language','appearance','sourceLayout','showDashboard','textScale','accent','parallel','automatic']);
+
+/** The part of a settings change to apply: live keys always, job keys only when nothing locks them; the rest is dropped silently. */
+export function acceptedPreferences(patch:Partial<Preferences>,locked:boolean):Partial<Preferences> {
+ return Object.fromEntries(Object.entries(patch).filter(([key])=>livePreferences.has(key)||!locked&&jobPreferences.has(key))) as Partial<Preferences>;
+}

@@ -27,3 +27,19 @@ test('only settings a job depends on are locked; display and queue settings neve
  assert.deepEqual(lockedPreferenceKeys({template:'{year}',language:'ja',parallel:3,mediaLayout:'flat'}),['template','mediaLayout']);
  assert.deepEqual(lockedPreferenceKeys({language:'ja',textScale:1.5,automatic:true}),[]);
 });
+
+test('the preferences handler drops locked keys while busy, paused or queued, and keeps the stored value', async () => {
+  const { acceptedPreferences } = await import('../settings-lock');
+  const { normalizePreferences } = await import('../preferences');
+  const before = normalizePreferences({ template: '{year}', mediaLayout: 'flat', parallel: 2, language: 'en' });
+  const patch = { template: '{camera}', mediaLayout: 'year', parallel: 4, language: 'ja' } as unknown as Partial<typeof before>;
+  for (const jobs of [[job('copying')], [job('queued')], [job('stopped', { paused: true })]]) {
+    const accepted = acceptedPreferences(patch, settingsLocked(state(jobs)));
+    assert.deepEqual(accepted, { parallel: 4, language: 'ja' });
+    const after = normalizePreferences({ ...before, ...accepted }, before);
+    assert.equal(after.template, before.template);
+    assert.equal(after.mediaLayout, before.mediaLayout);
+    assert.equal(after.parallel, 4);
+  }
+  assert.deepEqual(acceptedPreferences(patch, settingsLocked(state([]))), patch);
+});
