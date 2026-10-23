@@ -596,7 +596,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   rememberPlaced(plans,prefs);
   if(errors.length===0)rememberRouted(plans,prefs);
   // Files actually verified where an older rule filed them (a family that failed is not counted).
-  const olderRules=routed;
+  const olderRules=routed??0;
   await saveReport('execution.json',{copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings:reported,notes,appleDouble,...(prepared.elsewhere?{olderRules:{files:olderRules,partialFamilies:prepared.elsewhere.partialFamilies,skippedSizeGroups:prepared.elsewhere.skipped.map(item=>({...item,reason:'skipped: too many same-size files'})),paths:olderRulesPaths(plans)}}:{}),skipErrors:prepared.skipErrors,failedCount:failed.length,failed});
   const volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
   if(volume&&!qa&&Object.keys(verified).length)await rememberImported(app.getPath('userData'),volume,job.source.path,verified).catch(()=>{/* Only a cache. */});
