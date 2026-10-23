@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {folderDrive,otherMacMounts,parseLinuxVolumes,parseMacVolume,parseWindowsVolumes,rememberVolumes,singleFlight,volumeOf,type MountedVolume} from '../platform/volumes';
+import {folderDrive,otherMacMounts,volumeAt,parseLinuxVolumes,parseMacVolume,parseWindowsVolumes,rememberVolumes,singleFlight,volumeOf,type MountedVolume} from '../platform/volumes';
 
 const known:MountedVolume={path:'/',name:'Macintosh HD',volumeId:'A551DA84-858E-4A31-A7FA-16BD0FCEC7CE',physicalId:'disk3'};
 const failed=(reason='diskutil timed out'):PromiseSettledResult<MountedVolume>=>({status:'rejected',reason:new Error(reason)});
@@ -75,4 +75,13 @@ test('the macOS snapshot also holds local disks mounted outside /Volumes, so the
   '/dev/disk5s1 on /private/var/folders/T/exfat (2)/m (exfat, local, nodev, nosuid, noowners, noatime, nobrowse, fskit, mounted by me)',
   '//me@nas/photos on /Users/me/nas (smbfs, nodev, nosuid, mounted by me)'].join('\n');
  assert.deepEqual(otherMacMounts(table),['/private/var/folders/T/exfat (2)/m']);
+});
+
+test('one path\'s volume is described from its own mount, not a sweep of every disk',async()=>{
+ const described:string[][]=[];
+ const describe=async(mounts:string[])=>{described.push(mounts);return mounts.map(mount=>({path:mount,volumeId:`${mount}-UUID`,kind:'hdd' as const,fsType:'exfat'}));};
+ const mounts=async()=>['/','/Volumes/A','/Volumes/AB','/Volumes/A/Nested'];
+ assert.deepEqual(await volumeAt('/Volumes/A/DCIM/100',{mounts,describe}),{path:'/Volumes/A',volumeId:'/Volumes/A-UUID',kind:'hdd',fsType:'exfat'});
+ assert.deepEqual(described,[['/Volumes/A']]);
+ assert.equal((await volumeAt('/Users/me',{mounts,describe}))?.path,'/');
 });

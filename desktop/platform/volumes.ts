@@ -164,10 +164,26 @@ export function otherMacMounts(table:string):string[] {
     return mount && mount!=='/' && !/^\/(?:Volumes|System\/Volumes)(?:\/|$)/.test(mount) ? [mount] : [];
   });
 }
+/** Every macOS mount a source or destination can be on, apart from `/`: the entries of /Volumes and the other local disks. */
+async function macMounts():Promise<string[]> {
+  const entries=await readdir('/Volumes',{withFileTypes:true});
+  return [...entries.filter(e=>e.isDirectory()||e.isSymbolicLink()).map(e=>path.join('/Volumes',e.name)),...otherMacMounts((await exec('/sbin/mount',[],commandOptions)).stdout)];
+}
+/** The volume holding `target`, for its UUID, file system and medium: on macOS only the mount it is on is described
+ * (through the same per-mount memory as the snapshot), so a fresh process does not sweep every disk for one path.
+ * The physical disk of an APFS volume is not resolved here; take it from mountedVolumes(). */
+export async function volumeAt(target:string,deps?:{mounts:()=>Promise<string[]>;describe:(mounts:string[])=>Promise<MountedVolume[]>}):Promise<Pick<MountedVolume,'path'|'volumeId'|'kind'|'fsType'>|undefined> {
+  // Linux and Windows list every volume in one call.
+  if(!deps&&process.platform!=='darwin')return volumeOf(await mountedVolumes(),target);
+  const {mounts,describe}=deps??{mounts:async()=>['/',...await macMounts()],describe:describeVolumes};
+  const mount=volumeOf((await mounts()).map(item=>({path:item})),target)?.path;
+  if(!mount)return undefined;
+  const [volume]=await describe([mount]);
+  return volume&&{path:volume.path,volumeId:volume.volumeId,kind:volume.kind,fsType:volume.fsType};
+}
 async function enumerateVolumes():Promise<MountedVolume[]> {
   if(process.platform==='darwin') {
-    const entries=await readdir('/Volumes',{withFileTypes:true});
-    const mounts=[...entries.filter(e=>e.isDirectory()||e.isSymbolicLink()).map(e=>path.join('/Volumes',e.name)),...otherMacMounts((await exec('/sbin/mount',[],commandOptions)).stdout)];
+    const mounts=await macMounts();
     const volumes=await describeVolumes(mounts);
     // Include the system filesystem for destination identity, but never as an automatic source.
     if(!volumes.some(v=>v.path==='/')){const [root]=await describeVolumes(['/']);if(root?.volumeId)volumes.push(root);}

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { mountedVolumes, volumeOf } from '../platform/volumes';
+import { volumeAt } from '../platform/volumes';
 import { cpuWorkers, governor, memoryBudgetBytes, type MemoryGovernor } from '../resource-limits';
 
 /** What a storage device is, as far as streaming it is concerned. */
@@ -14,9 +14,9 @@ export const STREAMS:Record<DeviceKind,number>={hdd:1,card:2,ssd:4,unknown:2};
 export const CHUNK:Record<DeviceKind,number>={hdd:8*1024*1024,card:1024*1024,ssd:1024*1024,unknown:1024*1024};
 
 type Classify=(file:string)=>Promise<DeviceKind>;
-/** The medium `file` is on, from the mount snapshot that already described its volume (platform/volumes). */
+/** The medium `file` is on, from the description of its volume (platform/volumes). */
 async function classify(file:string):Promise<DeviceKind> {
-  return volumeOf(await mountedVolumes(),file)?.kind ?? 'unknown';
+  return (await volumeAt(file))?.kind ?? 'unknown';
 }
 
 /** Per-device stream slots shared by every job in this process, so two imports reading or
