@@ -713,6 +713,17 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
   </dialog>;
 }
 
+/** The combined speed of running jobs, for the overview's Transfer speed and its Total line alike. One rule: jobs moving data (copying,
+ * verifying, moving, removing) count with their MB/s and files/s; planning reads the source and moves nothing, so it adds no MB/s.
+ * While every job is still planning, only the files/s of its metadata checking is shown. Verification is labelled as read. */
+export function combinedSpeed(jobs: Job[]): Required<Pick<SpeedInput, 'speed' | 'fileRate'>> & Pick<SpeedInput, 'phase' | 'step'> {
+  const running = jobs.filter(job => job.progress);
+  const moving = running.filter(job => job.progress!.phase !== 'planning');
+  const counted = moving.length ? moving : running.filter(job => job.progress!.step === 'checking');
+  const sum = (pick: (progress: Progress) => number | undefined) => counted.reduce((total, job) => total + (pick(job.progress!) ?? 0), 0);
+  const verifying = moving.length > 0 && moving.every(job => job.progress!.phase === 'verifying' && !job.progress!.step);
+  return { speed: moving.length ? sum(progress => progress.speed) : 0, fileRate: sum(progress => progress.fileRate), ...(verifying ? { phase: 'verifying' as const } : {}) };
+}
 // Import desk statistics. Source jobs show their own progress on their cards, so only library organization jobs are listed here.
 export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) {
   const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
@@ -721,10 +732,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // Bytes count only once copying starts: planning measures the source, not the transfer.
   const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning' && !job.progress.renames);
   const transferred = transferring.reduce((sum,job) => sum + (job.progress?.bytes ?? 0),0), total = transferring.reduce((sum,job) => sum + (job.progress?.totalBytes ?? 0),0);
-  // Transfers only: planning reads the source, it moves nothing.
-  const speed = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.speed ?? 0),0);
-  // Steps that only rename or check files report files per second instead of bytes.
-  const fileRate = active.reduce((sum,job) => sum + (job.progress?.phase === 'planning' ? 0 : job.progress?.fileRate ?? 0),0);
+  // One rule for the Transfer speed metric and the Total line.
+  const { speed, fileRate } = combinedSpeed(active);
   const startedAt = active.map(job => job.startedAt).filter(Boolean).sort()[0];
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
@@ -761,7 +770,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
         empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && totalFraction(job, verify) === 1)}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
-        speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
+        speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
         step={stepKind(lead?.progress)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}

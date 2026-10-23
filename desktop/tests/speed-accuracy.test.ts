@@ -104,6 +104,28 @@ test('metadata checking shows files per second and never MB/s', () => {
   assert.ok(Math.abs(job.progress!.fileRate! - 40) < 1, `${job.progress!.fileRate}`);
 });
 
+test('the overview Transfer speed and the Total line show the same rates, and planning adds no MB/s', async () => {
+  const { ImportDashboard, combinedSpeed } = await import('../renderer/RootApp');
+  const { createTranslator, I18nProvider, languages } = await import('../renderer/i18n');
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const other = { id: 'b', name: 'Other', path: '/Volumes/OTHER', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
+  const copying: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 480, progress: { phase: 'copying', completed: 50, total: 200, bytes: 1e9, totalBytes: 8e9, speed: 12.4e6, fileRate: 30, file: 'a', eta: 480 } };
+  const planning: Job = { id: 'k', source: other, phase: 'verifying', errors: [], backup: false, startedAt: new Date().toISOString(), progress: { phase: 'planning', step: 'comparing', completed: 1, total: 10, bytes: 5e8, totalBytes: 0, speed: 50e6, fileRate: 7, file: 'a' } };
+  assert.deepEqual(combinedSpeed([copying, planning]), { speed: 12.4e6, fileRate: 30 }, 'planning adds neither');
+  const checking: Job = { ...planning, progress: { ...planning.progress!, step: 'checking', speed: 0, fileRate: 42 } };
+  assert.deepEqual(combinedSpeed([checking]), { speed: 0, fileRate: 42 }, 'checking alone shows its files/s');
+  for (const language of languages) {
+    const t = createTranslator(language);
+    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state: { preferences, sources: [card, other], jobs: [copying, planning], history: [], platform: 'darwin' }, act: () => {} }) }));
+    const metric = page.slice(page.indexOf(`${t('Transfer speed')}</dt>`), page.indexOf('</dd>', page.indexOf(`${t('Transfer speed')}</dt>`)));
+    const total = page.slice(page.indexOf('data-testid="total-progress"'));
+    assert.ok(metric.includes('12.4 MB/s'), `${language}: overview ${metric}`);
+    assert.ok(total.includes('12.4 MB/s') && total.includes(t('{count} files/s', { count: '30' })), `${language}: total line`);
+    assert.ok(!page.includes('50.0 MB/s'), `${language}: planning read speed is not counted`);
+  }
+});
+
 test('the speed window follows a steady rate, shows nothing for its first 2 s and falls to zero within 5 s of a stall', () => {
   const meter = new RateMeter();
   assert.equal(meter.next(0, 0), undefined);
