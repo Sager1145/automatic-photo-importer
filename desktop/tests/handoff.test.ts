@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import * as core from '../core/index';
 import type {Metadata} from '../shared';
+import {journalFolderFor,journalFileFor} from './fixtures/records';
 
 // The A006 pair: library organization A (photobackup) was stopped part-way; an older build then ran
 // organization B (videobackup), which moved some of A's already-moved videos on into videobackup
@@ -30,7 +31,7 @@ async function pair(t:test.TestContext,{strategy='rename',finishA=false,finalize
  const [journal]=await core.getOrganizationRecovery(photos);const A=journal!.id;
  if(finalizeA)assert.ok((await core.finalizeOrganization(photos,A)).removed>0);
  // The older build that ran B could not see A: hide A's journal from this build while B runs.
- const store=path.join(photos,'Photo Importer Recovery',A),hidden=path.join(drive,'hidden-'+A);
+ const store=await journalFolderFor(photos,A),hidden=path.join(drive,'hidden-'+A);
  await fs.rename(store,hidden);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
  assert.deepEqual((await core.executeReorganization(split!.videos!,undefined,undefined,{strategy:'rename'})).errors,[]);
@@ -76,7 +77,7 @@ test('finalizing keeps the retained original of a handed-off file and releases t
  const before=await job(photos,A);assert.equal(before?.error,undefined);
  const kept=await core.finalizeOrganization(photos,A);
  assert.equal(kept.removed,names.length-handed.length,'every other kept original is released');
- const store=path.join(photos,'Photo Importer Recovery',A,'originals');
+ const store=path.join(await journalFolderFor(photos,A),'originals');
  const left=(await fs.readdir(store,{recursive:true})).map(String).filter(file=>handed.includes(path.basename(file)));
  assert.equal(left.length,handed.length,'the handed-off files keep their originals');
 });
@@ -127,7 +128,7 @@ test('like A006: a finished, finalized journal whose copies were moved on lists 
  // A copied, kept and then released its originals; B later moved some of A's copies on.
  const {photos,A}=await pair(t,{strategy:'copy',finishA:true,finalizeA:true});
  // Journals from that build recorded no 'published' event for a copy.
- const log=path.join(photos,'Photo Importer Recovery',A,'event-log.jsonl');
+ const log=await journalFileFor(photos,A);
  await fs.writeFile(log,(await fs.readFile(log,'utf8')).split('\n').filter(line=>!line.includes('"event":"published"')).join('\n'));
  const listed=await job(photos,A);
  assert.equal(listed?.error,undefined);assert.equal(listed?.status,'complete');

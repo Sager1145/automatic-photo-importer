@@ -183,3 +183,13 @@ test('unknown model inputs draw from the defaults table',()=>{
  assert.equal(stepDefault('checking').b,0);
  void lcg;
 });
+
+test('the snapshot gives each step the cumulative share of the job done through it',()=>{
+ const model=new JobModel({kind:'import',book:defaultBook(),verify:true,publish:'link',totals:{copying:{files:100,bytes:10e9},verifying:{files:100,bytes:10e9}}});
+ model.update(0,'copying',{files:50,bytes:5e9},{files:100,bytes:10e9});
+ const {shares,fraction}=model.snapshot();
+ assert.ok(shares&&shares.length>=2);
+ for(let i=1;i<shares!.length;i++)assert.ok(shares![i]!.share>=shares![i-1]!.share);
+ assert.ok(Math.abs(shares!.at(-1)!.share-fraction)<1e-9);
+ assert.equal(shares!.find(item=>item.step==='copying')!.share,fraction);
+});

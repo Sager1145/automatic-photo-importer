@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ExifTool} from 'exiftool-vendored';
 import {metadata,closeMetadata,setRoutingBatch} from '../platform/metadata';
+import {CHECK_CONCURRENCY,mapPool} from '../core/devices';
 
 /** A 134-byte JPEG; ExifTool writes the EXIF under test into it. */
 const JPEG=Buffer.from('/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=','base64');
@@ -64,4 +65,25 @@ test('routing reads of one file at the same time share one request and the cache
   await metadata(file,{details:false});
   assert.equal(calls,1);
   assert.deepEqual(results[0],results[2]);
+});
+
+test('500 files read with the check concurrency go out in batches averaging at least 14',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'routing-mean-'));
+  t.after(async()=>{await closeMetadata();await fs.rm(root,{recursive:true,force:true});});
+  const files=Array.from({length:500},(_,index)=>path.join(root,`IMG_${String(index).padStart(4,'0')}.JPG`));
+  await Promise.all(files.map((file,index)=>fs.writeFile(file,`photo ${index}`)));
+  setRoutingBatch(16);
+  const sizes:number[]=[];let seed=12345;
+  // Files finish and arrive unevenly, as stats and reads do in a real check.
+  const random=()=>{seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;};
+  t.mock.method(ExifTool.prototype,'enqueueTask',async function(this:ExifTool,task:()=>{args:string[]}){
+    const names=(task() as {args:string[]}).args.filter(arg=>arg.startsWith(root));
+    sizes.push(names.length);
+    await new Promise(resolve=>setTimeout(resolve,3+Math.floor(random()*8)));
+    return names.map(name=>({SourceFile:name}));
+  } as never);
+  await mapPool(files,CHECK_CONCURRENCY,async file=>{await new Promise(resolve=>setTimeout(resolve,Math.floor(random()*6)));return metadata(file,{details:false});});
+  const mean=sizes.reduce((sum,size)=>sum+size,0)/sizes.length;
+  assert.equal(sizes.reduce((sum,size)=>sum+size,0),500);
+  assert.ok(mean>=14,`mean batch ${mean.toFixed(1)} over ${sizes.length} requests`);
 });

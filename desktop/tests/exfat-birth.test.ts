@@ -9,7 +9,8 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';
 import {plan,execute,cleanStage,configureOrganizationRecovery} from '../core/index';
-import {recordPartial,findPartial,leftoverReceipt} from '../core/import-recovery';
+import {recordPartial,findPartial} from '../core/import-recovery';
+import {stagePathFor,receiptOpen,receiptState,closeReceipt,leftoversFor} from './fixtures/receipts';
 import {sameBirth} from '../core/paths';
 import type {Metadata} from '../shared';
 
@@ -39,9 +40,10 @@ async function fixture(t:test.TestContext) {
   await fs.writeFile(path.join(card,'DSC_0001.NEF'),Buffer.alloc(4000,1));
   const reviewed=(await plan(card,[root],options,metadata('2024-02-03T12:00:00Z'))).plans[0]!,entry=reviewed.entries[0]!;
   await fs.mkdir(path.dirname(entry.destination),{recursive:true});
-  const copy=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+  const copy=await stagePathFor(root,randomUUID());
   await fs.copyFile(entry.source,copy);
-  return {base,card,root,reviewed,entry,copy};
+  const place={scope:path.join(root,'Photo Importer Data'),target:path.dirname(entry.destination)};
+  return {base,card,root,reviewed,entry,copy,place};
 }
 // A file recorded with the whole second, while the disk now reports a fraction of it.
 const withBirth=(stat:Stat,birthtimeNs:bigint,ino:bigint=stat.ino)=>Object.assign(Object.create(Object.getPrototypeOf(stat)) as Stat,stat,{birthtimeNs,ino});
@@ -60,25 +62,25 @@ test('cleanStage releases a stage recorded with a whole-second birth time that i
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),notes:string[]=[];
   const index=new Map(),owned=await recordPartial('stage',f.copy,whole(stat),f.entry,f.reviewed,index);
   report(t,f.copy,withBirth(stat,fraction(stat)));
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs+SECOND,record:owned,recovery:index},f.root,true,text=>notes.push(text));
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs+SECOND,record:owned,recovery:index},f.root,true,text=>notes.push(text));
   assert.equal(notes.length,1,'another second is refused');
   assert.equal(await present(f.copy),true);
   // A recorded fraction is exact: one nanosecond off is refused.
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:fraction(stat)+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:fraction(stat)+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
   assert.equal(notes.length,2,'+1n on a recorded fraction is refused');
   assert.equal(await present(f.copy),true);
   notes.length=1;
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs,record:owned,recovery:index},f.root,true,text=>notes.push(text));
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs,record:owned,recovery:index},f.root,true,text=>notes.push(text));
   unreport();
   assert.equal(notes.length,1);
   assert.equal(await present(f.copy),false,'the stage is released');
-  assert.equal(await present(owned.journal),false,'and so is its receipt');
+  assert.equal(await receiptOpen(owned),false,'and so is its receipt');
 });
 
 test('cleanStage with a temporary inode and a whole-second birth time releases a file found with a fraction',async t=>{
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true});
   report(t,f.copy,withBirth(stat,fraction(stat)));
-  await cleanStage({file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs,recovery:new Map()},f.root);
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs,recovery:new Map()},f.root);
   unreport();
   assert.equal(await present(f.copy),false);
 });
@@ -89,10 +91,10 @@ test('a whole-second receipt binds a file whose birth time has a fraction; a rec
   const fractionReceipt=await recordPartial('stage',f.copy,withBirth(stat,fraction(stat)+10_000_000n),f.entry,f.reviewed,index);
   const otherSecond=await recordPartial('stage',f.copy,withBirth(stat,whole(stat).birthtimeNs+SECOND),f.entry,f.reviewed,index);
   report(t,f.copy,withBirth(stat,fraction(stat)));
-  assert.equal((await leftoverReceipt(wholeReceipt.journal,f.root)).bound,true);
-  assert.equal((await leftoverReceipt(fractionReceipt.journal,f.root)).bound,false);
-  assert.equal((await leftoverReceipt(otherSecond.journal,f.root)).bound,false);
-  await fs.unlink(fractionReceipt.journal);await fs.unlink(otherSecond.journal);
+  assert.equal((await receiptState(wholeReceipt)).bound,true);
+  assert.equal((await receiptState(fractionReceipt)).bound,false);
+  assert.equal((await receiptState(otherSecond)).bound,false);
+  await closeReceipt(fractionReceipt);await closeReceipt(otherSecond);
   const entry={...f.entry,digest:createHash('sha256').update(await fs.readFile(f.copy)).digest('hex')};
   assert.equal((await findPartial('stage',entry,f.root,new Map()))?.file,f.copy);
 });
@@ -102,21 +104,21 @@ test('binds and cleanStage refuse what is not the same file, even in the same se
   const otherIno=await recordPartial('stage',f.copy,withBirth(whole(stat),whole(stat).birthtimeNs,stat.ino+1n),f.entry,f.reviewed,index);
   const otherDev=await recordPartial('stage',f.copy,withBirth(whole(stat),whole(stat).birthtimeNs,-7n),f.entry,f.reviewed,index);
   report(t,f.copy,withBirth(stat,fraction(stat)));
-  assert.equal((await leftoverReceipt(otherIno.journal,f.root)).bound,false,'a different positive inode');
-  assert.equal((await leftoverReceipt(otherDev.journal,f.root)).bound,true,'a temporary inode in the same second binds');
+  assert.equal((await receiptState(otherIno)).bound,false,'a different positive inode');
+  assert.equal((await receiptState(otherDev)).bound,true,'a temporary inode in the same second binds');
   unreport();
   // The file as another device reports it: the same temporary-inode receipt no longer binds.
   report(t,f.copy,Object.assign(withBirth(stat,fraction(stat)),{dev:stat.dev+1n}));
-  assert.equal((await leftoverReceipt(otherDev.journal,f.root)).bound,false,'a temporary inode on another device');
+  assert.equal((await receiptState(otherDev)).bound,false,'a temporary inode on another device');
   unreport();
   const notes:string[]=[],note=(text:string)=>notes.push(text);
   // A temporary inode is released only for one link and the same second.
   report(t,f.copy,Object.assign(withBirth(stat,fraction(stat)),{nlink:2n}));
-  await cleanStage({file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs,recovery:new Map()},f.root,true,note);
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs,recovery:new Map()},f.root,true,note);
   unreport();
   assert.equal(await present(f.copy),true,'two links: refused');
   report(t,f.copy,withBirth(stat,fraction(stat)));
-  await cleanStage({file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs-SECOND,recovery:new Map()},f.root,true,note);
+  await cleanStage({...f.place,file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs-SECOND,recovery:new Map()},f.root,true,note);
   unreport();
   assert.equal(await present(f.copy),true,'another second: refused');
   assert.equal(notes.length,2);
@@ -137,12 +139,6 @@ async function exfat(t:test.TestContext){
   t.after(async()=>{if(prior===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=prior;await run('hdiutil',['detach','-quiet','-force',mount]).catch(()=>{});await fs.rm(base,{recursive:true,force:true});});
   return {mount,image};
 }
-async function leftovers(folder:string){
-  const found:string[]=[];
-  for(const entry of await fs.readdir(folder,{withFileTypes:true,recursive:true})) if(/^photo-importer-(?!index)/.test(entry.name)) found.push(path.join(entry.parentPath,entry.name));
-  return found;
-}
-
 test('exFAT: a stage dated with a sub-second capture time is released after the volume is re-attached before publishing',async t=>{
   const disk=await exfat(t);
   if(!disk) return t.skip('exFAT disk images or the native bridge are unavailable here');
@@ -164,12 +160,12 @@ test('exFAT: a stage dated with a sub-second capture time is released after the 
     return link(...args);
   });syncBuiltinESMExports();
   t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
-  const result=await execute(reviewed);
+  const result=await execute(reviewed,undefined,undefined,{direct:false});
   t.mock.restoreAll();syncBuiltinESMExports();
   assert.equal(cycled,true);
   if(devChanged) return t.skip('the re-attached image got another device number, so the stage cannot be identified');
   assert.deepEqual(result.errors,[]);assert.equal(result.copied,1);
-  assert.deepEqual(await leftovers(root),[]);
+  assert.deepEqual(await leftoversFor(root),[]);
 });
 
 test('exFAT: a stage left behind with an old-style whole-second receipt is released after hashing on a re-import',async t=>{
@@ -183,14 +179,14 @@ test('exFAT: a stage left behind with an old-style whole-second receipt is relea
   const first=(await plan(source,[root],options,date)).plans[0]!,entry=first.entries[0]!;
   assert.equal((await execute(first)).copied,1);
   // The stage an old run left: a complete copy and a receipt recording the whole second its handle reported.
-  const partial=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+  const partial=await stagePathFor(root,randomUUID());
   await fs.copyFile(entry.destination,partial);
   const stat=await fs.lstat(partial,{bigint:true});
   await recordPartial('stage',partial,whole(stat),entry,first,new Map());
-  assert.equal((await leftovers(root)).length,2);
+  assert.equal((await leftoversFor(root)).length,2);
   const again=(await plan(source,[root],options,date)).plans[0]!;
   assert.ok(again.entries.every(item=>item.skip));
   const result=await execute(again);
   assert.deepEqual(result.errors,[]);assert.equal(result.skipped,1);
-  assert.deepEqual(await leftovers(root),[]);
+  assert.deepEqual(await leftoversFor(root),[]);
 });

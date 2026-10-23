@@ -82,6 +82,8 @@ Keep the app open and insert a card, or connect a camera over USB. With **Automa
 
 USB camera files are staged on the Mac before copying, so they need local free space, and most cameras offer no checksum to compare against. There is no Wi-Fi transfer and no video playback preview. Builds are local and not notarized.
 
+Records written by versions before v5 (the `Photo Importer Recovery` folders, per-file import receipts and index files) are no longer converted. A drive that holds them shows **Acknowledge old records**; the records stay untouched, and organizing or removing duplicates on that library waits until you acknowledge. The build tagged `records-migrator-v5` is the last one that converts them.
+
 ### Development
 
 ```sh
@@ -177,6 +179,8 @@ npm run native:mac
 | Linux | 同一套代码，提供 `package:linux` 打包目标。尚未在真实硬件上测试。 |
 
 USB 相机的文件会先暂存到 Mac 上再复制，因此需要本地空闲空间；而且大多数相机不提供可供比对的校验和。不支持 Wi-Fi 传输，也没有视频播放预览。构建产物仅供本地使用，未经公证。
+
+v5 之前的版本写下的记录（`Photo Importer Recovery` 文件夹、逐个文件的导入回执和索引文件）不再转换。存有这类记录的驱动器会显示**确认旧记录**；这些记录保持原样，该资料库的整理和移除重复项会等到你确认后才进行。标记为 `records-migrator-v5` 的版本是最后一个能转换它们的版本。
 
 ### 开发
 
@@ -274,6 +278,8 @@ npm run native:mac
 
 USB 相機的檔案會先暫存到 Mac 上再複製，因此需要本機可用空間；而且大多數相機不提供可供比對的校驗碼。不支援 Wi-Fi 傳輸，也沒有影片播放預覽。建置產物僅供本機使用，未經公證。
 
+v5 之前的版本寫下的記錄（`Photo Importer Recovery` 資料夾、逐個檔案的匯入回執和索引檔案）不再轉換。存有這類記錄的磁碟會顯示**確認舊記錄**；這些記錄保持原樣，該資料庫的整理和移除重複項會等到你確認後才進行。標記為 `records-migrator-v5` 的版本是最後一個能轉換它們的版本。
+
 ### 開發
 
 ```sh
@@ -369,6 +375,8 @@ npm run native:mac
 | Linux | 同じコードで、`package:linux` ターゲットあり。実機ではまだテストしていません。 |
 
 USB カメラのファイルはコピーの前にいったん Mac に一時保存されるため、ローカルの空き容量が必要です。また、多くのカメラは照合用のチェックサムを提供しません。Wi-Fi 転送と動画の再生プレビューには対応していません。ビルドはローカル用で、公証されていません。
+
+v5 より前のバージョンが書いた記録（`Photo Importer Recovery` フォルダー、ファイルごとの読み込み受領記録とインデックスファイル）は変換されなくなりました。こうした記録があるドライブには**古い記録を確認済みにする**が表示されます。記録はそのまま残り、そのライブラリの整理と重複の削除は確認するまで待機します。これらを変換できる最後のビルドは `records-migrator-v5` タグのものです。
 
 ### 開発
 

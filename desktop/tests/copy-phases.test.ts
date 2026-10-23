@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core';
+import {openReceiptsFor,stagingFor} from './fixtures/receipts';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 // Reintroducing per-file readback before the next source is staged must fail:
 // reads/writes below use real files; instrumentation observes actual I/O order.
@@ -60,6 +63,6 @@ test('Stop between copy and validation publishes nothing and retains every sourc
  const {plans:[transfer]}=await plan(source,[root],{backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},async()=>({fields:{}}));
  const control=new AbortController();let copiedAll=false;
  await assert.rejects(execute(transfer,control.signal,value=>{if(value.phase==='verifying'){copiedAll=value.bytes===32;control.abort();}}),{name:'AbortError'});
- assert.ok(copiedAll);assert.deepEqual(await fs.readdir(root),['sentinel']);assert.equal(await fs.readFile(path.join(root,'sentinel'),'utf8'),'existing');
+ assert.ok(copiedAll);assert.deepEqual((await fs.readdir(root)).filter(name=>name!=='Photo Importer Data'),['sentinel']);assert.deepEqual(await fs.readdir(await stagingFor(root)),[]);assert.equal((await openReceiptsFor(root)).size,0);assert.equal(await fs.readFile(path.join(root,'sentinel'),'utf8'),'existing');
  for(const name of ['one.bin','two.bin'])assert.equal(await fs.readFile(path.join(source,name),'utf8'),'original '+name);
 });

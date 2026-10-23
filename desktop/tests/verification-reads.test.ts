@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'verification-reads-')));
@@ -24,7 +26,7 @@ test('a hard-linked copy reads its source once and its staged bytes once',async 
  const open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
   const handle=await open(...args),file=String(args[0]);
-  const kind=file===f.original?'source':file.startsWith(f.root+path.sep)?file.endsWith('.partial')?'stage':'target':undefined;
+  const kind=file===f.original?'source':file.startsWith(f.root+path.sep)?file.endsWith('.partial')?'stage':file.includes(`${path.sep}Photo Importer Data${path.sep}`)?undefined:'target':undefined;
   if(kind){const original=handle.read.bind(handle);t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await original(...values);read[kind]+=result.bytesRead;return result;});}
   return handle;
  });syncBuiltinESMExports();
@@ -49,7 +51,7 @@ test('with verification after copy turned off, staged bytes are not read again',
  const open=fs.open.bind(fs);
  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
   const handle=await open(...args),file=String(args[0]);
-  const kind=file===f.original?'source':file.startsWith(f.root+path.sep)?file.endsWith('.partial')?'stage':'target':undefined;
+  const kind=file===f.original?'source':file.startsWith(f.root+path.sep)?file.endsWith('.partial')?'stage':file.includes(`${path.sep}Photo Importer Data${path.sep}`)?undefined:'target':undefined;
   if(kind){const original=handle.read.bind(handle);t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await original(...values);read[kind]+=result.bytesRead;return result;});}
   return handle;
  });syncBuiltinESMExports();

@@ -9,11 +9,12 @@ import {findResidue,cleanResidue} from '../core/residue';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
-const storage=(root:string)=>path.join(root,'Photo Importer Recovery');
+const storage=(root:string)=>path.join(root,'Photo Importer Data','Organizations');
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
 async function fixture(t:test.TestContext){
- const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'delete-recovery-')));
- t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ // Inside its own folder: the neighbouring folders are looked at too, and the system temporary folder holds other things.
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'delete-recovery-'))),root=path.join(parent,'library');await fs.mkdir(root);
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original));await fs.writeFile(original,'precious original');return {root,original};
 }
 async function organize(root:string,folder:string,signal?:AbortSignal,onProgress?:()=>void){
@@ -27,7 +28,7 @@ test('a stopped organization is refused and stays as it is',async t=>{
  await assert.rejects(organize(root,'first',controller.signal,()=>controller.abort()),{name:'AbortError'});
  const [id]=await ids(root);
  await assert.rejects(core.deleteOrganizationRecovery(root,id!),/finish or undo/i);
- assert.ok(await exists(path.join(storage(root),id!,'manifest.json')));
+ assert.ok(await exists(path.join(storage(root),id!,'journal.jsonl')));
  assert.equal((await core.getOrganizationRecovery(root))[0]!.status,'pending');
 });
 
@@ -35,7 +36,7 @@ test('a finished organization: its kept original is released after its destinati
  const {root}=await fixture(t);const {result,destination}=await organize(root,'first');assert.deepEqual(result.errors,[]);
  const [job]=await core.getOrganizationRecovery(root);assert.equal(job!.retainedFiles,1);
  const measured=await core.measureOrganizationRecovery(root,job!.id);
- assert.ok(measured.files>=3&&measured.bytes>='precious original'.length,JSON.stringify(measured));
+ assert.ok(measured.files>=2&&measured.bytes>='precious original'.length,JSON.stringify(measured));
  const deleted=await core.deleteOrganizationRecovery(root,job!.id);
  assert.equal(deleted.released,1);assert.equal(deleted.files,measured.files);
  // Releasing appends to the event log first.
@@ -43,8 +44,8 @@ test('a finished organization: its kept original is released after its destinati
  assert.equal(await fs.readFile(destination,'utf8'),'precious original');
  assert.equal(await exists(path.join(storage(root),job!.id)),false);
  assert.deepEqual(await core.getOrganizationRecovery(root),[]);
- // Nothing is left behind for a residue check, and the empty recovery folder is gone.
- assert.equal(await exists(storage(root)),false);
+ // Nothing is left behind in the journals folder (the store itself stays).
+ assert.deepEqual(await fs.readdir(storage(root)).catch(()=>[]),[]);
 });
 
 test('a destination that no longer matches keeps the original and the whole journal',async t=>{
@@ -54,7 +55,7 @@ test('a destination that no longer matches keeps the original and the whole jour
  await assert.rejects(core.deleteOrganizationRecovery(root,job!.id),/Destination/);
  const originals=path.join(storage(root),job!.id,'originals','0');const [slot]=await fs.readdir(originals);
  assert.equal(await fs.readFile(path.join(originals,slot!,'A.JPG'),'utf8'),'precious original');
- assert.ok(await exists(path.join(storage(root),job!.id,'manifest.json')));
+ assert.ok(await exists(path.join(storage(root),job!.id,'journal.jsonl')));
 });
 
 test('replaced organizations are deleted oldest first; every other journal and every organized file stays',async t=>{
@@ -67,7 +68,7 @@ test('replaced organizations are deleted oldest first; every other journal and e
  await assert.rejects(core.deleteOrganizationRecovery(root,made[1]!),new RegExp(`${made[0]}`));
  const first=await core.deleteOrganizationRecovery(root,made[0]!);assert.equal(first.released,0);assert.ok(first.bytes>0);
  assert.deepEqual((await ids(root)).sort(),[made[1],made[2]].sort());
- for(const id of made.slice(1))assert.ok(await exists(path.join(storage(root),id,'manifest.json')));
+ for(const id of made.slice(1))assert.ok(await exists(path.join(storage(root),id,'journal.jsonl')));
  assert.equal(await fs.readFile(last,'utf8'),'precious original');
  assert.deepEqual((await core.resumeOrganization(root,made[2]!)).errors,[]);
  await core.deleteOrganizationRecovery(root,made[1]!);
@@ -84,7 +85,7 @@ test('a replaced organization whose kept original has no checked copy elsewhere 
  const directory=path.join(storage(root),newer,'originals','0'),[slot]=await fs.readdir(directory);
  await fs.writeFile(path.join(directory,slot!,'A.JPG'),'tampered original');await fs.writeFile(destination,'tampered original');
  await assert.rejects(core.deleteOrganizationRecovery(root,old),/no checked copy/i);
- assert.ok(await exists(path.join(storage(root),old,'manifest.json')));
+ assert.ok(await exists(path.join(storage(root),old,'journal.jsonl')));
 });
 
 test('an undone organization can be deleted; the restored file stays',async t=>{
@@ -123,7 +124,7 @@ async function interrupted(t:test.TestContext,when:'before'|'after'){
 }
 test('interrupted before the journal is set aside, it is still whole and can be deleted again',async t=>{
  const {root,id,destination}=await interrupted(t,'before');
- assert.ok(await exists(path.join(storage(root),id,'manifest.json')));
+ assert.ok(await exists(path.join(storage(root),id,'journal.jsonl')));
  const [job]=await core.getOrganizationRecovery(root);assert.equal(job!.id,id);assert.equal(job!.status,'complete');
  await core.deleteOrganizationRecovery(root,id);
  assert.equal(await exists(path.join(storage(root),id)),false);assert.equal(await fs.readFile(destination,'utf8'),'precious original');
@@ -169,7 +170,7 @@ test('Finder metadata in the recovery folder never blocks a deletion',async t=>{
 test('a journal that cannot be read beside this one stops the deletion instead of being assumed unrelated',async t=>{
  const {root}=await fixture(t);
  assert.deepEqual((await organize(root,'first')).result.errors,[]);const [job]=await core.getOrganizationRecovery(root);
- const other=path.join(storage(root),'6b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f');await fs.mkdir(other);await fs.writeFile(path.join(other,'manifest.json'),'{torn');
+ const other=path.join(storage(root),'6b1f1b8e-8a9b-4c1d-9e3f-0a1b2c3d4e5f');await fs.mkdir(other);await fs.writeFile(path.join(other,'journal.jsonl'),'{torn');
  await assert.rejects(core.deleteOrganizationRecovery(root,job!.id),/6b1f1b8e/);
- assert.ok(await exists(path.join(storage(root),job!.id,'manifest.json')));
+ assert.ok(await exists(path.join(storage(root),job!.id,'journal.jsonl')));
 });

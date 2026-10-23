@@ -35,7 +35,7 @@ test('organization merges exact duplicates, retains different content and remove
  assert.equal(await fs.readFile(path.join(source,'2025/Keep notes/readme.txt'),'utf8'),'keep');
  assert.equal(await fs.readFile(path.join(target,'2025/202506/ILCE-7M5/B.ARW'),'utf8'),'existing');
  const recoveries=await getOrganizationRecovery(target);assert.equal(recoveries[0].status,'complete');assert.deepEqual((await resumeOrganization(target,recoveries[0].id)).errors,[]);
- const contents:string[]=[];async function walk(folder:string){for(const entry of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())await walk(file);else contents.push(await fs.readFile(file,'utf8'));}}await walk(path.join(target,'Photo Importer Recovery'));assert.ok(contents.includes('same'));assert.ok(contents.includes('different'));
+ const contents:string[]=[];async function walk(folder:string){for(const entry of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())await walk(file);else contents.push(await fs.readFile(file,'utf8'));}}await walk(path.join(target,'Photo Importer Data','Organizations'));assert.ok(contents.includes('same'));assert.ok(contents.includes('different'));
 });
 
 test('a selected legacy-folder scope excludes unrelated roots and rejects traversal',async t=>{

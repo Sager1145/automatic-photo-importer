@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ListingHint } from '../listing-estimate';
+import { cacheRecord, readCache } from './user-caches';
 
 /** The size of the last completed listing of each scope (source root plus selected folders), kept across
  * restarts only to estimate how far the next listing is. A wrong or missing entry just means a rougher estimate. */
@@ -13,8 +14,8 @@ async function read(store:string):Promise<Stored['scopes']> {
   try {
     const file=memoryFile(store);
     if((await fs.lstat(file)).size>MAX_BYTES) return {};
-    const stored=JSON.parse(await fs.readFile(file,'utf8')) as Stored;
-    if(stored?.version!==1||!stored.scopes||typeof stored.scopes!=='object') return {};
+    const stored=readCache<Stored>(JSON.parse(await fs.readFile(file,'utf8')),'listing',1);
+    if(!stored||!stored.scopes||typeof stored.scopes!=='object') return {};
     return Object.fromEntries(Object.entries(stored.scopes).filter(([,value])=>Number.isSafeInteger(value?.files)&&value.files>0&&Number.isSafeInteger(value.bytes)&&value.bytes>=0&&typeof value.at==='string'));
   } catch { return {}; }
 }
@@ -31,7 +32,7 @@ export function rememberListing(store:string,root:string,folders:string[]|undefi
     const kept=Object.entries(scopes).sort((a,b)=>b[1].at.localeCompare(a[1].at)).slice(0,MAX_SCOPES);
     const target=memoryFile(store),temporary=`${target}.${randomUUID()}.tmp`;
     await fs.mkdir(store,{recursive:true});
-    try { await fs.writeFile(temporary,JSON.stringify({version:1,scopes:Object.fromEntries(kept)}),{mode:0o600}); await fs.rename(temporary,target); }
+    try { await fs.writeFile(temporary,JSON.stringify(cacheRecord('listing',{scopes:Object.fromEntries(kept)})),{mode:0o600}); await fs.rename(temporary,target); }
     catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
   });
   return writing;

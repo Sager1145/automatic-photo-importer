@@ -38,7 +38,7 @@ export async function tree(root:string):Promise<Map<string,string>> {
  const found=new Map<string,string>();
  for(const entry of await fs.readdir(root,{withFileTypes:true,recursive:true})){
   const file=path.join(entry.parentPath,entry.name),relative=path.relative(root,file);
-  if(!entry.isFile()||entry.name.startsWith('._')||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')||/^photo-importer-(?:index|drive)/.test(part)||part==='Photo Importer Recovery'))continue;
+  if(!entry.isFile()||entry.name.startsWith('._')||relative.split(path.sep).some(part=>part.startsWith('.photo-importer-')||/^photo-importer-(?:index|drive)/.test(part)||part==='Photo Importer Recovery'||part==='Photo Importer Data'))continue;
   found.set(relative,await fileSha(file));
  }
  return found;

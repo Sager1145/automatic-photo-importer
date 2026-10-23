@@ -14,7 +14,7 @@ const destination = path.join(base,'destination');
 const library = path.join(base,'library');
 const original = path.join(library,'incoming','A.JPG');
 const target = path.join(library,'2024','202402','FixtureCamera','JPEG','A.JPG');
-const recovery = path.join(library,'Photo Importer Recovery');
+const recovery = path.join(library,'Photo Importer Data','Organizations');
 const finallyMarker = path.join(base,`finally-${mode}`);
 const metadata = async()=>({camera:'FixtureCamera',date:'2024-02-03',fields:{}});
 const importOptions = {backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -46,7 +46,7 @@ async function run() {
   if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'organization-exclusive') {
     fs.open = async(...args:Parameters<typeof fs.open>)=>{
       const handle = await open(...args), file = String(args[0]);
-      if (args[1] === 'wx' && (mode === 'import-stage' ? path.basename(file).startsWith('photo-importer-') && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) shortWrite(handle,file);
+      if (args[1] === 'wx' && (mode === 'import-stage' ? file.includes(`${path.sep}Photo Importer Data${path.sep}Imports${path.sep}Staging${path.sep}`) && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) shortWrite(handle,file);
       return handle;
     };
   }

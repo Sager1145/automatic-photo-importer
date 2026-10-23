@@ -84,14 +84,14 @@ export class RateMeter {
 }
 
 /** A job's progress as the tracker needs it (the shape of Progress). */
-export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;work?:Progress['work'];}
+export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;work?:Progress['work'];matched?:number;matchedBytes?:number;}
 /** listingTotalBytes: the used space of the drive being listed, when known. shared: another running job writes to the same destination drive. */
 export interface EtaContext {kind:JobKind;destinations:number;verify:boolean;listingTotalBytes?:number;shared?:boolean;}
 export interface JobEta {step?:number;job?:number;/** The low and high end of `job` while the estimate is still wide. */low?:number;high?:number;}
 /** What a job is, told by the code that starts it: its kind (never guessed from step names), the drives it reads and writes, and what it will do. */
 export interface EtaPlan {kind:JobKind;source?:DriveInfo;destinations?:DriveInfo[];verify?:boolean;publish?:'link'|'copy';totals?:Record<string,StepTotal>;/** Backup copies a Delete originals run re-reads besides the source. */backups?:number;estimated?:boolean;}
 /** Where a job stands as a whole, for the bars and the overview. */
-export interface JobView {fraction?:number;cost?:{done:number;total:number};}
+export interface JobView {fraction?:number;cost?:{done:number;total:number};shares?:{step:string;share:number}[];}
 
 const MiB=1<<20;
 /** Stages whose legacy (non-model) estimate counts bytes plus a per-file cost; the others count files. */
@@ -115,10 +115,12 @@ function modelStep(progress:EtaInput,kind:JobKind):string|undefined{
 /** Steps that count data (bytes) even when the model has no byte total for them: the totals a step reports are used as given. */
 const unknownBytes=new Set(['comparing','moving']);
 
+/** What the checking step found, to shrink the later steps as identical files are matched. */
+interface Known {files?:number;bytes?:number;}
 /** The legacy estimator of one stage: used for a listing and for steps the model does not cover. */
 interface Legacy {key:string;estimator:EtaEstimator;}
 interface JobState {
- plan:EtaPlan;model:JobModel;book:PriorBook;context?:PriorContext;fixed:Set<string>;
+ plan:EtaPlan;model:JobModel;book:PriorBook;context?:PriorContext;known:Known;fixed:Set<string>;
  first?:number;last?:number;key?:string;legacy?:Legacy;
  stepSmoother:EtaSmoother;jobSmoother:EtaSmoother;hold:DisplayHold;fractions:FractionHold;
  shared:Map<string,{shared:number;total:number}>;view:JobView;current?:string;
@@ -181,7 +183,7 @@ export class EtaTracker {
   const plan=this.plans.get(id)??{kind:context.kind};
   const prior=this.contextOf(plan),book=this.bookOf(plan,prior);
   const model=new JobModel({kind:plan.kind,book,totals:plan.totals,verify:plan.verify??context.verify,publish:plan.publish,estimated:plan.estimated});
-  const state:JobState={plan,model,book,context:prior,fixed:new Set(Object.keys(plan.totals??{}).map(step=>model.resolve(step))),stepSmoother:new EtaSmoother(),jobSmoother:new EtaSmoother(),hold:new DisplayHold(),fractions:new FractionHold(),shared:new Map(),view:{}};
+  const state:JobState={plan,model,book,context:prior,known:{},fixed:new Set(Object.keys(plan.totals??{}).map(step=>model.resolve(step))),stepSmoother:new EtaSmoother(),jobSmoother:new EtaSmoother(),hold:new DisplayHold(),fractions:new FractionHold(),shared:new Map(),view:{}};
   this.jobs.set(id,state);
   return state;
  }
@@ -196,13 +198,19 @@ export class EtaTracker {
   return {files:progress.completed,bytes:progress.bytes,totalFiles:progress.total,totalBytes:progress.totalBytes};
  }
  /** The totals of the steps still ahead, from what the job has shown so far, for any the plan did not set. */
- private learn(state:JobState,step:string,total:{files:number;bytes:number},context:EtaContext){
+ private learn(state:JobState,step:string,total:{files:number;bytes:number},context:EtaContext,progress?:EtaInput){
   const {model,fixed}=state,copies=Math.max(1,context.destinations),set=(name:string,value:StepTotal)=>{if(!fixed.has(model.resolve(name)))model.setTotal(name,value);};
   switch(state.plan.kind){
    case 'import':
     if(step==='checking'){
+     state.known.files=total.files;state.known.bytes=total.bytes;
      set('comparing',{files:total.files*copies,bytes:total.bytes*copies,bytesKnown:false});set('existing',{files:total.files*copies,bytes:0});
      set('copying',{files:total.files*copies,bytes:total.bytes*copies});set('verifying',{files:total.files*copies,bytes:total.bytes*copies});
+    }
+    // Files that turned out identical at the destination are not copied or verified: the later steps shrink as they are found.
+    if(step==='comparing'&&progress?.matched!==undefined&&state.known.files!==undefined){
+     const files=Math.max(0,state.known.files*copies-progress.matched),bytes=Math.max(0,(state.known.bytes??0)*copies-(progress.matchedBytes??0));
+     set('copying',{files,bytes});set('verifying',{files,bytes});
     }
     if(step==='copying')set('verifying',{files:total.files,bytes:total.bytes});
     break;
@@ -227,18 +235,18 @@ export class EtaTracker {
   let done={files:work?.files??progress.completed,bytes:work?.bytes??progress.bytes},total={files:work?.totalFiles??progress.total,bytes:work?.totalBytes??progress.totalBytes};
   if(!work&&step==='verifying'&&total.files>0)done={files:done.files,bytes:total.bytes*Math.min(1,done.files/total.files)};
   if(work?.publishCopy){state.model.setPublish('copy');for(const id_ of this.destinationsOf(id))this.copyPublishing.add(id_);}
-  const bytesUnknown=unknownBytes.has(step);
+  const bytesUnknown=unknownBytes.has(step)&&!(step==='comparing'&&total.bytes>0);
   if(state.key!==key){
    if(state.key!==undefined&&state.current!==undefined)this.record(state,now);
    state.key=key;state.current=state.model.resolve(step);state.legacy=undefined;state.stepSmoother=new EtaSmoother();
   }
-  this.learn(state,state.model.resolve(step),total,context);
+  this.learn(state,state.model.resolve(step),total,context,progress);
   const resolved=state.model.resolve(step),span=state.shared.get(resolved)??{shared:0,total:0};
   if(state.last!==undefined){const dt=Math.max(0,now-state.last);span.total+=dt;if(context.shared)span.shared+=dt;}
   state.shared.set(resolved,span);state.last=now;
   const snapshot=state.model.update(now,step,done,{...total,...(bytesUnknown?{bytesKnown:false}:{})});
   for(const ended of state.model.drain())this.save(state,ended,now);
-  state.view={cost:snapshot.cost,fraction:state.fractions.next(snapshot.fraction)};
+  state.view={cost:snapshot.cost,fraction:state.fractions.next(snapshot.fraction),...(snapshot.shares?{shares:snapshot.shares}:{})};
   const finished=snapshot.job===0;
   const stepEta=state.stepSmoother.next(snapshot.step,now,finished&&snapshot.step===0);
   // The job's first seconds are spent estimating.
@@ -333,6 +341,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   else{job.eta=eta.job;if(eta.low!==undefined&&eta.high!==undefined)job.etaRange={low:eta.low,high:eta.high};else delete job.etaRange;}
   if(view.fraction!==undefined)job.fraction=view.fraction;
   if(view.cost)job.cost=view.cost;
+  if(view.shares)job.stageShares=view.shares;else delete job.stageShares;
   speeds('speed:'+job.id,job.progress);
   running.push({job,id:job.id});
  }

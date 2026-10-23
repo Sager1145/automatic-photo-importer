@@ -6,22 +6,25 @@ import type { DuplicateExif, DuplicateFile, DuplicateGroup, InventoryFile, Media
 import { buildGroups, candidates, groupId } from '../duplicate-rules';
 import { inventory } from './inventory';
 import { DRIVE_BACKUPS } from './drive-backup';
-import { LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './recovery';
+import { APP_DATA_FOLDER, LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './legacy-names';
 import { PROBLEM_FILES_FOLDER } from '../shared';
 import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
+import { indexLocations, indexTarget } from './destination-index';
+import { openV5, sealV5 } from './app-store';
 import type { DestinationIndex } from './destination-index';
 import { CHECK_CONCURRENCY } from './devices';
 
 /** The per-library record of what duplicate detection found: visible, never hidden, and ignored by inventories. */
 export const DUPLICATES_PREFIX='photo-importer-duplicates';
 /** Folders the app owns, skipped at any depth: mirrors of other drives, the recovery store and collected problem files. */
-export const APP_FOLDERS=[DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
+export const APP_FOLDERS=[DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
 /** The destination libraries a chosen folder is, contains or sits inside. More than one means the scan would mix
  * libraries (or pair a library with another), so the folder is refused. */
 export function overlappingLibraries(folder:string,libraries:string[]):string[] {
   return [...new Set(libraries)].filter(library=>within(folder,library)||within(library,folder));
 }
-const NAME=`${DUPLICATES_PREFIX}.json`,MAX_BYTES=256*1024*1024;
+export const DUPLICATES_FILE='duplicates.json';
+const MAX_BYTES=256*1024*1024;
 interface FileRecord {size:string;mtimeNs:string;ino:string;kind:MediaKind;birth:number;ctime:number;edited:boolean;exif?:DuplicateExif;sha256?:string;/** The file's metadata was read (a record without it only knows size and hash). */read?:boolean;}
 interface StoredGroup {strength:DuplicateGroup['strength'];files:string[];}
 const unchanged=(record:FileRecord,stat:BigIntStats)=>record.size===String(stat.size)&&record.mtimeNs===String(stat.mtimeNs)&&record.ino===String(stat.ino);
@@ -41,16 +44,20 @@ export class DuplicateStore {
   constructor(readonly root:string,readonly rootIdentity:string) {}
   static async load(root:string,rootIdentity:string):Promise<DuplicateStore> {
     const store=new DuplicateStore(root,rootIdentity);
-    try {
-      const file=path.join(root,NAME),stat=await fs.lstat(file);
-      if(!stat.isFile()||stat.size>MAX_BYTES) return store;
-      const data=JSON.parse(await fs.readFile(file,'utf8'));
-      if(data?.version!==2||data.rootIdentity!==rootIdentity||!data.files||typeof data.files!=='object') return store;
-      for(const [relative,value] of Object.entries(data.files as {[name:string]:FileRecord})) if(value&&typeof value.size==='string'&&typeof value.mtimeNs==='string'&&typeof value.ino==='string'&&typeof value.kind==='string') store.files.set(relative,{...value,birth:Number(value.birth)||0,ctime:Number(value.ctime)||0,edited:!!value.edited});
-      store.groups=Array.isArray(data.groups)?data.groups.filter((group:StoredGroup)=>Array.isArray(group?.files)&&group.files.every(item=>typeof item==='string')):[];
-      store.complete=data.complete===true;store.updated=String(data.updated??'');
-    } catch { /* Missing, unreadable or from another volume: start empty and rebuild. */ }
+    for(const file of await indexLocations(root,DUPLICATES_FILE)) try {
+      const stat=await fs.lstat(file);
+      if(!stat.isFile()||stat.size>MAX_BYTES) continue;
+      const data=openV5('duplicates',JSON.parse(await fs.readFile(file,'utf8')));
+      if(data.rootIdentity!==rootIdentity||!data.files||typeof data.files!=='object') continue;
+      store.take(data);return store;
+    } catch { /* Missing, unreadable, from another volume or another Mac's: start empty and rebuild. */ }
     return store;
+  }
+  /** Take what a stored record says (this one's, or the earlier version's being converted). */
+  take(data:Record<string,unknown>):void {
+    for(const [relative,value] of Object.entries(data.files as {[name:string]:FileRecord})) if(value&&typeof value.size==='string'&&typeof value.mtimeNs==='string'&&typeof value.ino==='string'&&typeof value.kind==='string') this.files.set(relative,{...value,birth:Number(value.birth)||0,ctime:Number(value.ctime)||0,edited:!!value.edited});
+    this.groups=Array.isArray(data.groups)?data.groups.filter((group:StoredGroup)=>Array.isArray(group?.files)&&group.files.every(item=>typeof item==='string')):[];
+    this.complete=data.complete===true;this.updated=String(data.updated??'');
   }
   mark():void {this.dirty=true;}
   /** Atomic replace, like the destination index: write a sibling, fsync, rename, fsync the folder. */
@@ -59,14 +66,16 @@ export class DuplicateStore {
       if(!this.dirty) return;
       if(await identity(this.root).catch(()=>undefined)!==this.rootIdentity) return;
       this.dirty=false;
-      const target=path.join(this.root,NAME),temporary=path.join(this.root,`${DUPLICATES_PREFIX}-${randomUUID()}.tmp`);
+      let target:string;
+      try { target=await indexTarget(this.root,DUPLICATES_FILE); } catch(error) { this.dirty=true; throw error; }
+      const temporary=path.join(path.dirname(target),`duplicates-${randomUUID()}.tmp`);
       try {
         const handle=await fs.open(temporary,'wx',0o600);
-        try { await handle.writeFile(JSON.stringify({version:2,rootIdentity:this.rootIdentity,updated:new Date().toISOString(),complete:this.complete,files:Object.fromEntries(this.files),groups:this.groups})); await handle.sync(); }
+        try { await handle.writeFile(JSON.stringify(sealV5('duplicates',{rootIdentity:this.rootIdentity,updated:new Date().toISOString(),complete:this.complete,files:Object.fromEntries(this.files),groups:this.groups}))); await handle.sync(); }
         finally { await handle.close(); }
         await fs.rename(temporary,target);
       } catch(error) { await fs.unlink(temporary).catch(()=>{}); this.dirty=true; throw error; }
-      await syncDirectory(this.root);
+      await syncDirectory(path.dirname(target));
     });
     this.writing=write.catch(()=>{});
     return write;

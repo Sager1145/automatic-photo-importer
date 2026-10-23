@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {ImportDashboard,OrganizationProgress,ProgressDisplay,SidebarSources,SourceSteps,jobStageLayers,totalStageLayers} from '../renderer/RootApp';
+import {ImportDashboard,OrganizationProgress,ProgressDisplay,SidebarSources,SourceRow,SourceSteps,jobStageLayers,totalStageLayers} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
 
 const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
@@ -111,4 +111,37 @@ test('the stage palette keeps neighbouring stages apart in hue and for color-bli
    for(const kind of ['deuteranopia','protanopia'] as const)assert.ok(deltaE(simulated(color[a]!,kind),simulated(color[b]!,kind))>=7,`${theme} ${a}/${b} ${kind} deltaE ${deltaE(simulated(color[a]!,kind),simulated(color[b]!,kind)).toFixed(1)}`);
   }
  }
+});
+
+const steps=['checking','comparing','existing','copying','verifying:link'];
+const shares=(...values:number[])=>steps.map((step,index)=>({step,share:values[index]!}));
+
+test('a job bar is as long as the percent: 2% never fills a layer',()=>{
+ const planning=job('verifying',{phase:'planning',step:'checking',completed:2,total:100,bytes:0,totalBytes:0},{fraction:.02,cost:{done:2,total:100},stageShares:shares(.02,.02,.02,.02,.02)});
+ const layers=jobStageLayers(planning);
+ assert.ok(layers.length>=1);
+ for(const layer of layers)assert.ok(layer.fraction<=.02+1e-9,`layer ${layer.kind} ${layer.fraction}`);
+});
+
+test('a finished first stage stays under the next colour, and the layers are cumulative cost shares',()=>{
+ const copying=job('copying',{},{fraction:.278,cost:{done:27.8,total:100},stageShares:shares(.1,.12,.13,.278,.278)});
+ const layers=jobStageLayers(copying);
+ assert.deepEqual(layers.map(layer=>layer.kind),['scan','copy']);
+ assert.ok(Math.abs(layers[0]!.fraction-.13)<1e-9);
+ assert.ok(Math.abs(layers[1]!.fraction-.278)<1e-9);
+ const total=totalStageLayers([copying]);
+ assert.ok(Math.abs(total[0]!.fraction-.13)<1e-9&&Math.abs(total[1]!.fraction-.278)<1e-9);
+});
+
+test('the Drive details toggle sits in the step row with the steps and controls the panel',()=>{
+ const markup=render(createElement(SourceRow,{source:card,act:()=>{},configured:true}));
+ const row=markup.match(/<div class="source-step-row"[^>]*>([\s\S]*?)<\/button><\/div>/)?.[1]??'';
+ assert.match(row,/data-testid="source-steps"/);
+ const toggle=row.match(/<button[^>]*drive-details-toggle[^>]*>/)?.[0]??'';
+ assert.match(toggle,/aria-expanded="false"/);
+ const id=toggle.match(/aria-controls="([^"]+)"/)?.[1];
+ assert.ok(id);assert.ok(markup.includes(`id="${id}"`));
+ assert.doesNotMatch(markup.match(/<summary[\s\S]*?<\/summary>/)?.[0]??'',/Drive details/);
+
+ assert.match(css,/\.source-step-row\{[^}]*flex-wrap:wrap/);
 });

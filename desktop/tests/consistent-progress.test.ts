@@ -51,7 +51,6 @@ const operations:Operation[]=[
  {name:'later organizations',step:'later',phase:'verifying',unit:'files',count:/later organizations/,file:true,at:s=>({...base,phase:'verifying',step:'later',...files(s)})},
  {name:'earlier organization records',step:'records',phase:'planning',unit:'files',count:/earlier organization records/,file:true,at:s=>({...base,phase:'planning',step:'records',...files(s)})},
  {name:'earlier organizations by journal',step:'journals',phase:'planning',unit:'files',count:/journal 1 of 3/,file:true,at:s=>({...base,phase:'planning',step:'journals',journal:{index:1,count:3},...files(s)})},
- {name:'converting the record',step:'converting',phase:'planning',unit:'files',count:/Converting the organization record/,file:true,at:s=>({...base,phase:'planning',step:'converting',...files(s)})},
  {name:'removing old record files',step:'cleaning',phase:'planning',unit:'files',count:/Removing old record files/,file:true,at:s=>({...base,phase:'planning',step:'cleaning',...files(s)})},
  {name:'measuring recovery files',step:'measuring',phase:'planning',unit:'files',count:/Measuring: \d+ files/,file:true,at:s=>({...base,phase:'planning',step:'measuring',total:1000,...files(s),share:Math.min(.9,s/10)})},
  {name:'preparing destinations',step:'preparing',phase:'planning',unit:'files',count:/Preparing destinations/,file:true,at:s=>({...base,phase:'planning',step:'preparing',...files(s)})},
@@ -251,12 +250,12 @@ test('stashing the duplicates, closing the journal and releasing report their ow
 test('the leftover check and Clean up report progress',async t=>{
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'residue-progress-')));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
- for(const folder of ['2024','2025','2026']){await fs.mkdir(path.join(root,folder),{recursive:true});await fs.writeFile(path.join(root,folder,'a.jpg'),'x');}
- await fs.writeFile(path.join(root,'2025','.import-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.partial'),'partial');
+ for(let index=0;index<3;index++){const file=path.join(root,'incoming',`A${index}.JPG`);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,`original ${index}`);}
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'rename'});
  const scans:{looked:number;done:number;total:number;file:string}[]=[];
  const found=await findResidue([root],{onProgress:scan=>scans.push(scan)});
- assert.ok(scans.length>=3);assert.ok(scans.every(scan=>scan.total===scans[0]!.total&&scan.done<=scan.total));
- assert.equal(scans.at(-1)!.done,scans.at(-1)!.total);assert.ok(scans.at(-1)!.looked>=4);
+ assert.ok(scans.length>=2);assert.ok(scans.every(scan=>scan.total===scans[0]!.total&&scan.done<=scan.total));
+ assert.equal(scans.at(-1)!.done,scans.at(-1)!.total);assert.ok(scans.at(-1)!.looked>=1);
  const steps:[number,number][]=[];
  await cleanResidue(found,{onProgress:(done,total)=>steps.push([done,total])});
  assert.deepEqual(steps.at(0),[0,found.items.length]);assert.deepEqual(steps.at(-1),[found.items.length,found.items.length]);

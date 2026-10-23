@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { plan, execute, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
+import { openReceiptsFor, stagingFor } from './fixtures/receipts';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -38,10 +39,11 @@ async function source(t:test.TestContext):Promise<string> {
   for(let i=0;i<FILES;i++) await fs.writeFile(path.join(folder,`DSC_${String(i).padStart(4,'0')}.NEF`),randomBytes((MEGABYTES+(i%3))*1024*1024));
   return folder;
 }
+/** What an import leaves in the app's data folder: staged copies (paths) and open receipts ('receipt:' and the id). */
 async function leftovers(folder:string):Promise<string[]> {
-  const found:string[]=[];
-  for(const entry of await fs.readdir(folder,{withFileTypes:true,recursive:true}))
-    if(/^(?:\.import|photo-importer)-(?!index)/.test(entry.name)) found.push(path.join(entry.parentPath,entry.name));
+  const staging=await stagingFor(folder);
+  const found=(await fs.readdir(staging)).filter(name=>!name.startsWith("._")).map(name=>path.join(staging,name));
+  for(const rid of (await openReceiptsFor(folder)).keys()) found.push(`receipt:${rid}`);
   return found;
 }
 async function media(root:string):Promise<string[]> {
@@ -53,13 +55,12 @@ async function media(root:string):Promise<string[]> {
 async function assertOnlyEmptyOrphans(root:string,crashed:boolean) {
   const left=await leftovers(root);
   if(!crashed) return assert.deepEqual(left,[]);
+  const receipts=await openReceiptsFor(root);
   for(const file of left) {
-    if(file.endsWith('.json')) {
-      // A kill between writing a new receipt and removing the older one for the same file leaves the
-      // older receipt behind, pointing at a file the next import has already released.
-      // A receipt cut short by the kill grants no ownership and names nothing.
-      const named=await fs.readFile(file,'utf8').then(text=>JSON.parse(text).file as string,()=>undefined);
-      if(named===undefined) continue;
+    if(file.startsWith('receipt:')) {
+      // A kill between writing a new receipt and closing the older one for the same file leaves the
+      // older receipt open, pointing at a file the next import has already released.
+      const named=receipts.get(file.slice('receipt:'.length))!.file;
       assert.equal(await fs.lstat(named).then(()=>true,()=>false),false,`receipt for a file still there: ${file}`);
     } else assert.equal((await fs.stat(file)).size,0,`non-empty staging file left behind: ${file}`);
   }
@@ -103,10 +104,11 @@ async function ready(t:test.TestContext) {
   return {d,card,root};
 }
 
+// The staged path (direct: false). A Stop during a direct copy keeps the partial files; exfat-direct.test.ts covers that.
 test('a Stop while copying to a large exFAT volume leaves no staging file or receipt',async t=>{
   const env=await ready(t);if(!env) return;
   const controller=new AbortController(),reviewed=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
-  await assert.rejects(execute(reviewed,controller.signal,progress=>{if(progress.phase==='copying'&&progress.bytes>20*1048576)controller.abort();}),{name:'AbortError'});
+  await assert.rejects(execute(reviewed,controller.signal,progress=>{if(progress.phase==='copying'&&progress.bytes>20*1048576)controller.abort();},{direct:false}),{name:'AbortError'});
   assert.deepEqual(await leftovers(env.root),[]);
 });
 
@@ -114,14 +116,14 @@ test('a Stop while publishing to a large exFAT volume is finished by the next im
   const env=await ready(t);if(!env) return;
   const controller=new AbortController(),reviewed=(await plan(env.card,[env.root],options,metadata)).plans[0]!;
   const timer=setInterval(()=>{media(env.root).then(async files=>{for(const file of files)if((await fs.stat(file)).size>0){controller.abort();return;}}).catch(()=>{});},3);
-  try { await execute(reviewed,controller.signal); } catch(error) { assert.equal((error as Error).name,'AbortError'); } finally { clearInterval(timer); }
+  try { await execute(reviewed,controller.signal,undefined,{direct:false}); } catch(error) { assert.equal((error as Error).name,'AbortError'); } finally { clearInterval(timer); }
   await reimport(env.card,env.root);
 });
 
 test('receipts written before a large exFAT volume was attached again still resume and release',async t=>{
   const env=await ready(t);if(!env) return;
   await crash(env.card,env.root,'copy');
-  assert.ok((await leftovers(env.root)).some(file=>file.endsWith('.json')),'the killed run left stage receipts');
+  assert.ok((await leftovers(env.root)).some(file=>file.startsWith('receipt:')),'the killed run left stage receipts');
   const devices=await reattach(env.d,env.root);
   if(devices.after===devices.before) return t.skip('the device number did not change after 3 re-attaches');
   await reimport(env.card,env.root,true);

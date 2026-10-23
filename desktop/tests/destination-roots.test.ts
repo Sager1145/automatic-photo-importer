@@ -71,3 +71,11 @@ test('a source inside the video backup folder is refused, and the folders must d
  const card:Source={id:'folder:card',name:'Card',path:path.join(destination,'Card'),transport:'folder'};
  for(const videoBasePath of ['photobackup','photobackup/videos','','../videos'])await assert.rejects(destinationRoots({...video,videoBasePath},[card],card),/video backup folder/i,videoBasePath);
 });
+
+test('a backup folder may not be or lie in the app\'s records folder, and the unknown files folder may not be named after it',async t=>{
+ const {destination,card,prefs}=await fixture(t);
+ for(const basePath of ['Photo Importer Data','photo importer data/photos','Photo Importer Recovery'])await assert.rejects(destinationRoots(prefs(basePath),[card],card),{key:'error.backupFolderPath'} as never,basePath);
+ await assert.rejects(fs.lstat(path.join(destination,'Photo Importer Data')),{code:'ENOENT'},'nothing was created');
+ const {validNoMetadataFolder}=await import('../no-metadata');
+ for(const name of ['Photo Importer Data','photo importer data'])assert.equal(validNoMetadataFolder(name),false,name);
+});

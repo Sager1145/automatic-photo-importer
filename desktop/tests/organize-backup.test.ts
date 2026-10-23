@@ -32,6 +32,7 @@ test('conflict copies, drive backups and the recovery store are never counted or
   await put('2024/202402/Sony A7/JPEG/Conflicts/abc123/A.JPG');
   await put('Drive backups/Card 1/DCIM/C.JPG');
   await put('Photo Importer Recovery/0f/originals/1/D.JPG');
+  await put('Photo Importer Data/Organizations/0f/originals/1/D.JPG');
   assert.equal((await findMisplaced(root,root,options,metadata)).count,0);
   const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
   assert.deepEqual(reviewed.entries,[]);

@@ -7,6 +7,8 @@ import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core/index';
 import {contained,makeParent,syncParents} from '../core/paths';
 import type {Metadata} from '../shared';
+import {configureOrganizationRecovery} from '../core/index';
+configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00Z',fields:{}});

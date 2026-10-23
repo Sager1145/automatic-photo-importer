@@ -77,7 +77,7 @@ test('finalize releases kept originals, and a later layout supersedes the earlie
  // Outside the recovery store each photobackup file appears once; superseded originals stay retained.
  const visible=[...(await tree(photos)).keys()].filter(relative=>!relative.endsWith('.txt'));
  assert.equal(visible.length,Object.keys(files).filter(name=>name.startsWith('photobackup/')).length);
- const store=await fs.readdir(path.join(photos,'Photo Importer Recovery'),{recursive:true});
+ const store=await fs.readdir(path.join(photos,'Photo Importer Data'),{recursive:true});
  assert.ok(store.length>0);
  for(const relative of visible)assert.ok(contents.has(await fs.readFile(path.join(photos,relative),'utf8')),relative);
  await assert.rejects(core.undoOrganization(photos,listed[0]!.id),/released|cannot be undone/);

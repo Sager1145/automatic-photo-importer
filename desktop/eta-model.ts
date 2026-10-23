@@ -119,10 +119,10 @@ export class StepFit {
 export type JobKind='import'|'organization'|'duplicates'|'finalize'|'undo'|'originals';
 export interface StepTotal {files:number;bytes:number;/** false: bytes are not known beforehand (they follow the observed mix). */bytesKnown?:boolean;}
 export interface JobModelOptions {kind:JobKind;book:PriorBook;totals?:Record<string,StepTotal>;verify?:boolean;publish?:'link'|'copy';/** Totals come from a listing estimate. */estimated?:boolean;}
-export interface JobSnapshot {step?:number;job?:number;low?:number;high?:number;uncertainty:number;/** Model-seconds of work done / in all, and their ratio. */cost:{done:number;total:number};fraction:number;stepFraction:number;}
+export interface JobSnapshot {step?:number;job?:number;low?:number;high?:number;uncertainty:number;/** Model-seconds of work done / in all, and their ratio. */cost:{done:number;total:number};fraction:number;stepFraction:number;/** For each step in order, the share of the whole job done once it and every step before it are counted (cumulative, 0 to 1). */shares?:{step:string;share:number}[];}
 export interface StepSummary extends Coef {step:string;T:number;F:number;G:number;observed:number;windows:number;}
 
-interface StepState {total?:StepTotal;done:{files:number;bytes:number};fit?:StepFit;choice?:PriorChoice;status:'ahead'|'active'|'done'|'skipped';coef?:Coef;}
+interface StepState {total?:StepTotal;done:{files:number;bytes:number};fit?:StepFit;choice?:PriorChoice;status:'ahead'|'active'|'done'|'skipped';coef?:Coef;/** The current step's coefficients when it began: the work done is counted with these, so it never goes backwards as the fit moves. */start?:Coef;}
 const empty:JobSnapshot={uncertainty:1,cost:{done:0,total:0},fraction:0,stepFraction:0};
 
 /** The steps of a job in order. 'verifying' stands for the import's last step, named by whether it verifies and how it publishes. */
@@ -200,7 +200,7 @@ export class JobModel {
    }
    const state=this.state(key),choice=this.choice(key,state);
    state.status='active';state.fit=new StepFit(choice.coef,choice.T0);
-   state.coef=undefined;this.current=key;
+   state.coef=undefined;state.start=choice.coef;this.current=key;
   }
   const state=this.state(key);
   if(total&&(finite(total.files)>0||finite(total.bytes)>0))state.total={files:finite(total.files),bytes:finite(total.bytes),...(total.bytesKnown===false?{bytesKnown:false}:{})};
@@ -215,32 +215,41 @@ export class JobModel {
   const current=this.current?this.states.get(this.current):undefined;
   if(!current||!this.current)return empty;
   let seconds=0,uncertain=0,stepSeconds:number|undefined,done=0,all=0,stepDone=0,stepAll=0,missing=false;
+  const cumulative:{step:string;done:number}[]=[];let previous:string|undefined;
   for(const step of this.order){
    const state=this.states.get(step);
    if(!state||state.status==='skipped')continue;
+   if(previous!==undefined)cumulative.push({step:previous,done});
+   previous=step;
    const total=state.total,known=!!total&&(total.files>0||total.bytes>0);
    const choice=this.choice(step,state),isCurrent=step===this.current;
    const coef=isCurrent&&state.fit?state.fit.theta():state.coef??choice.coef;
-   const cost=(files:number,bytes:number)=>coef.a*files+coef.b*(total?.bytesKnown===false?0:bytes)/GB;
-   if(state.status==='done'){const final=total?cost(total.files,total.bytes):cost(state.done.files,state.done.bytes);done+=final;all+=final;continue;}
+   // A step's share of the job is counted with the coefficients it began with (also once it has finished), so the work done never
+   // goes backwards as the fit moves; the time left uses the live fit.
+   const counted=state.start??coef;
+   const costOf=(c:Coef)=>(files:number,bytes:number)=>c.a*files+c.b*(total?.bytesKnown===false?0:bytes)/GB;
+   const cost=costOf(coef),counting=costOf(counted);
+   if(state.status==='done'){const final=total?counting(total.files,total.bytes):counting(state.done.files,state.done.bytes);done+=final;all+=final;continue;}
    if(!known){if(isCurrent)missing=true;continue;}
-   all+=cost(total!.files,total!.bytes);done+=cost(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
+   all+=counting(total!.files,total!.bytes);done+=counting(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
    const rf=Math.max(0,total!.files-state.done.files),rb=total!.bytesKnown===false?undefined:Math.max(0,total!.bytes-state.done.bytes);
    let remaining:number,u:number;
    if(isCurrent&&state.fit){
     remaining=state.fit.remaining(rf,rb);u=state.fit.uncertainty(choice.level,choice.runs);
-    stepAll=cost(total!.files,total!.bytes);stepDone=cost(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
+    stepAll=counting(total!.files,total!.bytes);stepDone=counting(Math.min(state.done.files,total!.files),Math.min(state.done.bytes,total!.bytes));
     if(state.fit.windows>0)stepSeconds=remaining>0?Math.max(1,remaining):0;
    }else{
     remaining=coef.a*rf+(rb===undefined?0:coef.b*rb/GB);u=stepUncertainty({observed:0,level:choice.level,runs:choice.runs});
    }
    seconds+=remaining;uncertain+=remaining*u;
   }
+  if(previous!==undefined)cumulative.push({step:previous,done});
+  const shares=cumulative.map(item=>({step:item.step,share:all>0?Math.min(1,item.done/all):0}));
   const total=this.options.estimated?0.3:0;
-  if(missing)return {uncertainty:1,cost:{done,total:all},fraction:all>0?Math.min(1,done/all):0,stepFraction:0};
+  if(missing)return {uncertainty:1,cost:{done,total:all},fraction:all>0?Math.min(1,done/all):0,stepFraction:0,shares};
   const u=(seconds>0?uncertain/seconds:0.15)+total;
   const job=seconds>0?Math.max(1,seconds,stepSeconds??0):0;
-  return {...(stepSeconds===undefined?{}:{step:stepSeconds}),job,low:job/(1+u),high:job*(1+u),uncertainty:u,cost:{done,total:all},fraction:all>0?Math.min(1,done/all):0,stepFraction:stepAll>0?Math.min(1,stepDone/stepAll):0};
+  return {...(stepSeconds===undefined?{}:{step:stepSeconds}),job,low:job/(1+u),high:job*(1+u),uncertainty:u,cost:{done,total:all},fraction:all>0?Math.min(1,done/all):0,stepFraction:stepAll>0?Math.min(1,stepDone/stepAll):0,shares};
  }
 }
 

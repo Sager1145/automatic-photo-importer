@@ -5,6 +5,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery} from '../core';
+import {segmentsFor} from './fixtures/receipts';
 
 configureOrganizationRecovery('import-fixture-host-authentication-secret-32bytes');
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -42,7 +43,7 @@ for(const change of ['prefix','replacement','source replacement','journal authen
  if(change==='replacement'){await fs.rename(destination,destination+'.saved');await fs.writeFile(destination,f.data.subarray(0,4093));}
  if(change==='source replacement'){await fs.rename(f.original,f.original+'.saved');await fs.writeFile(f.original,f.data);}
  if(change==='hard link')await fs.link(destination,path.join(f.base,'foreign-link'));
- if(change==='journal authentication'){const names=(await fs.readdir(path.dirname(destination))).filter(name=>name.startsWith('photo-importer-intent-'));assert.ok(names.length>0);for(const name of names){const journal=path.join(path.dirname(destination),name),record=JSON.parse(await fs.readFile(journal,'utf8'));record.seal='0'.repeat(64);await fs.writeFile(journal,JSON.stringify(record));}}
+ if(change==='journal authentication'){const segments=await segmentsFor(f.root);assert.ok(segments.length>0);for(const segment of segments){const lines=(await fs.readFile(segment,'utf8')).split('\n').filter(Boolean).map(line=>JSON.stringify({...JSON.parse(line),seal:'0'.repeat(64)}));await fs.writeFile(segment,lines.join('\n')+'\n');}}
  const before=await fs.readFile(destination),retry=await f.prepare();assert.notEqual(retry.entries[0]!.destination,destination);assert.ok(retry.entries[0]!.destination.includes(path.sep+'Conflicts'+path.sep));
  assert.deepEqual(await execute(retry),{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(destination),before);assert.deepEqual(await fs.readFile(retry.entries[0]!.destination),f.data);
 });
