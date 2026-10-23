@@ -37,7 +37,7 @@ import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
-import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
+import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,MB} from './resource-limits';
 import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
@@ -1039,11 +1039,11 @@ async function action(input:Action):Promise<void>{
 }
 async function boot(){
  // Soft memory governor: main plus the scan worker against the limit; above 90% new files wait, above 100% a warning shows.
- // The main process counts by private memory (refreshed each reading, so a value is at most one tick old); children are the scan worker and the renderer.
+ // The main process counts by private memory (refreshed each reading, so a value is at most one tick old); the child is the scan worker.
  let mainPrivate:{private?:number}|undefined;
  const refreshMainMemory=()=>{try{void (process as unknown as {getProcessMemoryInfo?:()=>Promise<{private?:number}>}).getProcessMemoryInfo?.().then(info=>{mainPrivate=info;},()=>{});}catch{/* RSS stays the fallback */}};
  setMainMemory(()=>{refreshMainMemory();return privateOrRss(mainPrivate,process.memoryUsage().rss);});
- setChildMemory(()=>app.getAppMetrics().filter(item=>item.type==='Utility'||item.type==='Tab').reduce((sum,item)=>sum+(item.memory.privateBytes||item.memory.workingSetSize)*1024,0));
+ setChildMemory(()=>childProcessMemory(app.getAppMetrics()));
  governor.observe({
   onChange:(usage,limit)=>{log('detailed','resources','memory',{usageMB:Math.round(usage),limitMB:limit,busy:busy()});const moved=Math.round(usage/16)!==Math.round(lastUsageMB/16);lastUsageMB=usage;const cleared=overLimit&&usage<limit*0.9;if(cleared)overLimit=false;if(busy()&&(moved||cleared))emit();},
   onWarn:(usage,limit)=>{overLimit=true;log('normal','resources','memory-over-limit',{usageMB:Math.round(usage),limitMB:limit});console.warn(`Memory use ${usage} MB is above the ${limit} MB limit; new files wait until it drops.`);if(busy())emit();},

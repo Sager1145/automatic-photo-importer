@@ -148,9 +148,14 @@ test('a stopped job leaves the governor queue at once', async () => {
   await assert.rejects(waiting, { name: 'AbortError' });
   release(); await running;
 });
-import { privateOrRss } from '../resource-limits';
+import { privateOrRss, childProcessMemory } from '../resource-limits';
 test('memory is measured by private bytes, falling back to RSS', () => {
   assert.equal(privateOrRss({ private: 2048 }, 999 * MB), 2048 * 1024);
   assert.equal(privateOrRss({ private: 0 }, 5 * MB), 5 * MB);
   assert.equal(privateOrRss(undefined, 7 * MB), 7 * MB);
+});
+
+test('only utility processes count as child memory; the renderer never throttles imports', () => {
+  const metrics = [{ type: 'Browser', memory: { workingSetSize: 900 } }, { type: 'Utility', memory: { workingSetSize: 300, privateBytes: 100 } }, { type: 'Utility', memory: { workingSetSize: 50 } }, { type: 'Tab', memory: { workingSetSize: 5000 } }];
+  assert.equal(childProcessMemory(metrics), (100 + 50) * 1024);
 });
