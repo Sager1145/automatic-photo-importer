@@ -99,6 +99,27 @@ test('releasing kept originals reads each file once',async t=>{
  assert.equal(released.removed,1);
  assert.deepEqual(reads.files(),{stash:1,destination:1});
 });
+// On exFAT no stat proves a file unchanged between a check and its release, so the check before the first release
+// looks at stats only and each kept original and its copy are read once, right before that file is released.
+test('on exFAT releasing kept originals reads each file once, right before releasing it',async t=>{
+ const f=await organized(t,'verify-once-exfat-release-');
+ simulateExfat(t,f.root);
+ const reads=countReads(t,f.role);
+ const released=await core.finalizeOrganization(f.root,f.id);
+ reads.stop();
+ assert.equal(released.removed,1);
+ assert.deepEqual(reads.files(),{stash:1,destination:1});
+});
+test('on exFAT a copy that changed is found before its original is released, and that original is kept',async t=>{
+ const f=await organized(t,'verify-once-exfat-release-changed-');
+ const stashed=(await fs.readdir(path.join(f.root,'Photo Importer Recovery'),{recursive:true})).map(name=>path.join(f.root,'Photo Importer Recovery',String(name))).filter(file=>file.endsWith('A.JPG'));
+ assert.equal(stashed.length,1);
+ // Same size, same dates, different bytes: only a read can tell.
+ const {mtime}=await fs.stat(f.destination);await fs.writeFile(f.destination,Buffer.alloc(SIZE,9));await fs.utimes(f.destination,mtime,mtime);
+ simulateExfat(t,f.root);
+ await assert.rejects(core.finalizeOrganization(f.root,f.id));
+ assert.deepEqual(await fs.readFile(stashed[0]!),f.data,'the kept original is still there');
+});
 // The kept original is read in the check before anything changes; put back by this undo, it is not read again.
 test('an undo reads the kept original once and the copy it removes once',async t=>{
  const f=await organized(t,'verify-once-undo-');
