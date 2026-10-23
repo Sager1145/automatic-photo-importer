@@ -99,7 +99,9 @@ test('a symlinked folder is never entered or removed, and a separately chosen so
 test('an aborted run removes no folders', async t => {
   const { source, files } = await fixture(t, ['a/one.jpg', 'b/two.jpg', 'c/three.jpg']);
   const control = new AbortController();
-  await assert.rejects(deleteOriginals(source, files, { signal: control.signal, onProgress: completed => { if (completed === 1) control.abort(); } }));
+  const result = await deleteOriginals(source, files, { signal: control.signal, onProgress: completed => { if (completed === 1) control.abort(); } });
+  assert.equal(result.stopped, true);
+  assert.equal(result.folders, 0);
   for (const folder of ['a', 'b', 'c']) assert.equal(await exists(path.join(source, folder)), true);
 });
 
@@ -112,4 +114,25 @@ test('the summary line and the history message count the removed folders in ever
     assert.ok(formatMessage(message('job.originalsDeleted', { count: 4, size: '1 GB', kept: 1, folders: 7 }), language).includes('7'), `${language}: history`);
   }
   assert.equal(createTranslator('en')('Removing empty folders: {completed} of {total}', { completed: 2, total: 5 }), 'Removing empty folders: 2 of 5');
+});
+
+test('a stop before the first read ends as stopped with nothing deleted, never as an error', async t => {
+  const { files } = await fixture(t, ['a/one.jpg', 'a/two.jpg']);
+  const source = path.dirname(path.dirname(files[0]!.source)), control = new AbortController();
+  control.abort();
+  const result = await deleteOriginals(source, files, { signal: control.signal, changeTimes: true });
+  assert.equal(result.stopped, true);
+  assert.equal(result.deleted.length, 0);
+  assert.deepEqual(result.kept.map(item => item.reason), ['stopped', 'stopped']);
+  for (const file of files) assert.ok(await exists(file.source));
+});
+
+test('a stop during the empty-folder pass keeps the deletion result and leaves the remaining folders', async t => {
+  const { source, files } = await fixture(t, ['a/b/one.jpg', 'c/two.jpg']);
+  const control = new AbortController();
+  const result = await deleteOriginals(source, files, { signal: control.signal, onFolders: done => { if (done === 1) control.abort(); } });
+  assert.equal(result.stopped, true);
+  assert.equal(result.deleted.length, 2, 'both files were removed before the stop and are still reported');
+  for (const file of files) assert.equal(await exists(file.source), false);
+  assert.ok(await exists(path.join(source, 'c')) || await exists(path.join(source, 'a')), 'the pass ended before every folder was looked at');
 });
