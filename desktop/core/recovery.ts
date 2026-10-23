@@ -884,7 +884,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    let looked=0;
    try{
     for(const [scope,folders] of scoped)await sidecars.sweep(scope,folders,signal,(_done,folder)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total,bytes:0,totalBytes:0,speed:0,file:path.basename(folder),renames:true});});
-   }catch(error){sidecars.warnFolder(m.root,error);}
+   }catch(error){if(isAbort(error))throw error;sidecars.warnFolder(m.root,error);}
   }
   // The user can keep emptied source folders; the choice is part of the signed journal.
   await removeSiblingPointers(m);

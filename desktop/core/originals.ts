@@ -45,7 +45,6 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
   const check=async(file:VerifiedOriginal):Promise<Outcome>=>{
     checkAbort(options.signal);
     options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
-    bytesDone+=reads(file);
     try {
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
       if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
@@ -68,6 +67,9 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     } catch(error) {
       if(options.signal?.aborted) throw error;
       return {kept:'error',error:`${file.source}: ${error instanceof Error?error.message:String(error)}`};
+    } finally {
+      // Counted when this file's checks end, so the byte progress never runs ahead of the reads.
+      bytesDone+=reads(file);
     }
   };
   const outcomes=await mapPool(files,VERIFY_CONCURRENCY,check);

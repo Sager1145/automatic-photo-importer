@@ -985,7 +985,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           // After the last write, timestamps, sync and the staged copy's removal: the "._" beside each file just published, while it is still that file.
           if(run.appleDouble)for(const item of placed)await run.appleDouble.besideFile(item.file,transfer.root,now=>samePlaced(now,item.stat));
         },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file),...placed.map(item=>item.file)]);
-        run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
+        if(!batch.failed)run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
         staged.clear();
         progress(position,path.basename(family[family.length-1]!.source));
       });
