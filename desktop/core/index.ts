@@ -142,6 +142,28 @@ function contradicts(a:Metadata,b:Metadata):boolean {
 }
 /** A source file left out of a plan because of `error`; nothing was written for it. */
 export interface PlanFailure {path:string;error:Error;}
+/** Live Photos: pairs each .mov with the same-stem still (HEIC/HEIF/JPG) whose ContentIdentifier agrees, or, when
+ * either lacks one, whose make is Apple, and sets `companionOf` on it. Indexed once by stem, so the cost is linear in
+ * the number of files. `dropped` holds Apple videos whose same-stem still is empty and so never imported. */
+export function pairLivePhotos(files:InventoryFile[],scanned:InventoryFile[],infos:Map<string,Metadata>,hooks:{signal?:AbortSignal;stemOf?:(file:string)=>string}={}):{paired:Set<string>;dropped:Set<string>} {
+  const stemOf=hooks.stemOf??stem,stillExtensions=['heic','heif','jpg','jpeg'],apple=(info?:Metadata)=>/^apple\b/i.test(info?.make??'');
+  const stillsByStem=new Map<string,InventoryFile[]>(),emptyStems=new Set<string>(),paired=new Set<string>(),dropped=new Set<string>();
+  for(const f of scanned) if(stillExtensions.includes(extension(f.path))) {
+    if(f.size===0) emptyStems.add(stemOf(f.path));
+  }
+  for(const f of files) if(stillExtensions.includes(extension(f.path))) {const key=stemOf(f.path);const list=stillsByStem.get(key);if(list)list.push(f);else stillsByStem.set(key,[f]);}
+  for(const list of stillsByStem.values()) list.sort((a,b)=>stillExtensions.indexOf(extension(a.path))-stillExtensions.indexOf(extension(b.path)));
+  for(const mov of files) {
+    checkAbort(hooks.signal);
+    if(mov.kind!=='Videos'||extension(mov.path)!=='mov'||mov.companionOf) continue;
+    const own=infos.get(mov.path),key=stemOf(mov.path);
+    const still=(stillsByStem.get(key)??[]).find(f=>{const info=infos.get(f.path);return info?.contentId&&own?.contentId?info.contentId===own.contentId:apple(info);});
+    if(still) {mov.companionOf=still.path;paired.add(mov.path);}
+    // An empty still is never imported, so an Apple video that shares its stem stays beside it.
+    else if(apple(own)&&emptyStems.has(key)) dropped.add(mov.path);
+  }
+  return {paired,dropped};
+}
 export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates}> {
   if(!options.reuse) return planOnce(source,roots,options,metadata,signal,onProgress);
   // A file rewritten in place leaves its folder unchanged, so a remembered listing
@@ -250,24 +272,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // just read, so it runs here rather than in the inventory.
   const livePaired=new Set<string>(),liveRoot=new Map<string,InventoryFile>();
   if(!options.backup) {
-    const stillExtensions=['heic','heif','jpg','jpeg'],apple=(info?:Metadata)=>/^apple\b/i.test(info?.make??'');
-    // Indexed once by stem: a card holds thousands of videos.
-    const stillsByStem=new Map<string,InventoryFile[]>(),emptyStems=new Set<string>();
-    for(const f of scan.files) if(stillExtensions.includes(extension(f.path))) {
-      if(f.size===0) emptyStems.add(stem(f.path));
-    }
-    for(const f of files) if(stillExtensions.includes(extension(f.path))) {const key=stem(f.path);const list=stillsByStem.get(key);if(list)list.push(f);else stillsByStem.set(key,[f]);}
-    for(const list of stillsByStem.values()) list.sort((a,b)=>stillExtensions.indexOf(extension(a.path))-stillExtensions.indexOf(extension(b.path)));
-    const dropped=new Set<string>();
-    for(const mov of files) {
-      checkAbort(signal);
-      if(mov.kind!=='Videos'||extension(mov.path)!=='mov'||mov.companionOf) continue;
-      const own=infos.get(mov.path),key=stem(mov.path);
-      const still=(stillsByStem.get(key)??[]).find(f=>{const info=infos.get(f.path);return info?.contentId&&own?.contentId?info.contentId===own.contentId:apple(info);});
-      if(still) {mov.companionOf=still.path;livePaired.add(mov.path);}
-      // An empty still is never imported, so an Apple video that shares its stem stays beside it.
-      else if(apple(own)&&emptyStems.has(key)) dropped.add(mov.path);
-    }
+    const {paired,dropped}=pairLivePhotos(files,scan.files,infos,{signal});
+    for(const mov of paired) livePaired.add(mov);
     if(dropped.size) {
       const listed=new Map(files.map(f=>[f.path,f]));
       const rootedInDropped=(file:InventoryFile)=>{for(let cur:InventoryFile|undefined=file,hops=0;cur&&hops<16;cur=cur.companionOf?listed.get(cur.companionOf):undefined,hops++)if(dropped.has(cur.path))return true;return false;};

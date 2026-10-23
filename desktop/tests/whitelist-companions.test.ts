@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {inventory,plan} from '../core/index';
-import type {Metadata} from '../shared';
+import type {InventoryFile,Metadata} from '../shared';
 
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const camera=async():Promise<Metadata>=>({camera:'Cam',date:'2024-03-04T10:00:00Z',fields:{}});
@@ -160,18 +160,17 @@ test('the companion count includes Live Photo pairs',async t=>{
  const found=await plan(source,[root],options,liveMeta);
  assert.equal(found.inventory.companions,1);
 });
-test('Live Photo pairing scales to many files',async t=>{
- const {source,root}=await fixture(t);
- const dir=path.join(source,'DCIM');await fs.mkdir(dir);
- const writes:Promise<void>[]=[];
- for(let i=0;i<6700;i++){const n=String(i).padStart(5,'0');for(const ext of ['HEIC','MOV','JPG'])writes.push(fs.writeFile(path.join(dir,`IMG_${n}.${ext}`),'x'));}
- await Promise.all(writes);
- const start=performance.now();
- await plan(source,[root],options,async()=>({camera:'P',date:'2024-03-04T10:00:00Z',make:'Apple',fields:{}}));
- const elapsed=performance.now()-start;
- console.log('live scale ms',Math.round(elapsed));
- // The rest of planning (stat, metadata, destinations) takes ~20 s for 20k files on its own; the quadratic pairing alone took ~500 s.
- assert.ok(elapsed<90000,String(elapsed));
+test('Live Photo pairing is linear in the number of files',async()=>{
+ const {pairLivePhotos}=await import('../core/index');
+ const {stem}=await import('../core/inventory');
+ const files:InventoryFile[]=[];
+ for(let i=0;i<6700;i++){const n=String(i).padStart(5,'0');for(const [ext,kind] of [['HEIC','Photos'],['MOV','Videos'],['JPG','Photos']] as const)files.push({path:`/card/DCIM/IMG_${n}.${ext}`,relative:`DCIM/IMG_${n}.${ext}`,size:1,kind} as unknown as InventoryFile);}
+ let stemCalls=0;
+ const infos=new Map<string,Metadata>(files.map(f=>[f.path,{make:'Apple',fields:{}} as Metadata]));
+ const {paired}=pairLivePhotos(files,files,infos,{stemOf:file=>{stemCalls++;return stem(file);}});
+ assert.equal(paired.size,6700,'every MOV pairs with its still');
+ // The old implementation compared every video with every file (quadratic): ~13 million calls here.
+ assert.ok(stemCalls<=3*files.length,`${stemCalls} stem calls for ${files.length} files`);
 });
 test('a darktable XMP needs exactly two digits',async t=>{
  const {source,put}=await fixture(t);
