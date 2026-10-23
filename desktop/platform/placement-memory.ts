@@ -17,7 +17,7 @@ const hashOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value))
 /** One memory per destination volume and library; the scope is stored inside and must match. */
 export const placementId=(volumeId:string,root:string,videoRoot?:string)=>hashOf([volumeId,path.resolve(root),videoRoot?path.resolve(videoRoot):'']);
 /** Everything that changes where a file belongs. */
-export const placementScope=(parts:{template:string;layout:string;videoTemplate?:string;editedFolder?:string;basePaths:string[]})=>hashOf([parts.template,parts.layout,parts.videoTemplate??'',parts.editedFolder??'',parts.basePaths]);
+export const placementScope=(parts:{template:string;layout:string;videoTemplate?:string;editedFolder?:string;basePaths:string[];noMetadata?:string;noMetadataFolder?:string})=>hashOf([parts.template,parts.layout,parts.videoTemplate??'',parts.editedFolder??'',parts.basePaths,parts.noMetadata??'',parts.noMetadataFolder??'']);
 
 export async function loadPlacement(store:string,id:string,scope:string):Promise<Placement|undefined> {
   try {

@@ -891,7 +891,35 @@ Preparing organization review…|正在准备整理预览…|正在準備整理�
 Copy to camera folders|复制到相机文件夹|複製到相機資料夾|カメラ別フォルダーにコピー
 Remember for these extensions|记住这些扩展名的选择|記住這些副檔名的選擇|これらの拡張子の設定を保存
 Unknown formats stay excluded unless you choose to copy them. Recheck the source after changing a rule.|未知格式默认排除，除非你选择复制。更改规则后请重新检查来源。|未知格式預設排除，除非你選擇複製。變更規則後請重新檢查來源。|コピーを選択するまで不明な形式は除外されます。ルール変更後はソースを再確認してください。
-Camera folders use a matching photo or video, or the card’s single confirmed camera. Mixed or unconfirmed cards use Unknown Camera.|相机文件夹使用匹配的照片或视频，或卡中唯一已确认的相机。混合或未确认的卡使用 Unknown Camera。|相機資料夾使用配對的照片或影片，或卡中唯一已確認的相機。混合或未確認的卡使用 Unknown Camera。|対応する写真・動画、またはカード内で唯一確認されたカメラを使用します。複数機種や未確認のカードでは Unknown Camera を使用します。
+Camera folders use a matching photo or video, or the card’s single confirmed camera. Mixed or unconfirmed cards use the Unknown files folder.|相机文件夹使用匹配的照片或视频，或卡中唯一已确认的相机。混合或未确认的卡使用“Unknown files”文件夹。|相機資料夾使用配對的照片或影片，或卡中唯一已確認的相機。混合或未確認的卡使用「Unknown files」資料夾。|カメラ別フォルダーは、対応する写真・動画、またはカードで確認済みの唯一のカメラを使います。混在または未確認のカードは「Unknown files」フォルダーを使います。
+{count} unknown files will be left where they are.|{count} 个未知文件将保留在原位。|{count} 個未知檔案將保留在原位。|不明なファイル {count} 件はそのままの場所に残します。
+{count} unknown files will not be copied; they stay on the source.|{count} 个未知文件不会被复制，仍留在来源中。|{count} 個未知檔案不會被複製，仍留在來源中。|不明なファイル {count} 件はコピーされず、ソースに残ります。
+{count} unknown files will be moved to {folder}.|{count} 个未知文件将被移动到 {folder}。|{count} 個未知檔案將被移動到 {folder}。|不明なファイル {count} 件を {folder} に移動します。
+{count} unknown files will be copied to {folder}.|{count} 个未知文件将被复制到 {folder}。|{count} 個未知檔案將被複製到 {folder}。|不明なファイル {count} 件を {folder} にコピーします。
+{count} without a date|{count} 个无日期|{count} 個無日期|日付なし {count} 件
+{count} without a camera|{count} 个无相机|{count} 個無相機|カメラなし {count} 件
+{count} unreadable|{count} 个无法读取|{count} 個無法讀取|読み取り不可 {count} 件
+No capture date|无拍摄日期|無拍攝日期|撮影日なし
+No camera|无相机|無相機|カメラなし
+They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you continue.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你继续之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你繼續之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。続行するまで何も始まりません。
+Show files|显示文件|顯示檔案|ファイルを表示
+Hide files|隐藏文件|隱藏檔案|ファイルを隠す
+Use file date instead|改用文件日期|改用檔案日期|ファイルの日付を使う
+1 unknown file was left where it is|有 1 个未知文件保留在原位|有 1 個未知檔案保留在原位|不明なファイル 1 件をそのままの場所に残しました
+{count} unknown files were left where they are|有 {count} 个未知文件保留在原位|有 {count} 個未知檔案保留在原位|不明なファイル {count} 件をそのままの場所に残しました
+1 unknown file was filed in the unknown files folder|有 1 个未知文件被放入未知文件文件夹|有 1 個未知檔案被放入未知檔案資料夾|不明なファイル 1 件を不明ファイル用フォルダーに入れました
+{count} unknown files were filed in the unknown files folder|有 {count} 个未知文件被放入未知文件文件夹|有 {count} 個未知檔案被放入未知檔案資料夾|不明なファイル {count} 件を不明ファイル用フォルダーに入れました
+They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取。你可以在“设置”中更改。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取。你可以在「設定」中變更。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです。設定で変更できます。
+Files without metadata|无元数据的文件|無中繼資料的檔案|メタデータのないファイル
+Files with unknown metadata|元数据未知的文件|中繼資料未知的檔案|メタデータが不明なファイル
+Leave where they are|保留在原位|保留在原位|そのままにする
+Not moved or copied, and Delete originals never removes them. You are warned before a job starts.|不移动也不复制，“删除原件”也绝不会删除它们。任务开始前会提醒你。|不移動也不複製，「刪除原始檔」也絕不會刪除它們。工作開始前會提醒你。|移動もコピーもされず、「元ファイルを削除」でも削除されません。ジョブの開始前に警告します。
+Move to a folder|移动到文件夹|移動到資料夾|フォルダーに移動
+Organized or copied into one folder directly under your library, keeping their subfolders.|整理或复制到资料库下的同一个文件夹中，并保留其子文件夹结构。|整理或複製到資料庫下的同一個資料夾中，並保留其子資料夾結構。|ライブラリ直下の1つのフォルダーに、サブフォルダー構成を保ったまま整理またはコピーします。
+Use file date|使用文件日期|使用檔案日期|ファイルの日付を使う
+Filed by the file's modified date, in a camera folder with the folder name below.|按文件修改日期归档，放入以下方文件夹名称命名的相机文件夹。|依檔案修改日期歸檔，放入以下方資料夾名稱命名的相機資料夾。|ファイルの更新日で整理し、下のフォルダー名のカメラフォルダーに入れます。
+Use one folder name: no slashes or special characters, not a date or year, and not a folder the app uses. The saved name stays in use until this is fixed.|请使用单一的文件夹名称：不含斜杠或特殊字符，不是日期或年份，也不是应用使用的文件夹。在修正之前仍使用已保存的名称。|請使用單一的資料夾名稱：不含斜線或特殊字元，不是日期或年份，也不是 App 使用的資料夾。在修正之前仍使用已儲存的名稱。|フォルダー名は1つだけにしてください。スラッシュや特殊文字、日付や年、アプリが使うフォルダー名は使えません。修正するまで保存済みの名前を使います。
+Unknown files folder name|未知文件文件夹名称|未知檔案資料夾名稱|不明ファイル用フォルダー名
 All errors|所有错误|所有錯誤|すべてのエラー
 {count} errors|{count} 个错误|{count} 個錯誤|エラー {count} 件
 Close panel|关闭面板|關閉面板|パネルを閉じる

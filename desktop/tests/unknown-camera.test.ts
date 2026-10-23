@@ -56,7 +56,7 @@ test('unknown files route to their own DCIM camera and mixed card root files sta
  const destination=(source:string)=>plans[0].entries.find(entry=>entry.source===source)?.destination;
  assert.equal(destination(nikon),path.join(root,'2024/202402/Nikon Z6/INDEX.DSC'));
  assert.equal(destination(sony),path.join(root,'2025/202503/Sony A7/INDEX.DSC'));
- assert.equal(destination(mixed),path.join(root,'2020/202012/Unknown Camera/INDEX.DSC'));
+ assert.equal(destination(mixed),path.join(root,'2020/202012/Unknown files/INDEX.DSC'));
 });
 
 test('a single-camera card supplies context for root unknowns without treating them as edited exports',async t=>{
@@ -67,11 +67,11 @@ test('a single-camera card supplies context for root unknowns without treating t
  assert.ok(!plans[0].entries.find(entry=>entry.source===unknown)?.family.startsWith('edited:'));
 });
 
-test('unknown-only cards use Unknown Camera and the unknown file modification month',async t=>{
+test('unknown-only cards use Unknown files and the unknown file modification month',async t=>{
  const {source,root,put}=await fixture(t);const unknown=await put('INDEX01.DSC');
  const {plans}=await plan(source,[root],{...options,unknownRules:{dsc:cameraRule}},async()=>{throw new Error('Unknown files must not be inspected as media');});
  assert.equal(plans[0].entries[0]?.source,unknown);
- assert.equal(plans[0].entries[0]?.destination,path.join(root,'2020/202012/Unknown Camera/INDEX01.DSC'));
+ assert.equal(plans[0].entries[0]?.destination,path.join(root,'2020/202012/Unknown files/INDEX01.DSC'));
 });
 
 test('one camera spanning capture months supplies its camera but falls back to unknown file date',async t=>{
