@@ -203,6 +203,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   speeds('speed:'+job.id,job.progress);
  }
  if(state.reviewProgress)alone('review',state.reviewProgress);
+ if(state.duplicates?.progress)alone('duplicates',state.duplicates.progress);
  for(const [destination,progress] of Object.entries(state.misplacedProgress??{}))alone('misplaced:'+destination,progress);
  if(state.residue?.progress)alone('residue',state.residue.progress);
  if(state.organizationRecoveryProgress)alone('recovery-listing',state.organizationRecoveryProgress);

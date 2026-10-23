@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
-import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions} from './shared';
+import type {DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions} from './shared';
 import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
 import {settingsLocked,lockedPreferenceKeys,jobPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
@@ -21,7 +21,10 @@ import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,type ListingHint} from './listing-estimate';
-import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse} from './platform/metadata';
+import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,embeddedPreview} from './platform/metadata';
+import {thumbnail,systemDecoders} from './platform/thumbnails';
+import {removeDuplicates} from './core/duplicate-removal';
+import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue} from './core/residue';
 import {recordPlanDuplicates,scanDuplicates,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
@@ -135,7 +138,7 @@ const etaTracker=new EtaTracker();
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
-const emit=()=>{stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const emit=()=>{state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorLog.update(gatherErrors(state));state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 function progressEmit(){const now=Date.now();if(now-lastEmit>100){lastEmit=now;emit();}}
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
@@ -258,8 +261,9 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  void settle((async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
-  if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message('history.organization'),job.detail);}
-  else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message('history.organizationUndone'),job.detail);}
+  const duplicates=state.organizationRecovery?.find(item=>item.root===root&&item.id===id)?.kind==='duplicates';
+  if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesReleased',{count:released.removed,size:gigabytes(released.bytes)}):joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message(duplicates?'history.duplicatesReleased':'history.organization'),job.detail);}
+  else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesUndone',{restored:undone.restored}):joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message(duplicates?'history.duplicatesUndone':'history.organizationUndone'),job.detail);}
   else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
   else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=progress.step==='history'?'verifying':'copying';job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
@@ -298,7 +302,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size)retur
 // hashing threads start again on demand. Closed only while no job, scan, review, organization or check
 // could use them; the idle test and the closing calls run in the same turn, so nothing starts in between.
 let inspecting=0,releasing:Promise<void>|undefined;
-const idle=()=>!hardwareTest&&!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting;
+const idle=()=>!hardwareTest&&!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting&&!duplicateControl;
 function releaseIfIdle():Promise<void>{
  if(releasing||!idle())return releasing??Promise.resolve();
  if(checksPending){scheduleAutomaticChecks();return Promise.resolve();}
@@ -570,6 +574,71 @@ async function applyReview(){
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
  void settle(run(job,control,prepared)).finally(()=>{if(job.phase==='error'&&prepared.review.kind!=='reorganize')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
 }
+// ---- Remove duplicates: scan one library, review, set the chosen copies aside (recovery store, with undo).
+let duplicateGroups:DuplicateGroup[]=[],duplicateCompanions=new Map<string,string[]>(),duplicateControl:AbortController|undefined;
+const dup:Omit<DuplicatesState,'scopes'>={status:'idle',revision:0,groups:0,files:0};
+const chosenScopes=new Map<string,DuplicateScope>();
+function duplicateScopes():DuplicateScope[]{
+ const result:DuplicateScope[]=[];
+ for(const destination of state.preferences.destinations)for(const folder of backupFolders(state.preferences)){const root=path.resolve(destination,folder);if(!result.some(item=>item.root===root))result.push({root,name:folder?`${path.basename(destination)} · ${folder}`:path.basename(destination),destination});}
+ for(const scope of chosenScopes.values())if(!result.some(item=>item.root===scope.root))result.push(scope);
+ return result;
+}
+const duplicateScope=(root:string)=>duplicateScopes().find(item=>item.root===root);
+/** Make a library's journals findable by Undo and Release (the organization recovery list). */
+async function rememberLibrary(scope:DuplicateScope){
+ const index=state.preferences.destinations.indexOf(scope.destination??''),volumeId=index>=0?state.preferences.destinationIds?.[index]:(await volumeInfo(scope.root)).volumeId;
+ if(!volumeId)throw new MessageError('error.destinationUnidentified');
+ if(!organizationLocations.some(item=>item.root===scope.root&&item.volumeId===volumeId))organizationLocations.push({root:scope.root,destination:index>=0?scope.destination!:scope.root,volumeId,...(index>=0?{}:{folder:true})});
+ await save();
+}
+async function scanDuplicatesAction(){
+ const root=dup.root,scope=root?duplicateScope(root):undefined;
+ if(!root||!scope)throw new MessageError('error.duplicatesScope');
+ if(busy()||state.review||state.busyReview||duplicateControl)throw new MessageError('error.busy');
+ const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();
+ dup.status='scanning';dup.result=undefined;dup.progress=undefined;emit();
+ try{
+  await stopResidueCheck();
+  const real=await fs.realpath(root).catch(()=>{throw new MessageError('error.duplicatesUnavailable');});
+  const result=await scanDuplicates(real,{metadata:file=>metadata(file,{preview:false,details:false}),index:await destinationIndex(real,await identity(real))},{editedFolder:state.preferences.editedFolder,signal:control.signal,onProgress:progress=>{dup.progress=progress;progressEmit();}});
+  duplicateGroups=result.groups;duplicateCompanions=result.companions;
+  Object.assign(dup,{files:result.files,groups:result.groups.length,scannedAt:new Date().toISOString(),revision:dup.revision+1,status:'ready' as const});
+ }catch(error){
+  duplicateGroups=[];Object.assign(dup,{groups:0,files:0,revision:dup.revision+1,status:'idle' as const});
+  if(!control.signal.aborted)throw error;
+ }finally{dup.progress=undefined;if(duplicateControl===control)duplicateControl=undefined;emit();void releaseIfIdle();}
+}
+async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string>){
+ const root=dup.root,scope=root?duplicateScope(root):undefined;
+ if(!root||!scope||dup.status!=='ready')throw new MessageError('error.duplicatesStale');
+ if(busy()||state.review||state.busyReview||duplicateControl)throw new MessageError('error.busy');
+ if(![1,2,3].includes(level)||!decisions||typeof decisions!=='object')throw new Error('Invalid request');
+ const resolved=resolveGroups(duplicateGroups,level,Object.fromEntries(Object.entries(decisions).filter(([,value])=>typeof value==='string')),state.preferences.editedFolder);
+ if(!summarize(resolved).files)throw new MessageError('error.duplicatesNothing');
+ const real=await fs.realpath(root);
+ await rememberLibrary(scope);
+ const job:Job={id:randomUUID(),source:{id:'duplicates:'+root,name:scope.name,path:root,transport:'folder'},organization:true,phase:'verifying',detail:message('job.removingDuplicates'),errors:[],backup:false};
+ state.jobs.unshift(job);const control=new AbortController();cancelAutomaticChecks();active.set(job.id,control);organizationJobIds.add(job.id);dup.status='removing';emit();
+ void settle((async()=>{
+  const reports=path.join(app.getPath('userData'),'operation-reports',job.id);
+  try{
+   await stopResidueCheck();
+   const result=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
+   job.errors.push(...(result.result?.errors??[]).map(text));
+   await fs.mkdir(reports,{recursive:true});
+   for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
+   job.phase=job.errors.length?'error':'complete';
+   job.detail=joined(message('job.duplicatesRemoved',{count:result.removed,size:gigabytes(result.bytes)}),result.carried>0&&message('job.duplicatesCarried',{count:result.carried}),result.left>0&&message('job.duplicatesLeft',{count:result.left}),message('job.errors',{count:job.errors.length}));
+   addHistory(message('history.duplicatesRemoved',{name:scope.name}),job.detail);
+   dup.result={removed:result.removed,bytes:result.bytes,carried:result.carried,left:result.left,errors:job.errors.length,...(result.id?{id:result.id}:{})};
+  }catch(error){job.phase=control.signal.aborted?'stopped':'error';job.detail=control.signal.aborted?message('job.stopped'):toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}
+  finally{delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);dup.status='idle';await refreshOrganizations().catch(()=>{});emit();
+   // The library changed: look again (records make this quick).
+   if(!active.size&&dup.root===root){const result=dup.result;await scanDuplicatesAction().catch(error=>{state.error=toMessage(error);emit();});dup.result=result;emit();}
+   pump();void releaseIfIdle();}
+ })());
+}
 /** Delete originals already in the backup: a separate step after a finished folder import. Only source files whose
  * checksum is confirmed again, now, at every backup copy are removed; anything else stays. Each file is reported. */
 async function removeOriginals(jobId:string){
@@ -599,6 +668,11 @@ async function action(input:Action):Promise<void>{
   case 'preview':{const source=state.sources.find(s=>s.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');await previewSource(source,folders.get(source.id)?.backup??false);break;}
   case 'scanSource':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
+  case 'duplicatesScope':{if(!duplicateScope(input.root))throw new MessageError('error.duplicatesScope');if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');if(dup.root!==input.root){duplicateGroups=[];Object.assign(dup,{root:input.root,name:duplicateScope(input.root)!.name,status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesScan':await scanDuplicatesAction();break;
+  case 'duplicatesStop':duplicateControl?.abort();break;
+  case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;
   case 'refreshOrganization':await refreshOrganizations();break;
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'resumeOrganization':await resumeOrganizationJob(input.root,input.id,'resume',undefined,undefined,input.full===true);break;
@@ -768,6 +842,9 @@ async function boot(){
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
  ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{await action(value);}catch(e){state.error=toMessage(e);emit();}});
  ipcMain.handle('importer:inspect',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);inspecting++;try{return await metadata(await allowed(file),{preview:false});}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{return await thumbnail(await allowed(file),{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)});}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
  await window.loadFile(renderer);await refresh();timer=setInterval(()=>void refresh(),5000);
  if(hardwareReportRoot){const reports=hardwareReportRoot,owner=window;runA006HardwareTest(()=>state,action,reports,async source=>{const result=await dialog.showOpenDialog(owner,{title:`Authorize read access: ${source.name}`,defaultPath:source.path,properties:['openDirectory']});if(result.canceled||!result.filePaths[0]||await fs.realpath(result.filePaths[0])!==await fs.realpath(source.path))throw new Error(`Select the exact source root: ${source.path}`);}).catch(error=>{state.error=text(`A006 hardware test failed: ${errorText(error)}. Reports: ${reports}`);emit();});}
  if(qa&&qaFixtureRoot&&process.argv.includes('--codex-test')){const passed=await runCodexSmoke(window,qaFixtureRoot,process.argv.includes('--codex-ui-only'),process.argv.includes('--codex-organization-only'));await closeMetadata();app.exit(passed?0:1);}
@@ -781,7 +858,7 @@ let quitting=false,closing:Promise<void>|undefined;
 app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch(()=>{});
 app.on('before-quit',event=>{
  if(timer)clearInterval(timer);cancelAutomaticChecks();
- for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();reviewControl?.abort();
+ for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();reviewControl?.abort();duplicateControl?.abort();
  // A quit the closing step started, or a system shutdown, goes through; another quit meanwhile waits for it.
  if(!quitting&&closing){event.preventDefault();return;}
  if(!quitting){

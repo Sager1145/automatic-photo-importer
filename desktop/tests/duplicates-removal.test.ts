@@ -106,7 +106,7 @@ test('an EXIF duplicate with another SHA is set aside against its kept copy and 
   assert.equal(await exists(path.join(root, 'Imported/DSC_0003.JPG')), false);
   assert.equal(await fs.readFile(path.join(root, '2024/202405/Nikon Z f/DSC_0003.JPG'), 'utf8'), 'AAAAAAAAAA');
   const listed = (await getOrganizationRecovery(root)).find(job => job.id === removal.id)!;
-  assert.equal(listed.status, 'complete', listed.error);
+  assert.equal(listed.status, 'complete', String(listed.error));
   assert.equal((await undoOrganization(root, removal.id!)).restored, 1);
   assert.equal(await fs.readFile(path.join(root, 'Imported/DSC_0003.JPG'), 'utf8'), 'BBBBBBBBBB');
   dropDuplicateStores();

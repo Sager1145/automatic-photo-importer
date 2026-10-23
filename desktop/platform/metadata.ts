@@ -255,6 +255,21 @@ async function preview(filename:string):Promise<string|undefined> {
   }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
   return undefined;
 }
+/** The JPEG a camera embeds in a RAW (or HEIF) file, for when the system cannot decode the file itself. */
+export async function embeddedPreview(filename:string):Promise<Buffer|undefined> {
+  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));previewFolders.add(scratch);
+  try {
+    for(const tag of ['JpgFromRaw','PreviewImage','OtherImage','ThumbnailImage'] as const) {
+      const output=path.join(scratch,`${tag}.jpg`);
+      try {
+        await exiftool().extractBinaryTag(tag,filename,output);
+        const info=await stat(output);if(info.size===0||info.size>previewLimit)continue;
+        const buffer=await readFile(output);
+        if(buffer[0]===0xff&&buffer[1]===0xd8)return buffer;
+      }catch{/* Missing embedded previews are normal. */}
+    }
+  }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
+}
 // Routing reads only what camera, capture date, editor provenance, lens and
 // read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
