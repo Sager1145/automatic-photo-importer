@@ -266,10 +266,13 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
         catch(error) {if(isAbort(error))throw error;}
       }
     }));
-    // Only the changed file's family (same folder and stem: RAW, JPG, sidecars) is read again with it.
+    // Only the changed file's family is read again with it: members sharing a folder and stem (RAW, JPG) and the sidecars that
+    // belong to one of them wherever they live (NKSC_PARAM, CaptureOne/Settings), by the same companion links planning uses.
+    const listed=new Map(files.map(file=>[file.path,file]));
+    const familyOf=(file:InventoryFile)=>{let root=file;for(let hops=0;root.companionOf&&hops<16;hops++){const next=listed.get(root.companionOf);if(!next)break;root=next;}return stem(root.path);};
     const hot=new Set<string>();
-    for(const file of files) if(!trusted.has(file.path)) hot.add(stem(file.path));
-    for(const file of files) if(trusted.has(file.path)&&hot.has(stem(file.path))) trusted.delete(file.path);
+    for(const file of files) if(!trusted.has(file.path)) hot.add(familyOf(file));
+    for(const file of files) if(trusted.has(file.path)&&hot.has(familyOf(file))) trusted.delete(file.path);
   }
   async function examine(file:InventoryFile,position:number):Promise<void> {
     await contained(file.path,sourceRoot);

@@ -59,6 +59,18 @@ test('one new file beside 1,000 remembered ones re-reads only its own family',as
   assert.ok(again.reads>=1&&again.reads<=3,`reads ${again.reads}`);
 });
 
+for(const [name,sidecar] of [['an NKSC_PARAM sidecar','NKSC_PARAM/IMG_3.JPG.nksc'],['a CaptureOne Settings sidecar','CaptureOne/Settings1/IMG_3.JPG.cos']] as const) {
+  test(`a new ${name} re-reads its original and nothing else`,async t=>{
+    const {put,check}=await fixture(t);
+    for(let n=0;n<20;n++) await put(`2024/202402/Sony A7/JPEG/IMG_${n}.JPG`);
+    const scope=scopeOf(options.template);
+    await check(scope);
+    await put(`2024/202402/Sony A7/JPEG/${sidecar}`);
+    const again=await check(scope);
+    assert.equal(again.reads,1,'the original, whose companion routing needs its metadata');
+  });
+}
+
 test('a file moved by hand is still flagged',async t=>{
   const {root,put,check}=await fixture(t);
   await put('2024/202402/Sony A7/JPEG/A.JPG');await put('2024/202402/Sony A7/JPEG/B.JPG');
