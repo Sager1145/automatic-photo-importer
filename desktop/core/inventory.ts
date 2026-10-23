@@ -5,8 +5,8 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { mediaKindForPath } from '../media-formats';
 import { beneath, checkAbort, contained, directory, pathKey, validateRelative } from './paths';
 
-const sidecars=new Set('xmp aae thm xml moi wav m4a mp3 aac srt dop cos'.split(' '));
-const videoOnly=new Set('xml moi srt thm wav m4a mp3 aac'.split(' '));
+const sidecars=new Set('xmp aae thm xml moi wav bwf m4a mp3 aac srt dop cos pp3 comask on1 acr dr4 vrd rmd sidecar bim'.split(' '));
+const videoOnly=new Set('xml moi srt thm wav bwf m4a mp3 aac bim'.split(' '));
 /** Low-resolution proxies: real video, kept with their original or imported alone. */
 const proxies=new Set(['lrf','lrv']);
 /** Stems a proxy's original may have: its own (DJI LRF), GoPro GL… → GX…/GH… (same chapter and
@@ -17,7 +17,7 @@ function proxyOriginals(file:string):string[] {
   const insta=/^LRV(_\d{8}_\d{6}_\d)1(_\d+)$/i.exec(name);if(insta)names.push(`VID${insta[1]}0${insta[2]}`);
   return names.map(item=>pathKey(path.join(folder,item)));
 }
-const audio=new Set('wav m4a mp3 aac'.split(' '));
+const audio=new Set('wav bwf m4a mp3 aac'.split(' '));
 const artifacts=new Set(['.photo-importer-recovery','photo-importer-drive.json','.photo-importer-drive.json','photo-importer-index.json','photo importer recovery','.ds_store','.fseventsd','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
 const importArtifact=/^(?:\.import|photo-importer)-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
 const indexTemporary=/^photo-importer-index-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.tmp$/i;
@@ -27,6 +27,10 @@ export function extension(file:string):string {return path.extname(file).slice(1
 export function stem(file:string):string {return pathKey(path.join(path.dirname(file),path.basename(file,path.extname(file))));}
 /** NX Studio keeps edits in NKSC_PARAM/<original name>.nksc beside the original. */
 export function nkscEdit(file:string):boolean {return extension(file)==='nksc' && path.basename(path.dirname(file)).toLowerCase()==='nksc_param';}
+/** Capture One keeps <name>.<ext>.cos|comask in <folder>/CaptureOne/Settings<n>/ for the original in <folder>. */
+const captureOneSettings=/^(.*)[\\/](CaptureOne[\\/]Settings\d+)[\\/]([^\\/]+)\.(?:cos|comask)$/i;
+/** The CaptureOne/Settings<n> folder (as written on the card) of a Capture One settings file. */
+export function captureOneEdit(file:string):string|undefined {const match=captureOneSettings.exec(file);return match?path.join(...match[2]!.split(/[\\/]/)):undefined;}
 export interface RuleDefaults {fallback:UnknownDefault;builtins:boolean;}
 /** The rule for a file no format or companion claims: an explicit rule wins, then
  * unpaired camera audio goes to its camera folder, then the user's default. */
@@ -106,6 +110,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     for(const folder of selected){await walk(folder);topDone++;report(true);}
   }else await walk(root,true);
   report(true);
+  // Camera bookkeeping that looks like media (a thumbnail JPG) is a system file, never a photo.
+  for(const file of files) if(file.kind!=='Other') {const system=knownSystemFile(file.relative);if(system){file.system=system;file.kind='Other';}}
   const media=new Map<string,InventoryFile[]>(),byPath=new Map<string,InventoryFile>();
   for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); media.set(key,[...(media.get(key)??[]),file]); byPath.set(pathKey(file.path),file); }
   for(const file of files) {
@@ -119,18 +125,30 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       if(originals.length===1)file.companionOf=originals[0].path;
     }
     if(file.kind==='Other' && sidecars.has(extension(file.path))) {
-      const matches=media.get(stem(file.path))??[], stills=matches.filter(f=>f.kind!=='Videos'), videos=matches.filter(f=>f.kind==='Videos');
-      const originals=videos.filter(video=>!proxies.has(extension(video.path))),videoCandidates=originals.length?originals:videos;
-      let primary:InventoryFile|undefined;
-      if(stills.length && !(videoOnly.has(extension(file.path)) && videos.length)) primary=stills.find(f=>f.kind==='RAW')??stills[0];
-      else if(videoCandidates.length===1) primary=videoCandidates[0];
-      if(!primary && extension(file.path)==='xml' && /^C\d+M\d{2}$/i.test(path.basename(file.path,path.extname(file.path)))) {
-        const videoStem=stem(file.path).slice(0,-3), videos=(media.get(videoStem)??[]).filter(f=>f.kind==='Videos');
+      const ext=extension(file.path),dir=path.dirname(file.path),name=path.basename(file.path,path.extname(file.path));
+      // A family member of these stems: a still wins unless a video sidecar sits beside a video.
+      const choose=(matches:InventoryFile[]):InventoryFile|undefined => {
+        const stills=matches.filter(f=>f.kind!=='Videos'), videos=matches.filter(f=>f.kind==='Videos');
+        const originals=videos.filter(video=>!proxies.has(extension(video.path))),videoCandidates=originals.length?originals:videos;
+        if(stills.length && !(videoOnly.has(ext) && videos.length)) return stills.find(f=>f.kind==='RAW')??stills[0];
+        return videoCandidates.length===1?videoCandidates[0]:undefined;
+      };
+      // A Sony CnnnnR01.BIM belongs to its clip alone; its stem is never matched as-is.
+      let primary=ext==='bim'?undefined:choose(media.get(stem(file.path))??[]);
+      if(!primary && ext==='xml' && /^C\d+M\d{2}$/i.test(name)) {
+        const videos=(media.get(stem(file.path).slice(0,-3))??[]).filter(f=>f.kind==='Videos');
         const originals=videos.filter(video=>!proxies.has(extension(video.path))),candidates=originals.length?originals:videos;
         if(candidates.length===1) primary=candidates[0];
       }
-      // Lightroom and Camera Raw also write <name>.<original extension>.xmp.
+      // Lightroom, Camera Raw, ACR and RawTherapee write <name>.<original extension>.<sidecar>.
       primary??=byPath.get(stem(file.path));
+      if(!primary && ext==='pp3' && /\.out$/i.test(name)) primary=byPath.get(pathKey(path.join(dir,name.slice(0,-4))));
+      // darktable duplicates: <name>_<nn>.<ext>.xmp belongs to <name>.<ext> when no exact match exists.
+      if(!primary && ext==='xmp') {const duplicate=/^(.*)_\d{2,}\.(\w+)$/.exec(name);if(duplicate)primary=byPath.get(pathKey(path.join(dir,`${duplicate[1]}.${duplicate[2]}`)));}
+      if(!primary && (ext==='cos'||ext==='comask') && captureOneEdit(file.path)) primary=byPath.get(pathKey(path.join(path.dirname(path.dirname(dir)),name)));
+      if(!primary && audio.has(ext) && name.startsWith('_')) primary=choose(media.get(pathKey(path.join(dir,name.slice(1))))??[]);
+      if(!primary && ext==='bim') {const clip=/^(C\d{4})R01$/i.exec(name);if(clip)primary=choose(media.get(pathKey(path.join(dir,clip[1]!)))??[]);}
+      if(!primary && ext==='aae') {const edit=/^(IMG_)O(\d+)$/i.exec(name);if(edit)primary=choose(media.get(pathKey(path.join(dir,edit[1]!+edit[2]!)))??[]);}
       file.companionOf=primary?.path;
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;

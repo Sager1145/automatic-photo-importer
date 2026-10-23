@@ -22,3 +22,16 @@ test('formats cameras write, as listed by ExifTool, Immich and Rapid Photo Downl
   // Nikon N-RAW video is .NEV; ".nraw" is not a real extension.
   assert.equal(mediaKindForPath('/DCIM/clip.nraw'), 'Other');
 });
+
+test('whitelist additions map to their kinds in either case, and ts/txt/json/zip stay Other', () => {
+  const groups: [string, string[]][] = [
+    ['Images', ['webp', 'jps', 'psd', 'psb', 'jfif']],
+    ['RAW', ['cap', 'eip', 'k25', 'rwz', 'cs1']],
+    ['Videos', ['3g2', 'mqv', 'vob', 'dv']],
+  ];
+  for (const [kind, extensions] of groups) for (const extension of extensions) {
+    assert.equal(mediaKindForPath(`/DCIM/X0001.${extension}`), kind, extension);
+    assert.equal(mediaKindForPath(`/DCIM/X0001.${extension.toUpperCase()}`), kind, extension);
+  }
+  for (const extension of ['ts', 'txt', 'json', 'zip', 'mkv', 'webm', 'wmv', 'asf', 'bin', 'dat']) assert.equal(mediaKindForPath(`/DCIM/X0001.${extension}`), 'Other', extension);
+});
