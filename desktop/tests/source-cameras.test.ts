@@ -84,15 +84,17 @@ test('unreadable files are unknown and reported while later camera metadata is s
 test('analysis checks beyond the first batch and progress snapshots retain their earlier state',async()=>{
   const scan = inventory(Array.from({length:17},(_,index)=>file(`${index}.JPG`,'JPEG',2)));
   const updates:{checked:number;models:{name:string;files:number;bytes:number}[]}[] = [];
-  let reads = 0;
+  let reads = 0; const started = Date.now();
   const result = await analyzeSourceCameras(source,scan,async()=>{
-    reads += 1; return {camera:reads === 17 ? 'Canon EOS R5' : 'Nikon Z6III',fields:{}};
+    // File n is ready 60 ms after file n-1, however far ahead it was asked for.
+    const n = ++reads; const ready = started + n*60; await new Promise(resolve=>setTimeout(resolve,Math.max(0,ready-Date.now()))); return {camera:n === 17 ? 'Canon EOS R5' : 'Nikon Z6III',fields:{}};
   },undefined,summary=>updates.push(summary));
   assert.equal(reads,17); assert.equal(result.checked,17); assert.equal(result.total,17);
   assert.deepEqual(result.models,[{name:'Canon EOS R5',files:1,bytes:2},{name:'Nikon Z6III',files:16,bytes:32}]);
+  // Summaries are timed (at most four a second), not one per batch of files.
   assert.ok(updates.length > 2 && updates.length < 8);
-  assert.equal(updates[1].checked,8);
-  assert.deepEqual(updates[1].models,[{name:'Nikon Z6III',files:8,bytes:16}]);
+  const middle = updates[1]!; assert.ok(middle.checked > 0 && middle.checked < 17);
+  assert.deepEqual(middle.models,[{name:'Nikon Z6III',files:middle.checked,bytes:middle.checked*2}]);
 });
 
 test('an already stopped scan returns its hints without reading files',async()=>{

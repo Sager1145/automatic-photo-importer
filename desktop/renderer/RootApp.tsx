@@ -528,11 +528,17 @@ export function explainError(message: Message, kind: ErrorKind = 'app', language
   if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead.", severity: 'warning' };
   return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]!, severity: 'error' };
 }
+// The main process rebuilds errorLog exactly when the errors change, so the same errorLog object means the same errors.
+let gathered: { log: AppState['errorLog']; errors: ReturnType<typeof gatherErrors> } | undefined;
+function loggedErrors(state: AppState) {
+  if (!state.errorLog || gathered?.log !== state.errorLog) gathered = { log: state.errorLog, errors: gatherErrors(state) };
+  return gathered.errors;
+}
 export function collectErrors(state: AppState, extra: (string | LocalError | undefined)[] = []): DisplayError[] {
   const result: DisplayError[] = [];
   for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', severity: 'error', ...(local.at ? { at: local.at } : {}) }); }
   const cleared = new Set(state.errorLog?.cleared ?? []);
-  for (const error of gatherErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
+  for (const error of loggedErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
   const t = createTranslator(state.preferences.language);
   for (const {source,inventory,backup} of sourceInventories(state)) {
     if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
@@ -729,7 +735,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
   const filesLabel = doing.size === 1 ? ({ checked: "Files checked", verified: "Files verified", moved: "Files moved", copied: "Files copied", processed: "Files processed" } as const)[[...doing][0] as 'checked'] : "Files processed";
-  const warnings = gatherErrors(state).filter(error => error.severity === 'warning').length;
+  const warnings = loggedErrors(state).filter(error => error.severity === 'warning').length;
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
