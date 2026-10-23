@@ -127,7 +127,7 @@ export function validateRelative(folder:string):void {
 }
 export function safeComponent(value:string):string {
   let result=value.normalize('NFC').replace(/[\\/:\x00-\x1f\x7f<>"|?*]/gu,'-').trim().replace(/[. ]+$/u,'').slice(0,120);
-  if(!result || result==='.' || result==='..') result='Unknown Camera';
+  if(!result || result==='.' || result==='..') result='Unknown files';
   if(/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result)) result='_'+result;
   return result;
 }

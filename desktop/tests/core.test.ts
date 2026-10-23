@@ -102,7 +102,7 @@ test('missing camera and capture date use explicit fallback and UTC file modific
   const {source,root,put}=await fixture(t); const f=await put('A.JPG');
   await fs.utimes(f,new Date('2020-12-31T23:59:59Z'),new Date('2020-12-31T23:59:59Z'));
   const p=await plan(source,root,options,async()=>({fields:{}}));
-  assert.equal(p.entries[0]?.destination,path.join(root,'2020/202012/Unknown Camera/JPEG/A.JPG'));
+  assert.equal(p.entries[0]?.destination,path.join(root,'2020/202012/Unknown files/JPEG/A.JPG'));
 });
 
 test('RAW and JPEG retain conflicting camera/date metadata rather than inherit incorrect values',async t=>{

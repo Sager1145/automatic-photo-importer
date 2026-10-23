@@ -2,8 +2,9 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
-import { PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS } from '../shared';
+import type { DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import { LEGACY_UNKNOWN_CAMERA_FOLDER, PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
+import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, nkscEdit, captureOneEdit, unknownRule, type RuleDefaults } from './inventory';
 import { destinationIndex, flushIndex, type DestinationIndex, type Digests } from './destination-index';
@@ -41,7 +42,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};}
+interface Options {backup:boolean;/** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;/** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -69,7 +70,7 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   const year=String(capture.getUTCFullYear()).padStart(4,'0'), month=String(capture.getUTCMonth()+1).padStart(2,'0'), day=String(capture.getUTCDate()).padStart(2,'0');
   // Month names are English whatever the app language; the number first keeps calendar order.
   const monthName=`${month} ${MONTHS[capture.getUTCMonth()]}`;
-  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||info.origin||'Unknown Camera')};
+  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||info.origin||options.noMetadataFolder?.trim()||UNKNOWN_FILES_FOLDER)};
   const editedFolder=options.editedFolder??'editied';
   if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
   const video=options.layout==='video-root'&&!!media?.video;
@@ -168,7 +169,7 @@ export function pairLivePhotos(files:InventoryFile[],scanned:InventoryFile[],inf
   }
   return {paired,dropped};
 }
-export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere}> {
+export async function plan(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   if(!options.reuse) return planOnce(source,roots,options,metadata,signal,onProgress);
   // A file rewritten in place leaves its folder unchanged, so a remembered listing
   // can hold a stale size. List the card again once rather than failing.
@@ -193,7 +194,7 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
  * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, totalBytes 0);
  * 'locating': files to copy looked for elsewhere in the backup, by content (an import after the folder rules changed). */
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number})=>void;
-async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere}> {
+async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
   if(options.reorganize&&roots.length!==1)throw new Error('Review one organization destination at a time.');
@@ -222,6 +223,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }
   const allRoots=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
   if(options.drive&&!options.backup)throw new Error('Only drive backups use a drive folder.');
+  const unknownMode:NoMetadataHandling=options.backup?'fileDate':options.noMetadata??'fileDate',unknownFolder=unknownMode==='folder'?noMetadataFolderName(options.noMetadataFolder):options.noMetadataFolder??UNKNOWN_FILES_FOLDER;
   if(!options.backup) {folder({fields:{}},new Date(0),undefined,options);folder({fields:{}},new Date(0),{video:true,format:'MOV'},options);}
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   // The Problem files folder is the app's own, like Drive backups: never organized again, never misplaced.
@@ -249,7 +251,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const problems:ProblemFile[]=[],scanned=new Map(scan.files.map(file=>[file.path,file]));
   for(const item of scan.skipped??[]) if((item.reason==='empty'||item.reason==='emptyPrimary')&&!organizationOwned(item.path)) problems.push({path:item.path,relative:path.relative(sourceRoot,item.path),reason:item.reason,group:'empty',collected:false});
   const listedBytes=files.reduce((sum,file)=>sum+file.size,0);let checkedBytes=0;
-  const infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
+  const unreadableMeta=new Set<string>(), infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for
   // files library organization will move or when a same-size file already occupies a destination.
   // Metadata reads overlap (ExifTool runs several processes); issues keep file order.
@@ -276,7 +278,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     if(!originalStat.isFile() || originalStat.isSymbolicLink() || originalStat.size!==BigInt(file.size)) throw new MessageError('error.sourceChanged',{path:file.path});
     mtimes.set(file.path,originalStat.mtime);
     if(!options.backup && file.kind!=='Other' && !trusted.has(file.path)) {
-      try {const info=await metadata(file.path);for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string)))issues[position]!.push({path:file.path,message});infos.set(file.path,{camera:info.camera,origin:info.origin,date:info.date,edited:info.edited,contentId:info.contentId,make:info.make,fingerprint:info.fingerprint,fields:{}});} catch(error) {if(isAbort(error)) throw error;issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
+      try {const info=await metadata(file.path);for(const message of new Set(Object.entries(info.fields).filter(([key,value])=>key.split(':').at(-1)==='Error'&&typeof value==='string'&&value.trim()).map(([,value])=>value as string))){issues[position]!.push({path:file.path,message});unreadableMeta.add(file.path);}infos.set(file.path,{camera:info.camera,origin:info.origin,date:info.date,edited:info.edited,contentId:info.contentId,make:info.make,fingerprint:info.fingerprint,fields:{}});} catch(error) {if(isAbort(error)) throw error;unreadableMeta.add(file.path);issues[position]!.push({path:file.path,message:error instanceof Error?error.message:String(error)});infos.set(file.path,{fields:{}});}
     }
     if(!sameStat(originalStat,await fs.lstat(file.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:file.path});
     sourceStats.set(file.path,originalStat);
@@ -414,6 +416,26 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   }
   // `camera`: the family's conflict folder relative to the root, when the layout chose it.
   const prepared:{entry:Omit<PlanEntry,'destination'>;relative:string;root:'photos'|'videos';camera?:string}[]=[];
+  // Unknown files: no capture date, no camera and no known origin, or metadata that could not be read. A family is
+  // decided by its primary, so it is kept or filed apart whole.
+  const unknownFiles:NoMetadataFile[]=[],unknownCounts:Record<NoMetadataReason,number>={noDate:0,noCamera:0,unreadable:0};
+  const validCapture=(date:string|undefined)=>{const day=date?.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/)?.[1],calendar=day?new Date(day+'T00:00:00Z'):null;return !!calendar&&Number.isFinite(calendar.getTime())&&calendar.toISOString().slice(0,10)===day;};
+  const unknownReason=(file:InventoryFile,primary:InventoryFile):NoMetadataReason|undefined=>{
+    if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf))return undefined;
+    const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=infos.get(root.path);
+    if(root.kind==='Other')return undefined;
+    if(unreadableMeta.has(root.path))return 'unreadable';
+    if(!validCapture(info?.date))return 'noDate';
+    return !info?.camera?.trim()&&!info?.origin?'noCamera':undefined;
+  };
+  const libraryParts=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
+  /** Where an unknown file goes under the folder: its subfolders as they are (below the library root when it is in one), minus the folder itself and the legacy Unknown Camera folders. */
+  const unknownRelative=(file:InventoryFile)=>{
+    const owner=options.reorganize?libraryParts.find(part=>beneath(file.path,part.root)):undefined;
+    const sub=(owner?path.relative(owner.root,path.dirname(file.path)):path.dirname(file.relative)).split(path.sep).filter(part=>part&&part!=='.');
+    if(sub[0]?.toLowerCase()===unknownFolder.toLowerCase())sub.shift();
+    return path.join(unknownFolder,...sub.filter(part=>part.toLowerCase()!==LEGACY_UNKNOWN_CAMERA_FOLDER.toLowerCase()),path.basename(file.path));
+  };
   for(const file of files) {
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
@@ -421,8 +443,18 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const live=liveRoot.has(file.path),info:Metadata={fields:{},origin:own.origin||(inherit?paired.origin:undefined),camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
-    let relative:string,place:ReturnType<typeof folder>|undefined;
-    if(options.backup) relative=file.relative;
+    let relative:string,place:ReturnType<typeof folder>|undefined,forcedRoot:'photos'|'videos'|undefined;
+    const unknown=unknownReason(file,primary);
+    if(unknown) {
+      unknownFiles.push({path:file.path,relative:file.relative,reason:unknown});unknownCounts[unknown]++;
+      log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(unknownMode==='folder'?{destination:unknownRelative(file)}:{})});
+      if(unknownMode==='keep') continue;
+    }
+    if(unknown) {
+      const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file;
+      relative=unknownRelative(file);forcedRoot=options.layout==='video-root'&&original.kind==='Videos'?'videos':'photos';
+    }
+    else if(options.backup) relative=file.relative;
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
     else {
       // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
@@ -436,7 +468,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':captureOne??'',path.basename(file.path));
     }
     log('trace','plan','route',()=>({source:file.path,destination:relative,camera:place?.camera??info.camera,date:info.date,kind:file.kind,companionOf:file.companionOf,reason:options.backup?'drive backup keeps the source layout':file.kind==='Other'&&!file.companionOf&&typeof rule==='string'?`rule for .${extension(file.path)}: folder ${rule}`:place?info.camera&&info.date?'camera and capture date from metadata':info.date?'capture date from metadata, no camera name':info.camera?'camera from metadata, date from the file modification time':'no metadata: file modification time':'filed with its original',origin:info.origin}));
-    prepared.push({relative,root:place?.root??'photos',camera:place?.camera,entry:{captureTimeMs:options.backup?undefined:captureTimestamp(info.date),id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:(info.edited?'edited:':'')+familyFor.get(file.path)!}});
+    prepared.push({relative,root:forcedRoot??place?.root??'photos',camera:place?.camera,entry:{captureTimeMs:options.backup?undefined:captureTimestamp(info.date),id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:(info.edited?'edited:':'')+familyFor.get(file.path)!}});
   }
   const collecting=options.reorganize===true&&options.collectProblems===true&&!options.misplacedOnly;
   if(collecting) for(const item of problems) {
@@ -571,7 +603,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       index.listing??=(async()=>{
         const found=await inventory(part.root,{backup:true,excludeNames:APP_NAMES,onProgress:(count,_bytes,_top,latest)=>listed(offset+count,latest??'')},signal);
         // Conflict copies are never proof that a file is filed: they hold what the folder rules could not place.
-        return found.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-')&&!file.relative.split(path.sep).includes('Conflicts');}).map(file=>({path:file.path,size:file.size}));
+        return found.files.filter(file=>{const name=path.basename(file.path);return file.size>0&&!name.startsWith('._')&&!name.startsWith('photo-importer-')&&!name.startsWith('.photo-importer-')&&!file.relative.split(path.sep).includes('Conflicts')&&file.relative.split(path.sep)[0]?.toLowerCase()!==unknownFolder.toLowerCase();}).map(file=>({path:file.path,size:file.size}));
       })();
       index.listing.catch(()=>{index.listing=undefined;});
       const files=await index.listing;before+=files.length;
@@ -699,7 +731,8 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   const planned=new Set(plans.flatMap(item=>[item,...(item.videos?[item.videos]:[])]).flatMap(item=>item.entries.map(entry=>entry.source)));
   for(const item of problems) item.collected=item.collected&&planned.has(item.path);
   log('detailed','plan','plan-done',()=>({source:sourceRoot,destinations:plans.length,files:plans.reduce((sum,item)=>sum+item.entries.length,0),toCopy:plans.reduce((sum,item)=>sum+item.entries.filter(entry=>!entry.skip).length,0),alreadyThere:plans.reduce((sum,item)=>sum+item.entries.filter(entry=>entry.skip).length,0),failedFiles:failures.size,problemFiles:problems.length,reorganize:!!options.reorganize}));
-  return {inventory:scan,plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies,skipped:elsewhereSkipped}}:{})};
+  const noMetadata:NoMetadataSummary|undefined=unknownFiles.length&&(unknownMode==='keep'||unknownMode==='folder')?{handling:unknownMode,folder:unknownFolder,count:unknownFiles.length,counts:unknownCounts,files:unknownFiles}:undefined;
+  return {inventory:scan,plans,failures:[...failures].map(([path,error])=>({path,error})),problems,...(noMetadata?{noMetadata}:{}),...(duplicates?{duplicates}:{}),...(lookup?{elsewhere:{files:elsewhereFiles,partialFamilies,skipped:elsewhereSkipped}}:{})};
 }
 
 // Destination checks, publication and staging-link cleanup share this lock:
