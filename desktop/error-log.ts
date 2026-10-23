@@ -1,5 +1,5 @@
 import type {AppState} from './shared';
-import {text,type Message} from './messages';
+import {message as makeMessage,text,type Message} from './messages';
 
 export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
 /** An error failed or stopped something. A warning is informational: nothing was left undone. */
@@ -9,12 +9,20 @@ const warningKeys=new Set<string>(['error.userSkipped','error.folderCleanup','in
 /** The severity a message has by itself: informational notes are warnings, anything that failed or stopped a job is an error.
  * A file skipped on purpose (by the user) is a warning; a file skipped because it failed is an error. Metadata problems (kind 'metadata') are warnings: the file is still handled. */
 export function severityOf(value:Message,kind?:ErrorKind):Severity{
- if(warningKeys.has(value.key))return 'warning';
+ if(warningKeys.has(value.key)||value.params?.severity==='warning')return 'warning';
  if(value.key==='error.fileSkipped'){const reason=value.params?.error;return reason&&typeof reason==='object'&&!Array.isArray(reason)&&reason.key==='error.userSkipped'?'warning':'error';}
  return kind==='metadata'?'warning':'error';
 }
+/** Codes for messages that carry none of their own, derived from the message key. Raw text keeps the code 'text'. */
+const keyCodes:Record<string,string>={'error.fileSkipped':'file-skipped','error.userSkipped':'user-skipped','error.folderCleanup':'folder-cleanup','inventory.emptyFile':'zero-byte','inventory.emptySkipped':'zero-byte','inventory.emptyPrimaryFile':'zero-byte','inventory.emptyPrimarySkipped':'zero-byte','error.residueCleanup':'residue-cleanup'};
+/** The stable code of a message: the one it carries, else one derived from its key. */
+export function codeOf(value:Message):string{const own=value.params?.code;return typeof own==='string'&&own?own:keyCodes[value.key]??value.key;}
+/** The path a message names, when it carries one. */
+export function pathOf(value:Message):string|undefined{const own=value.params?.path;return typeof own==='string'&&own?own:undefined;}
+/** Codes shown as one row per job however many entries there are. Other entries keep a row each. */
+export const groupedCodes=new Set<string>(['staging-left','unreadable','zero-byte','copy-failed','file-skipped']);
 /** One problem shown in All errors. id is stable while the problem lasts; source groups it, drive names the volume it came from. */
-export interface LoggedError {id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
+export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
 /** When each shown error first appeared (ISO), and the ids the user cleared while they last. */
 export interface ErrorLogState {at:Record<string,string>;cleared:string[];}
 
@@ -29,16 +37,20 @@ export function gatherErrors(state:AppState):LoggedError[]{
  const result:LoggedError[]=[],ids=new Set<string>();
  const add=(scope:string,source:string,location:string,message:Message|undefined,kind:ErrorKind,sourceId?:string,jobId?:string)=>{
   if(!message)return;const id=hash(`${scope}|${source}|${JSON.stringify(message)}`);if(ids.has(id))return;ids.add(id);
-  result.push({id,source,drive:location?driveName(location,source):'',message,kind,severity:severityOf(message,kind),...(sourceId?{sourceId}:{}),...(jobId?{jobId}:{})});
+  result.push({id,code:codeOf(message),source,drive:location?driveName(location,source):'',message,kind,severity:severityOf(message,kind),...(sourceId?{sourceId}:{}),...(jobId?{jobId}:{})});
  };
  const raw=(value?:string)=>value?text(value):undefined;
- const issue=(item:{path:string;message:string})=>text(`${item.path}: ${item.message}`);
+ const issue=(item:{path:string;message:string}):Message=>({key:'text',params:{text:`${item.path}: ${item.message}`,code:'unreadable',path:item.path}});
  add('app','','',state.error,'app');
  for(const job of state.jobs){
   const kind:ErrorKind=job.organization?'organization':'source',id=job.organization?undefined:job.source.id,{name,path}=job.source;
   for(const error of job.errors)add('job:'+job.id,name,path,error,kind,id,job.id);
   for(const item of job.inventory?.issues??[])add('issue:'+job.source.id,name,path,issue(item),'metadata',id);
-  if(job.phase==='error'&&!job.errors.length)add('job:'+job.id,name,path,job.detail,kind,id);
+  for(const group of job.groups??[]){
+   const groupId=hash(`group|${job.id}|${group.code}|${group.severity}`);if(ids.has(groupId))continue;ids.add(groupId);
+   result.push({id:groupId,code:group.code,source:name,drive:driveName(path,name),message:makeMessage('issue.group',{code:group.code,count:group.count}),kind,severity:group.severity,count:group.count,items:group.items,...(id?{sourceId:id}:{}),jobId:job.id});
+  }
+  if(job.phase==='error'&&!job.errors.length&&!(job.groups??[]).some(group=>group.severity==='error'))add('job:'+job.id,name,path,job.detail,kind,id);
  }
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
   const source=state.sources.find(item=>item.id===id),name=source?.name??id,location=source?.path??'';
@@ -51,8 +63,8 @@ export function gatherErrors(state:AppState):LoggedError[]{
 }
 
 /** Entries saved before severities existed have none: they get the default for their message key. */
-export function migrateLoggedError<T extends Omit<LoggedError,'severity'>&{severity?:Severity}>(entry:T):T&{severity:Severity}{
- return {...entry,severity:entry.severity==='error'||entry.severity==='warning'?entry.severity:severityOf(entry.message,entry.kind)};
+export function migrateLoggedError<T extends Omit<LoggedError,'severity'|'code'>&{severity?:Severity;code?:string}>(entry:T):T&{severity:Severity;code:string}{
+ return {...entry,code:typeof entry.code==='string'&&entry.code?entry.code:codeOf(entry.message),severity:entry.severity==='error'||entry.severity==='warning'?entry.severity:severityOf(entry.message,entry.kind)};
 }
 
 /** Remembers when errors appeared and which ones the user cleared. Both are forgotten once an error is gone, so it shows again if it returns. */
@@ -73,6 +85,12 @@ export class ErrorLog{
  clear(ids:string[]){for(const id of ids)this.cleared.add(id);}
 }
 
+/** Clears the listed errors in one go (a whole group), never touching the other severity when one is given. */
+export function clearErrorIds(log:ErrorLog,state:AppState,ids:string[],severity?:Severity){
+ const wanted=new Set(ids),errors=gatherErrors(state).filter(error=>wanted.has(error.id)&&(!severity||error.severity===severity)),app=errors.find(error=>error.kind==='app');
+ log.clear(errors.map(error=>error.id));
+ if(app)state.error=undefined;
+}
 /** Clears one error, or all of one severity (all of both when none is given). Clearing warnings never clears errors, and the reverse.
  * Jobs keep their errors; only the shared app error is reset at its source. */
 export function clearErrors(log:ErrorLog,state:AppState,id?:string,severity?:Severity){

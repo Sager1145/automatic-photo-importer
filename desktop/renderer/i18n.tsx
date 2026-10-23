@@ -6,6 +6,32 @@ export const localeNames: Record<Language, string> = { en: 'English', 'zh-Hans':
 export const languages = Object.keys(localeNames) as Language[];
 // English keys are also the fallback. Placeholder names and user data never pass through translation.
 const rows = `
+{count} temporary copies were left on {drive} — your photos are safe|{drive} 上留下了 {count} 个临时副本 — 你的照片是安全的|{drive} 上留下了 {count} 個暫存副本 — 你的照片是安全的|{drive} に一時コピーが {count} 件残りました — 写真は無事です
+1 temporary copy was left on {drive} — your photo is safe|{drive} 上留下了 1 个临时副本 — 你的照片是安全的|{drive} 上留下了 1 個暫存副本 — 你的照片是安全的|{drive} に一時コピーが 1 件残りました — 写真は無事です
+These are scratch files from the copy step. Every real copy was checked and is complete; Clean up removes the leftovers.|这些是复制过程中的临时文件。所有正式副本都已检查且完整；“清理”会删除这些残留文件。|這些是複製過程中的暫存檔案。所有正式副本都已檢查且完整；「清理」會刪除這些殘留檔案。|コピー処理の作業用ファイルです。本来のコピーはすべて確認済みで完全です。「クリーンアップ」で残りを削除できます。
+{count} files could not be read for photo details|有 {count} 个文件无法读取照片详情|有 {count} 個檔案無法讀取照片詳細資訊|{count} 件のファイルで写真の詳細を読み取れませんでした
+1 file could not be read for photo details|有 1 个文件无法读取照片详情|有 1 個檔案無法讀取照片詳細資訊|1 件のファイルで写真の詳細を読み取れませんでした
+The files are still copied; their dates may come from the file instead.|这些文件仍会被复制；日期可能改用文件本身的日期。|這些檔案仍會被複製；日期可能改用檔案本身的日期。|ファイルはコピーされます。日付はファイル自体のものになる場合があります。
+{count} empty files were left out|有 {count} 个空文件被跳过|有 {count} 個空檔案被略過|空のファイル {count} 件を除外しました
+1 empty file was left out|有 1 个空文件被跳过|有 1 個空檔案被略過|空のファイル 1 件を除外しました
+Empty files hold no photo data.|空文件不含任何照片数据。|空檔案不含任何照片資料。|空のファイルには写真データがありません。
+{count} files could not be copied|有 {count} 个文件无法复制|有 {count} 個檔案無法複製|{count} 件のファイルをコピーできませんでした
+1 file could not be copied|有 1 个文件无法复制|有 1 個檔案無法複製|1 件のファイルをコピーできませんでした
+These files are not in the backup yet. Retry runs the job again.|这些文件尚未进入备份。“重试”会重新运行该任务。|這些檔案尚未進入備份。「重試」會重新執行該工作。|これらのファイルはまだバックアップにありません。「再試行」でジョブをもう一度実行します。
+{count} files were skipped because they failed|有 {count} 个文件因出错而被跳过|有 {count} 個檔案因出錯而被略過|{count} 件のファイルは失敗したためスキップされました
+1 file was skipped because it failed|有 1 个文件因出错而被跳过|有 1 個檔案因出錯而被略過|1 件のファイルは失敗したためスキップされました
+The other files were copied. Retry runs the job again, including these files.|其他文件已复制。“重试”会重新运行任务，包括这些文件。|其他檔案已複製。「重試」會重新執行工作，包括這些檔案。|他のファイルはコピーされました。「再試行」でこれらも含めてジョブを再実行します。
+{count} issues need attention|有 {count} 个问题需要留意|有 {count} 個問題需要留意|{count} 件の確認が必要です
+1 issue needs attention|有 1 个问题需要留意|有 1 個問題需要留意|1 件の確認が必要です
+Copy details|复制详情|複製詳細資訊|詳細をコピー
+Clear group|清除此组|清除此群組|グループを消去
+Retry all|全部重试|全部重試|すべて再試行
+Show more|显示更多|顯示更多|さらに表示
+and {count} more|另有 {count} 个|另有 {count} 個|ほか {count} 件
+Copy all paths|复制全部路径|複製全部路徑|すべてのパスをコピー
+Show affected files|显示受影响的文件|顯示受影響的檔案|影響を受けるファイルを表示
+Hide affected files|隐藏受影响的文件|隱藏受影響的檔案|影響を受けるファイルを隠す
+Technical detail|技术详情|技術詳細資訊|技術的な詳細
 Copying files|正在复制文件|正在複製檔案|ファイルをコピー中
 Moving files|正在移动文件|正在移動檔案|ファイルを移動中
 Stopping…|正在停止…|正在停止…|停止しています…

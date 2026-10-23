@@ -1,6 +1,6 @@
 import {executeMany,executeReorganization,type OrganizationStrategy} from './index';
 import {destinationEntries,destinationParts,requiredTransferSpace} from './allocation';
-import type {Progress,TransferPlan} from '../shared';
+import type {ExecutionIssue,Progress,TransferPlan} from '../shared';
 
 /** Execute independent destination copies; one unavailable disk must not cancel the
  * other. Copies to several destinations share one read of each source file. A destination's
@@ -23,7 +23,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
  const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>);
  const finished=new Set<number>();
- const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];notes:string[]};
+ const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;removed:number;errors:string[];warnings?:ExecutionIssue[];notes:string[]};
  const report=(slot:number,value:Progress)=>{
   // Checks before anything is written (an organization's journal and files, a copy's existing files) count records or files, not the plan's work.
   if(value.step==='existing')existing[slot]=value.completed;
@@ -68,6 +68,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
    if(value instanceof Error){failed(index,value);return;}
    result.copied+=value.copied;result.skipped+=value.skipped;result.removed+=value.removed??0;
    result.errors.push(...value.errors.map(error=>`Destination ${index+1}: ${error}`));
+   for(const issue of value.warnings??[])(result.warnings??=[]).push({...issue,destination:index+1});
   });
  }finally{for(const slot of ready)settle(slots[slot].index);}
  return result;

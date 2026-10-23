@@ -51,8 +51,9 @@ test('a receipt whose root inode differs is not rebased, one with only another d
 });
 
 test('cleanStage leaves a file with a different birth time in place and says its identity differs',async t=>{
-  const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),notes:string[]=[];
-  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
+  const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),notes:string[]=[],issues:{code:string;severity:string;path:string}[]=[];
+  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:stat.birthtimeNs+1n,recovery:new Map()},f.root,true,(text,issue)=>{notes.push(text);if(issue)issues.push(issue);});
+  assert.deepEqual(issues.map(issue=>[issue.code,issue.severity,issue.path]),[['staging-left','warning',f.copy]],'also reported as a structured warning');
   assert.ok(await fs.lstat(f.copy).then(()=>true,()=>false),'the file is still there');
   assert.equal(notes.length,1);assert.match(notes[0]!,/identity differs/);
   // A temporary inode with a different birth time is no better.

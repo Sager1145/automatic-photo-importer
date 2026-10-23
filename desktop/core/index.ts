@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DuplicateFile, Inventory, InventoryFile, MediaLayout, Metadata, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import type { DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS } from '../shared';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, nkscEdit, captureOneEdit, unknownRule, type RuleDefaults } from './inventory';
@@ -693,7 +693,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
 const toError=(error:unknown)=>error instanceof Error?error:new Error(String(error));
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 /** `sync:false`: the caller synchronizes the folder once after removing many stages. */
-export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string)=>void=text=>console.warn(text)):Promise<void> {
+export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:string,issue?:ExecutionIssue)=>void=text=>console.warn(text)):Promise<void> {
   claimedStages.delete(staged.file);
   try {
     await contained(staged.file,root);
@@ -703,7 +703,10 @@ export async function cleanStage(staged:Staged,root:string,sync=true,note:(text:
     // A temporary (negative) inode is replaced by the real one on exFAT; device and birth time still name the file.
     const temporary=staged.ino<0n&&current.dev===staged.dev&&current.birthtimeNs===staged.birthtime&&current.nlink===1n;
     if(exact||temporary) {await fs.unlink(staged.file);if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
-    else note(`Staging file left in place, identity differs: ${staged.file} expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`);
+    else{
+      const detail=`expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`;
+      note(`Staging file left in place, identity differs: ${staged.file} ${detail}`,{code:'staging-left',severity:'warning',path:staged.file,detail});
+    }
   } catch { /* An unavailable/replaced destination is never followed or removed. */ }
 }
 /** A complete staged copy left by an interrupted run is released once the published file is
@@ -801,7 +804,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
   if(owned)await clearPartialRecord(owned,transfer.root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;});
   return bound;
 }
-export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];}
+export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];}
 export async function execute(transfer:TransferPlan,signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:ExecutionOptions={}):Promise<ExecutionResult> {
   const [result]=await executeMany([transfer],signal,onProgress&&((_index,value)=>onProgress(value)),options);
   if(result instanceof Error) throw result;
@@ -936,7 +939,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           run.completed+=family.length;
         }catch(error){if(isAbort(error))throw error;run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);}
         await exclusive(async()=>{
-          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,true,text=>batch.errors.push(text));
+          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,true,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&now.dev===item.stat.dev&&now.ino===item.stat.ino&&now.size===item.stat.size&&now.mtimeNs===item.stat.mtimeNs)index!.remember(item.file,item.sha256,now);}
@@ -954,7 +957,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     for(const run of runs) {
       const stages=run.batches.flatMap(batch=>[...batch.staged.values()]);
       await exclusive(async()=>{
-        await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false,text=>run.result.errors.push(text)));
+        await pool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else run.result.errors.push(line);}));
         for(const folder of new Set(stages.map(temporary=>path.dirname(temporary.file))))await syncDirectory(folder).catch(()=>{});
       // Keyed by folder: unlinking a stage still linked to its published file changes that file.
       },[...new Set(stages.map(temporary=>path.dirname(temporary.file)))]);

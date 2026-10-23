@@ -5,6 +5,7 @@ import type {Language} from './shared';
 export const backendMessages={
  text:{en:'{text}','zh-Hans':'{text}','zh-Hant':'{text}',ja:'{text}'},
 
+ 'issue.group':{en:'{count} items need attention','zh-Hans':'{count} 项需要留意','zh-Hant':'{count} 項需要留意',ja:'{count} 件の確認が必要です'},
  'job.waiting':{en:'Waiting for an available slot','zh-Hans':'等待空闲的处理位置','zh-Hant':'等待空閒的處理位置',ja:'空きを待っています'},
  'job.waitingForImports':{en:'Waiting for imports to finish before organizing','zh-Hans':'等待导入完成后再整理','zh-Hant':'等待匯入完成後再整理',ja:'インポートの完了を待ってから整理します'},
  'job.stagingCamera':{en:'Downloading camera originals to a temporary staging folder','zh-Hans':'正在将相机原始文件下载到临时暂存文件夹','zh-Hant':'正在將相機原始檔案下載到暫存資料夾',ja:'カメラの元のファイルを一時フォルダーにダウンロード中'},
