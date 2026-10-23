@@ -18,7 +18,23 @@ library itself when it is not beneath a destination. Nothing of the app's is wri
 
 Every record is sealed with this Mac's host key over `photo-importer:v5:<kind>\n<JSON>`, so a record of one kind,
 or one an earlier version sealed, never verifies as another. Logs are read in 1 MiB chunks, line by line, and
-appended in groups: one write, one sync of the file, one sync of its folder.
+appended in groups: one write and one sync of the file per group.
+
+## Durability on exFAT
+
+`SYNC_LOG_FOLDER_EACH_GROUP` (core/app-store.ts) is `false`: a log's folder is synchronized when the log is created
+(its new name must be durable before anything relies on it), not after every group. The design's T1 probe on a
+3 GB FSKit exFAT image (20 runs per row; crashes by `hdiutil detach -force`, `diskutil unmountDisk force` and a
+`cp -c` snapshot of the mounted image) found that an append followed by `fsync(file)` or `F_FULLFSYNC`, with no
+folder sync, kept the new size in 120/120 runs, and a new file with only `fsync(file)` kept its name in 120/120
+(the no-sync controls lost them, so the method discriminates). Set the constant to `true` to sync the folder after
+every group again.
+
+The same probe showed `rename(X,Y)` moves `._X` to `._Y`, `unlink(X)` removes `._X`, and a folder rename keeps every
+inode inside it. `desktop/qa/exfat-move-inode-probe.mjs` (result in `docs/exfat-move-inode-probe-20261023.json`)
+showed a non-empty file moved into another folder keeps its inode right after the move and after a remount; an
+empty file gets a new synthetic inode, so empty files are identified by birth time. Renames are still checked by
+both names afterwards: none of this proves a rename is atomic across a power cut.
 
 ## Converting what earlier versions wrote
 
