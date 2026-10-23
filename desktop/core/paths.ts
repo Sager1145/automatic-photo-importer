@@ -150,10 +150,10 @@ export function sameStat(a:Stat,b:Stat):boolean {
 }
 /** exFAT (macOS FSKit) reports a birth time as whole seconds while the file is cached after the date helper set it,
  * and as the stored 10 ms value once re-read from disk. A recorded whole second therefore matches any value in that
- * same second; every other recorded value (APFS nanoseconds included) must match exactly. */
+ * same second; every other recorded value (APFS nanoseconds included) must match exactly, and so must any negative value. */
 export function sameBirth(expected:bigint,found:bigint):boolean {
   if(expected===found) return true;
-  return expected%1_000_000_000n===0n&&found/1_000_000_000n===expected/1_000_000_000n;
+  return expected>=0n&&found>=0n&&expected%1_000_000_000n===0n&&found/1_000_000_000n===expected/1_000_000_000n;
 }
 /** dev:ino:size:mtimeNs:ctimeNs - the identity a plan, review or receipt binds a file to (birth time instead of ino when the inode is unreliable). */
 export function statKey(stat:Stat):string {return `${stat.dev}:${unreliableIno(stat)?`birth${stat.birthtimeNs}`:stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}

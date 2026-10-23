@@ -56,13 +56,18 @@ function report(t:test.TestContext,file:string,found:Stat) {
 }
 const unreport=()=>{(files.lstat as unknown as {mock?:{restore():void}}).mock?.restore();syncBuiltinESMExports();};
 
-test('cleanStage releases a stage recorded with a whole-second birth time that is found with a fraction, and still refuses a +1n mismatch',async t=>{
+test('cleanStage releases a stage recorded with a whole-second birth time that is found with a fraction, and still refuses a +1n or a +1 s mismatch',async t=>{
   const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),notes:string[]=[];
   const index=new Map(),owned=await recordPartial('stage',f.copy,whole(stat),f.entry,f.reviewed,index);
   report(t,f.copy,withBirth(stat,fraction(stat)));
   await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs+SECOND,record:owned,recovery:index},f.root,true,text=>notes.push(text));
   assert.equal(notes.length,1,'another second is refused');
   assert.equal(await present(f.copy),true);
+  // A recorded fraction is exact: one nanosecond off is refused.
+  await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:fraction(stat)+1n,recovery:new Map()},f.root,true,text=>notes.push(text));
+  assert.equal(notes.length,2,'+1n on a recorded fraction is refused');
+  assert.equal(await present(f.copy),true);
+  notes.length=1;
   await cleanStage({file:f.copy,dev:stat.dev,ino:stat.ino,birthtime:whole(stat).birthtimeNs,record:owned,recovery:index},f.root,true,text=>notes.push(text));
   unreport();
   assert.equal(notes.length,1);
@@ -92,8 +97,33 @@ test('a whole-second receipt binds a file whose birth time has a fraction; a rec
   assert.equal((await findPartial('stage',entry,f.root,new Map()))?.file,f.copy);
 });
 
+test('binds and cleanStage refuse what is not the same file, even in the same second',async t=>{
+  const f=await fixture(t),stat=await fs.lstat(f.copy,{bigint:true}),index=new Map();
+  const otherIno=await recordPartial('stage',f.copy,withBirth(whole(stat),whole(stat).birthtimeNs,stat.ino+1n),f.entry,f.reviewed,index);
+  const otherDev=await recordPartial('stage',f.copy,withBirth(whole(stat),whole(stat).birthtimeNs,-7n),f.entry,f.reviewed,index);
+  report(t,f.copy,withBirth(stat,fraction(stat)));
+  assert.equal((await leftoverReceipt(otherIno.journal,f.root)).bound,false,'a different positive inode');
+  assert.equal((await leftoverReceipt(otherDev.journal,f.root)).bound,true,'a temporary inode in the same second binds');
+  unreport();
+  // The file as another device reports it: the same temporary-inode receipt no longer binds.
+  report(t,f.copy,Object.assign(withBirth(stat,fraction(stat)),{dev:stat.dev+1n}));
+  assert.equal((await leftoverReceipt(otherDev.journal,f.root)).bound,false,'a temporary inode on another device');
+  unreport();
+  const notes:string[]=[],note=(text:string)=>notes.push(text);
+  // A temporary inode is released only for one link and the same second.
+  report(t,f.copy,Object.assign(withBirth(stat,fraction(stat)),{nlink:2n}));
+  await cleanStage({file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs,recovery:new Map()},f.root,true,note);
+  unreport();
+  assert.equal(await present(f.copy),true,'two links: refused');
+  report(t,f.copy,withBirth(stat,fraction(stat)));
+  await cleanStage({file:f.copy,dev:stat.dev,ino:-4n,birthtime:whole(stat).birthtimeNs-SECOND,recovery:new Map()},f.root,true,note);
+  unreport();
+  assert.equal(await present(f.copy),true,'another second: refused');
+  assert.equal(notes.length,2);
+});
+
 // ---- exFAT disk image ----
-const bridge='/Users/sager/Documents/GitHub/automatic-photo-importer/build/native/NativeCameraBridge';
+const bridge=process.env.IMPORTER_NATIVE_BRIDGE||path.join(process.cwd(),'build','native','NativeCameraBridge');
 async function exfat(t:test.TestContext){
   if(process.platform!=='darwin'||!await present(bridge)) return undefined;
   const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'exfat-birth-disk-')));
@@ -121,15 +151,23 @@ test('exFAT: a stage dated with a sub-second capture time is released after the 
   await fs.writeFile(path.join(source,'DSC_0001.NEF'),Buffer.alloc(300_000,7));
   const root=path.join(disk.mount,'photobackup');await fs.mkdir(root);
   const reviewed=(await plan(source,[root],options,metadata('2024-02-03T12:00:00.370Z'))).plans[0]!;
-  const link=files.link.bind(files);let cycled=false;
+  const link=files.link.bind(files);let cycled=false,devChanged=false;
   t.mock.method(files,'link',async(...args:Parameters<typeof files.link>)=>{
-    if(!cycled){cycled=true;await run('hdiutil',['detach','-quiet',disk.mount]);await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',disk.mount,disk.image]);}
+    if(!cycled){
+      cycled=true;
+      const before=(await fs.stat(disk.mount)).dev;
+      const cycle=async()=>{await run('hdiutil',['detach','-quiet',disk.mount]);await run('hdiutil',['attach','-quiet','-nobrowse','-mountpoint',disk.mount,disk.image]);};
+      await cycle();
+      // A remount may get another device number, which no receipt can survive; try once more.
+      if((await fs.stat(disk.mount)).dev!==before){await cycle();devChanged=(await fs.stat(disk.mount)).dev!==before;}
+    }
     return link(...args);
   });syncBuiltinESMExports();
   t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
   const result=await execute(reviewed);
   t.mock.restoreAll();syncBuiltinESMExports();
   assert.equal(cycled,true);
+  if(devChanged) return t.skip('the re-attached image got another device number, so the stage cannot be identified');
   assert.deepEqual(result.errors,[]);assert.equal(result.copied,1);
   assert.deepEqual(await leftovers(root),[]);
 });
