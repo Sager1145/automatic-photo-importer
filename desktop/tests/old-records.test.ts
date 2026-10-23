@@ -6,9 +6,11 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
 import * as core from '../core/index';
-import {acknowledgeOldRecords,findOldRecords,refuseOldRecords} from '../core/old-records';
-import {beginDuplicateRemoval} from '../core/recovery';
-import {openV5,storeFor} from '../core/app-store';
+import {acknowledgeOldRecords,findOldRecords,onOldRecordsFound,refuseOldRecords} from '../core/old-records';
+import {beginDuplicateRemoval,deleteOrganizationRecovery,finalizeOrganization,resumeOrganization,undoOrganization} from '../core/recovery';
+import {findResidue} from '../core/residue';
+import {openV5,sealV5,storeFor} from '../core/app-store';
+import {appendJournalLine,journalFileFor,resealJournalLine,sealedEvent} from './fixtures/records';
 import {identity} from '../core/paths';
 import {OLD_HIDDEN_FOLDER,OLD_FOLDER,oldJournal,oldPointer,oldReceipt} from './fixtures/old-records';
 
@@ -137,4 +139,92 @@ test('a library whose old records are another Mac\'s is not refused',async t=>{
  await oldJournal(root,{key:OTHER_KEY});
  const result=await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!);
  assert.equal(result.moved,1);
+});
+
+test('an acknowledged item stays acknowledged when the drive is mounted again with another device number',async t=>{
+ const root=await fixture(t);
+ const job=await oldJournal(root);
+ await acknowledgeOldRecords(root);
+ const file=path.join((await storeFor(root)).path,'reviewed-leftovers.json');
+ const saved=openV5('reviewed',JSON.parse(await fs.readFile(file,'utf8')));
+ const items=(saved.items as {dev:string}[]).map(item=>({...item,dev:String(Number(item.dev)+7)}));
+ await fs.writeFile(file,JSON.stringify(sealV5('reviewed',{items})));
+ assert.deepEqual(await findOldRecords(root),[]);
+ await refuseOldRecords(root);
+ assert.ok(job.id);
+});
+test('acknowledged items are not read again: they cost an lstat',async t=>{
+ const root=await fixture(t);
+ const job=await oldJournal(root);
+ await acknowledgeOldRecords(root);
+ const opened:string[]=[];const real=patched.open;
+ (patched as any).open=async(...args:any[])=>{opened.push(String(args[0]));return (real as any)(...args);};
+ try{assert.deepEqual(await findOldRecords(root),[]);}finally{patched.open=real;}
+ assert.deepEqual(opened.filter(file=>file.includes(OLD_FOLDER)),[]);
+ assert.ok(job.id);
+});
+test('a failed acknowledgement leaves no temporary file in the store',async t=>{
+ const root=await fixture(t);
+ await oldJournal(root);
+ const real=patched.rename;
+ (patched as any).rename=async(...args:any[])=>{if(String(args[1]).endsWith('reviewed-leftovers.json'))throw new Error('disk full');return (real as any)(...args);};
+ try{await assert.rejects(acknowledgeOldRecords(root),/disk full/);}finally{patched.rename=real;}
+ const store=(await storeFor(root)).path;
+ assert.deepEqual((await fs.readdir(store)).filter(name=>name.startsWith('reviewed')),[]);
+ assert.equal((await findOldRecords(root)).length,1,'still not acknowledged');
+});
+test('a library found to hold old receipts while listing tells the app, so the notice and Acknowledge appear; a refusal does too',async t=>{
+ const root=await fixture(t),file=path.join(root,'incoming/A.JPG');
+ let told=0;onOldRecordsFound(()=>{told++;});
+ try{
+  assert.equal(told,0);
+  const receipt=await oldReceipt(file);
+  await core.inventory(root,{backup:true});
+  assert.ok(told>=1,'the inventory met a receipt');
+  const before=told;
+  await assert.rejects(refuseOldRecords(root),(error:any)=>error.key==='error.oldRecords');
+  assert.ok(told>before,'a refusal tells it too');
+  assert.deepEqual((await findOldRecords(root)).map(item=>item.path),[receipt],'there is something to acknowledge');
+  assert.equal(await acknowledgeOldRecords(root),1);
+  await refuseOldRecords(root);
+ }finally{onOldRecordsFound(undefined);}
+});
+test('a journal converted only in part is an old record: in the notice, refused by resume, undo, finalize and delete, and kept by the automatic cleanup',async t=>{
+ const root=await fixture(t);
+ const done=await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ assert.equal(done.errors.length,0);
+ const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
+ assert.deepEqual(await findOldRecords(root),[]);
+ await resealJournalLine(root,id,0,value=>({...value,convertedFrom:{path:path.join(root,OLD_FOLDER,id),records:3,sha256:'0'.repeat(64)}}));
+ const found=await findOldRecords(root);
+ assert.deepEqual(found.map(item=>item.path),[await journalFileFor(root,id)]);
+ const refused=(error:any)=>error.key==='error.oldRecords';
+ await assert.rejects(resumeOrganization(root,id),refused);
+ await assert.rejects(undoOrganization(root,id),refused);
+ await assert.rejects(finalizeOrganization(root,id),refused);
+ await assert.rejects(deleteOrganizationRecovery(root,id),refused);
+ assert.ok(!(await findResidue([root])).items.some(item=>item.kind==='journal'),'not deleted automatically');
+ // Acknowledging stops the notice, but the journal itself stays unusable.
+ await acknowledgeOldRecords(root);
+ assert.deepEqual(await findOldRecords(root),[]);
+ await assert.rejects(undoOrganization(root,id),refused);
+ // Once the migrator's own end marker is there it is an ordinary journal again.
+ await appendJournalLine(root,id,sealedEvent({id,root,event:'migration-complete',at:new Date().toISOString()}));
+ assert.deepEqual((await resumeOrganization(root,id)).errors,[]);
+ assert.equal((await undoOrganization(root,id)).restored>=0,true);
+});
+test('deleting a journal\'s records looks at the neighbouring folders too: an old record there stops it until acknowledged',async t=>{
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-neighbours-')));
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
+ const root=path.join(parent,'library'),neighbour=path.join(parent,'other');
+ await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(neighbour);
+ await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
+ await undoOrganization(root,id);
+ await oldJournal(neighbour);
+ await assert.rejects(deleteOrganizationRecovery(root,id),(error:any)=>error.key==='error.oldRecords');
+ assert.ok(!(await findResidue([root])).items.some(item=>item.kind==='journal'),'the automatic cleanup keeps it');
+ await acknowledgeOldRecords(neighbour);
+ await deleteOrganizationRecovery(root,id);
 });

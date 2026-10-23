@@ -12,8 +12,9 @@ const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 const storage=(root:string)=>path.join(root,'Photo Importer Data','Organizations');
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
 async function fixture(t:test.TestContext){
- const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'delete-recovery-')));
- t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ // Inside its own folder: the neighbouring folders are looked at too, and the system temporary folder holds other things.
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'delete-recovery-'))),root=path.join(parent,'library');await fs.mkdir(root);
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
  const original=path.join(root,'incoming','A.JPG');await fs.mkdir(path.dirname(original));await fs.writeFile(original,'precious original');return {root,original};
 }
 async function organize(root:string,folder:string,signal?:AbortSignal,onProgress?:()=>void){
