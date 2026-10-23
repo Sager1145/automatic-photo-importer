@@ -181,10 +181,11 @@ type Stat=import('node:fs').BigIntStats;
 /** exFAT gives a zero-length file no start cluster, so its inode is synthetic (2^63 and up, negative when
  * read as signed) and changes whenever the vnode is recreated. Such an inode proves nothing either way. */
 export function unreliableIno(stat:Pick<Stat,'ino'|'size'>):boolean {return stat.size===0n || stat.ino<0n || stat.ino>=2n**63n;}
-/** The same file: dev, size and times, plus the inode - or the birth time where no inode can be trusted. */
+/** The same file: dev, size and times, plus the inode - or the birth time where either inode cannot be trusted. */
 export function sameStat(a:Stat,b:Stat):boolean {
   if(a.dev!==b.dev || a.size!==b.size || a.mtimeNs!==b.mtimeNs || a.ctimeNs!==b.ctimeNs) return false;
-  return unreliableIno(a)&&unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
+  // exFAT swaps an empty or fresh file's synthetic inode for the real one when it is first flushed: that alone is not another file.
+  return unreliableIno(a)||unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
 }
 /** exFAT (macOS FSKit) reports a birth time as whole seconds while the file is cached after the date helper set it,
  * and as the stored 10 ms value once re-read from disk. A recorded whole second therefore matches any value in that
