@@ -226,6 +226,7 @@ Estimated share of time the drive spent reading or writing, not its capacity|硬
 Read|读取|讀取|読み込み
 Write|写入|寫入|書き込み
 Activity ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}
+Whole disk, all apps; may include metadata and receipts|整个硬盘，包含所有应用；可能含元数据和回执|整個硬碟，包含所有應用程式；可能含中繼資料和回條|ディスク全体・すべてのアプリの合計です。メタデータやレシートを含む場合があります
 Read {read} · Write {write}|读取 {read} · 写入 {write}|讀取 {read} · 寫入 {write}|読み込み {read} · 書き込み {write}
 Destinations|目标|目的地|保存先
 Copy policy|复制策略|複製策略|コピー方式

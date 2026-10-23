@@ -126,6 +126,60 @@ test('the overview Transfer speed and the Total line show the same rates, and pl
   }
 });
 
+/** ioreg output for one disk ("disk9") with the given cumulative counters. */
+const ioreg = (c: { read: number; write?: number; ns?: number }) => `<array><dict><key>IORegistryEntryID</key><integer>1</integer><key>Statistics</key><dict><key>Bytes (Read)</key><integer>${Math.round(c.read)}</integer><key>Bytes (Write)</key><integer>${Math.round(c.write ?? 0)}</integer><key>Operations (Read)</key><integer>0</integer><key>Operations (Write)</key><integer>0</integer><key>Total Time (Read)</key><integer>${Math.round(c.ns ?? 0)}</integer><key>Total Time (Write)</key><integer>0</integer></dict><key>IORegistryEntryChildren</key><array><dict><key>BSD Name</key><string>disk9</string><key>Whole</key><true/></dict></array></dict></array>`;
+
+test('drive activity: the timestamp is taken when ioreg has answered, so a slow call does not skew the rate', async () => {
+  const { createDriveSampler } = await import('../platform/drive-activity');
+  let clock = 0, calls = 0;
+  const rate = 100e6; // bytes per second, steady
+  // ioreg takes 10 ms or 200 ms in turn and reads its counters halfway through the call.
+  const sampler = createDriveSampler({ now: () => clock, run: async () => { const took = calls++ % 2 ? 200 : 10, value = rate * (clock + took / 2) / 1000; clock += took; return ioreg({ read: value }); } });
+  sampler.setTargets({ vol: ['disk9'] });
+  await sampler.sample();
+  for (let i = 0; i < 12; i++) {
+    clock += 1000;
+    const shown = (await sampler.sample())['vol'];
+    assert.ok(shown, 'a reading');
+    assert.ok(Math.abs(shown.readBps - rate) / rate < 0.005, `sample ${i}: ${shown.readBps}`);
+  }
+});
+
+test('drive activity: read and write rates are smoothed over 5 s while the sparkline keeps each raw reading', async () => {
+  const { createDriveSampler } = await import('../platform/drive-activity');
+  let clock = 0, read = 0, step = 0, busy = 0;
+  const sampler = createDriveSampler({ now: () => clock, run: async () => ioreg({ read, write: read / 2, ns: busy }) });
+  sampler.setTargets({ vol: ['disk9'] });
+  await sampler.sample();
+  const shown: { read: number; write: number; history: number[] }[] = [];
+  for (let i = 0; i < 14; i++) {
+    clock += 1000; step++;
+    read += i % 2 ? 90e6 : 110e6; // raw seconds swing 10% around 100 MB/s
+    busy += i % 2 ? 0.2e9 : 0.6e9; // and the disk is busy 60% then 20% of each second
+    const found = (await sampler.sample())['vol'];
+    if (found) shown.push({ read: found.readBps, write: found.writeBps, history: found.history });
+  }
+  for (const item of shown.slice(6)) {
+    assert.ok(Math.abs(item.read - 100e6) <= 3e6, `smoothed read ${item.read}`);
+    assert.ok(Math.abs(item.write - 50e6) <= 1.5e6, `smoothed write ${item.write}`);
+  }
+  assert.equal(shown.length, 14, 'a value from the second reading on');
+  assert.deepEqual(shown.at(-1)!.history.slice(-4), [60, 20, 60, 20], 'the sparkline is not smoothed');
+});
+
+test('the drive meter says it measures the whole disk, in every language', async () => {
+  const { DriveActivityMeter } = await import('../renderer/RootApp');
+  const { createTranslator, I18nProvider, languages } = await import('../renderer/i18n');
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  for (const language of languages) {
+    const t = createTranslator(language), text = t('Whole disk, all apps; may include metadata and receipts');
+    if (language !== 'en') assert.notEqual(text, 'Whole disk, all apps; may include metadata and receipts', `${language}: translated`);
+    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(DriveActivityMeter, { activity: { utilization: 40, readBps: 1e6, writeBps: 2e6, iops: 5, history: [1, 2] } }) }));
+    assert.ok(page.includes(`title="${text}"`), `${language}: tooltip`);
+  }
+});
+
 test('the speed window follows a steady rate, shows nothing for its first 2 s and falls to zero within 5 s of a stall', () => {
   const meter = new RateMeter();
   assert.equal(meter.next(0, 0), undefined);

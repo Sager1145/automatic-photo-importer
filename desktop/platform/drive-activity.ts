@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { DestinationStatus, DriveActivity, Source } from '../shared';
 import { within } from '../core/paths';
+import { RateMeter } from '../eta';
 import type { MountedVolume } from './volumes';
 
 const exec = promisify(execFile);
@@ -79,7 +80,8 @@ export function parseDiskMap(xml:string):Map<number,string[]> {
 export interface Rates {utilization:number;readBps:number;writeBps:number;iops:number;}
 /** Rates over the interval between two cumulative readings; undefined when the interval is unusable
  * or a counter went backwards (the disk was re-attached). Total Time is I/O time summed over
- * concurrent requests, so busy time above wall time is capped to 100%. */
+ * concurrent requests, so busy time above wall time is capped to 100%: an estimate, not a true share of time
+ * (it equals the average time per request times requests per second). The counters cover the whole disk: every app, metadata and receipts. */
 export function computeRates(previous:Counters,current:Counters,seconds:number):Rates|undefined {
   if(!(seconds>0))return undefined;
   const delta=(key:keyof Counters)=>current[key]-previous[key];
@@ -105,6 +107,7 @@ export interface SamplerOptions {
 export function createDriveSampler(options:SamplerOptions):DriveSampler {
   const now=options.now??(()=>performance.now()),length=options.historyLength??HISTORY_LENGTH,retry=options.mediaRetryMs??10000;
   let targets:Record<string,string[]>={},diskMap=new Map<number,string[]>(),lastMedia=-Infinity,misses=0,wantedKey='';
+  const meters=new Map<string,{read:RateMeter;write:RateMeter}>();
   const previous=new Map<string,{at:number;counters:Counters}>(),history=new Map<string,number[]>(),latest=new Map<string,Rates>();
   return {
     setTargets(next){targets=next;},
@@ -113,11 +116,13 @@ export function createDriveSampler(options:SamplerOptions):DriveSampler {
       if(!wanted.size)return {};
       const key=[...wanted].sort().join('|'),changed=key!==wantedKey;
       if(changed){wantedKey=key;misses=0;}
-      let at=now(),stats=parseStatistics(await options.run(false));
+      // The counters are read somewhere inside the call: its midpoint is the best time to give them (not the moment the call began).
+      const began=now();
+      let stats=parseStatistics(await options.run(false)),at=(began+now())/2;
       const mapped=new Set([...diskMap.values()].flat());
       const stale=[...stats.keys()].some(id=>!diskMap.has(id))||[...diskMap.keys()].some(id=>!stats.has(id));
       if((stale||[...wanted].some(disk=>!mapped.has(disk)))&&(changed||at-lastMedia>=Math.min(MEDIA_RETRY_CAP,retry*2**misses))){
-        const xml=await options.run(true);at=now();lastMedia=at;
+        const mediaBegan=now(),xml=await options.run(true);at=(mediaBegan+now())/2;lastMedia=now();
         diskMap=parseDiskMap(xml);stats=parseStatistics(xml);
         // A wanted disk that still does not map (not a block-storage disk) must not cost a full listing every few seconds.
         misses=[...wanted].every(disk=>[...diskMap.values()].some(names=>names.includes(disk)))?0:Math.min(misses+1,20);
@@ -129,13 +134,17 @@ export function createDriveSampler(options:SamplerOptions):DriveSampler {
         const sum=byDisk.get(disk);
         byDisk.set(disk,sum?Object.fromEntries((Object.keys(sum) as (keyof Counters)[]).map(key=>[key,sum[key]+counters[key]])) as unknown as Counters:{...counters});
       }
-      for(const disk of [...previous.keys()])if(!wanted.has(disk)){previous.delete(disk);history.delete(disk);latest.delete(disk);}
+      for(const disk of [...previous.keys()])if(!wanted.has(disk)){previous.delete(disk);history.delete(disk);latest.delete(disk);meters.delete(disk);}
       for(const [disk,counters] of byDisk){
         const before=previous.get(disk);previous.set(disk,{at,counters});
+        // The byte rates are measured over the last 5 s of cumulative bytes (the same window as the transfer speeds); the first 2 s use the raw reading.
+        let pair=meters.get(disk);if(!pair){pair={read:new RateMeter(),write:new RateMeter()};meters.set(disk,pair);}
+        const smoothRead=pair.read.next(counters.readBytes,at),smoothWrite=pair.write.next(counters.writeBytes,at);
         if(!before)continue;
         const rates=computeRates(before.counters,counters,(at-before.at)/1000);
         if(!rates){history.delete(disk);latest.delete(disk);continue;}
-        latest.set(disk,rates);
+        // The utilization stays the raw reading of this interval: it feeds the sparkline, one point per reading.
+        latest.set(disk,{...rates,readBps:smoothRead??rates.readBps,writeBps:smoothWrite??rates.writeBps});
         const list=history.get(disk)??[];list.push(Math.round(rates.utilization));history.set(disk,list.slice(-length));
       }
       const result:Record<string,DriveActivity>={};
