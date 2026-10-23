@@ -103,7 +103,7 @@ async function card(t:test.TestContext,bytes=Buffer.alloc(4000,7)){
 }
 const oldStage=(entry:PlanEntry)=>path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
 
-for(const point of [undefined,'R1','R2'] as const)test(`R: a staged copy bound by its receipt moves into the staging folder${point?` (stopped after ${point}, finished by the next run)`:''} and the next import continues it`,async t=>{
+for(const point of [undefined,'R1','R2','R3'] as const)test(`R: a staged copy bound by its receipt moves into the staging folder${point?` (stopped after ${point}, finished by the next run)`:''} and the next import continues it`,async t=>{
  const f=await card(t);
  const partial=oldStage(f.entry);await fs.writeFile(partial,f.bytes.subarray(0,1500));
  const inode=(await fs.lstat(partial,{bigint:true})).ino;

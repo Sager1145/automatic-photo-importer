@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,undoOrganization,resumeOrganization} from '../core/index';
+import * as core from '../core/index';
 import {migrateDrive,SimulatedCrash} from '../core/migrate/index';
 import {registerDestinations} from '../core/app-store';
 import {journalFolderFor,journalLines} from './fixtures/records';
@@ -117,13 +118,17 @@ test('a journal another Mac sealed is left exactly as it is and reported',async 
 
 test('a store copy that is not this folder\'s own conversion stops the conversion: multiple copies',async t=>{
  const f=await legacyLibrary(t);
- // Another journal with the same id already in the store, converted from somewhere else.
+ // A valid, sealed journal with the same id already in the store, converted from another folder.
+ const {sealedLine,storeFor}=await import('../core/app-store');await storeFor(f.root);
+ const {seal:_seal,version:_version,kind,entries,...manifest}=JSON.parse(await fs.readFile(path.join(f.legacy,'manifest.json'),'utf8'));
  const store=path.join(f.root,'Photo Importer Data','Organizations',f.id);await fs.mkdir(store,{recursive:true});
- await fs.writeFile(path.join(store,'journal.jsonl'),'not this one\n');
+ const header=sealedLine('organization',{...manifest,...(kind?{dupKind:kind}:{}),folders:[],convertedFrom:{path:path.join(f.base,'elsewhere','Photo Importer Recovery',f.id),records:0,sha256:'0'.repeat(64)}});
+ await fs.writeFile(path.join(store,'journal.jsonl'),header+'\n'+sealedLine('entries',{id:f.id,entries})+'\n');
+ const before=await fs.readdir(f.legacy,{recursive:true});
  const result=await migrateDrive([f.root]);
- assert.ok(result.problems.some(problem=>/more than one place|could not be converted/.test(problem)),result.problems.join('; '));
- assert.ok(await exists(path.join(f.legacy,'manifest.json')),'the earlier version\'s journal stays');
- for(const file of await fs.readdir(path.join(f.legacy,'originals'),{recursive:true}))void file;
+ assert.ok(result.problems.some(problem=>/more than one place/.test(problem)),result.problems.join('; '));
+ assert.deepEqual(await fs.readdir(f.legacy,{recursive:true}),before,'the earlier version\'s journal and originals stay as they were');
+ await assert.rejects(core.resumeOrganization(f.root,f.id),/more than one place/);
 });
 
 test('both names for one file after a stop between writing and committing the converted journal: First Aid, nothing unlinked',async t=>{
