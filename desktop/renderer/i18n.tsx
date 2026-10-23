@@ -835,6 +835,7 @@ No preview available|无可用预览|沒有可用預覽|プレビューはあり
 Loading preview…|正在加载预览…|正在載入預覽…|プレビューを読み込み中…
 This Mac can't decode this RAW format yet, so the camera's embedded preview is shown. Updating macOS or converting the files with Adobe DNG Converter adds support.|这台 Mac 暂时无法解码此 RAW 格式，因此显示相机内嵌的预览。更新 macOS 或用 Adobe DNG Converter 转换文件即可获得支持。|這台 Mac 暫時無法解碼此 RAW 格式，因此顯示相機內嵌的預覽。更新 macOS 或用 Adobe DNG Converter 轉換檔案即可獲得支援。|この Mac はこの RAW 形式をまだデコードできないため、カメラ内蔵のプレビューを表示しています。macOS を更新するか、Adobe DNG Converter で変換すると対応できます。
 This file's preview could not be read.|无法读取此文件的预览。|無法讀取此檔案的預覽。|このファイルのプレビューを読み込めませんでした。
+This file's EXIF could not be read.|无法读取此文件的 EXIF。|無法讀取此檔案的 EXIF。|このファイルの EXIF を読み込めませんでした。
 Full EXIF|完整 EXIF|完整 EXIF|すべての EXIF
 Loading…|正在加载…|正在載入…|読み込み中…
 No EXIF found|未找到 EXIF|找不到 EXIF|EXIF が見つかりません

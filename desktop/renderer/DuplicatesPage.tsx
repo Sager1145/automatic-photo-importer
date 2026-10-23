@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock3, CopyCheck, ImageOff, Info, LoaderCircle, RotateCcw, ScanSearch, Square, Trash2, FolderOpen } from 'lucide-react';
 import type { Action, AppState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
 import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
+import { createDetailStore, type FileDetails, type Outcome } from './duplicate-details';
 import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, type DeleteRecoveryStep } from './RootApp';
 
 type Dispatch = (action: Action) => void;
@@ -71,8 +72,10 @@ function Badge({ kind }: { kind: FileBadge }) {
   return <span className={`small-tag duplicate-badge duplicate-badge-${kind}`} data-badge={kind}>{label}</span>;
 }
 
-function Preview({ file, thumbnail }: { file: DuplicateFile; thumbnail?: Thumbnail }) {
+function Preview({ file, outcome }: { file: DuplicateFile; outcome?: Outcome<Thumbnail> }) {
   const { t } = useTranslation();
+  // A preview that failed to arrive reads like an unreadable file; the file's Retry asks again.
+  const thumbnail: Thumbnail | undefined = outcome && ('value' in outcome ? outcome.value : { via: 'none', problem: 'unreadable' });
   return <div className="duplicate-preview">
     {thumbnail?.src ? <img src={thumbnail.src} alt={t("Preview of {name}", { name: baseName(file.path) })} loading="lazy" /> : <div className="duplicate-preview-empty" aria-label={thumbnail ? t("No preview available") : t("Loading preview…")}>{thumbnail ? <Icon icon={ImageOff} size={28} /> : <Icon icon={LoaderCircle} size={24} />}</div>}
     {thumbnail?.problem === 'raw-unsupported' && <p className="inline-note duplicate-raw-note" role="note" data-testid="raw-unsupported"><Icon icon={Info} size={14} />{t("This Mac can't decode this RAW format yet, so the camera's embedded preview is shown. Updating macOS or converting the files with Adobe DNG Converter adds support.")}</p>}
@@ -80,12 +83,13 @@ function Preview({ file, thumbnail }: { file: DuplicateFile; thumbnail?: Thumbna
   </div>;
 }
 
-function FullExif({ metadata }: { metadata?: Metadata }) {
+function FullExif({ outcome }: { outcome?: Outcome<Metadata> }) {
   const { t, formatBytes } = useTranslation();
+  const metadata = outcome && 'value' in outcome ? outcome.value : undefined;
   const categories = useMemo(() => metadata ? categorize(metadata.fields, formatBytes) : [], [metadata, formatBytes]);
   return <details className="duplicate-full-exif" data-testid="full-exif">
     <summary>{t("Full EXIF")}</summary>
-    {!metadata ? <p className="muted">{t("Loading…")}</p> : categories.length === 0 ? <p className="muted">{t("No EXIF found")}</p> : categories.map(category => <section key={category.id} data-category={category.id}>
+    {outcome && 'error' in outcome ? <p className="muted">{t("This file's EXIF could not be read.")}</p> : !metadata ? <p className="muted">{t("Loading…")}</p> : categories.length === 0 ? <p className="muted">{t("No EXIF found")}</p> : categories.map(category => <section key={category.id} data-category={category.id}>
       <h4>{t(category.title)}</h4>
       <dl>{category.rows.map(row => <div key={row.tag}><dt>{t(row.label)}</dt><dd>{t(row.value)}</dd></div>)}</dl>
     </section>)}
@@ -93,10 +97,10 @@ function FullExif({ metadata }: { metadata?: Metadata }) {
 }
 
 export interface GroupViewProps {
-  item: ResolvedGroup; number?: number; thumbs: Record<string, Thumbnail | undefined>; exifs: Record<string, Metadata | undefined>;
+  item: ResolvedGroup; number?: number; details: Readonly<Record<string, FileDetails>>; onRetry: (path: string) => void;
   onDecide: (id: string, keep: string) => void; disabled?: boolean; editedFolder?: string;
 }
-export function GroupView({ item, number, thumbs, exifs, onDecide, disabled = false, editedFolder }: GroupViewProps) {
+export function GroupView({ item, number, details, onRetry, onDecide, disabled = false, editedFolder }: GroupViewProps) {
   const { t, formatBytes, formatNumber, language } = useTranslation();
   const { group } = item;
   return <article className="duplicate-group" data-testid="duplicate-group" data-group-id={group.id} data-strength={group.strength} data-auto={item.auto ? 'true' : 'false'}>
@@ -108,13 +112,15 @@ export function GroupView({ item, number, thumbs, exifs, onDecide, disabled = fa
       <label className="duplicate-keep duplicate-keep-all"><input type="radio" name={`keep-${group.id}`} value="all" checked={item.keep === 'all'} disabled={disabled} data-testid="keep-all" onChange={() => onDecide(group.id, 'all')} />{t("Keep all")}</label>
     </div>
     <div className="duplicate-files">{group.files.map(file => {
-      const removing = item.remove.includes(file);
+      const removing = item.remove.includes(file), { thumbnail, exif } = details[file.path] ?? {};
+      const failed = (thumbnail && 'error' in thumbnail) || (exif && 'error' in exif);
       return <div key={file.path} className={`duplicate-file ${item.keep === file.path ? 'keeping' : ''} ${removing ? 'removing' : ''}`} data-testid="duplicate-file" data-path={file.path}>
-        <Preview file={file} thumbnail={thumbs[file.path]} />
+        <Preview file={file} outcome={thumbnail} />
         <label className="duplicate-keep"><input type="radio" name={`keep-${group.id}`} value={file.path} checked={item.keep === file.path} disabled={disabled} data-testid="keep-file" onChange={() => onDecide(group.id, file.path)} /><strong>{baseName(file.path)}</strong></label>
         <div className="duplicate-badges">{fileBadges(group, file, item.suggested, editedFolder).map(badge => <Badge key={badge} kind={badge} />)}{removing && <span className="small-tag duplicate-badge-remove" data-badge="remove">{t("Will be removed")}</span>}</div>
-        <dl className="duplicate-basic" data-testid="basic-exif">{basicExif(file, exifs[file.path], t, formatBytes, language).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={label === t("Path") ? 'recovery-root' : undefined}>{value}</dd></div>)}</dl>
-        <FullExif metadata={exifs[file.path]} />
+        <dl className="duplicate-basic" data-testid="basic-exif">{basicExif(file, exif && 'value' in exif ? exif.value : undefined, t, formatBytes, language).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={label === t("Path") ? 'recovery-root' : undefined}>{value}</dd></div>)}</dl>
+        <FullExif outcome={exif} />
+        {failed && <div className="rule-actions"><Button icon={RotateCcw} data-testid="details-retry" onClick={() => onRetry(file.path)}>{t("Retry")}</Button></div>}
       </div>;
     })}</div>
   </article>;
@@ -151,41 +157,17 @@ export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecov
   </section>;
 }
 
-/** Fetches previews and EXIF only for the files on the page, three at a time. Results are keyed by path relative to the scope root. */
-function useFileDetails(root: string | undefined, files: DuplicateFile[]) {
-  const [thumbs, setThumbs] = useState<Record<string, Thumbnail | undefined>>({});
-  const [exifs, setExifs] = useState<Record<string, Metadata | undefined>>({});
-  // loaded: a result is in thumbs/exifs. flying: asked for and not back yet. Neither outlives its root.
-  const cache = useRef({ root: '', loaded: new Set<string>(), flying: new Set<string>() });
+/** Fetches previews and EXIF only for the files on the page, three at a time (see duplicate-details). A new root or scan revision starts empty. */
+function useFileDetails(root: string | undefined, revision: number, files: DuplicateFile[]) {
+  const [store] = useState(() => createDetailStore({
+    thumbnail: (base, path) => window.importer.thumbnail(absolutePath(base, path)),
+    exif: (base, path) => window.importer.exif(absolutePath(base, path)),
+  }));
+  const view = () => store.view(root ?? '', revision);
+  const details = useSyncExternalStore(store.subscribe, view, view);
   const key = files.map(file => file.path).join('\0');
-  useEffect(() => {
-    if (cache.current.root !== (root ?? '')) { cache.current = { root: root ?? '', loaded: new Set(), flying: new Set() }; setThumbs({}); setExifs({}); }
-  }, [root]);
-  useEffect(() => {
-    if (!root) return;
-    let alive = true;
-    const mine = cache.current.root === root ? cache.current : (cache.current = { root, loaded: new Set(), flying: new Set() });
-    const queue = files.filter(file => !mine.loaded.has(file.path) && !mine.flying.has(file.path)), owned = queue.map(file => file.path);
-    for (const path of owned) mine.flying.add(path);
-    const worker = async () => {
-      for (let file = queue.shift(); file && alive; file = queue.shift()) {
-        const full = absolutePath(root, file.path);
-        const [picture, metadata] = await Promise.all([
-          window.importer.thumbnail(full).catch((): Thumbnail => ({ via: 'none', problem: 'unreadable' })),
-          window.importer.exif(full).catch((): Metadata => ({ fields: {} })),
-        ]);
-        mine.flying.delete(file.path);
-        // A result that arrives after paging away still lands, unless the root changed meanwhile.
-        if (cache.current !== mine) return;
-        mine.loaded.add(file.path);
-        setThumbs(current => ({ ...current, [file.path]: picture }));
-        setExifs(current => ({ ...current, [file.path]: metadata }));
-      }
-    };
-    for (let i = 0; i < 3; i++) void worker();
-    return () => { alive = false; for (const path of owned) mine.flying.delete(path); };
-  }, [root, key]);
-  return { thumbs, exifs };
+  useEffect(() => root ? store.show(root, revision, key ? key.split('\0') : []) : undefined, [store, root, revision, key]);
+  return { details, retry: (path: string) => { if (root) store.retry(root, revision, path); } };
 }
 
 export function Pagination({ page, pages, onPage }: { page: number; pages: number; onPage: (page: number) => void }) {
@@ -235,7 +217,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
   const shown = useMemo(() => plan.resolved.map((item, index) => ({ item, number: index + 1 })).filter(entry => filter === 'all' || (filter === 'auto') === entry.item.auto), [plan.resolved, filter]);
   const pages = Math.max(1, Math.ceil(shown.length / GROUPS_PER_PAGE)), current = Math.min(pageIndex, pages - 1);
   const visible = shown.slice(current * GROUPS_PER_PAGE, (current + 1) * GROUPS_PER_PAGE);
-  const { thumbs, exifs } = useFileDetails(dup.root, useMemo(() => visible.flatMap(entry => entry.item.group.files), [visible]));
+  const { details, retry } = useFileDetails(dup.root, dup.revision, useMemo(() => visible.flatMap(entry => entry.item.group.files), [visible]));
   const decide = (id: string, keep: string) => setDecisions(current => ({ ...current, [id]: keep }));
   const keepSuggested = () => setDecisions(current => ({ ...current, ...Object.fromEntries(plan.resolved.filter(item => item.needsDecision).map(item => [item.group.id, item.suggested])) }));
   const removed = (state.organizationRecovery ?? []).filter(job => job.kind === 'duplicates' && job.root === dup.root);
@@ -292,7 +274,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
         {groups.length > 0 && <div className="segmented" role="group" aria-label={t("Show groups")}>{([['all', t("All ({count})", { count: formatNumber(counts.all) })], ['manual', t("You decide ({count})", { count: formatNumber(counts.manual) })], ['auto', t("Automatic ({count})", { count: formatNumber(counts.auto) })]] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} data-testid={`duplicates-filter-${id}`} onClick={() => setFilter(id)}>{label}</button>)}</div>}
         {groups.length === 0 ? <p className="inline-note" data-testid="duplicates-none"><Icon icon={CheckCircle2} size={14} />{t("No duplicates found.")}</p> : <>
           <Pagination page={current} pages={pages} onPage={setPageIndex} />
-          <div className="duplicate-list" data-testid="duplicate-list">{visible.map(entry => <GroupView key={entry.item.group.id} item={entry.item} number={entry.number} thumbs={thumbs} exifs={exifs} onDecide={decide} disabled={locked} editedFolder={editedFolder} />)}</div>
+          <div className="duplicate-list" data-testid="duplicate-list">{visible.map(entry => <GroupView key={entry.item.group.id} item={entry.item} number={entry.number} details={details} onRetry={retry} onDecide={decide} disabled={locked} editedFolder={editedFolder} />)}</div>
           <Pagination page={current} pages={pages} onPage={setPageIndex} />
         </>}
       </section>
