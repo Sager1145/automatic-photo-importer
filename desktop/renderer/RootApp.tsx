@@ -19,6 +19,7 @@ import { buildTemplate, parseTemplate, type FolderPath } from '../folder-templat
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { settingsLocked } from '../settings-lock';
+import { listingShare } from '../listing-estimate';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
 const pageOrder: Page[] = ['desk', 'drives', 'organization', 'history', 'settings'];
@@ -74,6 +75,8 @@ export interface ProgressDisplayProps {
   label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: Pick<Progress, 'speed' | 'fileRate'>;
   startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
   heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean;
+  /** Nothing is planned: an empty bar and no percentage. */
+  empty?: boolean;
 }
 export function ProgressDisplay(props: ProgressDisplayProps) {
   const { t, formatNumber } = useTranslation();
@@ -81,10 +84,10 @@ export function ProgressDisplay(props: ProgressDisplayProps) {
   const shown = known ? (props.finished ? 1 : Math.min(.99, Math.max(0, props.fraction!))) : 0;
   return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.testId ? { 'data-testid': props.testId } : {})}>
     {props.heading}
-    <ProgressBar value={shown} indeterminate={!known} label={props.label} />
+    <ProgressBar value={shown} indeterminate={!known && !props.empty} label={props.label} />
     <div className="progress-display-line">
       <span className="progress-count" data-testid="progress-count">{props.count ?? t("Starting…")}</span>
-      {known && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
+      {known && !props.empty && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
       {props.speed && <ProgressSpeed progress={props.speed} />}
       <ProgressTiming startedAt={props.startedAt} endedAt={props.endedAt} left={props.left} etaTestId={props.etaTestId} />
       <ProgressFile file={props.file} />
@@ -382,7 +385,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
       const job = state.jobs.find(item => item.source.id === source.id && (!item.organization || !state.sources.some(other => other.id === source.id)));
       const scanning = !!state.scanningSources?.includes(source.id);
       const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
-      const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff), capacity = sourceCapacity(state, source);
+      const steps = sourceStepStates(job, state.sourceInventories?.[source.id] ?? job?.inventory, scanning, verifyOff, !!state.busyReview && state.reviewSourceId === source.id), capacity = sourceCapacity(state, source);
       return <li key={source.id} data-source-id={source.id} className={`sidebar-drive ${sourceSelected(source) ? '' : 'sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
         <SidebarCapacity total={capacity.total ?? source.total} free={capacity.free ?? source.free} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} moving={!!job?.progress?.renames} />} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
@@ -588,6 +591,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const verify = state.preferences.verifyCopies !== false;
   const measured = latestJobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
   const overall = measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
+  // No job, no planned bytes: only "No transfer planned" is shown, with an empty bar and no percentage.
+  const nothingPlanned = !(total > 0 && transferred > 0) && !lead?.progress && !active.length && overall === undefined;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
       <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
@@ -599,7 +604,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
-        fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => job.phase === 'complete')}
+        empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => job.phase === 'complete')}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined}
@@ -906,7 +911,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
         <div className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
           {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{t("Connect camera storage or a memory card.")}</h3><p>{t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
           {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
-          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, job.source)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} originalsSize={state.originalsSize} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, source)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
+          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, job.source)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === job.source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} originalsSize={state.originalsSize} /> : <SourceRow canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} capacity={sourceCapacity(state, source)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
           <div className="source-footer"><Switch label={t("Enable media folder selection")} detail={t("Import: copy, source untouched")} checked={state.preferences.allowFolderSource} disabled={settingsLocked(state)} onChange={allowFolderSource => act({ type: 'preferences', patch: { allowFolderSource } })} /><Button icon={FolderPlus} disabled={!configured || !state.preferences.allowFolderSource || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: false })}>{t("Choose media folders…")}</Button></div>
         </div>
       </section>
@@ -969,8 +974,10 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
 }
 type StepState = 'pending' | 'active' | 'done' | 'error' | 'paused' | 'skipped';
 // Scanning → Copying → Verifying for one source, derived from its latest job and read-only scan.
-export function sourceStepStates(job: Job | undefined, inventory: Inventory | undefined, scanning: boolean, verifyOff: boolean): StepState[] {
+export function sourceStepStates(job: Job | undefined, inventory: Inventory | undefined, scanning: boolean, verifyOff: boolean, reviewing = false): StepState[] {
   const skipVerify = (state: StepState): StepState => verifyOff ? 'skipped' : state;
+  // A review being built for this source is its first step at work.
+  if (reviewing && (!job || !activePhases.includes(job.phase)) && job?.phase !== 'queued') return ['active', 'pending', skipVerify('pending')];
   if (!job || job.phase === 'queued') return [scanning ? 'active' : inventory ? 'done' : 'pending', 'pending', skipVerify('pending')];
   if (job.phase === 'complete') return ['done', 'done', skipVerify('done')];
   const progressPhase = job.progress?.phase;
@@ -978,9 +985,9 @@ export function sourceStepStates(job: Job | undefined, inventory: Inventory | un
   const current: StepState = job.phase === 'error' ? 'error' : job.phase === 'stopped' ? 'paused' : 'active';
   return [0, 1, 2].map(index => index === 2 && verifyOff ? 'skipped' : index < stage ? 'done' : index === stage ? current : 'pending');
 }
-export function SourceSteps({ job, inventory, scanning, verifyOff }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean }) {
+export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = false }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean; reviewing?: boolean }) {
   const { t, formatNumber } = useTranslation();
-  const states = sourceStepStates(job, inventory, scanning, verifyOff);
+  const states = sourceStepStates(job, inventory, scanning, verifyOff, reviewing);
   const icons: Record<StepState, LucideIcon> = { pending: Circle, active: LoaderCircle, done: Check, error: CircleAlert, paused: Pause, skipped: Minus };
   const names = [t("Scanning"), t(job?.progress?.renames ? "Moving" : "Copying"), t("Verifying")];
   const fraction = job ? cardFraction(job) : undefined;
@@ -1244,12 +1251,12 @@ export function PlanningProgress({ progress, label }: { progress: Progress; labe
 export function ScanProgress({ sourceName, listing, cameraInfo, usedBytes }: { sourceName: string; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; usedBytes?: number }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const reading = cameraInfo?.status === 'reading', eta = reading ? cameraInfo.eta : listing?.eta;
-  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? Math.min(.99, listing.bytes / usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
+  const fraction = reading ? (cameraInfo.total ? cameraInfo.checked / cameraInfo.total : undefined) : listing && usedBytes && usedBytes > 0 ? listingShare(listing.bytes, usedBytes) : listing?.topShare !== undefined ? Math.min(.99, listing.topShare) : undefined;
   const count = reading ? t("Reading camera metadata: {checked}/{total}", { checked: formatNumber(cameraInfo.checked), total: formatNumber(cameraInfo.total) }) : listing ? t("Listing files…") : undefined;
   return <ProgressDisplay testId="scan-progress" className="progress-scan" label={t("{name} scanning", { name: sourceName })} fraction={fraction}
     count={count}
     speed={reading ? { speed: 0, fileRate: cameraInfo.fileRate } : listing ? { speed: 0, fileRate: listing.fileRate } : undefined}
-    startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : undefined}
+    startedAt={reading ? cameraInfo.startedAt : listing?.startedAt} left={eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : fraction !== undefined ? t("Estimating time left…") : undefined}
     file={reading ? undefined : listing?.file}
     extra={!reading && listing ? <strong className="scan-found">{t("{count} files found · {size}", { count: formatNumber(listing.files), size: bytes(listing.bytes) })}</strong> : undefined} />;
 }
@@ -1261,12 +1268,12 @@ function containsBackup(source: Source, destinations: string[]): boolean {
   return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
 }
 
-function SourceRow({ source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize }: { originalsSize?: AppState['originalsSize']; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+function SourceRow({ reviewing = false, reviewProgress, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize }: { reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
   const active = !!job && activePhases.includes(job.phase);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
-  const status = !job ? t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
+  const status = reviewing && !active && !queued ? t("Building review…") : !job ? t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
   const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
   const paused = job?.phase === 'stopped' && !!job.paused;
   const already = job?.phase === 'complete' && !!job.alreadyImported;
@@ -1286,7 +1293,8 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {mirrorReview && <p className="source-notice"><Icon icon={Eye} size={14} />{t("Review what Mirror will move to continue.")}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
-    <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
+    {reviewing && !active && !queued && <OperationProgress progress={reviewProgress} label={t("Review progress")} testId="source-review-progress" className="progress-in-card" />}
+    <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
     {job?.space && !already && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}

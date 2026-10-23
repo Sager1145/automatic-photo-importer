@@ -1,5 +1,6 @@
 /** Time-remaining estimates for every stage of a job and for the whole job. See docs/eta-estimates.md. */
 import type {AppState,Progress,Source} from './shared';
+import {LISTING_KNEE,listingShare} from './listing-estimate';
 
 export interface EtaSample {files:number;bytes:number;totalFiles:number;totalBytes:number;}
 /** perFileBytes: the cost of one file in bytes, added to bytes (data stages); absent counts files only (metadata stages).
@@ -15,7 +16,9 @@ export class EtaSmoother {
   if(this.value===undefined)this.value=raw;
   else{
    const base=Math.max(0,this.value-(now-this.at)/1000);
-   this.value=raw<base/2?raw:base+(1-Math.exp(-Math.max(0,now-this.at)/(raw<base?3000:10000)))*(raw-base);
+   // A sudden jump up is clamped: one odd measurement cannot double the time left.
+   const target=Math.min(raw,Math.max(base*2,base+60));
+   this.value=raw<base/2?raw:base+(1-Math.exp(-Math.max(0,now-this.at)/(raw<base?3000:10000)))*(target-base);
   }
   this.at=now;this.value=Math.max(1,this.value);return this.value;
  }
@@ -90,6 +93,8 @@ const pipelines:Record<EtaContext['kind'],string[]>={
 /** Bytes a listing will find: the job's own estimate (an earlier listing of the scope), else the drive's used space; 0 when unknown. */
 const listingTotal=(progress:EtaInput,context:EtaContext)=>progress.totalBytes>progress.bytes?progress.totalBytes:context.listingTotalBytes&&context.listingTotalBytes>progress.bytes?context.listingTotalBytes:0;
 const SHARE_UNITS=10000;
+/** Seconds: a listing never shows more time left than this. */
+const MAX_LISTING_ETA=24*3600;
 const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`;
 /** Stages whose total is an estimate (a share), not a count: a listing, and a look through folders for leftovers. */
 const estimated=(key:string)=>key==='planning:listing'||key==='planning:scanning';
@@ -116,8 +121,13 @@ export class EtaTracker {
  since(id:string,now:number):string{let start=this.starts.get(id);if(!start){start=new Date(now).toISOString();this.starts.set(id,start);}return start;}
  private rate(key:string){return this.rates.get(key)??defaultRates[key];}
  private sample(key:string,progress:EtaInput,context:EtaContext):EtaSample{
-  // A listing's estimate is a share of the files (a remembered count, or top-level folders) when it has no bytes to measure by.
-  if(estimated(key)){const totalBytes=listingTotal(progress,context);return !totalBytes&&progress.share!==undefined?{files:Math.round(progress.share*SHARE_UNITS),bytes:progress.bytes,totalFiles:SHARE_UNITS,totalBytes:0}:{files:0,bytes:progress.bytes,totalFiles:0,totalBytes};}
+  // A listing is measured by its share (an estimate that grows with what is found), never by a total that moves with it.
+  // Past the knee the estimate is being stretched, so the time left cannot be trusted: none is shown.
+  if(estimated(key)){
+   const share=progress.share??(context.listingTotalBytes&&progress.bytes>0?listingShare(progress.bytes,context.listingTotalBytes):undefined);
+   const reliable=share!==undefined&&!(key==='planning:listing'&&share>LISTING_KNEE);
+   return reliable?{files:Math.round(share*SHARE_UNITS),bytes:progress.bytes,totalFiles:SHARE_UNITS,totalBytes:0}:{files:0,bytes:progress.bytes,totalFiles:0,totalBytes:0};
+  }
   // Verification reports files; its bytes follow the share of files verified.
   const bytes=key==='verifying:'&&progress.total?progress.totalBytes*Math.min(1,progress.completed/progress.total):progress.bytes;
   return {files:progress.completed,bytes,totalFiles:progress.total,totalBytes:progress.totalBytes};
@@ -150,7 +160,9 @@ export class EtaTracker {
    this.jobs.set(id,tracked);
   }
   this.learn(key,progress,context,tracked.known);
-  const sample=this.sample(key,progress,context),step=tracked.estimator.update(sample,now),measured=tracked.estimator.rate;
+  const sample=this.sample(key,progress,context),measured0=tracked.estimator.update(sample,now),measured=tracked.estimator.rate;
+  // A listing that claims more than a day left is guessing.
+  const step=estimated(key)&&measured0!==undefined&&measured0>MAX_LISTING_ETA?undefined:measured0;
   if(measured&&!estimated(key))this.rates.set(key,measured);
   // While a stage warms up, its remaining work at the remembered rate stands in for the job total.
   let current=step;
@@ -207,7 +219,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  if(state.residue?.progress)alone('residue',state.residue.progress);
  if(state.organizationRecoveryProgress)alone('recovery-listing',state.organizationRecoveryProgress);
  // A scan lists the files, then reads their metadata: one clock for both.
- for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0,...(listing.topShare!==undefined?{share:listing.topShare}:{})},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);listing.fileRate=tracker.measure('speed:scan:'+id,'listing',listing.files,now);live.push('speed:scan:'+id);}
+ for(const [id,listing] of Object.entries(state.scanProgress??{})){const source=state.sources.find(item=>item.id===id);listing.eta=source&&stepOnly('scan:'+id,{phase:'planning',step:'listing',completed:listing.files,total:0,bytes:listing.bytes,totalBytes:0,...(listing.topShare!==undefined&&!used(source)?{share:listing.topShare}:{})},{kind:'import',destinations:1,verify,listingTotalBytes:used(source)});listing.startedAt=since('start:scan:'+id);listing.fileRate=tracker.measure('speed:scan:'+id,'listing',listing.files,now);live.push('speed:scan:'+id);}
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
   if(info.status!=='reading'){info.eta=info.fileRate=info.startedAt=undefined;continue;}
   info.eta=stepOnly('camera:'+id,{phase:'planning',step:'checking',completed:info.checked,total:info.total,bytes:0,totalBytes:0},{kind:'import',destinations:1,verify});
