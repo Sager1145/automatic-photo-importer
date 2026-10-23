@@ -7,7 +7,12 @@
       "layers" : [
         {
           "glass" : false,
-          "image-name" : "03-import.svg",
+          "image-name" : "04-tray.svg",
+          "name" : "Tray"
+        },
+        {
+          "glass" : false,
+          "image-name" : "03-arrow.svg",
           "name" : "Import arrow"
         },
         {
