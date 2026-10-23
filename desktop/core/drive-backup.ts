@@ -9,8 +9,8 @@ import { hostKeyConfigured, openV5, sealV5 } from './app-store';
 import { log, logDeletion } from '../logger';
 
 export const DRIVE_BACKUPS='Drive backups';
-export const DRIVE_MARKER='photo-importer-drive.json', LEGACY_DRIVE_MARKER=`.${DRIVE_MARKER}`;
-const marker=DRIVE_MARKER, legacyMarker=LEGACY_DRIVE_MARKER, holding='Removed by mirror';
+export const DRIVE_MARKER='photo-importer-drive.json';
+const marker=DRIVE_MARKER, holding='Removed by mirror';
 export interface Drive {name:string;identity:string;mirror:boolean;}
 /** A removal is bound to the exact inode and timestamps seen during review. */
 export interface ReviewedRemoval extends MirrorRemoval {stat:string;}
@@ -19,30 +19,16 @@ async function owner(folder:string):Promise<string|null|undefined> {
   let stat;
   try { stat=await fs.lstat(folder); } catch(error) { if(code(error)==='ENOENT') return undefined; throw error; }
   if(!stat.isDirectory()) return null;
-  for(const name of [marker,legacyMarker]) {
-    let text;
-    try { text=await fs.readFile(path.join(folder,name),'utf8'); } catch(error) { if(code(error)==='ENOENT'&&name===marker) continue; return null; }
-    try { return markerIdentity(JSON.parse(text)); } catch { return null; }
-  }
-  return null;
+  let text;
+  try { text=await fs.readFile(path.join(folder,marker),'utf8'); } catch(error) { if(code(error)==='ENOENT') return null; return null; }
+  try { return markerIdentity(JSON.parse(text)); } catch { return null; }
 }
-/** A marker's drive identity: a v5 marker must carry this Mac's seal; the earlier version's plain one is read as before (the converter rewrites it). */
+/** A marker's drive identity: the marker must carry this Mac's seal. */
 export function markerIdentity(recorded:unknown):string|null {
-  if(recorded&&typeof recorded==='object'&&(recorded as {v?:unknown}).v!==undefined){
-    try { const opened=openV5('drive',recorded); return typeof opened.identity==='string'?opened.identity:null; } catch { return null; }
-  }
-  const identity=(recorded as {identity?:unknown}|null)?.identity;
-  return typeof identity==='string'?identity:null;
+  try { const opened=openV5('drive',recorded); return typeof opened.identity==='string'?opened.identity:null; } catch { return null; }
 }
 /** The marker this version writes: sealed when the host key is configured (always in the app). */
 export const markerText=(drive:{identity:string;name:string})=>JSON.stringify(hostKeyConfigured()?sealV5('drive',{identity:drive.identity,name:drive.name}):{identity:drive.identity,name:drive.name});
-/** A valid marker left under the older hidden name becomes the visible one the first time it is used. */
-async function adoptLegacyMarker(folder:string):Promise<void> {
-  const visible=path.join(folder,marker),legacy=path.join(folder,legacyMarker);
-  if(await fs.lstat(visible).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) return;
-  if(!(await fs.lstat(legacy).then(stat=>stat.isFile(),()=>false))) return;
-  await fs.rename(legacy,visible);await syncDirectory(folder);
-}
 /** Each drive owns one folder on a destination: the numbered folder it already
  * claimed, else the first name that neither another drive nor the user holds. */
 export async function driveFolder(root:string,drive:Drive):Promise<string> {
@@ -70,9 +56,9 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
     checkAbort(signal);
     let entries;
     try { entries=await fs.readdir(current,{withFileTypes:true}); } catch(error) { if(code(error)==='ENOENT') return; throw error; }
-    found+=entries.filter(entry=>entry.isFile()&&!ignoredName(entry.name)&&!(current===base&&(entry.name===marker||entry.name===legacyMarker))).length;onProgress?.(compared,found,path.relative(base,current)||folder);
+    found+=entries.filter(entry=>entry.isFile()&&!ignoredName(entry.name)&&!(current===base&&entry.name===marker)).length;onProgress?.(compared,found,path.relative(base,current)||folder);
     for(const entry of entries) {
-      if(ignoredName(entry.name) || (current===base && (entry.name===marker||entry.name===legacyMarker)) || entry.isSymbolicLink()) continue;
+      if(ignoredName(entry.name) || (current===base && entry.name===marker) || entry.isSymbolicLink()) continue;
       const file=path.join(current,entry.name);await contained(file,root);
       if(entry.isDirectory()) {await walk(file);continue;}
       if(!entry.isFile()) continue;
@@ -89,7 +75,7 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
 export async function claimDriveFolder(root:string,drive:NonNullable<TransferPlan['drive']>,rootIdentity?:string):Promise<void> {
   const file=path.join(root,DRIVE_BACKUPS,drive.folder,marker);await contained(file,root);
   const recorded=await owner(path.dirname(file));
-  if(recorded===drive.identity) {await adoptLegacyMarker(path.dirname(file));return;}
+  if(recorded===drive.identity) return;
   if(recorded!==undefined) throw new Error(`This backup folder was created without this drive's marker or belongs to another drive; review again: ${path.dirname(file)}`);
   await makeParent(file,root,rootIdentity);
   try {

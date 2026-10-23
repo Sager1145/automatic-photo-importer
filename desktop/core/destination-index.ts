@@ -6,9 +6,8 @@ import { checkAbort, digest, identity, sameStat, statKey, syncDirectory } from '
 import { libraryPartition, openV5, sealV5, storeFolder, storeFor, storesFor } from './app-store';
 
 /** Per-destination cache of verified SHA-256 values, sealed, in the records folder: Libraries/<library>/index.json.
- * The earlier version kept it in the library (its names stay ignored by inventory; the converter moves it). */
+ */
 export const INDEX_PREFIX='photo-importer-index';
-export const LEGACY_INDEX_NAMES=[`${INDEX_PREFIX}.json`,`.${INDEX_PREFIX}.json`];
 /** Each library's folder of cached records in the store. */
 export const LIBRARIES='Libraries',INDEX_FILE='index.json';
 const MAX_INDEX_BYTES=256*1024*1024;

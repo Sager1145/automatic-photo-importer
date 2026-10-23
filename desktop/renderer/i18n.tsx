@@ -173,27 +173,9 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files put back|已放回 {completed}/{total} 个文件|已放回 {completed}/{total} 個檔案|{total} 件中 {completed} 件を元に戻し済み
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
-Converting earlier records|正在转换早期记录|正在轉換早期記錄|以前の記録を変換中
-Converting from the earlier version|正在从早期版本转换|正在從早期版本轉換|以前のバージョンから変換中
 Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
 {completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
 {step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
-Looking for earlier records|正在查找早期记录|正在尋找早期記錄|以前の記録を探しています
-Reading earlier records|正在读取早期记录|正在讀取早期記錄|以前の記録を読み込み中
-Moving kept originals|正在移动保留的原件|正在移動保留的原始檔案|保持中のオリジナルを移動中
-Removing old record files|正在删除旧记录文件|正在刪除舊記錄檔案|古い記録ファイルを削除中
-Converting import records|正在转换导入记录|正在轉換匯入記錄|読み込み記録を変換中
-Converting cached records|正在转换缓存记录|正在轉換快取記錄|キャッシュ記録を変換中
-Tidying old record folders|正在整理旧记录文件夹|正在整理舊記錄資料夾|古い記録フォルダーを整理中
-Records from the earlier version|早期版本的记录|早期版本的記錄|以前のバージョンの記録
-Records conversion progress|记录转换进度|記錄轉換進度|記録変換の進行状況
-Pause conversion|暂停转换|暫停轉換|変換を一時停止
-Resume conversion|继续转换|繼續轉換|変換を再開
-Conversion paused|转换已暂停|轉換已暫停|変換を一時停止中
-Earlier records are converted once the drive is idle|驱动器空闲后将转换早期记录|磁碟閒置後將轉換早期記錄|ドライブが空いたら以前の記録を変換します
-Conversion is paused until you resume it or restart the app.|转换已暂停，直到你继续转换或重新启动应用。|轉換已暫停，直到你繼續轉換或重新啟動 App。|再開するかアプリを再起動するまで、変換は一時停止します。
-{count} could not be converted and were left as they are:|{count} 项无法转换，已保持原样：|{count} 項無法轉換，已保持原樣：|{count} 件は変換できなかったため、そのままにしました：
-Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.|本应用早期版本在驱动器上写入的记录，会在驱动器空闲时转换到该驱动器的 Photo Importer Data 文件夹中。整理资料库需等待其记录转换完成；导入照常进行。|本 App 早期版本在磁碟上寫入的記錄，會在磁碟閒置時轉換到該磁碟的 Photo Importer Data 資料夾中。整理資料庫需等待其記錄轉換完成；匯入照常進行。|このアプリの以前のバージョンがドライブに書き込んだ記録は、ドライブがほかに使われていないときに、そのドライブの Photo Importer Data フォルダーへ変換されます。ライブラリの整理は記録の変換が終わるまで待ちます。読み込みはそのまま続きます。
 {count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。
 Backup folder check progress|备份文件夹检查进度|備份資料夾檢查進度|バックアップフォルダー確認の進行状況
 Checking {drive} folder layout|正在检查 {drive} 的文件夹结构|正在檢查 {drive} 的資料夾結構|{drive} のフォルダー構成を確認中
@@ -685,9 +667,10 @@ Checking the earlier organization: {completed} of {total} records|正在检查�
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
 Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
 Reading later organizations: {completed} of {total}|正在读取较新的整理记录：{completed}/{total}|正在讀取較新的整理記錄：{completed}/{total}|新しい整理の記録を読み込み中：{total} 件中 {completed} 件
+Old records from an earlier version are on {drive}. Use records-migrator-v5 to convert them; they were left untouched.|{drive} 上有早期版本留下的旧记录。请使用 records-migrator-v5 转换它们；它们未被改动。|{drive} 上有早期版本留下的舊記錄。請使用 records-migrator-v5 轉換它們；它們未被更動。|{drive} に以前のバージョンの古い記録があります。records-migrator-v5 を使って変換してください。記録には手を加えていません。
+Acknowledge old records|确认旧记录|確認舊記錄|古い記録を確認済みにする
 Reading earlier organization records: {completed} of {total}|正在读取较早的整理记录：{completed}/{total}|正在讀取較早的整理記錄：{completed}/{total}|以前の整理の記録を読み込み中：{total} 件中 {completed} 件
 Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}|正在读取较早的整理：第 {journal}/{journals} 份记录，已读 {completed}/{total} 条|正在讀取較早的整理：第 {journal}/{journals} 份記錄，已讀 {completed}/{total} 筆|以前の整理を読み込み中：記録 {journal}/{journals} 件目、{total} 件中 {completed} 件
-Converting the organization record: {completed} of {total}|正在转换整理记录：{completed}/{total}|正在轉換整理記錄：{completed}/{total}|整理の記録を変換中：{total} 件中 {completed} 件
 Removing old record files: {completed} of {total}|正在删除旧的记录文件：{completed}/{total}|正在刪除舊的記錄檔案：{completed}/{total}|古い記録ファイルを削除中：{total} 件中 {completed} 件
 Measuring: {completed} files|正在测量：{completed} 个文件|正在測量：{completed} 個檔案|計測中：{completed} ファイル
 Preparing destinations: {completed} of {total}|正在准备目标位置：{completed}/{total}|正在準備目的地：{completed}/{total}|保存先を準備中：{total} 件中 {completed} 件

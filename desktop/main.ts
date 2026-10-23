@@ -35,10 +35,9 @@ import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
-import {orphanedJournals,recordsWeight} from './core/recovery';
-import {convertUserCaches} from './platform/user-caches';
+import {orphanedJournals} from './core/recovery';
 import {registerDestinations} from './core/app-store';
-import {migrateDrive,needsConversion} from './core/migrate/index';
+import {acknowledgeOldRecords,findOldRecords} from './core/old-records';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
@@ -60,7 +59,6 @@ import {sourcePolicy,freshOrganizeOptions} from './run-policy';
 import {measureOriginals,deleteOriginals,recordVerified,verifiedOriginals,type ImportVerified,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
-import {migrationGate} from './migration-gate';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
 import {PhaseLog,TopologyLog,ActivityLog,logProgress} from './job-log';
 import {exportLogs} from './log-export';
@@ -226,7 +224,7 @@ async function refresh(){
   // Automatic import only takes drives the user selected (now or on a previous connection).
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
   driveSampler.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
-  emit();pump();scheduleMisplacedCheck();scheduleMigration();scheduleResidueCheck();
+  emit();pump();scheduleMisplacedCheck();scheduleOldRecordsCheck();scheduleResidueCheck();
   const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
   if(scope!==recoveryScope&&!recoveryRefresh.running){recoveryScope=scope;recoveryRefresh.request();}
   else recoveryRefresh.resume();
@@ -241,8 +239,6 @@ async function scanSource(source:Source){
 
  finally{scanControls.delete(source.id);delete state.scanProgress?.[source.id];state.scanningSources=[...scanControls.keys()];emit();void releaseIfIdle();}
 }
-/** Roughly how much there is to read in a folder's journals. */
-const journalWeight=(root:string)=>recordsWeight(root).catch(()=>0);
 let organizationListing:Promise<void>|undefined,organizationListingAgain=false;
 /** One listing at a time. A request while one runs gets one more listing right after it, so a
  * change made meanwhile (an undo or resume that just finished) is always shown. */
@@ -261,7 +257,6 @@ function refreshOrganizations():Promise<void>{
 /** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
 function yieldListing(){
  // The converter gives way to any job at once; each step finishes from what is on disk, so it picks up later.
- if(jobsActive())migrationAbort('a job needs the drive');
  if(listingControl){if(!listingControl.signal.aborted&&drivesInUse()){log('detailed','listing','yield',{reason:'a job needs the drive; what was read is kept'});listingControl.abort();}}
  else if(!drivesInUse()){if(state.organizationRecoveryPaused)log('detailed','listing','resume',{reason:'no job is using the drive'});recoveryRefresh.resume();}
 }
@@ -271,22 +266,11 @@ async function listOrganizations(signal:AbortSignal){
  const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
  // Every backup folder on each destination, whatever the current layout: a journal may be in either.
  for(let index=0;index<destinations.length;index++){const destination=destinations[index];for(const folder of new Set([...backupFolders(state.preferences),state.preferences.basePath,state.preferences.videoBasePath]))add(path.resolve(destination,folder),destination,state.preferences.destinationIds?.[index]??'');}
- // A large journal from an earlier version can take minutes to read on a USB drive. The previous list
- // stays until each folder is read again, and is replaced folder by folder.
+ // The previous list stays until each folder is read again, and is replaced folder by folder.
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
  const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
  const listed=new Set<string>();state.organizationRecoveryLoading=true;state.organizationRecoveryPaused=false;emit();
- // Small folders first, so they show at once; a folder holding a large journal from an earlier version
- // (one file per event, slow to read on a USB drive) comes last.
- // Only folders on a connected, unchanged destination are weighed, one at a time.
- const weights=new Map<string,number>();
- for(const location of locations){
-  signal.throwIfAborted();
-  const status=location.folder?undefined:destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
-  weights.set(location.root,status?.available&&status.volumeId===location.volumeId?await journalWeight(location.root):0);
- }
- locations.sort((a,b)=>weights.get(a.root)!-weights.get(b.root)!);
  let looked=0;
  try{
   for(let position=0;position<locations.length;position++){
@@ -364,13 +348,12 @@ function recordsDetail(progress:{step?:string;completed:number;total:number}):Me
   case 'history':return message('job.readingHistory',counts);
   case 'later':return message('job.readingLater',counts);
   case 'earlier':return message('job.readingEarlier',counts);
-  case 'converting':return message('job.converting',counts);
   case 'cleaning':return message('job.cleaning',counts);
   case 'measuring':return message('job.measuring',counts);
  }
 }
 /** Steps that read or check records before anything changes: the job is verifying while they run. */
-const recordSteps=['history','later','earlier','converting','cleaning','measuring'];
+const recordSteps=['history','later','earlier','cleaning','measuring'];
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */
 function planningProgress(count:number,file:string,detail?:Parameters<PlanProgress>[2]):Progress{return {phase:'planning',step:detail?.step??'checking',completed:count,total:detail?.total??0,bytes:detail?.bytes??0,totalBytes:detail?.totalBytes??0,...(detail?.share!==undefined?{share:detail.share}:{}),speed:0,file};}
 /** Files staged from a USB camera so far (the camera reports counts, not bytes or names). */
@@ -395,7 +378,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size||dupl
  // Folders on one physical device share its stream limit; jobs on other devices still run in parallel.
  const job=nextRunnable(state.jobs,sourceOrder,item=>deviceHasRoom(item.source.drive,running)&&!(item.awaitingConfirmation&&(!!state.review||state.busyReview||active.size>0||!!duplicateControl)));if(!job)break;delete job.awaitingConfirmation;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
- organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();migrationAbort('a job started');const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
+ organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
  void settle(withJob(job.id,()=>run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(job.useFileDate?{useFileDate:true}:{}),...(job.unknownConfirmed?{confirmed:true}:{}),...skip}))).finally(()=>{void duplicatesStale(touchedLibraries.get(job.id)??[]);touchedLibraries.delete(job.id);if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
  if(organization)break;
@@ -404,7 +387,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size||dupl
 // hashing threads start again on demand. Closed only while no job, scan, review, organization or check
 // could use them; the idle test and the closing calls run in the same turn, so nothing starts in between.
 let inspecting=0,releasing:Promise<void>|undefined;
-const idle=()=>!hardwareTest&&!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!migrationTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting&&!duplicateControl;
+const idle=()=>!hardwareTest&&!active.size&&!scanControls.size&&!misplacedControl&&!misplacedTask&&!residueControl&&!residueTask&&!state.busyReview&&!reviewControl&&!resumingOrganizations.size&&!recoveryRefresh&&!inspecting&&!duplicateControl;
 function releaseIfIdle():Promise<void>{
  if(releasing||!idle())return releasing??Promise.resolve();
  if(checksPending){scheduleAutomaticChecks();return Promise.resolve();}
@@ -419,7 +402,7 @@ let checkTimer:NodeJS.Timeout|undefined,checksPending=false;
 function cancelAutomaticChecks(){if(checkTimer){clearTimeout(checkTimer);checksPending=true;}checkTimer=undefined;}
 function scheduleAutomaticChecks(){
  if(qa||quitting)return;cancelAutomaticChecks();checksPending=false;
- checkTimer=setTimeout(()=>{checkTimer=undefined;scheduleMisplacedCheck(true);scheduleMigration();scheduleResidueCheck(true);},AUTOMATIC_CHECK_DELAY);checkTimer.unref();
+ checkTimer=setTimeout(()=>{checkTimer=undefined;scheduleMisplacedCheck(true);scheduleOldRecordsCheck();scheduleResidueCheck(true);},AUTOMATIC_CHECK_DELAY);checkTimer.unref();
 }
 // A check reading a drive that was unplugged stops; mounts in the last refresh are remembered.
 let knownMounts=new Set<string>();
@@ -463,7 +446,7 @@ function rememberPlaced(plans:TransferPlan[],prefs:Preferences,useFileDate=false
  placementWork=work;
 }
 function scheduleMisplacedCheck(force=false){
- if(qa||(!force&&checkTimer)||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask||migrationTask)return;
+ if(qa||(!force&&checkTimer)||state.preferences.autoOrganizeBackup==='off'||active.size||state.review||state.busyReview||misplacedControl||residueTask)return;
  const prefs=state.preferences,scope=JSON.stringify([prefs.destinations,prefs.destinationIds,prefs.basePath,prefs.template,prefs.mediaLayout,prefs.videoBasePath,prefs.videoTemplate,prefs.editedFolder,prefs.noMetadataHandling,prefs.noMetadataFolder,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===misplacedScope)return;
  misplacedScope=scope;const control=new AbortController();misplacedControl=control;misplacedPaths=prefs.destinations.slice(0,2);const organize=organizeAfterImport;organizeAfterImport=false;
@@ -500,7 +483,7 @@ async function residueRoots():Promise<string[]>{
  return [...new Set(roots)].filter((root,_index,all)=>!all.some(other=>other!==root&&within(root,other)));
 }
 // The automatic check also waits for the backup folder check, which rewrites index files; Clean up does not.
-const residueIdle=(manual=false)=>!active.size&&!resumingOrganizations.size&&!migrationTask&&(manual||!misplacedControl)&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
+const residueIdle=(manual=false)=>!active.size&&!resumingOrganizations.size&&(manual||!misplacedControl)&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
 function scheduleResidueCheck(force=false){
  if(qa||(!force&&checkTimer))return;
  // Something running now: look again once it is idle (any later refresh or finished job).
@@ -517,7 +500,7 @@ function checkResidue(all:boolean):Promise<void>{
   const roots=await residueRoots();residuePaths=roots;
   // Looking is a share of the folders walked; removing counts the leftovers found. Both show in the settings row.
   const show=(progress:Progress)=>{if(state.residue)state.residue.progress=progress;progressEmit();};
-  const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,legacy:all,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
+  const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
   // Cleaned when something can go: files beyond the copies kept, or receipts to close.
   const work=found.files>(all?0:found.resumable.files)+found.recoverable.files||found.items.some(item=>item.kind==='receipt'&&!!item.rid);
   const {removed,left}=work?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
@@ -530,69 +513,56 @@ function checkResidue(all:boolean):Promise<void>{
  residueTask=task;return task;
 }
 /** Anything about to write waits for a running cleanup to stop. */
-async function stopResidueCheck(){residueControl?.abort();await residueTask;migrationAbort('a check needs the drive');await migrationTask;}
-// Records v5: what an earlier version wrote on each connected destination is converted into its "Photo Importer
-// Data" folder while nothing else uses the drive. A job starting stops it; every step finishes from what is on
-// disk, so the next idle moment picks it up where it stopped.
-let migrationControl:AbortController|undefined,migrationTask:Promise<void>|undefined,migrationTimer:NodeJS.Timeout|undefined;
-/** Not on the first refresh: 30 s after launch, and 30 s after the app or the drive was last busy; never while paused. */
-const migrationStart=migrationGate();
-/** A drive busy with other I/O (another app copying) counts as in use. */
-const MIGRATION_BUSY_UTILIZATION=0.25;
-/** Stop the converter (a job needs the drive, the user paused it, the app quits); it goes on from what is on disk later. */
-function migrationAbort(reason:string){migrationStart.busy();if(migrationControl&&!migrationControl.signal.aborted){log('normal','migrate','stop',{reason});migrationControl.abort();}}
-/** Drives (path and volume) converted, or found with nothing to convert, while connected: looked at again only once
- * reconnected or after a restart, so what the converter must leave alone is not looked at every few seconds. */
-const migrationChecked=new Set<string>();
-const migrationIdle=()=>!active.size&&!scanControls.size&&!resumingOrganizations.size&&!misplacedControl&&!residueControl&&!residueTask&&!duplicateControl&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
-/** Per connected, unchanged destination: the folders the converter looks at (the destination, its backup folders,
- * folders organized there) and those whose receipts it walks (all but the destination itself, unless imports go there). */
-async function migrationDrives():Promise<{drive:string;key:string;roots:string[];walk:string[]}[]>{
- const prefs=state.preferences,drives=new Map<string,{key:string;roots:string[];walk:string[]}>();
- const add=(drive:string,root:string,walk:boolean,volumeId:string)=>{const entry=drives.get(drive)??{key:`${drive}\0${volumeId}`,roots:[],walk:[]};if(!entry.roots.includes(root))entry.roots.push(root);if(walk&&!entry.walk.includes(root))entry.walk.push(root);drives.set(drive,entry);};
+async function stopResidueCheck(){residueControl?.abort();await residueTask;}
+// Records v5: what an earlier version wrote on a connected destination is never read beyond telling whether this
+// Mac wrote it, never changed and never deleted. A notice names the drive; Acknowledge stops it for those items.
+/** Drives (path and volume) looked at while connected: looked at again once reconnected, after a restart or an acknowledgement. */
+const oldRecordsChecked=new Set<string>();
+let oldRecordsTask:Promise<void>|undefined;
+/** Per connected, unchanged destination: the folders to look at (the destination, its backup folders, folders organized there). */
+async function oldRecordsDrives():Promise<{drive:string;key:string;roots:string[]}[]>{
+ const prefs=state.preferences,drives=new Map<string,{key:string;roots:string[]}>();
+ const add=(drive:string,root:string,volumeId:string)=>{const entry=drives.get(drive)??{key:`${drive}\0${volumeId}`,roots:[]};if(!entry.roots.includes(root))entry.roots.push(root);drives.set(drive,entry);};
  prefs.destinations.forEach((destination,index)=>{
   const status=state.destinationStatus?.find(item=>item.path===destination);if(!status?.available||status.volumeId!==prefs.destinationIds?.[index])return;
-  add(destination,destination,false,status.volumeId??"");
-  for(const folder of backupFolders(prefs)){const root=path.resolve(destination,folder);if(within(root,destination))add(destination,root,true,status.volumeId??"");}
+  add(destination,destination,status.volumeId??"");
+  for(const folder of backupFolders(prefs)){const root=path.resolve(destination,folder);if(within(root,destination))add(destination,root,status.volumeId??"");}
  });
  for(const location of organizationLocations){
   const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):state.destinationStatus?.find(item=>item.path===location.destination);
-  if(status?.available&&status.volumeId===location.volumeId)add(location.destination,location.root,true,location.volumeId);
+  if(status?.available&&status.volumeId===location.volumeId)add(location.destination,location.root,status.volumeId??location.volumeId);
  }
  return [...drives].map(([drive,entry])=>({drive,...entry}));
 }
-function scheduleMigration(){
- if(qa||hardwareTest||quitting||migrationTask)return;
- const busyDrive=state.preferences.destinations.some(drive=>(state.driveActivity?.[drive]?.utilization??0)>=MIGRATION_BUSY_UTILIZATION);
- if(!migrationIdle()||busyDrive){migrationStart.busy();return;}
- const wait=migrationStart.wait();
- if(wait>0){if(wait!==Infinity&&!migrationTimer){migrationTimer=setTimeout(()=>{migrationTimer=undefined;scheduleMigration();},wait);migrationTimer.unref();}return;}
- const control=new AbortController();migrationControl=control;let changed=false,ran=false;
+/** Cheap: two folder checks per root, then one small file per old journal. Nothing is organized, converted or deleted. */
+function scheduleOldRecordsCheck(force=false){
+ if(qa||hardwareTest||quitting||oldRecordsTask)return;
  const task:Promise<void>=(async()=>{
-  const drives=await migrationDrives(),connected=new Set(drives.map(item=>item.key));
-  for(const key of [...migrationChecked])if(!connected.has(key))migrationChecked.delete(key);
-  if(state.migrationWaiting)state.migrationWaiting=state.migrationWaiting.filter(drive=>drives.some(item=>item.drive===drive));
-  for(const {drive,key,roots,walk} of drives){
-   if(control.signal.aborted)return;
-   if(migrationChecked.has(key))continue;
-   if(!(await Promise.all(roots.map(root=>needsConversion(root,walk.includes(root)).catch(()=>false)))).some(Boolean)){migrationChecked.add(key);continue;}
-   if(!(state.migrationWaiting??=[]).includes(drive))state.migrationWaiting.push(drive);
-   ran=true;state.migration={drive,step:'looking',completed:0,total:0,file:''};emit();
-   log('normal','migrate','start',{drive,folders:roots.length});
-   const result=await migrateDrive(roots,{signal:control.signal,walk,ignoreFolders:[UNKNOWN_FILES_FOLDER,...(state.preferences.noMetadataFolder?[state.preferences.noMetadataFolder]:[])],onProgress:progress=>{state.migration={drive,...progress};progressEmit();}});
-   log('normal','migrate','finish',{drive,converted:result.converted,kept:result.problems.length});
-   changed||=result.converted>0;migrationChecked.add(key);state.migrationWaiting=state.migrationWaiting.filter(item=>item!==drive);
-   if(result.problems.length)(state.migrationProblems??={})[drive]=result.problems;else if(state.migrationProblems)delete state.migrationProblems[drive];
+  const drives=await oldRecordsDrives(),connected=new Set(drives.map(item=>item.key));
+  for(const key of [...oldRecordsChecked])if(!connected.has(key))oldRecordsChecked.delete(key);
+  if(state.oldRecords)state.oldRecords=state.oldRecords.filter(drive=>drives.some(item=>item.drive===drive));
+  let changed=false;
+  for(const {drive,key,roots} of drives){
+   if(!force&&oldRecordsChecked.has(key))continue;
+   oldRecordsChecked.add(key);
+   const found=(await Promise.all(roots.map(root=>findOldRecords(root).catch(()=>[])))).flat();
+   const known=!!state.oldRecords?.includes(drive);
+   if(found.length&&!known){(state.oldRecords??=[]).push(drive);changed=true;log('normal','records','old-records-found',{drive,items:found.length});}
+   else if(!found.length&&known){state.oldRecords=state.oldRecords!.filter(item=>item!==drive);changed=true;}
   }
- })().catch(error=>{if(!control.signal.aborted){log('normal','migrate','abort',{error:toMessage(error)});state.error=message('error.migration',{error:toMessage(error)});}}).finally(()=>{
-  if(migrationControl===control)migrationControl=undefined;if(migrationTask===task)migrationTask=undefined;
-  if(!ran)return;
-  delete state.migration;emit();
-  if(changed)void refreshOrganizations();
-  // Picked up again at the next idle moment if a job stopped it; the cleanup runs once it is done.
-  if(!control.signal.aborted)scheduleResidueCheck(true);void releaseIfIdle();
- });
- migrationTask=task;
+  if(state.oldRecords&&!state.oldRecords.length)delete state.oldRecords;
+  if(changed)emit();
+ })().catch(error=>{log('normal','records','old-records-check-failed',{error:toMessage(error)});}).finally(()=>{if(oldRecordsTask===task)oldRecordsTask=undefined;});
+ oldRecordsTask=task;
+}
+/** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the drive's reviewed list. */
+async function acknowledgeDrive(drive:string){
+ const found=(await oldRecordsDrives()).find(item=>item.drive===drive);if(!found)return;
+ let count=0;
+ for(const root of found.roots)count+=await acknowledgeOldRecords(root);
+ log('normal','records','old-records-acknowledged',{drive,items:count});
+ if(oldRecordsTask)await oldRecordsTask;
+ scheduleOldRecordsCheck(true);
 }
 // Jobs still settling; quitting waits for them so a stopped job removes its staging files.
 const settling=new Set<Promise<unknown>>();
@@ -868,7 +838,7 @@ async function scanDuplicatesAction(){
  const root=dup.root,scope=root?duplicateScope(root):undefined;
  if(!root||!scope)throw new MessageError('error.duplicatesScope');
  if(busy()||state.review||state.busyReview||duplicateControl)throw new MessageError('error.busy');
- const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();migrationAbort('Remove duplicates started');
+ const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();
  dup.status='scanning';dup.result=undefined;dup.progress=undefined;emit();
  try{
   await stopResidueCheck();
@@ -1075,8 +1045,7 @@ async function action(input:Action):Promise<void>{
   case 'clearErrors':clearErrors(errorLog,state,undefined,input.severity==='error'||input.severity==='warning'?input.severity:undefined);break;
   case 'refresh':await refresh();break;
   case 'logOpenFolder':{const logger=activeLogger();if(!logger)break;const target=await logger.latest();if(target)shell.showItemInFolder(target);else await shell.openPath(logger.directory);break;}
-  case 'pauseMigration':{migrationStart.pause();state.migrationPaused=true;log('normal','migrate','paused',{running:!!migrationTask});migrationAbort('paused by the user');emit();break;}
-  case 'resumeMigration':{migrationStart.resume();delete state.migrationPaused;log('normal','migrate','resumed',{});emit();scheduleMigration();break;}
+  case 'acknowledgeOldRecords':{await acknowledgeDrive(input.drive);break;}
   case 'logCopyPath':{const latest=await activeLogger()?.latest();if(latest)clipboard.writeText(latest);break;}
   case 'logExport':{
    const logger=activeLogger();if(!logger)break;await logger.flush();
@@ -1194,8 +1163,6 @@ async function boot(){
  try{await initializeRecoveryKey();}catch(error){state.error=toMessage(error);}
  await load();
  {const logger=configureLogger({dir:path.join(app.getPath('userData'),'logs'),level:state.preferences.logLevel??'normal'});log('normal','app','start',{version:app.getVersion(),electron:process.versions.electron,node:process.versions.node,chrome:process.versions.chrome,platform:process.platform,arch:process.arch,osRelease:os.release(),cpus:os.cpus().length,totalMemMB:Math.round(os.totalmem()/MB),level:logger.getLevel(),qa,pid:process.pid});}
- // This Mac's caches written by an earlier version take this version's shape (records v5); best effort.
- await convertUserCaches(app.getPath('userData')).catch(()=>0);
  {const priors=new PriorStore(path.join(app.getPath('userData'),'eta-priors.json'),()=>randomBytes(16).toString('base64url'));await priors.load();etaTracker.attach(priors);}
  if(hardwareReportRoot)state.preferences=normalizePreferences({destinations:[hardwareDestination.path],destinationIds:[hardwareDestination.volumeId]});
  nativeTheme.themeSource=state.preferences.appearance;
@@ -1229,7 +1196,7 @@ app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch
 app.on('before-quit',event=>{
  if(!quitting&&!closing)log('normal','app','quit',{runningJobs:active.size});
  if(timer)clearInterval(timer);cancelAutomaticChecks();
- for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();migrationAbort('quitting');reviewControl?.abort();duplicateControl?.abort();
+ for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();reviewControl?.abort();duplicateControl?.abort();
  // A quit the closing step started, or a system shutdown, goes through; another quit meanwhile waits for it.
  if(!quitting&&closing){event.preventDefault();return;}
  if(!quitting){
@@ -1237,7 +1204,7 @@ app.on('before-quit',event=>{
   // everything that holds a drive is closed (all within 10 s).
   event.preventDefault();
   const finish=async()=>{
-   await Promise.allSettled([...settling,scansSettled(),misplacedTask,residueTask,migrationTask,...(reviewed||reviewControl?[discardReview()]:[])]);
+   await Promise.allSettled([...settling,scansSettled(),misplacedTask,residueTask,oldRecordsTask,...(reviewed||reviewControl?[discardReview()]:[])]);
    await Promise.allSettled([closeMetadata(),closeCameraBridge(),terminateHasher()]);
    await activeLogger()?.close();
   };

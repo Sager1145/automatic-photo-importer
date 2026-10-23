@@ -23,8 +23,6 @@ export const APP_FOLDERS=[DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_R
 export function overlappingLibraries(folder:string,libraries:string[]):string[] {
   return [...new Set(libraries)].filter(library=>within(folder,library)||within(library,folder));
 }
-/** The earlier version kept it in the library under this name (still ignored by inventory; the converter moves it). */
-export const LEGACY_DUPLICATES_NAME=`${DUPLICATES_PREFIX}.json`;
 export const DUPLICATES_FILE='duplicates.json';
 const MAX_BYTES=256*1024*1024;
 interface FileRecord {size:string;mtimeNs:string;ino:string;kind:MediaKind;birth:number;ctime:number;edited:boolean;exif?:DuplicateExif;sha256?:string;/** The file's metadata was read (a record without it only knows size and hash). */read?:boolean;}

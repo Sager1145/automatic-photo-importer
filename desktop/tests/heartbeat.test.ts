@@ -7,8 +7,6 @@ import * as core from '../core/index';
 import {findResidue} from '../core/residue';
 import {heartbeat,slowFileSystem} from './fixtures/slow-fs';
 import {appendJournalLine,journalFileFor,journalFolderFor,sealedEvent} from './fixtures/records';
-import {toLegacy} from './fixtures/legacy-records';
-import {migrateDrive} from '../core/migrate/index';
 import type {Metadata} from '../shared';
 
 // "No phase may show a frozen counter": with every file-system call taking 20 ms (a slow USB drive), each of these
@@ -53,15 +51,6 @@ test('planning reports at least every 3 s',async t=>{
  for(let index=0;index<30;index++)await fs.writeFile(path.join(card,`IMG_${String(index).padStart(4,'0')}.JPG`),'bytes of '+index);
  const pulse=await measured(beat=>core.plan(drive,[photos],{...base,layout:'flat',reorganize:true,sourceFolders:['2025']},metadata,undefined,beat));
  within('plan',pulse);
-});
-
-test('converting an earlier version\'s journal (the converter) reports at least every 3 s',async t=>{
- const f=await organized(t,6);
- const legacy=await toLegacy(f.photos,f.id,{format:'files'});
- for(let index=0;index<150;index++)await fs.writeFile(path.join(legacy,`event-0000${String(index).padStart(4,'0')}-0000-4000-8000-000000000000.json`),'');
- const pulse=await measured(beat=>migrateDrive([f.photos],{onProgress:beat}));
- assert.equal(await fs.lstat(legacy).then(()=>true,()=>false),false,'converted');
- within('converter',pulse);
 });
 
 test('placedByEarlierJournals reports at least every 3 s',async t=>{

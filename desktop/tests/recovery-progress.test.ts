@@ -8,8 +8,6 @@ import type {Metadata,Progress} from '../shared';
 import {translationCatalogs} from '../renderer/i18n';
 import {backendMessages} from '../messages';
 import {journalFolderFor} from './fixtures/records';
-import {toLegacy} from './fixtures/legacy-records';
-import {journalConversion} from '../core/recovery';
 
 // "Everything must update": each phase of reading, checking, converting and deleting organization records counts its own work.
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -97,23 +95,9 @@ test('looking for the later organization that took files over counts the journal
 test('every new progress label and job message exists in all four languages',()=>{
  const labels=['Reading later organizations: {completed} of {total}','Reading earlier organization records: {completed} of {total}','Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}','Converting the organization record: {completed} of {total}','Removing old record files: {completed} of {total}','Measuring: {completed} files','Preparing destinations: {completed} of {total}','Comparing the backup with the drive: {completed} of {total}','Loading the destination index: {size} of {totalSize}','Reading organization history is paused while a job uses the drive. It continues afterwards.'];
  for(const label of labels)for(const catalog of Object.values(translationCatalogs))assert.ok(catalog[label],`${label} in ${Object.keys(catalog).length} entries`);
- for(const key of ['job.readingLater','job.readingEarlier','job.converting','job.cleaning','job.measuring'] as const){
+ for(const key of ['job.readingLater','job.readingEarlier','job.cleaning','job.measuring'] as const){
   const entry=backendMessages[key];
   for(const language of ['en','zh-Hans','zh-Hant','ja'] as const)assert.ok(entry[language],`${key} ${language}`);
  }
 });
 
-test('the converter reading 2,500 per-event files of an earlier version reports at least every 100 files',async t=>{
- const secret='fixture-only-host-recovery-secret-32bytes';
- const {photos,id}=await finished(t);
- const folder=await toLegacy(photos,id,{format:'files'});
- const {createHmac,randomUUID}=await import('node:crypto');
- const checked=(index:number)=>{const record={id,root:photos,event:'checked',index:0,at:new Date(Date.UTC(2026,9,21,0,0,0,index)).toISOString()};return JSON.stringify({...record,seal:createHmac('sha256',secret).update(JSON.stringify(record)).digest('hex')});};
- const present=(await fs.readdir(folder)).filter(name=>name.startsWith('event-')).length;
- await Promise.all(Array.from({length:2500-present},(_,index)=>fs.writeFile(path.join(folder,`event-${randomUUID()}.json`),checked(index))));
- const seen:number[]=[];
- await journalConversion.read(photos,id,read=>seen.push(read));
- let last=0,widest=0;for(const read of seen){widest=Math.max(widest,read-last);last=Math.max(last,read);}
- assert.ok(widest<=100,`widest step ${widest}`);assert.ok(Math.max(...seen)>=2500);
- assert.ok(seen.filter(read=>read>0&&read<2500).length>=20,'counted file by file, not once at the end');
-});
