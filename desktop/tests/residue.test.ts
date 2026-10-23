@@ -147,7 +147,7 @@ test('camera and preview folders are found and removed through the system tempor
   const found=await findResidue([],{temporary:os.tmpdir(),inUse:()=>[reading]});
   const own=found.items.filter(item=>item.path.endsWith(path.sep+path.basename(left)));
   assert.equal(own.length,1);assert.ok(!found.items.some(item=>item.path.endsWith(path.sep+path.basename(reading))),'a folder in use is not listed');
-  const {removed}=await cleanResidue({items:own,files:1,bytes:own[0]!.bytes,resumable:{files:0,bytes:0}});
+  const {removed}=await cleanResidue({items:own,files:1,bytes:own[0]!.bytes,resumable:{files:0,bytes:0},recoverable:{files:0,bytes:0}});
   assert.equal(removed.files,1);await assert.rejects(fs.lstat(left),{code:'ENOENT'});await fs.lstat(reading);
 });
 
@@ -281,4 +281,30 @@ test('a staged copy whose source device had to be rewritten is never classified 
   assert.equal(result.removed.files,0);assert.ok(await exists(f.copy));assert.ok(await exists(f.receipt));
   const manual=await cleanResidue(await findResidue([f.root]));
   assert.equal(manual.removed.files,2);assert.ok(!await exists(f.copy));assert.ok(!await exists(f.receipt));
+});
+
+/** A complete staged copy (as large as its source) whose card file then changed or went. */
+async function completeStale(t:test.TestContext,change:'size'|'mtime'|'missing') {
+  const f=await staged(t,reseal({fileIdentity:'1:2:3'}));
+  await fs.writeFile(f.copy,Buffer.alloc(4000,1));
+  if(change==='size') await fs.appendFile(f.source,'more');
+  else if(change==='mtime') await fs.utimes(f.source,new Date(1e12),new Date(1e12));
+  else await fs.unlink(f.source);
+  return f;
+}
+
+test('a complete staged copy whose card file changed or went is kept by the automatic check and by Clean up',async t=>{
+  for(const change of ['size','mtime','missing'] as const) {
+    const f=await completeStale(t,change);
+    const found=await findResidue([f.root]);
+    assert.equal(found.items.find(item=>item.path===f.copy)?.kind,'recoverable',change);
+    assert.equal(found.items.find(item=>item.path===f.receipt)?.kind,'recoverable',change);
+    assert.deepEqual(found.recoverable,{files:1,bytes:4000,folder:path.dirname(f.copy)},change);
+    const automaticResult=await cleanResidue(found,{keepResumable:true});
+    assert.equal(automaticResult.removed.files,0,change);assert.ok(await exists(f.copy),change);assert.ok(await exists(f.receipt),change);
+    assert.equal(automaticResult.left.recoverable.files,1,change);
+    const manual=await cleanResidue(await findResidue([f.root]));
+    assert.equal(manual.removed.files,0,change);assert.ok(await exists(f.copy),`${change}: Clean up keeps it`);assert.ok(await exists(f.receipt),change);
+    assert.equal(manual.left.recoverable.files,1,change);
+  }
 });

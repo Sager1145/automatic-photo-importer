@@ -448,9 +448,9 @@ function checkResidue(all:boolean):Promise<void>{
   // Looking is a share of the folders walked; removing counts the leftovers found. Both show in the settings row.
   const show=(progress:Progress)=>{if(state.residue)state.residue.progress=progress;progressEmit();};
   const found=await findResidue(roots,{temporary:os.tmpdir(),inUse:previewFoldersInUse,signal:control.signal,onProgress:scan=>show({phase:'planning',step:'scanning',completed:scan.looked,total:0,bytes:0,totalBytes:0,...(scan.total>0?{share:Math.min(.99,scan.done/scan.total)}:{}),speed:0,file:scan.file})});
-  const {removed,left}=found.files>(all?0:found.resumable.files)?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
+  const {removed,left}=found.files>(all?0:found.resumable.files)+found.items.filter(item=>item.kind==='recoverable').length?await cleanResidue(found,{keepResumable:!all,inUse:previewFoldersInUse,signal:control.signal,onProgress:(done,total,bytes,totalBytes,file)=>show({phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file})}):{removed:{files:0,bytes:0},left:found};
   const now=new Date().toISOString(),cleaned=removed.files?{...removed,at:now}:state.residue?.cleaned;
-  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,checkedAt:now,...(cleaned?{cleaned}:{})};
+  state.residue={files:left.files,bytes:left.bytes,resumable:left.resumable,recoverable:left.recoverable,checkedAt:now,...(cleaned?{cleaned}:{})};
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.residueCleanup',{error:toMessage(error)});}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===task)residueTask=undefined;if(control.signal.aborted)residueScope='';if(state.residue){delete state.residue.checking;delete state.residue.progress;}emit();void releaseIfIdle();});
  residueTask=task;return task;
 }

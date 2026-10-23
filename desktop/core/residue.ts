@@ -9,10 +9,12 @@ import { checkAbort, code, contained, sameStat } from './paths';
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
  * proven dead (identity drift, no or unauthenticated receipt, card absent); only Clean up removes it.
- * partial: a staged copy whose authenticated receipt shows its source gone or changed. */
-export type ResidueKind='partial'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary';
+ * partial: an incomplete staged copy whose authenticated receipt shows its source gone or changed.
+ * recoverable: a complete staged copy whose source on the connected card changed or vanished; it may
+ * be the only copy left, so neither the automatic check nor Clean up removes it. */
+export type ResidueKind='partial'|'recoverable'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary';
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat:BigIntStats;}
-export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};}
+export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -44,7 +46,7 @@ async function folderBytes(folder:string,signal?:AbortSignal):Promise<number> {
 /** Staged copies, receipts and index files in one folder. A staged copy is the app's by its
  * name alone; a receipt only when it authenticates with this host's key. */
 async function importLeftovers(folder:string,entries:Dirent[],root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
-  const resumable=new Set<string>(),dead=new Set<string>(),pending:{file:string;stat:BigIntStats;target?:string;resumable:boolean}[]=[];
+  const resumable=new Set<string>(),dead=new Set<string>(),recoverable=new Set<string>(),pending:{file:string;stat:BigIntStats;target?:string;resumable:boolean}[]=[];
   for(const entry of entries) {
     if(!entry.isFile()||!receiptPattern.test(entry.name)) continue;
     checkAbort(signal);
@@ -58,18 +60,18 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
     // re-import finishes it, and it is kept even when it no longer binds the file.
     if(receipt.kind==='publication'&&receipt.present) continue;
     if(receipt.resumable&&receipt.file) resumable.add(receipt.file);
-    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) dead.add(receipt.file);
+    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) (receipt.complete?recoverable:dead).add(receipt.file);
     pending.push({file,stat,resumable:receipt.resumable,...(receipt.kind==='stage'&&receipt.owned&&receipt.present&&receipt.file?{target:receipt.file}:{})});
   }
   // A receipt goes with its copy: kept while the copy is kept, removed once the copy is dead or gone.
   for(const {file,stat,target,resumable:binds} of pending)
-    items.push({path:file,kind:binds?'resumable':target&&!dead.has(target)?'kept':'receipt',bytes:Number(stat.size),root,stat});
+    items.push({path:file,kind:binds?'resumable':target&&recoverable.has(target)?'recoverable':target&&!dead.has(target)?'kept':'receipt',bytes:Number(stat.size),root,stat});
   for(const entry of entries) {
     if(!entry.isFile()) continue;
     const file=path.join(folder,entry.name),staged=stagePattern.test(entry.name);
     if(!staged&&!indexTemporary.test(entry.name)) continue;
     const stat=await regular(file);
-    if(stat) items.push({path:file,kind:!staged?'index':resumable.has(file)?'resumable':dead.has(file)?'partial':'kept',bytes:Number(stat.size),root,stat});
+    if(stat) items.push({path:file,kind:!staged?'index':resumable.has(file)?'resumable':recoverable.has(file)?'recoverable':dead.has(file)?'partial':'kept',bytes:Number(stat.size),root,stat});
   }
 }
 /** In each organization journal: staged and preserved incomplete copies (never read again; the
@@ -168,22 +170,24 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
 function summary(items:ResidueItem[]):Residue {
   const resumable=items.filter(item=>item.kind==='resumable'||item.kind==='kept');
   const sum=(list:ResidueItem[])=>list.reduce((total,item)=>total+item.bytes,0);
-  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)}};
+  // Counted by staged copy; the receipts that go with them are kept too but are not copies.
+  const kept=items.filter(item=>item.kind==='recoverable'&&stagePattern.test(path.basename(item.path)));
+  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:kept.length,bytes:sum(kept),...(kept[0]?{folder:path.dirname(kept[0].path)}:{})}};
 }
 
 /** Remove what findResidue listed, each only while it is still the very file or folder found.
  * Folders go only when empty. keepResumable leaves copies a re-import could continue and those not
- * proven dead. */
+ * proven dead. Recoverable copies are always left. */
 export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
   // Only what this run removes counts toward the total: kept copies are not work.
-  const doomed=residue.items.filter(item=>!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
+  const doomed=residue.items.filter(item=>item.kind!=='recoverable'&&!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
   let handled=0,handledBytes=0;
   options.onProgress?.(0,doomed.length,0,doomedBytes,'');
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
-    if(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) continue;
+    if(item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) continue;
     handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);
