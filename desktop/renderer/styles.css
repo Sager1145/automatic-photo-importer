@@ -495,7 +495,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .backup-action{display:flex;align-items:flex-start;gap:1rem;padding:1.15rem 1.25rem}
 
 /* Destination inspector */
-.destination-bay{position:sticky;top:calc(var(--titlebar-height) + 1.5rem);display:grid;gap:.75rem;min-width:0}
+.destination-bay{position:sticky;z-index:2;isolation:isolate;top:calc(var(--titlebar-height) + 1.5rem);display:grid;gap:.75rem;min-width:0}
 .destination-panel{display:grid;background:var(--surface);border-radius:var(--radius-xl);box-shadow:0 0 0 1px var(--separator),var(--shadow-2);overflow:hidden}
 .copy-policy{display:grid;gap:.45rem;padding:var(--card-pad-y) var(--card-pad-x);border-bottom:1px solid var(--separator)}
 .copy-policy>strong,.copy-policy>label{font-weight:650}
@@ -1205,14 +1205,14 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 .dashboard-hide>svg{width:14px;height:14px}
 
 /* Sidebar drive status: the running step flashes. Reduced motion keeps a steady filled dot. */
-.mini-steps i[data-state=active]{position:relative;background:var(--accent-soft);animation:step-flash 1.2s var(--ease-out) infinite}
+.mini-steps i[data-state=active]{position:relative;isolation:isolate;background:var(--accent-soft);animation:step-flash 1.2s var(--ease-out) infinite}
 .mini-steps i[data-state=active]::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 1.5px var(--accent-fill);opacity:0;pointer-events:none;animation:step-ping 1.2s var(--ease-out) infinite}
 @keyframes step-flash{0%,100%{background-color:var(--accent-soft)}45%{background-color:var(--accent-fill);color:var(--on-accent)}}
 @keyframes step-ping{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.9)}}
 
 /* Settings: category list beside the open panel; a scrolling tab strip when narrow. */
 .settings-page.settings-layout{columns:auto;display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.25rem;container:settings/inline-size}
-.settings-nav{flex:1 1 15rem;max-width:18rem;position:sticky;top:calc(var(--titlebar-height) + 1rem);min-width:0}
+.settings-nav{flex:1 1 15rem;max-width:18rem;position:sticky;z-index:2;top:calc(var(--titlebar-height) + 1rem);min-width:0}
 .settings-nav [role=tablist]{display:grid;gap:.2rem;padding:.35rem;border-radius:var(--radius-xl);background:var(--surface);box-shadow:0 0 0 1px var(--separator),var(--shadow-1)}
 .settings-nav [role=tab]{position:relative;isolation:isolate;display:flex;align-items:center;gap:.7rem;width:100%;min-width:0;padding:.55rem .65rem;border-radius:var(--radius-lg);text-align:start;color:var(--label);transition:background-color var(--base) var(--ease-out),box-shadow var(--base) var(--ease-out)}
 .settings-nav [role=tab]:hover{background:var(--fill-4)}
