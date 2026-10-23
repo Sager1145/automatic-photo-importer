@@ -45,3 +45,14 @@ test('a job still checking files shows Checking files at the destination, never 
  const verifying=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarDestinations,{state:{...base,jobs:[{...job,progress:{...job.progress!,phase:'verifying',step:undefined}}]}})}));
  assert.ok(verifying.includes('Verifying'));
 });
+
+test('a job without progress follows its phase, and progress left from an earlier run is ignored',()=>{
+ const base=state([{path:'/Volumes/A',available:true,free:1e9,total:2e9} as NonNullable<AppState['destinationStatus']>[number]]);
+ const make=(phase:string,progress?:unknown)=>({id:'j',source:{id:'s',name:'Card',path:'/Volumes/CARD',transport:'storage',selected:true},phase,errors:[],backup:false,progress} as unknown as AppState['jobs'][number]);
+ const kindOf=(job:AppState['jobs'][number])=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarDestinations,{state:{...base,jobs:[job]}})})).match(/data-kind="([\w-]+)"/)?.[1];
+ const planning={phase:'planning',step:'comparing',completed:3,total:10,bytes:0,totalBytes:0,speed:0,file:''};
+ assert.equal(kindOf(make('verifying')),'checking-files','reading metadata, before any progress');
+ assert.equal(kindOf(make('copying')),'receiving');
+ assert.equal(kindOf(make('copying',planning)),'receiving','planning progress from an earlier run');
+ assert.equal(kindOf(make('verifying',{...planning,phase:'verifying',step:undefined})),'verifying');
+});

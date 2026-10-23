@@ -507,7 +507,10 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
     if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
-    parts.push({ kind: tidy ? 'cleaning' : job.progress?.phase === 'planning' ? 'checking-files' : job.progress?.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name, paused: jobPaused(job) });
+    // Progress left over from an earlier run (planning figures on a job already copying) says nothing about what the job does now; without any, the job's phase decides.
+    const progress = job.progress && job.phase === 'copying' && job.progress.phase === 'planning' ? undefined : job.progress;
+    const stage = progress?.phase ?? (job.phase === 'verifying' ? 'planning' : job.phase === 'copying' ? 'copying' : undefined);
+    parts.push({ kind: tidy ? 'cleaning' : stage === 'planning' ? 'checking-files' : stage === 'verifying' ? 'verifying' : 'receiving', progress, eta: job.eta ?? progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
   if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
