@@ -14,7 +14,7 @@ import {
   Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { ACTIVE_PHASES, isRunning } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
@@ -1153,6 +1153,20 @@ function UnknownDefaultControl({ preferences, act }: { preferences: Preferences;
   </div>;
 }
 
+// A file whose name is taken at the destination by a file with other content (imports, drive backups and organizing).
+export function ConflictNamingSettings({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
+  const { t } = useTranslation();
+  const current = preferences.conflictNaming ?? 'folder';
+  const choices: { value: ConflictNaming; label: string; detail: string }[] = [
+    { value: 'folder', label: t("Conflicts folder"), detail: t("Saved with its own name in a Conflicts folder inside the camera folder, one subfolder per file.") },
+    { value: 'number', label: t("Add a number"), detail: t("Saved beside the other file with a number: IMG_0001 (1).JPG, then (2). Its sidecars get the same number.") },
+  ];
+  return <div className="backup-mode" data-testid="conflict-naming-settings">
+    <div className="segmented" role="group" aria-label={t("Same name, different content")}>{choices.map(choice => <button key={choice.value} type="button" aria-pressed={current === choice.value} onClick={() => act({ type: 'preferences', patch: { conflictNaming: choice.value } })}>{choice.label}</button>)}</div>
+    <p className="settings-explanation">{choices.find(choice => choice.value === current)!.detail}</p>
+  </div>;
+}
+
 function BackupModeControl({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
   const mode = preferences.backupMode ?? 'additive';
@@ -1999,6 +2013,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
         <TextPreference label={t("Edited exports folder")} value={editedFolder} placeholder="editied" onSave={editedFolder => act({type:'preferences',patch:{editedFolder}})} description={t("Edited exports go here, inside each month folder.")} />
         <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath), ...samplePath(editedTemplate(editedFolder)), 'DSC_0001.jpg']} testId="edited-export-preview" />
       </SettingsSection>
+      <SettingsSection title={t("Same name, different content")} icon={Files}><ConflictNamingSettings preferences={p} act={act} /></SettingsSection>
   </div>;
 }
 

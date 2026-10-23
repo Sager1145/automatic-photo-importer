@@ -669,7 +669,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const used=!reorganize&&!sourceFolders?.length&&source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
   const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,previousHint??(used>0?{bytes:used}:undefined));
   // One request per intent: an organization files by the rules and keeps unknown files where they are; a drive backup keeps the drive's layout.
-  const listed={...listing,reuse:reusableScan(source),sourceFolders,...(request.exclude?.length?{exclude:request.exclude}:{})};
+  const listed={...listing,reuse:reusableScan(source),sourceFolders,conflictNaming:prefs.conflictNaming,...(request.exclude?.length?{exclude:request.exclude}:{})};
   const {unknownRules,unknownDefault,...folderRules}=ruleOptions(prefs,request.useFileDate),filed={...folderRules,...(videoRoots?{videoRoots}:{})};
   const copy={...listed,unknownRules,unknownDefault,sourceDigest,skipErrors,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
    // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.

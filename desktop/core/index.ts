@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
+import type { ConflictNaming, DuplicateFile, ExecutionIssue, Inventory, InventoryFile, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
 import { LEGACY_UNKNOWN_CAMERA_FOLDER, PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
 import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
@@ -58,6 +58,7 @@ interface Listing {
   sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;
   /** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;
   /** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;
+  /** A file whose name is taken at its destination by other content (ConflictNaming). Absent: folder. */conflictNaming?:ConflictNaming;
   /** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];
 }
 /** What a copy (an import or a drive backup) adds: which source files it takes and what it already knows of them. */
@@ -129,14 +130,31 @@ function groups(entries:PlanEntry[]):PlanEntry[][] {
   for(const entry of entries) {const family=families.get(entry.family)??[]; family.push(entry); families.set(entry.family,family);}
   return [...families.values()];
 }
-// Conflicts/<content id> retains original names and camera/media grouping.
-// Allocation metadata is serialized with the plan so review roundtrips preserve
-// the same policy if another writer arrives after planning.
+// Conflicts/<content id> retains original names and camera/media grouping; numbering instead
+// names attempt n `<name> (n)` in place. Allocation metadata (the policy too) is serialized with
+// the plan so review roundtrips and resumed imports allocate alike if another writer arrives after planning.
 function target(entry:PlanEntry,attempt:number,family:PlanEntry[],digests?:Map<string,string>):string {
   const original=entry.allocation??{destination:entry.destination,folder:path.dirname(entry.destination)};
   if(!attempt)return original.destination;
+  if(entry.allocation?.conflictNaming==='number')return path.join(path.dirname(original.destination),numbered(entry,attempt,family));
   const content=createHash('sha256').update(JSON.stringify(family.map(member=>[path.basename(member.source),digests!.get(member.id)!]).sort((a,b)=>a[0]!.localeCompare(b[0]!)||a[1]!.localeCompare(b[1]!)))).digest('hex').slice(0,16);
   return path.join(original.folder,'Conflicts',content+(attempt>1?'-'+attempt:''),path.relative(original.folder,original.destination));
+}
+const NAME_BYTES=255;
+const originalName=(entry:PlanEntry)=>path.basename(entry.allocation?.destination??entry.destination);
+/** ` (n)` after the stem the family shares (its shortest name without the extension), or after a
+ * member's own stem when it is not named after it: DSC_0001 (1).NEF.xmp, C0004 (1)M01.XML. Members
+ * matched by a stem (XMP, NKSC, LRF, Live Photo MOV) pair again when the library is read later;
+ * pattern-named ones (Sony M01.XML/R01.BIM, IMG_O….AAE, GoPro GL….LRV) keep the number but not
+ * that pattern. Every member's stem is shortened alike when a name would pass 255 bytes. */
+function numbered(entry:PlanEntry,n:number,family:PlanEntry[]):string {
+  const suffix=` (${n})`,stemOf=(name:string)=>name.slice(0,name.length-path.extname(name).length);
+  const shared=family.map(member=>stemOf(originalName(member))).sort((a,b)=>a.length-b.length||(a<b?-1:a>b?1:0))[0]!;
+  const split=(name:string)=>{const at=name.toLowerCase().startsWith(shared.toLowerCase())?shared.length:stemOf(name).length;return [name.slice(0,at),name.slice(at)] as const;};
+  const over=Math.max(0,...family.map(member=>Buffer.byteLength(originalName(member))+Buffer.byteLength(suffix)-NAME_BYTES));
+  const [stem,rest]=split(originalName(entry)),characters=Array.from(stem);
+  let cut=0;while(cut<over&&characters.length)cut+=Buffer.byteLength(characters.pop()!);
+  return characters.join('')+suffix+rest;
 }
 /** null: nothing there. A different size is a different file without reading
  * anything; equal sizes compare SHA-256 values (the destination via its index). */
@@ -151,7 +169,7 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
-    const digests=attempt?new Map<string,string>():undefined;
+    const digests=attempt&&family[0]!.allocation?.conflictNaming!=='number'?new Map<string,string>():undefined;
     if(digests) for(const member of family) digests.set(member.id,await resolve(member));
     const proposed=new Map<string,PlanEntry>(), allocation=[];
     let conflict=false;
@@ -601,7 +619,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       checkAbort(signal);
       const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
-      pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera)}});
+      pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera),...(options.conflictNaming==='number'?{conflictNaming:'number' as const}:{})}});
       onProgress?.(++made,path.relative(sourceRoot,entry.source),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     }
     const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0})):undefined;
@@ -764,7 +782,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
         if(!hit) continue;
         moved.add(entry.id);
         const list=arrived.get(hit.part)??[];
-        list.push({...entry,skip:true,destination:hit.path,allocation:{destination:hit.path,folder:path.dirname(hit.path)},digest:hit.digest,routed:entry.destination});
+        list.push({...entry,skip:true,destination:hit.path,allocation:{...entry.allocation,destination:hit.path,folder:path.dirname(hit.path)},digest:hit.digest,routed:entry.destination});
         arrived.set(hit.part,list);
       }
     }
