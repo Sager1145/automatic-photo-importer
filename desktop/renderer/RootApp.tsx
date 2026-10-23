@@ -671,7 +671,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatRemaining(remaining, t) }) : undefined}
         step={stepKind(lead?.progress)} />
       {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={state.review && configured && readyDestinations.length >= requiredDestinations ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t("A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
-      {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} /></li>)}</ul>}
+      {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
     </section>);
 }
 
@@ -1308,7 +1308,7 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
   const file = job.skippablePath;
   return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
-export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
+export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const progress = job.progress, working = activePhases.includes(job.phase), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
   const fraction = queued ? 0 : cardFraction(job);
@@ -1316,7 +1316,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
     <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={job.phase === 'complete'} count={count}
-      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} />
+      speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
 }
