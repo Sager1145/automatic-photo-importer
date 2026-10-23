@@ -91,7 +91,7 @@ export interface JobEta {step?:number;job?:number;/** The low and high end of `j
 /** What a job is, told by the code that starts it: its kind (never guessed from step names), the drives it reads and writes, and what it will do. */
 export interface EtaPlan {kind:JobKind;source?:DriveInfo;destinations?:DriveInfo[];verify?:boolean;publish?:'link'|'copy';totals?:Record<string,StepTotal>;/** Backup copies a Delete originals run re-reads besides the source. */backups?:number;estimated?:boolean;}
 /** Where a job stands as a whole, for the bars and the overview. */
-export interface JobView {fraction?:number;cost?:{done:number;total:number};}
+export interface JobView {fraction?:number;cost?:{done:number;total:number};shares?:{step:string;share:number}[];}
 
 const MiB=1<<20;
 /** Stages whose legacy (non-model) estimate counts bytes plus a per-file cost; the others count files. */
@@ -247,7 +247,7 @@ export class EtaTracker {
   state.shared.set(resolved,span);state.last=now;
   const snapshot=state.model.update(now,step,done,{...total,...(bytesUnknown?{bytesKnown:false}:{})});
   for(const ended of state.model.drain())this.save(state,ended,now);
-  state.view={cost:snapshot.cost,fraction:state.fractions.next(snapshot.fraction)};
+  state.view={cost:snapshot.cost,fraction:state.fractions.next(snapshot.fraction),...(snapshot.shares?{shares:snapshot.shares}:{})};
   const finished=snapshot.job===0;
   const stepEta=state.stepSmoother.next(snapshot.step,now,finished&&snapshot.step===0);
   // The job's first seconds are spent estimating.
@@ -342,6 +342,7 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   else{job.eta=eta.job;if(eta.low!==undefined&&eta.high!==undefined)job.etaRange={low:eta.low,high:eta.high};else delete job.etaRange;}
   if(view.fraction!==undefined)job.fraction=view.fraction;
   if(view.cost)job.cost=view.cost;
+  if(view.shares)job.stageShares=view.shares;else delete job.stageShares;
   speeds('speed:'+job.id,job.progress);
   running.push({job,id:job.id});
  }
