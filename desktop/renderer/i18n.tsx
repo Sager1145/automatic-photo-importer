@@ -32,6 +32,11 @@ Copy all paths|复制全部路径|複製全部路徑|すべてのパスをコピ
 Show affected files|显示受影响的文件|顯示受影響的檔案|影響を受けるファイルを表示
 Hide affected files|隐藏受影响的文件|隱藏受影響的檔案|影響を受けるファイルを隠す
 Technical detail|技术详情|技術詳細資訊|技術的な詳細
+Skip these|跳过这些|略過這些|これらをスキップ
+Skip all and mark as done|全部跳过并标记为完成|全部略過並標記為完成|すべてスキップして完了にする
+Skipping only changes the status. Nothing is deleted.|跳过只会改变状态，不会删除任何内容。|略過只會變更狀態，不會刪除任何內容。|スキップしても状態が変わるだけで、何も削除されません。
+{count} issues skipped|已跳过 {count} 个问题|已略過 {count} 個問題|{count} 件の問題をスキップしました
+1 issue skipped|已跳过 1 个问题|已略過 1 個問題|1 件の問題をスキップしました
 Copying files|正在复制文件|正在複製檔案|ファイルをコピー中
 Moving files|正在移动文件|正在移動檔案|ファイルを移動中
 Stopping…|正在停止…|正在停止…|停止しています…

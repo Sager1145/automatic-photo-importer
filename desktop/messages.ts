@@ -5,6 +5,8 @@ import type {Language} from './shared';
 export const backendMessages={
  text:{en:'{text}','zh-Hans':'{text}','zh-Hant':'{text}',ja:'{text}'},
 
+ 'history.issuesSkipped':{en:'Skipped issues ({name}): {count}','zh-Hans':'已跳过的问题（{name}）：{count}','zh-Hant':'已略過的問題（{name}）：{count}',ja:'スキップした問題（{name}）：{count}'},
+ 'error.acknowledgeInvalid':{en:'These issues can no longer be skipped. Open All errors again.','zh-Hans':'这些问题已无法跳过。请重新打开“所有错误”。','zh-Hant':'這些問題已無法略過。請重新開啟「所有錯誤」。',ja:'これらの問題はスキップできなくなりました。「すべてのエラー」を開き直してください。'},
  'issue.group':{en:'{count} items need attention','zh-Hans':'{count} 项需要留意','zh-Hant':'{count} 項需要留意',ja:'{count} 件の確認が必要です'},
  'job.waiting':{en:'Waiting for an available slot','zh-Hans':'等待空闲的处理位置','zh-Hant':'等待空閒的處理位置',ja:'空きを待っています'},
  'job.waitingForImports':{en:'Waiting for imports to finish before organizing','zh-Hans':'等待导入完成后再整理','zh-Hant':'等待匯入完成後再整理',ja:'インポートの完了を待ってから整理します'},

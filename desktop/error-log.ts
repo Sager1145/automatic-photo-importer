@@ -44,13 +44,15 @@ export function gatherErrors(state:AppState):LoggedError[]{
  add('app','','',state.error,'app');
  for(const job of state.jobs){
   const kind:ErrorKind=job.organization?'organization':'source',id=job.organization?undefined:job.source.id,{name,path}=job.source;
-  for(const error of job.errors)add('job:'+job.id,name,path,error,kind,id,job.id);
+  const skipped=(code:string)=>!!job.acknowledged&&(job.acknowledged.all||job.acknowledged.codes.includes(code));
+  for(const error of job.errors)if(!skipped(codeOf(error)))add('job:'+job.id,name,path,error,kind,id,job.id);
   for(const item of job.inventory?.issues??[])add('issue:'+job.source.id,name,path,issue(item),'metadata',id);
   for(const group of job.groups??[]){
+   if(skipped(group.code))continue;
    const groupId=hash(`group|${job.id}|${group.code}|${group.severity}`);if(ids.has(groupId))continue;ids.add(groupId);
    result.push({id:groupId,code:group.code,source:name,drive:driveName(path,name),message:makeMessage('issue.group',{code:group.code,count:group.count}),kind,severity:group.severity,count:group.count,items:group.items,...(id?{sourceId:id}:{}),jobId:job.id});
   }
-  if(job.phase==='error'&&!job.errors.length&&!(job.groups??[]).some(group=>group.severity==='error'))add('job:'+job.id,name,path,job.detail,kind,id);
+  if(job.phase==='error'&&!job.errors.length&&!job.acknowledged&&!(job.groups??[]).some(group=>group.severity==='error'))add('job:'+job.id,name,path,job.detail,kind,id);
  }
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{})){
   const source=state.sources.find(item=>item.id===id),name=source?.name??id,location=source?.path??'';
@@ -106,7 +108,7 @@ export function errorSignature(state:AppState):string{
  const parts:(string|number)[]=[state.error?JSON.stringify(state.error):''];
  for(const job of state.jobs){
   let grouped=0;for(const group of job.groups??[])grouped+=group.count;
-  parts.push(job.id,job.errors.length,grouped,job.inventory?.issues?.length??0,job.phase==='error'&&!job.errors.length?JSON.stringify(job.detail??''):'');
+  parts.push(job.id,job.errors.length,grouped,job.acknowledged?job.acknowledged.at:'',job.inventory?.issues?.length??0,job.phase==='error'&&!job.errors.length?JSON.stringify(job.detail??''):'');
  }
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))parts.push(id,info.issues?.length??0,info.error??'');
  for(const recovery of state.organizationRecovery??[])parts.push(recovery.id,recovery.error??'');

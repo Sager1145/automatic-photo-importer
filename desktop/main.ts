@@ -38,6 +38,7 @@ import {runCodexSmoke} from './qa/codex-smoke';
 import {runA006HardwareTest,hardwareDestination} from './qa/a006-hardware';
 import {createStateChannel} from './state-channel';
 import {ErrorLog,clearErrorIds,clearErrors,createErrorLogCache} from './error-log';
+import {acknowledgeJob,acknowledgeSummary} from './acknowledge';
 import {errorTotal,issuePaths,recordIssues,reportSummary,throttled} from './job-issues';
 import {EtaTracker,stampEstimates} from './eta';
 import {normalizePreferences} from './preferences';
@@ -774,6 +775,16 @@ async function action(input:Action):Promise<void>{
   case 'discardReview':await discardReview();pump();break;
   case 'window': if(input.command==='minimize')window?.minimize();else if(input.command==='maximize'){if(window?.isMaximized())window.unmaximize();else window?.maximize();}else if(input.command==='close')window?.close();break;
   case 'clearError':if(typeof input.id==='string')clearErrors(errorLog,state,input.id,input.severity==='error'||input.severity==='warning'?input.severity:undefined);else state.error=undefined;break;
+  case 'acknowledgeErrors':{
+   // Skipping only changes status: nothing is deleted, the reports keep every error, and Delete originals still uses only the verified list.
+   const job=typeof input.jobId==='string'?state.jobs.find(item=>item.id===input.jobId):undefined;
+   if(!job||active.has(job.id))throw new MessageError('error.acknowledgeInvalid');
+   const codes=Array.isArray(input.codes)?input.codes.filter((code:unknown):code is string=>typeof code==='string'):undefined;
+   let record;try{record=acknowledgeJob(job,codes);}catch{throw new MessageError('error.acknowledgeInvalid');}
+   await acknowledgeSummary(path.join(app.getPath('userData'),'operation-reports',job.id),record).catch(()=>{});
+   addHistory(message('history.issuesSkipped',{name:job.source.name,count:record.errorCount}),text(record.groups.map(group=>`${group.code}: ${group.count}`).join(', ')));
+   break;
+  }
   case 'clearErrorIds':if(Array.isArray(input.ids))clearErrorIds(errorLog,state,input.ids.filter((id:unknown):id is string=>typeof id==='string'),input.severity==='error'||input.severity==='warning'?input.severity:undefined);break;
   case 'clearErrors':clearErrors(errorLog,state,undefined,input.severity==='error'||input.severity==='warning'?input.severity:undefined);break;
   case 'refresh':await refresh();break;

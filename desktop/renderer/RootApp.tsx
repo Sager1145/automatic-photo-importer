@@ -596,6 +596,11 @@ export function groupInfo(code: string, count: number, drive: string, t: Transla
     default: return { title: one ? t("1 issue needs attention") : t("{count} issues need attention", { count: n }) };
   }
 }
+/** The finished job (still with errors) a list of errors belongs to, when it can be marked as done. */
+function skippableJob(state: AppState, list: DisplayError[]): boolean {
+  const jobId = list.find(error => error.jobId)?.jobId;
+  return jobId !== undefined && state.jobs.some(job => job.id === jobId && (job.phase === 'error' || job.phase === 'stopped') && !job.stopping);
+}
 const rowDrive = (row: ErrorRow<DisplayError>) => row.entries[0]!.drive || row.entries[0]!.source;
 /** A group as text: its title, then the first paths with their technical detail. */
 function rowReport(row: ErrorRow<DisplayError>, t: Translate, formatNumber: (value: number) => string): string {
@@ -606,7 +611,7 @@ function rowReport(row: ErrorRow<DisplayError>, t: Translate, formatNumber: (val
 type RowApi = { current: { act: Dispatch; copy: (text: string) => void; clear: (ids?: string[], severity?: Severity) => void; onOpenSource?: (sourceId: string) => void; close: () => void } };
 const ITEM_PAGE = 200;
 /** One group row: title, count, explanation and actions. Its affected paths load only when expanded, 200 at a time. */
-const MergedRow = memo(function MergedRow({ row, api, retryable }: { row: ErrorRow<DisplayError>; api: RowApi; retryable: boolean }) {
+const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { row: ErrorRow<DisplayError>; api: RowApi; retryable: boolean; skippable: boolean }) {
   const { t, formatNumber } = useTranslation();
   const [open, setOpen] = useState(false), [shown, setShown] = useState(ITEM_PAGE);
   const first = row.entries[0]!, info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber);
@@ -623,6 +628,7 @@ const MergedRow = memo(function MergedRow({ row, api, retryable }: { row: ErrorR
       {first.sourceId && api.current.onOpenSource && <Button kind="quiet" icon={ArrowUpRight} data-testid="error-group-drive" onClick={() => { api.current.onOpenSource!(first.sourceId!); api.current.close(); }}>{t("Show drive")}</Button>}
       {retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-group-retry" onClick={() => api.current.act({ type: 'retryJob', jobId: first.jobId! })}>{t("Retry all")}</Button>}
       {row.code === 'staging-left' && <Button kind="quiet" icon={Trash2} data-testid="error-group-cleanup" onClick={() => api.current.act({ type: 'cleanResidue' })}>{t("Clean up")}</Button>}
+      {skippable && <Button kind="quiet" icon={CheckCheck} data-testid="error-group-skip" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => api.current.act({ type: 'acknowledgeErrors', jobId: first.jobId!, codes: [row.code] })}>{t("Skip these")}</Button>}
       <Button kind="quiet" icon={X} data-testid="error-group-clear" onClick={() => api.current.clear(row.entries.flatMap(entry => entry.id ? [entry.id] : []), row.severity)}>{t("Clear group")}</Button>
       <Button kind="quiet" icon={open ? ChevronDown : ChevronRight} data-testid="error-group-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? t("Hide affected files") : t("Show affected files")}</Button>
     </div>
@@ -640,7 +646,7 @@ const MergedRow = memo(function MergedRow({ row, api, retryable }: { row: ErrorR
       </div>
     </>}
   </li>;
-}, (a, b) => a.row.key === b.row.key && a.row.count === b.row.count && a.row.entries.length === b.row.entries.length && a.row.severity === b.row.severity && a.retryable === b.retryable && a.api === b.api);
+}, (a, b) => a.row.key === b.row.key && a.row.count === b.row.count && a.row.entries.length === b.row.entries.length && a.row.severity === b.row.severity && a.retryable === b.retryable && a.skippable === b.skippable && a.api === b.api);
 
 export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSource, onClear, target, onShowAll}: {state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[], severity?: Severity) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
   const { t, formatNumber, language } = useTranslation();
@@ -662,9 +668,9 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
     return <section className={`error-section is-${severity}`} data-testid={`${plural}-section`} data-severity={severity} aria-labelledby={`${plural}-heading`}>
       <div className="error-section-heading"><h3 id={`${plural}-heading`}>{severity === 'error' ? t("Errors") : t("Warnings")}<span className="error-section-count" data-testid={`${plural}-section-count`}>{formatNumber(rows.length)}</span></h3><div className="card-actions">{items.length > 0 && <Button kind="quiet" icon={Copy} data-testid={`${plural}-copy-all`} onClick={() => copy(report(items))}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid={`${plural}-clear-all`} aria-label={label} onClick={clearShown}>{t("Clear all")}</Button>}</div></div>
       {items.length ? <div className="error-groups">{[...map].map(([source, list]) => <section key={source || 'app'} className="error-group">
-        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}</div>
+        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}{severity === 'error' && skippableJob(state, list) && <Button kind="quiet" icon={CheckCheck} data-testid="job-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: list.find(error => error.jobId)!.jobId! })}>{t("Skip all and mark as done")}</Button>}</div>
         <ul className="all-errors">{buildRows(list).map((row, index) => {
-          if (row.merged) return <MergedRow key={row.key} row={row} api={api} retryable={row.severity === 'error' && row.entries[0]!.jobId !== undefined && state.jobs.some(job => job.id === row.entries[0]!.jobId && job.phase === 'error' && !!job.retryable)} />;
+          if (row.merged) return <MergedRow key={row.key} row={row} api={api} skippable={row.severity === 'error' && skippableJob(state, row.entries)} retryable={row.severity === 'error' && row.entries[0]!.jobId !== undefined && state.jobs.some(job => job.id === row.entries[0]!.jobId && job.phase === 'error' && !!job.retryable)} />;
           const error = row.entries[0]!;
           if (error.formatSourceId) return <li key={index} className="error-item is-warning">{sourceInventories(state).filter(item => item.source.id === error.formatSourceId).map(({source,inventory}) => <UnknownFilesPrompt key={source.id} sourceName={source.name} inventory={inventory} knownRules={{...state.preferences.unknownRules,...state.sessionUnknownRules}} act={act} />)}</li>;
           const explained = explainError(error.message, error.kind, language);
@@ -1364,12 +1370,14 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
 }
 
 function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
-  const { t } = useTranslation();
+  const { t, formatNumber } = useTranslation();
+  if (job.phase === 'complete' && job.acknowledged) return <div className="source-choice job-skipped-note" data-testid="job-skipped-note"><details><summary><Icon icon={CheckCircle2} size={14} />{job.acknowledged.errorCount === 1 ? t("1 issue skipped") : t("{count} issues skipped", { count: formatNumber(job.acknowledged.errorCount) })}</summary><ul>{job.acknowledged.groups.map(group => <li key={group.severity + group.code}>{groupInfo(group.code, group.count, job.source.name, t, formatNumber).title}</li>)}</ul><p>{t("Skipping only changes the status. Nothing is deleted.")}</p></details></div>;
   if (job.phase !== 'error') return null;
+  const skipAll = <Button icon={CheckCheck} data-testid="job-card-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: job.id })}>{t("Skip all and mark as done")}</Button>;
   const retry = job.retryable ? <Button icon={RotateCcw} data-testid="retry-button" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: job.id })}>{t("Retry")}</Button> : null;
-  if (!job.skippablePath) return retry && <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}</div></div>;
+  if (!job.skippablePath) return <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}{skipAll}</div></div>;
   const file = job.skippablePath;
-  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skipFile', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skipAndContinue', jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
