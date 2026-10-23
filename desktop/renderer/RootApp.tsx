@@ -1092,11 +1092,12 @@ function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
   return <>{t("{count} files/s", { count: numberIn(value, language, { maximumSignificantDigits: 3 }) })}</>;
 }
+/** Bytes per second, plus files per second where a step reports both (metadata checking). */
 function ProgressSpeed({ progress }: { progress: Pick<Progress, 'speed' | 'fileRate'> }) {
-  const { t } = useTranslation();
-  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed"><Speed value={progress.speed} /></span>;
-  if (!progress.fileRate || progress.fileRate <= 0) return null;
-  return <span className="progress-speed" data-testid="speed"><FileRate value={progress.fileRate} /></span>;
+  const { t, language } = useTranslation();
+  const rate = progress.fileRate && progress.fileRate > 0 ? t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
+  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed"><Speed value={progress.speed} />{rate && <> · <span data-testid="file-rate">{rate}</span></>}</span>;
+  return rate ? <span className="progress-speed" data-testid="speed">{rate}</span> : null;
 }
 /** How far an organization is. Its moves are renames, so bytes stay at 0: count files; a finished one is 100%. */
 function organizationFraction(job: Job): number | undefined {

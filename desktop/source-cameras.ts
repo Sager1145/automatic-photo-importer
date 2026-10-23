@@ -47,6 +47,9 @@ export function inferCameraHints(source:Source, inventory:Inventory):CameraHint[
   return hints;
 }
 
+/** Metadata reads started ahead of the file being counted. */
+const READ_AHEAD = 32;
+
 /** Read each media file once. The supplied reader must disable preview extraction. */
 export async function analyzeSourceCameras(
   source:Source,
@@ -69,10 +72,18 @@ export async function analyzeSourceCameras(
     return {status,...(issues.length?{issues:issues.map(issue=>({...issue}))}:{}),hints:hints.map(hint=>({...hint})),models:[...models.values()].map(model=>({...model})).sort((a,b)=>a.name.localeCompare(b.name)),lenses:[...lenses.values()].map(lens=>({...lens})).sort((a,b)=>b.files-a.files||a.name.localeCompare(b.name)),noLens,checked,total:files.length,unknown,...(failures ? {error:`${failures} media ${failures === 1 ? 'file' : 'files'} could not be read.`} : {})};
   }
   onUpdate?.(summary('reading'));
-  for (const file of files) {
+  // Reads run a window ahead so the reader can group them; results are still handled in file order.
+  const ahead = new Map<number,Promise<Metadata>>();
+  const read = (position:number) => {
+    for (let next = position; next < Math.min(files.length, position + (position === 0 ? 1 : READ_AHEAD)); next++) if (!ahead.has(next)) {
+      const pending = readMetadata(files[next]!.path); pending.catch(() => {}); ahead.set(next, pending);
+    }
+    const found = ahead.get(position)!; ahead.delete(position); return found;
+  };
+  for (const [position, file] of files.entries()) {
     if (signal?.aborted) break;
     let metadata:Metadata|undefined;
-    try { metadata = await readMetadata(file.path); const error=Object.entries(metadata.fields).find(([key])=>key.split(':').at(-1)==='Error')?.[1]; if(error)throw new Error(String(error)); }
+    try { metadata = await read(position); const error=Object.entries(metadata.fields).find(([key])=>key.split(':').at(-1)==='Error')?.[1]; if(error)throw new Error(String(error)); }
     catch (error) {
       if (signal?.aborted) break;
       failures += 1; issues.push({path:file.path,message:error instanceof Error?error.message:String(error)});

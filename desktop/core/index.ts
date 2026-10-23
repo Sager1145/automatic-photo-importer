@@ -24,6 +24,9 @@ export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalizati
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
 const PLAN_CONCURRENCY=Math.max(2,Math.min(8,availableParallelism()));
+/** Metadata reads in flight while checking: enough to fill ExifTool's multi-file requests (platform/metadata.ts)
+ * on every process; the device's own limit still caps the requests running at once. */
+const CHECK_CONCURRENCY=32;
 /** Whole files hashed or copied at once by one job; each device's own limit (devices.ts) still
  * applies, so a spinning disk serves them one at a time. */
 const STREAM_CONCURRENCY=4;
@@ -232,7 +235,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     sourceStats.set(file.path,originalStat);
     checkedBytes+=file.size;onProgress?.(++done,file.relative,{step:'checking',total:files.length,bytes:checkedBytes,totalBytes:listedBytes});
   }
-  await Promise.all(Array.from({length:Math.min(files.length,PLAN_CONCURRENCY)},async()=>{
+  await Promise.all(Array.from({length:Math.min(files.length,CHECK_CONCURRENCY)},async()=>{
     while(failure===undefined && next<files.length) {
       const position=next++;
       try { checkAbort(signal); if(!failures.has(files[position]!.path)) await examine(files[position]!,position); } catch(error) { try { skip(files[position]!.path,error); } catch(thrown) { failure??=thrown; } }
