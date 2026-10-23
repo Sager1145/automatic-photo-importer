@@ -31,21 +31,38 @@ function unchanged(recorded:Recorded,stat:BigIntStats):boolean {
   return recorded.dev===now.dev && recorded.ino===now.ino && recorded.size===now.size && recorded.mtime===now.mtime && recorded.ctime===now.ctime;
 }
 
+/** The file's text, read in chunks so a large index reports how far it is. */
+async function readWhole(file:string,size:number,onBytes?:(read:number,total:number)=>void):Promise<string> {
+  const handle=await fs.open(file,'r');
+  try {
+    const bytes=Buffer.alloc(size);let filled=0;onBytes?.(0,size);
+    while(filled<size) {
+      const {bytesRead}=await handle.read(bytes,filled,Math.min(8*1024*1024,size-filled),filled);
+      if(!bytesRead) break;
+      filled+=bytesRead;onBytes?.(filled,size);
+    }
+    return bytes.subarray(0,filled).toString('utf8');
+  } finally { await handle.close(); }
+}
+
 /** A cache only: an entry is trusted solely while every recorded stat field
  * still matches, so a touched, replaced or moved file is always hashed again. */
 export class DestinationIndex implements Digests {
   private files=new Map<string,Recorded>();
   private hints=new Map<string,{stat:string;sha256:string}>();
   private dirty=false;
+  /** This session's listing of the library (path and size of each file), for the lookup of files filed elsewhere. Dropped with the index, and when the library is reorganized. */
+  listing?:Promise<{path:string;size:number}[]>;
   private writing:Promise<void>=Promise.resolve();
   constructor(readonly root:string,readonly rootIdentity:string) {}
-  static async load(root:string,rootIdentity:string):Promise<DestinationIndex> {
+  /** `onBytes`: bytes of the index file read so far and its size, as it is read (it can be hundreds of MB on a slow drive). */
+  static async load(root:string,rootIdentity:string,onBytes?:(read:number,total:number)=>void):Promise<DestinationIndex> {
     const index=new DestinationIndex(root,rootIdentity);
     for(const name of [INDEX_NAME,LEGACY_INDEX_NAME]) {
       try {
         const file=path.join(root,name),stat=await fs.lstat(file);
         if(!stat.isFile() || stat.size>MAX_INDEX_BYTES) continue;
-        const data=JSON.parse(await fs.readFile(file,'utf8'));
+        const data=JSON.parse(await readWhole(file,stat.size,onBytes));
         if(data?.version!==1 || data.rootIdentity!==rootIdentity || !data.files || typeof data.files!=='object') continue;
         for(const [relative,value] of Object.entries(data.files as Record<string,Recorded>))
           if(value && ['dev','ino','size','mtime','ctime','sha256'].every(key=>typeof (value as unknown as Record<string,unknown>)[key]==='string') && /^[a-f0-9]{64}$/.test(value.sha256)) index.files.set(relative,value);
@@ -87,7 +104,7 @@ export class DestinationIndex implements Digests {
     this.files.set(this.key(file),{...fingerprint(stat),sha256});this.dirty=true;
   }
   forget(file:string):void {this.hints.delete(file);if(this.files.delete(this.key(file)))this.dirty=true;}
-  clear():void {this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}
+  clear():void {this.listing=undefined;this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}
   /** Atomic replace: write a sibling, fsync, rename, fsync the folder. */
   flush():Promise<void> {
     const write=this.writing.then(async()=>{
@@ -109,11 +126,19 @@ export class DestinationIndex implements Digests {
   }
 }
 const indexes=new Map<string,Promise<DestinationIndex>>();
-/** One shared index per destination root and identity for this app session. */
-export function destinationIndex(root:string,rootIdentity:string):Promise<DestinationIndex> {
+const loading=new Map<string,Set<(read:number,total:number)=>void>>();
+/** One shared index per destination root and identity for this app session. `onBytes` hears the load while it runs
+ * (also when another caller started it); an index already loaded reports nothing. */
+export function destinationIndex(root:string,rootIdentity:string,onBytes?:(read:number,total:number)=>void):Promise<DestinationIndex> {
   const key=`${root}\0${rootIdentity}`;
   let index=indexes.get(key);
-  if(!index){index=DestinationIndex.load(root,rootIdentity);indexes.set(key,index);index.catch(()=>indexes.delete(key));}
+  if(!index){
+    const listeners=new Set<(read:number,total:number)=>void>();loading.set(key,listeners);
+    if(onBytes)listeners.add(onBytes);
+    index=DestinationIndex.load(root,rootIdentity,(read,total)=>{for(const listener of listeners)listener(read,total);});
+    indexes.set(key,index);index.catch(()=>indexes.delete(key));
+    index.then(()=>{},()=>{}).then(()=>{if(loading.get(key)===listeners)loading.delete(key);});
+  } else if(onBytes)loading.get(key)?.add(onBytes);
   return index;
 }
 /** Start over as a new app session does: later lookups load from disk. */

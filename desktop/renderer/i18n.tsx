@@ -140,6 +140,7 @@ The backup folder isn't scanned as a source|备份文件夹不会作为来源被
 {completed} files looked at|已查看 {completed} 个文件|已查看 {completed} 個檔案|{completed} 件のファイルを確認済み
 Setting aside duplicates: {completed} of {total}|正在搁置重复文件：{completed}/{total}|正在擱置重複檔案：{completed}/{total}|重複ファイルを退避中：{total} 件中 {completed} 件
 Reading metadata: {completed} of {total} files|正在读取元数据：{completed}/{total} 个文件|正在讀取中繼資料：{completed}/{total} 個檔案|メタデータを読み込み中：{total} 件中 {completed} 件
+Looking for files already in the backup: {completed} of {total}|正在查找备份中已有的文件：{completed}/{total}|正在尋找備份中已有的檔案：{completed}/{total}|バックアップにすでにあるファイルを検索中：{completed}/{total}
 Confirming possible duplicates: {completed} of {total} files|正在确认可能的重复文件：{completed}/{total} 个文件|正在確認可能的重複檔案：{completed}/{total} 個檔案|重複の可能性があるファイルを確認中：{total} 件中 {completed} 件
 Looking for identical files: {completed} of {total} files|正在查找相同的文件：{completed}/{total} 个文件|正在尋找相同的檔案：{completed}/{total} 個檔案|同一のファイルを検索中：{total} 件中 {completed} 件
 Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在收尾：{completed}/{total}|仕上げ中：{total} 件中 {completed} 件
@@ -194,6 +195,7 @@ Estimated share of time the drive spent reading or writing, not its capacity|硬
 Read|读取|讀取|読み込み
 Write|写入|寫入|書き込み
 Activity ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}|使用率 ≈{percent}
+Whole disk, all apps; may include metadata and receipts|整个硬盘，包含所有应用；可能含元数据和回执|整個硬碟，包含所有應用程式；可能含中繼資料和回條|ディスク全体・すべてのアプリの合計です。メタデータやレシートを含む場合があります
 Read {read} · Write {write}|读取 {read} · 写入 {write}|讀取 {read} · 寫入 {write}|読み込み {read} · 書き込み {write}
 Destinations|目标|目的地|保存先
 Copy policy|复制策略|複製策略|コピー方式
@@ -445,6 +447,12 @@ Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン
 Copying|复制|複製|コピー
 Verifying|校验|驗證|検証
+Reading|读取|讀取|読み込み
+Comparing|比较|比較|比較
+Tidying|整理|整理|整頓
+Deleting|删除|刪除|削除
+Checking folder|检查文件夹|檢查資料夾|フォルダを確認
+{stage}, {percent}%|{stage}，{percent}%|{stage}，{percent}%|{stage}、{percent}%
 Already imported|已导入|已匯入|読み込み済み
 All {count} files are in the backup and verified|全部 {count} 个文件已在备份中并通过校验|全部 {count} 個檔案已在備份中並通過驗證|{count} 件すべてがバックアップ済みで検証済みです
 All files are in the backup and verified|所有文件已在备份中并通过校验|所有檔案已在備份中並通過驗證|すべてのファイルがバックアップ済みで検証済みです
@@ -473,6 +481,7 @@ No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到�
 Full recheck|完整重新检查|完整重新檢查|すべて再確認
 Reads every organized file again, not only those changed since the last recheck.|重新读取每个已整理的文件，而不只是自上次重新检查以来有变化的文件。|重新讀取每個已整理的檔案，而不只是自上次重新檢查以來有變化的檔案。|前回の再確認以降に変わったファイルだけでなく、整理したすべてのファイルを読み直します。
 Reading organization history…|正在读取整理记录…|正在讀取整理記錄…|整理の履歴を読み込み中…
+Reading organization history is paused while a job uses the drive. It continues afterwards.|有任务正在使用该磁盘，整理记录的读取已暂停，任务结束后会继续。|有工作正在使用該磁碟，整理記錄的讀取已暫停，工作結束後會繼續。|ジョブがドライブを使用中のため、整理履歴の読み込みを一時停止しています。終了後に再開します。
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
 Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細
@@ -534,6 +543,15 @@ Reading history|正在读取历史|正在讀取歷史|履歴を読み込み中
 Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
 Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
+Reading later organizations: {completed} of {total}|正在读取较新的整理记录：{completed}/{total}|正在讀取較新的整理記錄：{completed}/{total}|新しい整理の記録を読み込み中：{total} 件中 {completed} 件
+Reading earlier organization records: {completed} of {total}|正在读取较早的整理记录：{completed}/{total}|正在讀取較早的整理記錄：{completed}/{total}|以前の整理の記録を読み込み中：{total} 件中 {completed} 件
+Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}|正在读取较早的整理：第 {journal}/{journals} 份记录，已读 {completed}/{total} 条|正在讀取較早的整理：第 {journal}/{journals} 份記錄，已讀 {completed}/{total} 筆|以前の整理を読み込み中：記録 {journal}/{journals} 件目、{total} 件中 {completed} 件
+Converting the organization record: {completed} of {total}|正在转换整理记录：{completed}/{total}|正在轉換整理記錄：{completed}/{total}|整理の記録を変換中：{total} 件中 {completed} 件
+Removing old record files: {completed} of {total}|正在删除旧的记录文件：{completed}/{total}|正在刪除舊的記錄檔案：{completed}/{total}|古い記録ファイルを削除中：{total} 件中 {completed} 件
+Measuring: {completed} files|正在测量：{completed} 个文件|正在測量：{completed} 個檔案|計測中：{completed} ファイル
+Preparing destinations: {completed} of {total}|正在准备目标位置：{completed}/{total}|正在準備目的地：{completed}/{total}|保存先を準備中：{total} 件中 {completed} 件
+Comparing the backup with the drive: {completed} of {total}|正在比较备份与磁盘：{completed}/{total}|正在比較備份與磁碟：{completed}/{total}|バックアップとドライブを比較中：{total} 件中 {completed} 件
+Loading the destination index: {size} of {totalSize}|正在加载目标索引：{size}/{totalSize}|正在載入目的地索引：{size}/{totalSize}|保存先のインデックスを読み込み中：{totalSize} 中 {size}
 Checking the destination: {completed} of {total} files|正在检查目标：{completed}/{total} 个文件|正在檢查目的地：{completed}/{total} 個檔案|保存先を確認中：{total} ファイル中 {completed} 件
 Confirming files already on the destination: {completed} of {total}|正在确认目标中已有的文件：{completed}/{total}|正在確認目的地中已有的檔案：{completed}/{total}|保存先にあるファイルを確認中：{total} 件中 {completed} 件
 Confirming files before moving: {completed} of {total}|移动前确认文件：{completed}/{total}|移動前確認檔案：{completed}/{total}|移動前にファイルを確認中：{total} 件中 {completed} 件
@@ -603,6 +621,7 @@ Not checked yet.|尚未检查。|尚未檢查。|まだ確認していません�
 No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファイルはありません。
 Clean up|清理|清理|クリーンアップ
 {count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
+{count} complete copies whose card file changed are kept: {folder}|{count} 个完整副本的存储卡文件已更改，已保留：{folder}|{count} 個完整副本的記憶卡檔案已變更，已保留：{folder}|カード上のファイルが変わった完全なコピー {count} 個を保管しています：{folder}
 Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
 Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認
@@ -611,6 +630,7 @@ Staging files from interrupted imports, organization scratch copies and camera d
 Took {time}|用时 {time}|用時 {time}|所要時間 {time}
 Estimating time left…|正在估算剩余时间…|正在估算剩餘時間…|残り時間を計算中…
 {count} files/s|{count} 个文件/秒|{count} 個檔案/秒|{count} ファイル/秒
+Verify read|校验读取|校驗讀取|検証の読み込み
 {time} left|剩余{time}|剩餘{time}|残り{time}
 {count} already in the backup|备份中已有 {count} 个|備份中已有 {count} 個|バックアップに {count} 件が既にあります
 {time} left, not counting queued sources|剩余{time}（不含排队中的来源）|剩餘{time}（不含佇列中的來源）|残り{time}（待機中のソースを除く）
@@ -924,6 +944,29 @@ JPEG|JPEG|JPEG|JPEG
 Lossy JPEG (DNG)|有损 JPEG（DNG）|有損 JPEG（DNG）|非可逆 JPEG（DNG）
 Flash fired|闪光灯已闪光|閃光燈已閃光|フラッシュ発光
 No flash|未闪光|未閃光|フラッシュなし
+Checking…|检查中…|檢查中…|確認中…
+Receiving files|正在接收文件|正在接收檔案|ファイルを受信中
+Checking folder layout|正在检查文件夹结构|正在檢查資料夾結構|フォルダー構成を確認中
+Cleaning up|正在清理|正在清理|クリーンアップ中
+from {name}|来自 {name}|來自 {name}|{name} から
+from {name} (+{count} more)|来自 {name}（另有 {count} 个）|來自 {name}（另有 {count} 個）|{name} から（ほか {count} 件）
+{completed} of {total} files|{completed}/{total} 个文件|{completed}/{total} 個檔案|{total} 件中 {completed} 件
+{completed} of {total} files · {size} of {totalSize}|{completed}/{total} 个文件 · {size}/{totalSize}|{completed}/{total} 個檔案 · {size}/{totalSize}|{total} 件中 {completed} 件 · {totalSize} 中 {size}
+Destination status|目标磁盘状态|目標磁碟狀態|保存先の状態
+Destination progress|目标磁盘进度|目標磁碟進度|保存先の進行状況
+Diagnostics|诊断|診斷|診断
+Log detail|日志详细程度|記錄詳細程度|ログの詳細度
+Detailed|详细|詳細|詳細
+Trace|跟踪|追蹤|トレース
+Nothing is recorded.|不记录任何内容。|不記錄任何內容。|何も記録しません。
+Records settings changes, job phases, every file the app deletes, and errors.|记录设置更改、任务阶段、应用删除的每个文件以及错误。|記錄設定變更、工作階段、App 刪除的每個檔案以及錯誤。|設定の変更、ジョブの段階、アプリが削除したすべてのファイル、エラーを記録します。
+Also records each file's steps and decisions, drives, memory and timing.|同时记录每个文件的处理步骤和决定、驱动器、内存及耗时。|同時記錄每個檔案的處理步驟與決定、磁碟機、記憶體及耗時。|各ファイルの処理手順と判断、ドライブ、メモリ、所要時間も記録します。
+Also records every routing decision and journal entry. Large; for troubleshooting.|同时记录每次归类决定和日志条目。体积较大，用于排查问题。|同時記錄每次歸類決定與日誌項目。體積較大，用於疑難排解。|すべての振り分け判断とジャーナルの項目も記録します。大きくなるため、問題の調査用です。
+Open log folder|打开日志文件夹|開啟記錄檔資料夾|ログフォルダを開く
+Copy latest log path|拷贝最新日志路径|拷貝最新記錄檔路徑|最新のログのパスをコピー
+Export logs…|导出日志…|匯出記錄檔…|ログを書き出す…
+Log size: {size}|日志大小：{size}|記錄檔大小：{size}|ログのサイズ：{size}
+Logs stay on this Mac. They never include file contents or recovery keys.|日志只保存在这台 Mac 上，不含文件内容或恢复密钥。|記錄檔只保存在這台 Mac 上，不含檔案內容或復原金鑰。|ログはこの Mac にのみ保存され、ファイルの内容や復元キーは含まれません。
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of rows.trim().split('\n').filter(Boolean)) {

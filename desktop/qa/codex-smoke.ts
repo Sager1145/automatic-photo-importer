@@ -8,6 +8,7 @@ import type {Action,Metadata} from '../shared';
 import {createStateReceiver,type StateUpdate} from '../state-channel';
 import {formatMessage,type Message} from '../messages';
 import {threadpoolExceeds} from './thread-pool';
+import {createStallWatch} from './stall-watch';
 const english=(message?:Message)=>message?formatMessage(message,'en'):'';
 
 export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=false,organizationOnly=false):Promise<boolean>{
@@ -15,7 +16,10 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  const report=path.join(root,'artifacts');await fs.mkdir(report,{recursive:true});
  const js=<T>(source:string)=>window.webContents.executeJavaScript(source) as Promise<T>;
  const receiver=createStateReceiver();
- const state=async()=>receiver.apply(await js<StateUpdate>('window.importer.state()'))!;
+ // Every state received is watched: nothing running may keep the same progress for 10 s (also polled, so quiet stretches are seen).
+ const stalls=createStallWatch();
+ const state=async()=>{const current=receiver.apply(await js<StateUpdate>('window.importer.state()'))!;stalls.observe(current);return current;};
+ const poller=setInterval(()=>{void state().catch(()=>{});},1000);
  const action=async(value:Action)=>{await js<void>(`window.importer.action(${JSON.stringify(value)})`);return state();};
  const wait=async(test:()=>Promise<boolean>,label:string)=>{const end=Date.now()+60000;while(Date.now()<end){if(await test())return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Timed out: ${label}`);};
  const theme=async(want:string)=>wait(()=>js<boolean>(`document.documentElement.dataset.theme===${JSON.stringify(want)}`),`theme ${want}`);
@@ -98,6 +102,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    // Fixture folders live on the internal disk, so utilization of that disk appears for the destination and in the UI.
    if(process.platform==='darwin'){await wait(async()=>{const s=await state();const first=s.preferences.destinations[0];const entry=first?s.driveActivity?.[first]:undefined;return !!entry&&entry.utilization>=0&&entry.utilization<=100&&Array.isArray(entry.history);},'drive activity for the destination');
     await wait(()=>js<boolean>("document.querySelector('[data-testid=sidebar-activity]')!==null&&document.querySelector('[data-testid=drive-activity]')!==null&&document.querySelector('.import-dashboard [data-metric=drive-activity]')!==null"),'drive activity meters');}
+   await wait(()=>js<boolean>("[...document.querySelectorAll('[data-testid=sidebar-destination]')].every(row=>row.querySelector('[data-testid=sidebar-destination-status]')?.textContent.trim().length>0)&&document.querySelector('[data-testid=sidebar-destination-status]')!==null"),'the sidebar destination status line');
    assert.equal(await js<boolean>("Array.from(document.querySelectorAll('h2')).some(h=>h.textContent.includes('Ready for your next shoot'))"),false);
    await js("document.querySelector('[data-testid=show-errors]').click()");await wait(()=>js<boolean>("document.querySelector('.activity-dialog')?.open===true"),'errors panel');await shot('all-errors');await js("document.querySelector('[data-testid=activity-close]').click()");await wait(()=>js<boolean>("document.querySelector('.activity-dialog')===null"),'animated activity close');
   });
@@ -525,6 +530,8 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
  }catch(error){failure=error;}
  finally{
   nativeTheme.themeSource=previousTheme;
+  clearInterval(poller);
+  await check('No running job, listing or recheck kept the same progress for more than 10 s',async()=>stalls.assertNone());
   try{await check('Every source original and the existing destination marker retain their exact bytes',async()=>{for(const [file,hash] of originals)assert.equal(await digest(file),hash,file);});}catch(error){failure??=error;}
   await fs.writeFile(path.join(report,'state.json'),JSON.stringify(await state(),null,2));
   await fs.writeFile(path.join(report,'report.json'),JSON.stringify({suite:organizationOnly?'organization':uiOnly?'ui':'full',passed:!failure,checks,error:failure?String(failure):undefined},null,2));

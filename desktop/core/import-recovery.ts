@@ -6,6 +6,7 @@ import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
 import {MessageError} from '../messages';
 import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,syncDirectory,syncParents} from './paths';
+import {log,logDeletion} from '../logger';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
@@ -70,7 +71,7 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
  * (size or mtime), so the copy cannot continue; a card not connected proves nothing. A source
  * volume whose device number had to be rewritten is not proven to be the same card (another one
  * may be mounted at the same path), so it is never stale. */
-export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean}>{
+export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;complete:boolean}>{
  const record=await rebaseMount((await readRecord(journal,root)).record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
@@ -80,7 +81,9 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
  const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
- return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale};
+ // complete: the staged copy is as large as its source was, so it may be the only whole copy left.
+ const complete=!!stat?.isFile()&&!!record.sourceStat&&String(stat.size)===record.sourceStat.size;
+ return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,complete};
 }
 
 /** Record exclusive creation durably before the first byte is written. */
@@ -100,7 +103,7 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
  const journal=path.join(path.dirname(file),`photo-importer-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;
  try {await handle.writeFile(JSON.stringify(sealImportRecord({...record})));await handle.sync();journalStat=await handle.stat({bigint:true});}finally{await handle.close();}
- await syncParents(journal,transfer.root);
+ log('detailed','exec','receipt-written',{kind,file,journal,source:entry.source});await syncParents(journal,transfer.root);
  remember(await receiptNames(path.dirname(journal),transfer.root,index),path.basename(journal),record);
  return {journal,journalStat,record};
 }
@@ -173,5 +176,5 @@ export async function releaseCreations(entry:PlanEntry,root:string,index:Recover
 export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
- await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
+ await fs.unlink(partial.journal);logDeletion('receipt',partial.journal,'copy receipt of a staged or published file that is finished or abandoned','the receipt is this app\'s sealed record and was unchanged since it was read (same device, inode, size and times)',{recordKind:partial.record.kind,file:partial.record.file});(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
 }

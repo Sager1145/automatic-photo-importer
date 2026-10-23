@@ -62,6 +62,8 @@ export class StepFit {
   if(gap/1000>SLEEP){window.start+=gap;gap=0;}
   window.files+=files-this.last.files;window.gb+=gb-this.last.gb;
   this.last={at:now,files,gb};
+  // Before the step's counter has first moved (a journal read, a long start) the clock does not run: the rate is measured from first movement.
+  if(this.closed===0&&window.files===0&&window.gb===0)window.start=now;
   const age=(now-window.start)/1000;
   if(age>=WINDOW&&(window.files>0||window.gb>0)){this.close(age,window.files,window.gb);this.window={start:now,files:0,gb:0};}
  }

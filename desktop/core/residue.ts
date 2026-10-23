@@ -3,16 +3,19 @@ import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
 import { INDEX_PREFIX } from './destination-index';
 import { leftoverReceipt } from './import-recovery';
-import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover } from './recovery';
+import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover, removeTree } from './recovery';
 import { checkAbort, code, contained, sameStat } from './paths';
+import { log, logDeletion } from '../logger';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
  * proven dead (identity drift, no or unauthenticated receipt, card absent); only Clean up removes it.
- * partial: a staged copy whose authenticated receipt shows its source gone or changed. */
-export type ResidueKind='partial'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary';
+ * partial: an incomplete staged copy whose authenticated receipt shows its source gone or changed.
+ * recoverable: a complete staged copy whose source on the connected card changed or vanished; it may
+ * be the only copy left, so neither the automatic check nor Clean up removes it. */
+export type ResidueKind='partial'|'recoverable'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary';
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat:BigIntStats;}
-export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};}
+export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -30,13 +33,13 @@ async function regular(file:string):Promise<BigIntStats|undefined> {
   return stat?.isFile()?stat:undefined;
 }
 /** Bytes of a folder this app made in the temporary folder; links are counted, not followed. */
-async function folderBytes(folder:string,signal?:AbortSignal):Promise<number> {
+async function folderBytes(folder:string,signal?:AbortSignal,onEntry?:(name:string)=>void):Promise<number> {
   let bytes=0;
   for(const entry of await list(folder)) {
     checkAbort(signal);
     const file=path.join(folder,entry.name);
-    if(entry.isDirectory()) bytes+=await folderBytes(file,signal);
-    else bytes+=Number((await fs.lstat(file,{bigint:true}).catch(()=>undefined))?.size??0n);
+    if(entry.isDirectory()) bytes+=await folderBytes(file,signal,onEntry);
+    else {bytes+=Number((await fs.lstat(file,{bigint:true}).catch(()=>undefined))?.size??0n);onEntry?.(entry.name);}
   }
   return bytes;
 }
@@ -44,7 +47,7 @@ async function folderBytes(folder:string,signal?:AbortSignal):Promise<number> {
 /** Staged copies, receipts and index files in one folder. A staged copy is the app's by its
  * name alone; a receipt only when it authenticates with this host's key. */
 async function importLeftovers(folder:string,entries:Dirent[],root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
-  const resumable=new Set<string>(),dead=new Set<string>(),pending:{file:string;stat:BigIntStats;target?:string;resumable:boolean}[]=[];
+  const resumable=new Set<string>(),dead=new Set<string>(),recoverable=new Set<string>(),pending:{file:string;stat:BigIntStats;target?:string;resumable:boolean}[]=[];
   for(const entry of entries) {
     if(!entry.isFile()||!receiptPattern.test(entry.name)) continue;
     checkAbort(signal);
@@ -58,40 +61,43 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
     // re-import finishes it, and it is kept even when it no longer binds the file.
     if(receipt.kind==='publication'&&receipt.present) continue;
     if(receipt.resumable&&receipt.file) resumable.add(receipt.file);
-    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) dead.add(receipt.file);
+    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) (receipt.complete?recoverable:dead).add(receipt.file);
+    if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) log('detailed','residue','classified',{file:receipt.file,kind:receipt.complete?'recoverable':'partial',reason:receipt.complete?'complete staged copy whose card file changed or vanished':'incomplete staged copy whose source changed'});
     pending.push({file,stat,resumable:receipt.resumable,...(receipt.kind==='stage'&&receipt.owned&&receipt.present&&receipt.file?{target:receipt.file}:{})});
   }
   // A receipt goes with its copy: kept while the copy is kept, removed once the copy is dead or gone.
   for(const {file,stat,target,resumable:binds} of pending)
-    items.push({path:file,kind:binds?'resumable':target&&!dead.has(target)?'kept':'receipt',bytes:Number(stat.size),root,stat});
+    items.push({path:file,kind:binds?'resumable':target&&recoverable.has(target)?'recoverable':target&&!dead.has(target)?'kept':'receipt',bytes:Number(stat.size),root,stat});
   for(const entry of entries) {
     if(!entry.isFile()) continue;
     const file=path.join(folder,entry.name),staged=stagePattern.test(entry.name);
     if(!staged&&!indexTemporary.test(entry.name)) continue;
     const stat=await regular(file);
-    if(stat) items.push({path:file,kind:!staged?'index':resumable.has(file)?'resumable':dead.has(file)?'partial':'kept',bytes:Number(stat.size),root,stat});
+    if(stat) items.push({path:file,kind:!staged?'index':resumable.has(file)?'resumable':recoverable.has(file)?'recoverable':dead.has(file)?'partial':'kept',bytes:Number(stat.size),root,stat});
   }
 }
 /** In each organization journal: staged and preserved incomplete copies (never read again; the
  * original stays at its path or among the retained originals), and folders emptied when retained
  * originals were released. Journals and retained originals are never listed. */
-async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal):Promise<void> {
+async function journalLeftovers(storage:string,root:string,items:ResidueItem[],signal?:AbortSignal,scan?:{state:ResidueScan;emit():void}):Promise<void> {
+  // Each journal read (a pointer's, a finished journal's) counts the records it reads, so the look keeps moving.
+  const reading=(label:string)=>(read:number,total:number)=>{if(!scan)return;scan.state.looked++;scan.state.file=`${label} · ${read}/${total}`;scan.emit();};
   const folder=async(item:string)=>{const stat=await fs.lstat(item,{bigint:true}).catch(()=>undefined);if(stat)items.push({path:item,kind:'folder',bytes:0,root,stat});};
   // Pointers to journals in other backup folders that are finished, undone or gone, and their crash leftovers.
-  for(const entry of await list(storage)) {
-    if(!entry.isFile()||!entry.name.startsWith('journal-')) continue;
+  const pointers=(await list(storage)).filter(entry=>entry.isFile()&&entry.name.startsWith('journal-'));
+  for(const [position,entry] of pointers.entries()) {
     checkAbort(signal);
-    const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name)?await regular(file):undefined;
+    const file=path.join(storage,entry.name),stat=await pointerLeftover(path.dirname(storage),entry.name,reading(`pointer ${position+1} of ${pointers.length}`))?await regular(file):undefined;
     if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
   }
   // A journal folder set aside by a deletion that stopped before it was gone.
   for(const entry of await list(storage)) {
     if(!entry.isDirectory()||!deletingPattern.test(entry.name)) continue;
     const aside=path.join(storage,entry.name),stat=await fs.lstat(aside,{bigint:true}).catch(()=>undefined);
-    if(stat) items.push({path:aside,kind:'organization',bytes:await folderBytes(aside,signal),root,stat});
+    if(stat) items.push({path:aside,kind:'organization',bytes:await folderBytes(aside,signal,name=>{if(scan){scan.state.looked++;scan.state.file=name;scan.emit();}}),root,stat});
   }
-  for(const job of await list(storage)) {
-    if(!job.isDirectory()||!uuid.test(job.name)) continue;
+  const journals=(await list(storage)).filter(job=>job.isDirectory()&&uuid.test(job.name));
+  for(const [position,job] of journals.entries()) {
     const jobPath=path.join(storage,job.name);
     for(const entry of await list(jobPath)) {
       checkAbort(signal);
@@ -99,7 +105,7 @@ async function journalLeftovers(storage:string,root:string,items:ResidueItem[],s
       if(stat) items.push({path:file,kind:'organization',bytes:Number(stat.size),root,stat});
     }
     // Empty slots of a pending journal are where its retained originals will go: only a finished journal's are leftovers.
-    if(!await journalTerminal(path.dirname(storage),job.name)) continue;
+    if(!await journalTerminal(path.dirname(storage),job.name,reading(`journal ${position+1} of ${journals.length}`))) continue;
     const originals=path.join(jobPath,'originals');let emptied=true,any=false;
     for(const index of await list(originals)) {
       any=true;
@@ -127,7 +133,7 @@ async function walk(folder:string,root:string,items:ResidueItem[],signal?:AbortS
   for(const entry of entries) {
     if(!entry.isDirectory()) continue;
     const child=path.join(folder,entry.name);
-    if(isRecoveryName(entry.name)) await journalLeftovers(child,root,items,signal);
+    if(isRecoveryName(entry.name)) await journalLeftovers(child,root,items,signal,scan);
     // Other hidden folders (.Trashes, .Spotlight-V100, .mirror-removed…) are not this app's to clean.
     else if(!entry.name.startsWith('.')) await walk(child,root,items,signal,scan);
     if(scan&&top){scan.state.done++;scan.state.file=path.relative(root,child);scan.emit();}
@@ -168,22 +174,25 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
 function summary(items:ResidueItem[]):Residue {
   const resumable=items.filter(item=>item.kind==='resumable'||item.kind==='kept');
   const sum=(list:ResidueItem[])=>list.reduce((total,item)=>total+item.bytes,0);
-  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)}};
+  // Counted by staged copy; the receipts that go with them are kept too but are not copies.
+  const kept=items.filter(item=>item.kind==='recoverable'&&stagePattern.test(path.basename(item.path)));
+  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:kept.length,bytes:sum(kept),...(kept[0]?{folder:path.dirname(kept[0].path)}:{})}};
 }
 
+const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':'leftover of an interrupted run (staging file, receipt or scratch file)';
 /** Remove what findResidue listed, each only while it is still the very file or folder found.
  * Folders go only when empty. keepResumable leaves copies a re-import could continue and those not
- * proven dead. */
+ * proven dead. Recoverable copies are always left. */
 export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
   // Only what this run removes counts toward the total: kept copies are not work.
-  const doomed=residue.items.filter(item=>!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
+  const doomed=residue.items.filter(item=>item.kind!=='recoverable'&&!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
   let handled=0,handledBytes=0;
   options.onProgress?.(0,doomed.length,0,doomedBytes,'');
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
-    if(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) continue;
+    if(item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':'copy a re-import could continue'});continue;}
     handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);
@@ -191,13 +200,15 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
       if(item.kind==='folder'||item.kind==='temporary'||item.stat.isDirectory()) {
         if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
         // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
-        if(item.kind==='folder') await fs.rmdir(item.path); else await fs.rm(item.path,{recursive:true});
+        if(item.kind==='folder') await fs.rmdir(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
+        logDeletion('residue',item.path,residueReason(item.kind),item.kind==='folder'?'directory is still the one found by the scan (same device and inode) and rmdir only removes empty folders':`directory is still the one found by the scan (same device and inode) and is this app's own ${item.kind==='temporary'?'temporary':'set-aside'} folder, not in use`,{kind:item.kind,bytes:item.bytes,folder:true});
       } else {
         if(!now.isFile()||!sameStat(now,item.stat)) continue;
         await fs.unlink(item.path);
+        logDeletion('residue',item.path,residueReason(item.kind),'file is still the one found by the scan: same device, inode, size and modification time',{kind:item.kind,bytes:item.bytes});
       }
       left.pop();removed.files++;removed.bytes+=item.bytes;
-    } catch { /* Gone, changed, in use or unavailable: left for a later check. */ }
+    } catch(error) { log('detailed','residue','left',{path:item.path,kind:item.kind,error}); /* Gone, changed, in use or unavailable: left for a later check. */ }
     options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path));
   }
   return {removed,left:summary(left)};

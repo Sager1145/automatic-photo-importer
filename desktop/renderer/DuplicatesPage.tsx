@@ -5,7 +5,7 @@ import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, 
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
-import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, showSheet, useAnimatedClose, type DeleteRecoveryStep } from './RootApp';
+import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, type DeleteRecoveryStep } from './RootApp';
 
 type Dispatch = (action: Action) => void;
 /** Groups shown per page: only these are drawn and only their previews are fetched, so thousands of groups stay responsive. */
