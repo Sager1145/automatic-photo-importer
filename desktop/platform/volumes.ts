@@ -161,8 +161,8 @@ async function enumerateVolumes():Promise<MountedVolume[]> {
         return parseMacPhysicalStores(await plistJSON(stdout));
       });
     }catch{/* A virtual filesystem without physical-store resolution cannot prove drive independence. */}
-    for(const volume of volumes)volume.physicalId=resolveMacPhysicalIdentity(volume,physical);
-    return volumes;
+    // Copies: the described volumes are remembered between refreshes, and a resolved identity must not be resolved again.
+    return volumes.map(volume=>({...volume,physicalId:resolveMacPhysicalIdentity(volume,physical)}));
   }
   if(process.platform==='win32')return windowsVolumes();
   if(process.platform==='linux')return linuxVolumes();

@@ -168,6 +168,12 @@ Verified|已校验|已驗證|検証済み
 Capacity unavailable over USB|USB 连接不提供容量信息|USB 連接不提供容量資訊|USB経由では容量を取得できません
 Capacity unavailable|容量信息不可用|容量資訊無法取得|容量を取得できません
 Storage used|已用空间|已用空間|使用済み容量
+Drive activity|硬盘使用率|硬碟使用率|ドライブの使用率
+Share of time the drive spent reading or writing, not its capacity|硬盘用于读写的时间占比，不是容量|硬碟用於讀寫的時間占比，不是容量|ドライブが読み書きに使った時間の割合です（容量ではありません）
+Read|读取|讀取|読み込み
+Write|写入|寫入|書き込み
+Activity {percent}|使用率 {percent}|使用率 {percent}|使用率 {percent}
+Read {read} · Write {write}|读取 {read} · 写入 {write}|讀取 {read} · 寫入 {write}|読み込み {read} · 書き込み {write}
 Destinations|目标|目的地|保存先
 Copy policy|复制策略|複製策略|コピー方式
 One destination|单一目标|單一目的地|1つの保存先
