@@ -29,7 +29,7 @@ import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
 import {deviceHasRoom} from './core/devices';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
-import {loadPlacement,placedMatches,placementId,rememberEntries,replacePlacement} from './platform/placement-memory';
+import {loadPlacement,placedMatches,placedOutcomes,placementId,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting,embeddedPreview} from './platform/metadata';
 import {thumbnail,systemDecoders} from './platform/thumbnails';
@@ -477,9 +477,7 @@ function rememberPlaced(plans:TransferPlan[],prefs:Preferences,outcomes:Outcomes
     if(plan.drive||!prefs.destinations[index])continue;
     const {library,id,scope}=placementOf(prefs,index,useFileDate);
     if(!outcomes){await replacePlacement(app.getPath('userData'),id,scope,[]);continue;}
-    // A file found where older rules filed it is not where the rules put it.
-    const placed=[...outcomes.values()].flat().filter(item=>item.destinationSlot===index&&item.disposition!=='routed');
-    await rememberEntries(app.getPath('userData'),id,scope,library.source,[library.root,...(library.videoRoot?[library.videoRoot]:[])],placed);
+    await rememberEntries(app.getPath('userData'),id,scope,library.source,[library.root,...(library.videoRoot?[library.videoRoot]:[])],placedOutcomes(outcomes.values(),index));
    }
   }finally{inspecting--;void releaseIfIdle();}
  }).catch(()=>{/* Only a cache: the next check reads everything. */});

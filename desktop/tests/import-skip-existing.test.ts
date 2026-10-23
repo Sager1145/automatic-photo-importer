@@ -4,10 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery,RECOVERY_FOLDER,type PlanProgress} from '../core';
-import {placedEntries} from '../core/allocation';
+import {placedOutcomes} from '../platform/placement-memory';
 import {dropDestinationIndexes} from '../core/destination-index';
 import {recordPartial} from '../core/import-recovery';
-import type {Metadata,PlanEntry,TransferPlan} from '../shared';
+import type {Metadata,TransferPlan} from '../shared';
 import {stagePathFor} from './fixtures/receipts';
 import {randomUUID} from 'node:crypto';
 
@@ -126,9 +126,9 @@ test('a copy inside the recovery store never counts',async t=>{
 });
 
 test('files found elsewhere are not remembered as placed',()=>{
- const entry=(id:string,routed?:string):PlanEntry=>({id,source:id,destination:'/d/'+id,size:1,kind:'Photos' as PlanEntry['kind'],skip:true,family:id,...(routed?{routed}:{})});
- const transfer:TransferPlan={source:'/s',root:'/d',rootIdentity:'x',entries:[entry('a'),entry('b','/d/new/b')],videos:{source:'/s',root:'/v',rootIdentity:'y',entries:[entry('c','/v/new/c'),entry('e')]}};
- assert.deepEqual(placedEntries(transfer).map(item=>item.id),['a','e']);
+ const outcome=(destination:string,destinationSlot:number,disposition:string)=>({destination,destinationSlot,disposition,size:1});
+ const outcomes=[[outcome('/d/a',0,'existing'),outcome('/e/a',1,'published')],[outcome('/d/old/b',0,'routed')],[outcome('/v/c',0,'published')]];
+ assert.deepEqual(placedOutcomes(outcomes,0).map(item=>item.destination),['/d/a','/v/c']);
 });
 
 test('the lookup reports a counter that moves to the number of files looked up',async t=>{
