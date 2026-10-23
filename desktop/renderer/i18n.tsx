@@ -187,6 +187,11 @@ Converting cached records|正在转换缓存记录|正在轉換快取記錄|キ�
 Tidying old record folders|正在整理旧记录文件夹|正在整理舊記錄資料夾|古い記録フォルダーを整理中
 Records from the earlier version|早期版本的记录|早期版本的記錄|以前のバージョンの記録
 Records conversion progress|记录转换进度|記錄轉換進度|記録変換の進行状況
+Pause conversion|暂停转换|暫停轉換|変換を一時停止
+Resume conversion|继续转换|繼續轉換|変換を再開
+Conversion paused|转换已暂停|轉換已暫停|変換を一時停止中
+Earlier records are converted once the drive is idle|驱动器空闲后将转换早期记录|磁碟閒置後將轉換早期記錄|ドライブが空いたら以前の記録を変換します
+Conversion is paused until you resume it or restart the app.|转换已暂停，直到你继续转换或重新启动应用。|轉換已暫停，直到你繼續轉換或重新啟動 App。|再開するかアプリを再起動するまで、変換は一時停止します。
 {count} could not be converted and were left as they are:|{count} 项无法转换，已保持原样：|{count} 項無法轉換，已保持原樣：|{count} 件は変換できなかったため、そのままにしました：
 Records an earlier version of this app wrote on a drive are converted into its Photo Importer Data folder while nothing else uses the drive. Organizing a library waits until its records are converted; imports go on.|本应用早期版本在驱动器上写入的记录，会在驱动器空闲时转换到该驱动器的 Photo Importer Data 文件夹中。整理资料库需等待其记录转换完成；导入照常进行。|本 App 早期版本在磁碟上寫入的記錄，會在磁碟閒置時轉換到該磁碟的 Photo Importer Data 資料夾中。整理資料庫需等待其記錄轉換完成；匯入照常進行。|このアプリの以前のバージョンがドライブに書き込んだ記録は、ドライブがほかに使われていないときに、そのドライブの Photo Importer Data フォルダーへ変換されます。ライブラリの整理は記録の変換が終わるまで待ちます。読み込みはそのまま続きます。
 {count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。

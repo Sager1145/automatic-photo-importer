@@ -55,6 +55,7 @@ import {sourcePolicy,freshOrganizeOptions} from './run-policy';
 import {measureOriginals,deleteOriginals,type VerifiedOriginal} from './core/originals';
 import {filePath,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
+import {migrationGate} from './migration-gate';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
 import {PhaseLog,TopologyLog,ActivityLog,logProgress} from './job-log';
 import {exportLogs} from './log-export';
@@ -253,7 +254,7 @@ function refreshOrganizations():Promise<void>{
 /** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
 function yieldListing(){
  // The converter gives way to any job at once; each step finishes from what is on disk, so it picks up later.
- if(jobsActive()&&migrationControl&&!migrationControl.signal.aborted){log('normal','migrate','stop',{reason:'a job needs the drive'});migrationControl.abort();}
+ if(jobsActive())migrationAbort('a job needs the drive');
  if(listingControl){if(!listingControl.signal.aborted&&drivesInUse()){log('detailed','listing','yield',{reason:'a job needs the drive; what was read is kept'});listingControl.abort();}}
  else if(!drivesInUse()){if(state.organizationRecoveryPaused)log('detailed','listing','resume',{reason:'no job is using the drive'});recoveryRefresh.resume();}
 }
@@ -387,7 +388,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size||dupl
  // Folders on one physical device share its stream limit; jobs on other devices still run in parallel.
  const job=nextRunnable(state.jobs,sourceOrder,item=>deviceHasRoom(item.source.drive,running));if(!job)break;
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
- organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();migrationControl?.abort();const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
+ organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);cancelAutomaticChecks();misplacedControl?.abort();residueControl?.abort();migrationAbort('a job started');const control=new AbortController();active.set(job.id,control);if(organization)organizationJobIds.add(job.id);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
  void settle(withJob(job.id,()=>run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...skip}))).finally(()=>{void duplicatesStale(touchedLibraries.get(job.id)??[]);touchedLibraries.delete(job.id);if(job.phase==='error')job.retryable=true;delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);if(!organization&&job.phase==='complete')organizeAfterImport=true;emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();});
  if(organization)break;
@@ -520,11 +521,17 @@ function checkResidue(all:boolean):Promise<void>{
  residueTask=task;return task;
 }
 /** Anything about to write waits for a running cleanup to stop. */
-async function stopResidueCheck(){residueControl?.abort();await residueTask;migrationControl?.abort();await migrationTask;}
+async function stopResidueCheck(){residueControl?.abort();await residueTask;migrationAbort('a check needs the drive');await migrationTask;}
 // Records v5: what an earlier version wrote on each connected destination is converted into its "Photo Importer
 // Data" folder while nothing else uses the drive. A job starting stops it; every step finishes from what is on
 // disk, so the next idle moment picks it up where it stopped.
-let migrationControl:AbortController|undefined,migrationTask:Promise<void>|undefined;
+let migrationControl:AbortController|undefined,migrationTask:Promise<void>|undefined,migrationTimer:NodeJS.Timeout|undefined;
+/** Not on the first refresh: 30 s after launch, and 30 s after the app or the drive was last busy; never while paused. */
+const migrationStart=migrationGate();
+/** A drive busy with other I/O (another app copying) counts as in use. */
+const MIGRATION_BUSY_UTILIZATION=0.25;
+/** Stop the converter (a job needs the drive, the user paused it, the app quits); it goes on from what is on disk later. */
+function migrationAbort(reason:string){migrationStart.busy();if(migrationControl&&!migrationControl.signal.aborted){log('normal','migrate','stop',{reason});migrationControl.abort();}}
 /** Drives (path and volume) converted, or found with nothing to convert, while connected: looked at again only once
  * reconnected or after a restart, so what the converter must leave alone is not looked at every few seconds. */
 const migrationChecked=new Set<string>();
@@ -546,21 +553,29 @@ async function migrationDrives():Promise<{drive:string;key:string;roots:string[]
  return [...drives].map(([drive,entry])=>({drive,...entry}));
 }
 function scheduleMigration(){
- if(qa||hardwareTest||quitting||migrationTask||!migrationIdle())return;
+ if(qa||hardwareTest||quitting||migrationTask)return;
+ const busyDrive=state.preferences.destinations.some(drive=>(state.driveActivity?.[drive]?.utilization??0)>=MIGRATION_BUSY_UTILIZATION);
+ if(!migrationIdle()||busyDrive){migrationStart.busy();return;}
+ const wait=migrationStart.wait();
+ if(wait>0){if(wait!==Infinity&&!migrationTimer){migrationTimer=setTimeout(()=>{migrationTimer=undefined;scheduleMigration();},wait);migrationTimer.unref();}return;}
  const control=new AbortController();migrationControl=control;let changed=false,ran=false;
  const task:Promise<void>=(async()=>{
   const drives=await migrationDrives(),connected=new Set(drives.map(item=>item.key));
   for(const key of [...migrationChecked])if(!connected.has(key))migrationChecked.delete(key);
+  if(state.migrationWaiting)state.migrationWaiting=state.migrationWaiting.filter(drive=>drives.some(item=>item.drive===drive));
   for(const {drive,key,roots,walk} of drives){
    if(control.signal.aborted)return;
    if(migrationChecked.has(key))continue;
    if(!(await Promise.all(roots.map(root=>needsConversion(root,walk.includes(root)).catch(()=>false)))).some(Boolean)){migrationChecked.add(key);continue;}
+   if(!(state.migrationWaiting??=[]).includes(drive))state.migrationWaiting.push(drive);
    ran=true;state.migration={drive,step:'looking',completed:0,total:0,file:''};emit();
+   log('normal','migrate','start',{drive,folders:roots.length});
    const result=await migrateDrive(roots,{signal:control.signal,walk,onProgress:progress=>{state.migration={drive,...progress};progressEmit();}});
-   changed||=result.converted>0;migrationChecked.add(key);
+   log('normal','migrate','finish',{drive,converted:result.converted,kept:result.problems.length});
+   changed||=result.converted>0;migrationChecked.add(key);state.migrationWaiting=state.migrationWaiting.filter(item=>item!==drive);
    if(result.problems.length)(state.migrationProblems??={})[drive]=result.problems;else if(state.migrationProblems)delete state.migrationProblems[drive];
   }
- })().catch(error=>{if(!control.signal.aborted)state.error=message('error.migration',{error:toMessage(error)});}).finally(()=>{
+ })().catch(error=>{if(!control.signal.aborted){log('normal','migrate','abort',{error:toMessage(error)});state.error=message('error.migration',{error:toMessage(error)});}}).finally(()=>{
   if(migrationControl===control)migrationControl=undefined;if(migrationTask===task)migrationTask=undefined;
   if(!ran)return;
   delete state.migration;emit();
@@ -806,7 +821,7 @@ async function scanDuplicatesAction(){
  const root=dup.root,scope=root?duplicateScope(root):undefined;
  if(!root||!scope)throw new MessageError('error.duplicatesScope');
  if(busy()||state.review||state.busyReview||duplicateControl)throw new MessageError('error.busy');
- const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();migrationControl?.abort();
+ const control=new AbortController();duplicateControl=control;cancelAutomaticChecks();misplacedControl?.abort();migrationAbort('Remove duplicates started');
  dup.status='scanning';dup.result=undefined;dup.progress=undefined;emit();
  try{
   await stopResidueCheck();
@@ -998,6 +1013,8 @@ async function action(input:Action):Promise<void>{
   case 'clearErrors':clearErrors(errorLog,state,undefined,input.severity==='error'||input.severity==='warning'?input.severity:undefined);break;
   case 'refresh':await refresh();break;
   case 'logOpenFolder':{const logger=activeLogger();if(!logger)break;const target=await logger.latest();if(target)shell.showItemInFolder(target);else await shell.openPath(logger.directory);break;}
+  case 'pauseMigration':{migrationStart.pause();state.migrationPaused=true;log('normal','migrate','paused',{running:!!migrationTask});migrationAbort('paused by the user');emit();break;}
+  case 'resumeMigration':{migrationStart.resume();delete state.migrationPaused;log('normal','migrate','resumed',{});emit();scheduleMigration();break;}
   case 'logCopyPath':{const latest=await activeLogger()?.latest();if(latest)clipboard.writeText(latest);break;}
   case 'logExport':{
    const logger=activeLogger();if(!logger)break;await logger.flush();
@@ -1144,7 +1161,7 @@ app.whenReady().then(()=>powerMonitor.on('shutdown',()=>{quitting=true;})).catch
 app.on('before-quit',event=>{
  if(!quitting&&!closing)log('normal','app','quit',{runningJobs:active.size});
  if(timer)clearInterval(timer);cancelAutomaticChecks();
- for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();migrationControl?.abort();reviewControl?.abort();duplicateControl?.abort();
+ for(const control of active.values())control.abort();for(const control of scanControls.values())control.abort();misplacedControl?.abort();residueControl?.abort();migrationAbort('quitting');reviewControl?.abort();duplicateControl?.abort();
  // A quit the closing step started, or a system shutdown, goes through; another quit meanwhile waits for it.
  if(!quitting&&closing){event.preventDefault();return;}
  if(!quitting){

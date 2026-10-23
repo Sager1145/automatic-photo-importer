@@ -263,6 +263,11 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .sidebar-capacity-text{position:relative;display:block;margin:0 .75rem 0 2.35rem;font-size:var(--text-caption);line-height:1.25;color:var(--label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .sidebar-capacity-text .capacity-short{display:none}
 .sidebar-migration{color:var(--accent);margin-top:.15rem}
+.sidebar-migration-line{display:flex;align-items:center;gap:.25rem;min-width:0}
+.sidebar-migration-line>.sidebar-capacity-text{flex:1 1 auto;min-width:0;margin-right:0}
+.sidebar-migration-line>.button{flex:none;margin-right:.5rem}
+.sidebar-migration-line[data-paused] .sidebar-migration{color:var(--label-secondary)}
+.records-conversion-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem}
 /* Hidden but still laid out, so its natural width can be measured. */
 .sidebar-capacity-text.is-compact .capacity-full{position:absolute;left:0;visibility:hidden;pointer-events:none}
 .sidebar-capacity-text.is-compact .capacity-short{display:inline}
