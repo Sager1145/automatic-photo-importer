@@ -1165,15 +1165,16 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     const sha=await resolve(entry);
     // Reported once the stale stage is gone too: one hard-linked to this file moves its change time.
     const settled=async()=>run.emit(outcomeOf(run,entry,destination,sha,entry.routed!==undefined?'routed':'existing','content-verified',await vouched(index,destination,sha)));
-    if(await finishDirect(entry,destination,sha,transfer,recovery,signal)) result.copied++;
-    else {
+    const finished=await finishDirect(entry,destination,sha,transfer,recovery,signal);
+    if(!finished) {
       await syncFile(destination);await syncParents(destination,root);
       const recovered=await findPartial('publication',{...entry,destination},root,recovery,signal);if(recovered)await clearPartialRecord(recovered,root,recovery);
       await releaseCreations({...entry,destination},root,recovery);
-      result.skipped++;
     }
-    if(entry.routed!==undefined)result.routed=(result.routed??0)+1;
     await releaseStaleStage({...entry,destination,digest:sha},root,recovery,signal).finally(settled);
+    // Counted only once its family's step here is done, so a failed family is never counted as found.
+    if(finished)result.copied++;else result.skipped++;
+    if(entry.routed!==undefined)result.routed=(result.routed??0)+1;
     hooks.done(entry);
   };
   /** Create the name (or take up the unfinished file already there) and bind it to a receipt. Throws NOT_DIRECT after undoing its own creation when the volume reports no birth time. */

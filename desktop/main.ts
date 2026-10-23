@@ -774,7 +774,8 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    settled:index=>{reserved[index].bytes=0;}
   });}finally{
    // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails. Only a cache.
-   if(volume&&!qa)await rememberImported(app.getPath('userData'),volume,job.source.path,importedSums(outcomes)).catch(()=>{});
+   const sums=importedSums(outcomes);
+   if(volume&&!qa&&Object.keys(sums).length)await rememberImported(app.getPath('userData'),volume,job.source.path,sums).catch(()=>{});
   }
   const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=executed;
   addErrors(job,...errors.map(text));recordIssues(job,warnings);
