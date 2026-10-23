@@ -539,7 +539,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .review-checksum-pending{font-family:var(--font-sans);font-style:italic;color:var(--label-tertiary)}
 .review-pagination{display:flex;align-items:center;justify-content:space-between;gap:1rem;font-size:var(--text-footnote);color:var(--label-secondary)}
 .review-pagination div{display:flex;gap:.4rem}
-.review-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem 1rem;padding-top:.25rem}
+.review-footer{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem 1rem;margin:0 calc(var(--card-pad-x,1.35rem)*-1) calc(var(--card-pad-y,1.25rem)*-1);padding:.75rem var(--card-pad-x,1.35rem);background:var(--surface);border-radius:0 0 var(--radius-xl) var(--radius-xl);box-shadow:0 -1px 0 var(--separator)}
+.review-panel .review-table-scroll{max-height:max(10rem,calc(100vh - 26rem))}
 .review-footer>span{display:inline-flex;align-items:center;gap:.45rem;font-size:var(--text-footnote);color:var(--label-secondary)}
 .review-footer>span svg{flex:none;color:var(--success)}
 .review-footer>div{display:flex;gap:.5rem}
