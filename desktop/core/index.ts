@@ -701,7 +701,8 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
     try {
       if(!owned||creating){
         await output.sync();owned=await recordPartial('publication',destination,await output.stat({bigint:true}),publicationEntry,transfer,recovery);
-        // The creation receipt stays until the copy is complete (releaseCreations below); it no longer binds once data is written.
+        // The creation receipt only covers receipt -> wx -> this receipt; its name-only binding ends here.
+        if(creating) await clearPartialRecord(creating,transfer.root,recovery);
       }
       await streams.run([staged.file,destination],async chunk=>{
       const input=await regularHandle(staged.file),buffer=Buffer.allocUnsafe(chunk);let position=Number((await output.stat({bigint:true})).size);
@@ -724,8 +725,9 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
     const after=await fs.lstat(destination,{bigint:true});bound=sameStat(before,after)?after:undefined;
   }
   await syncParents(destination,transfer.root);
-  if(owned)await clearPartialRecord(owned,transfer.root,recovery);
+  // One step: every publication receipt for this destination goes, so a crash cannot leave one beside the finished file.
   await releaseCreations(publicationEntry,transfer.root,recovery);
+  if(owned)await clearPartialRecord(owned,transfer.root,recovery).catch(error=>{if(code(error)!=='ENOENT')throw error;});
   return bound;
 }
 export interface ExecutionResult {copied:number;skipped:number;removed?:number;errors:string[];}
