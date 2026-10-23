@@ -46,11 +46,11 @@ test('clearing hides one error or all of them without changing any job',()=>{
  const before=structuredClone(value.jobs);
  const [app,a,b]=gatherErrors(value);
  log.update(gatherErrors(value));
- clearErrors(log,value,a!.id);
+ clearErrors(log,value,{ids:[a!.id]});
  assert.deepEqual(log.update(gatherErrors(value)).cleared,[a!.id]);
  assert.deepEqual(value.jobs,before,'jobs keep their errors and phase');
  assert.ok(value.error,'clearing a job error leaves the app error');
- clearErrors(log,value,app!.id);
+ clearErrors(log,value,{ids:[app!.id]});
  assert.equal(value.error,undefined,'clearing the app error clears it at the source');
  clearErrors(log,value);
  assert.deepEqual(log.update(gatherErrors(value)).cleared.sort(),[a!.id,b!.id].sort());
@@ -60,7 +60,7 @@ test('clearing hides one error or all of them without changing any job',()=>{
 test('an error that goes away and comes back is shown again with a new time',()=>{
  const log=new ErrorLog(),with_=state({destinationStatus:[{path:'/Volumes/A006',available:false,detail:'Not mounted'}]}),without=state();
  const [error]=gatherErrors(with_);
- log.update(gatherErrors(with_),new Date('2026-10-22T09:00:00Z'));clearErrors(log,with_,error!.id);
+ log.update(gatherErrors(with_),new Date('2026-10-22T09:00:00Z'));clearErrors(log,with_,{ids:[error!.id]});
  assert.deepEqual(log.update(gatherErrors(with_)).cleared,[error!.id]);
  log.update(gatherErrors(without));
  const back=log.update(gatherErrors(with_),new Date('2026-10-22T10:00:00Z'));
@@ -121,7 +121,7 @@ test('sidebar sources and destinations with errors show a live count that opens 
   assert.equal((panel.match(/data-testid="error-clear"/g)??[]).length,2,`${language}: filtered to the drive`);
   assert.ok(panel.includes(t('Errors for {name}',{name:'Untitled'}))&&panel.includes(t('Show all errors')),`${language}: filter is named and can be removed`);
  }
- clearErrors(log,value,errors[0]!.id);clearErrors(log,value,errors[1]!.id);value.errorLog=log.update(gatherErrors(value));errors=collectErrors(value);
+ clearErrors(log,value,{ids:[errors[0]!.id!]});clearErrors(log,value,{ids:[errors[1]!.id!]});value.errorLog=log.update(gatherErrors(value));errors=collectErrors(value);
  const sources=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
  assert.ok(!sources.includes('sidebar-errors'),'the badge goes once its errors are cleared');
 });

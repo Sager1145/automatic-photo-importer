@@ -476,7 +476,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 		});
 		await check("Read-only inventories for all storage sources", async () => {
 			const previous = new Map(sources.map((source) => [source.id, getState().sourceInventories?.[source.id]]));
-			await send({ type: "scanSources" });
+			await send({ type: "scan" });
 			const deadline = Date.now() + 12e4;
 			await wait(() => sources.every((source) => {
 				const current = getState().sourceInventories?.[source.id];

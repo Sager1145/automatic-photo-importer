@@ -105,7 +105,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    await wait(()=>js<boolean>("document.querySelectorAll('details.source-disclosure').length===6"),'source card disclosures');
    assert.equal(await js<boolean>("Array.from(document.querySelectorAll('details.source-disclosure')).every(details=>!details.open)"),true,'Drive details must start collapsed');
    assert.equal(await js<boolean>("document.querySelector('#parallel-source-limit').closest('.section-heading').contains(document.querySelector('#source-heading'))&&document.querySelector('.concurrency-control')===null"),true,'Parallel limit belongs in the source heading row');
-   const before=(await state()).jobs.length;await action({type:'scanSource',sourceId:'fixture:1'});await action({type:'stop'});await wait(async()=>!(await state()).scanningSources?.length,'scan cancellation');await action({type:'scanSource',sourceId:'fixture:1'});
+   const before=(await state()).jobs.length;await action({type:'scan',sourceId:'fixture:1'});await action({type:'stop'});await wait(async()=>!(await state()).scanningSources?.length,'scan cancellation');await action({type:'scan',sourceId:'fixture:1'});
    await wait(async()=>!!(await state()).sourceInventories?.['fixture:1'],'media scan');
    const scan=(await state()).sourceInventories!['fixture:1'];assert.equal(scan.media,2);assert.equal((await state()).jobs.length,before);
    await wait(()=>js<boolean>("document.querySelector('[data-testid=source-media-summary][data-source-id=\"fixture:1\"]')!==null"),'scanned card content');
@@ -304,7 +304,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    }catch(error){editedFolderFailure=error;console.error('Edited folder QA original failure:',error);throw error;}finally{
     try{
     await js("document.activeElement?.blur()");
-    await action({type:'clearError'});await action({type:'preferences',patch:{editedFolder:'editied',language:'en'}});
+    await action({type:'clearErrors'});await action({type:'preferences',patch:{editedFolder:'editied',language:'en'}});
     await wait(()=>js<boolean>("document.querySelector('input[placeholder=\"editied\"]')?.value==='editied'&&document.querySelector('[data-testid=edited-export-preview]')?.textContent.includes('2026202610editiedNikon Z6III')"),'restored edited exports folder');
     await js("Array.from(document.querySelectorAll('.nav-item')).find(button=>button.textContent.trim()==='Import desk').click()");await wait(()=>js<boolean>("document.querySelector('.window-titlebar h1').textContent==='Import desk'"),'navigation committed');
     }catch(cleanupError){if(editedFolderFailure)throw new AggregateError([editedFolderFailure,cleanupError],'Edited folder check and restoration both failed');throw cleanupError;}
@@ -498,7 +498,7 @@ export async function runCodexSmoke(window:BrowserWindow,root:string,uiOnly=fals
    const previous=new Set((await state()).jobs.map(job=>job.id));await js("Promise.all([window.importer.action({type:'applyReview'}),window.importer.action({type:'applyReview'})])");await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'organization finish');
    assert.equal((await state()).jobs.filter(job=>!previous.has(job.id)).length,1,'Double Apply must create only one organization job');
    await action({type:'refreshOrganization'});const recovery=(await state()).organizationRecovery?.find(job=>job.status==='complete');assert.ok(recovery,JSON.stringify((await state()).jobs));
-   const beforeResume=new Set((await state()).jobs.map(job=>job.id));await js(`Promise.all([window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})}),window.importer.action(${JSON.stringify({type:'resumeOrganization',id:recovery.id,root:recovery.root})})])`);await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'recheck finish');assert.equal((await state()).jobs[0].phase,'complete',english((await state()).jobs[0].detail));assert.equal((await state()).jobs.filter(job=>!beforeResume.has(job.id)).length,1,'Double Resume must create only one recovery job');await action({type:'clearError'});
+   const beforeResume=new Set((await state()).jobs.map(job=>job.id));await js(`Promise.all([window.importer.action(${JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root})}),window.importer.action(${JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root})})])`);await wait(async()=>!(await state()).jobs.some(job=>['queued','discovering','verifying','copying'].includes(job.phase)),'recheck finish');assert.equal((await state()).jobs[0].phase,'complete',english((await state()).jobs[0].detail));assert.equal((await state()).jobs.filter(job=>!beforeResume.has(job.id)).length,1,'Double Resume must create only one recovery job');await action({type:'clearErrors'});
   });
   await check('One-click organization executes through the public app action and writes real execution reports',async()=>{
    await action({type:'preferences',patch:{basePath:'oneclick-library'}});

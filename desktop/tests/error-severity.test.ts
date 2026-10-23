@@ -35,16 +35,16 @@ test('clearing one severity never clears the other',()=>{
  const all=gatherErrors(value),errors=all.filter(item=>item.severity==='error'),warns=all.filter(item=>item.severity==='warning');
  assert.equal(errors.length,2);assert.equal(warns.length,2);
  log.update(all);
- clearErrors(log,value,undefined,'warning');
+ clearErrors(log,value,{severity:'warning'});
  assert.deepEqual(log.update(gatherErrors(value)).cleared.sort(),warns.map(item=>item.id).sort(),'only warnings cleared');
  assert.ok(value.error,'the app error is untouched');
- clearErrors(log,value,errors[0]!.id,'warning');
+ clearErrors(log,value,{ids:[errors[0]!.id],severity:'warning'});
  assert.equal(log.update(gatherErrors(value)).cleared.length,2,'a warning-scoped clear ignores an error id');
- clearErrors(log,value,undefined,'error');
+ clearErrors(log,value,{severity:'error'});
  assert.equal(value.error,undefined);
  assert.equal(log.update(gatherErrors(value)).cleared.length,3,'the app error is gone, the rest are cleared');
  const other=new ErrorLog();other.update(all);
- clearErrors(other,value,undefined,'error');
+ clearErrors(other,value,{severity:'error'});
  assert.deepEqual(other.update(gatherErrors(value)).cleared.sort(),errors.filter(item=>item.kind!=='app').map(item=>item.id).sort(),'only errors cleared');
 });
 

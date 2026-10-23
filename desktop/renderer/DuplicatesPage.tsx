@@ -149,12 +149,12 @@ export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecov
         {retained > 0 && <p className="muted"><Icon icon={Info} size={14} />{t("{count} originals ({size}) kept for undo.", { count: formatNumber(retained), size })}</p>}
         {job.error && <p className="field-error">{job.error}</p>}
         <div className="rule-actions">
-          {job.undoable && <Button icon={RotateCcw} disabled={busy} data-testid="duplicates-undo" onClick={() => act({ type: 'undoOrganization', root: job.root, id: job.id })}>{t("Undo")}</Button>}
+          {job.undoable && <Button icon={RotateCcw} disabled={busy} data-testid="duplicates-undo" onClick={() => act({ type: 'recovery', op: 'undo', root: job.root, id: job.id })}>{t("Undo")}</Button>}
           {retained > 0 && <Button icon={Trash2} disabled={busy || !job.finalizable} data-testid="duplicates-release" onClick={() => setReleasing(job)}>{t("Release {size}", { size })}</Button>}
         </div>
       </article>;
     })}</div>}
-    {releasing && <ReleaseConfirm size={formatBytes(releasing.retainedBytes ?? 0)} root={releasing.root} onCancel={() => setReleasing(undefined)} onConfirm={() => { act({ type: 'finalizeOrganization', root: releasing.root, id: releasing.id }); setReleasing(undefined); }} />}
+    {releasing && <ReleaseConfirm size={formatBytes(releasing.retainedBytes ?? 0)} root={releasing.root} onCancel={() => setReleasing(undefined)} onConfirm={() => { act({ type: 'recovery', op: 'finalize', root: releasing.root, id: releasing.id }); setReleasing(undefined); }} />}
   </section>;
 }
 
