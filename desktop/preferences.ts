@@ -1,13 +1,12 @@
-import {defaultLimits,clampCpuThreads,clampMemoryLimitMB} from './resource-limits';
-import type {DriveCameraRecord,LogLevel,MediaLayout,NoMetadataHandling,Preferences} from './shared';
-import {UNKNOWN_FILES_FOLDER} from './shared';
+import {defaultLimits,clampCpuThreads,clampMemoryLimitMB,savedLimits} from './resource-limits';
+import type {DriveCameraRecord,MediaLayout,NoMetadataHandling,Preferences} from './shared';
+import {LOG_LEVELS,UNKNOWN_FILES_FOLDER} from './shared';
 import {validNoMetadataFolder} from './no-metadata';
 
-export const logLevelValues:readonly LogLevel[]=['off','normal','detailed','trace'];
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,skipFileErrors:true,removeEmptySourceFolders:true,collectProblemFiles:true,removeAppleDouble:true,releaseDuplicatesAfterOrganizing:true,autoOrganizeBackup:'ask',unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,autoOrganizeBackup:'ask',unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -35,7 +34,7 @@ function history(value:unknown):NonNullable<Preferences['deviceHistory']> {
 /** The single set of preference rules, for settings read from disk and for every change the
  * interface sends: each field that is missing or invalid keeps its value from `base`. */
 export function normalizePreferences(input:unknown,base:Preferences=defaultPreferences):Preferences {
- const value=(input&&typeof input==='object'?input:{}) as Record<string,unknown>;
+ const value=(input&&typeof input==='object'?input:{}) as Record<string,unknown>,limits=savedLimits(value);
  return {
   sourceLayout:oneOf(value.sourceLayout,['list','grid'] as const,base.sourceLayout??'list'),
   showDashboard:flag(value.showDashboard,base.showDashboard!==false),
@@ -60,10 +59,8 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   verifyCopies:value.verifyCopies===undefined?base.verifyCopies!==false:value.verifyCopies!==false,
   // Saved as skipFileErrors: an older skipErrors:false only recorded that option's earlier default (off).
   skipFileErrors:flag(value.skipFileErrors,base.skipFileErrors!==false),
-  removeEmptySourceFolders:value.removeEmptySourceFolders===undefined?base.removeEmptySourceFolders!==false:value.removeEmptySourceFolders!==false,
   removeAppleDouble:flag(value.removeAppleDouble,base.removeAppleDouble!==false),
   collectProblemFiles:value.collectProblemFiles===undefined?base.collectProblemFiles!==false:value.collectProblemFiles!==false,
-  releaseDuplicatesAfterOrganizing:flag(value.releaseDuplicatesAfterOrganizing,base.releaseDuplicatesAfterOrganizing!==false),
   autoOrganizeBackup:oneOf(value.autoOrganizeBackup,['off','ask','auto'] as const,base.autoOrganizeBackup??'ask'),
   unknownDefault:oneOf(value.unknownDefault,['skip','other','ask'] as const,base.unknownDefault??'skip'),
   rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected']),
@@ -72,10 +69,10 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
   noMetadataHandling:oneOf(value.noMetadataHandling,noMetadataModes,base.noMetadataHandling??'keep'),
   noMetadataFolder:validNoMetadataFolder(value.noMetadataFolder)?value.noMetadataFolder:validNoMetadataFolder(base.noMetadataFolder)?base.noMetadataFolder:UNKNOWN_FILES_FOLDER,
-  logLevel:oneOf(value.logLevel,logLevelValues,base.logLevel??'normal'),
+  logLevel:oneOf(value.logLevel,LOG_LEVELS,base.logLevel??'normal'),
   editedFolder:text(value.editedFolder,base.editedFolder??'editied'),
-  // Out of range or unreadable values fall back to the saved ones, then to this machine's defaults.
-  maxCpuThreads:clampCpuThreads(value.maxCpuThreads??base.maxCpuThreads),
-  memoryLimitMB:clampMemoryLimitMB(value.memoryLimitMB??base.memoryLimitMB),
+  // The thread pool reads the saved limits by the same rule before anything starts; a limit not given keeps the base one, then this machine's default.
+  maxCpuThreads:limits.maxCpuThreads??clampCpuThreads(base.maxCpuThreads),
+  memoryLimitMB:limits.memoryLimitMB??clampMemoryLimitMB(base.memoryLimitMB),
  };
 }

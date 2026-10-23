@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import { ACTIVE_PHASES, isRunning } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
@@ -44,7 +45,8 @@ export function destinationReadiness(state: Pick<AppState, 'preferences' | 'dest
   };
 }
 type Preview = { path: string; metadata?: Metadata; loading: boolean; error?: string };
-export const activePhases = ['discovering', 'verifying', 'copying'];
+/** DuplicatesPage reads the active phases from here until the shared UI module replaces this import. */
+export const activePhases = ACTIVE_PHASES;
 
 // In the order the options were asked for; 'flat' is the default.
 const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
@@ -482,7 +484,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
   const { t } = useTranslation();
   const verifyOff = state.preferences.verifyCopies === false;
   // A library or folder with a job running (an organization, a folder backup) is a source here too, while it runs.
-  const running = state.jobs.filter(job => (activePhases.includes(job.phase) || job.phase === 'queued') && !state.sources.some(source => source.id === job.source.id)).map(job => job.source);
+  const running = state.jobs.filter(job => (isRunning(job) || job.phase === 'queued') && !state.sources.some(source => source.id === job.source.id)).map(job => job.source);
   const listed = [...state.sources, ...running.filter((source, index) => running.findIndex(other => other.id === source.id) === index)];
   return <section className="sidebar-section" aria-labelledby="sidebar-sources"><h2 id="sidebar-sources">{t("Sources")}</h2>
     {listed.length ? <ul>{listed.map(source => {
@@ -512,7 +514,7 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   type Part = { kind: DestinationStatusKind; progress?: Progress; eta?: number; source?: string; paused?: boolean };
   const parts: Part[] = [];
   for (const job of state.jobs) {
-    if (!activePhases.includes(job.phase)) continue;
+    if (!isRunning(job)) continue;
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
     if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
@@ -688,8 +690,8 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
 }
 
 /** Copying, planning a review, showing one, or scanning sources: pages lock the settings these depend on. */
-function pageBusy(state: AppState): boolean { return state.jobs.some(job => activePhases.includes(job.phase)) || !!state.busyReview || !!state.review || !!state.scanningSources?.length; }
-function organizeBusy(state: AppState): boolean { return !!state.review || !!state.busyReview || !!state.scanningSources?.length || state.jobs.some(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued')); }
+function pageBusy(state: AppState): boolean { return state.jobs.some(job => isRunning(job)) || !!state.busyReview || !!state.review || !!state.scanningSources?.length; }
+function organizeBusy(state: AppState): boolean { return !!state.review || !!state.busyReview || !!state.scanningSources?.length || state.jobs.some(job => job.organization && (isRunning(job) || job.phase === 'queued')); }
 function organizationDestinationIndex(preferences: Preferences, selected: number): number { return preferences.destinations[selected] ? selected : 0; }
 
 /** Each page's own actions, then All errors on every page. */
@@ -708,12 +710,12 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   }
   if (page !== 'desk') return <div className="titlebar-actions">{errorsButton}</div>;
   const scanning = !!state.scanningSources?.length;
-  const canStop = scanning || !!state.review || !!state.busyReview || state.jobs.some(job => activePhases.includes(job.phase) || job.phase === 'queued');
+  const canStop = scanning || !!state.review || !!state.busyReview || state.jobs.some(job => isRunning(job) || job.phase === 'queued');
   const configured = state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2);
   const selectedCount = state.sources.filter(sourceSelected).length;
-  const running = state.jobs.some(job => !job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'));
+  const running = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued'));
   // Every running job is winding down after Stop or Pause: the controls say so, disabled, until it has.
-  const live = state.jobs.filter(job => activePhases.includes(job.phase));
+  const live = state.jobs.filter(job => isRunning(job));
   const winding = live.length > 0 && live.every(job => job.stopping) && !state.jobs.some(job => job.phase === 'queued') && !scanning && !state.review && !state.busyReview;
   const stopping = winding && live.some(job => job.stopping === 'stop');
   const showing = state.preferences.showDashboard !== false;
@@ -847,7 +849,7 @@ export function combinedSpeed(jobs: Job[]): Required<Pick<SpeedInput, 'speed' | 
 // Import desk statistics. Source jobs show their own progress on their cards, so only library organization jobs are listed here.
 export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) {
   const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
-  const jobs = state.jobs, active = jobs.filter(job => activePhases.includes(job.phase)), queued = jobs.filter(job => job.phase === 'queued');
+  const jobs = state.jobs, active = jobs.filter(job => isRunning(job)), queued = jobs.filter(job => job.phase === 'queued');
   const latestJobs = jobs.filter((job,index) => jobs.findIndex(item => item.source.id === job.source.id) === index);
   // Bytes count only once copying starts: planning measures the source, not the transfer.
   const transferring = latestJobs.filter(job => job.progress && job.progress.phase !== 'planning' && !job.progress.renames);
@@ -1011,7 +1013,7 @@ export function DrivesPage({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatBytes: bytes } = useTranslation();
   return <div className="drives-page">
     <section className="settings-section" aria-labelledby="connected-drives"><CardHeader icon={Usb} id="connected-drives" title={t("Connected drives")} /><div className="settings-section-content">
-      {state.sources.length ? <ul className="drive-list">{state.sources.map(source => <li key={source.id} data-source-id={source.id} className={sourceSelected(source) ? 'is-selected' : 'is-unselected'}><Icon icon={source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save} size={18} /><div><strong>{source.name}</strong><small>{[source.drive?.name, driveContext(source, state.sources, state.destinationStatus)?.showsCapacity !== false && source.total ? bytes(source.total) : '', source.path].filter(Boolean).join(' · ')}</small></div><SelectionChip source={source} act={act} disabled={state.jobs.some(job => !job.organization && job.source.id === source.id && (activePhases.includes(job.phase) || job.phase === 'queued'))} /></li>)}</ul> : <p className="muted">{t("No sources connected")}</p>}
+      {state.sources.length ? <ul className="drive-list">{state.sources.map(source => <li key={source.id} data-source-id={source.id} className={sourceSelected(source) ? 'is-selected' : 'is-unselected'}><Icon icon={source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save} size={18} /><div><strong>{source.name}</strong><small>{[source.drive?.name, driveContext(source, state.sources, state.destinationStatus)?.showsCapacity !== false && source.total ? bytes(source.total) : '', source.path].filter(Boolean).join(' · ')}</small></div><SelectionChip source={source} act={act} disabled={state.jobs.some(job => !job.organization && job.source.id === source.id && (isRunning(job) || job.phase === 'queued'))} /></li>)}</ul> : <p className="muted">{t("No sources connected")}</p>}
     </div></section>
     <RememberedDrives preferences={state.preferences} act={act} />
     <IgnoredDrives preferences={state.preferences} act={act} />
@@ -1190,7 +1192,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, ne
   const { t } = useTranslation();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const jobs = state.jobs;
-  const active = jobs.filter(job => activePhases.includes(job.phase));
+  const active = jobs.filter(job => isRunning(job));
   // The order queued jobs will start in, as the importer publishes it; longest waiting first otherwise.
   const startOrder = state.queueOrder ?? [];
   const selectedJob = jobs.find(job => job.id === selectedJobId && !job.organization) ?? jobs.find(job => job.inventory && !job.organization);
@@ -1290,7 +1292,7 @@ type StepState = 'pending' | 'active' | 'done' | 'error' | 'paused' | 'skipped';
 export function sourceStepStates(job: Job | undefined, inventory: Inventory | undefined, scanning: boolean, verifyOff: boolean, reviewing = false): StepState[] {
   const skipVerify = (state: StepState): StepState => verifyOff ? 'skipped' : state;
   // A review being built for this source is its first step at work.
-  if (reviewing && (!job || !activePhases.includes(job.phase)) && job?.phase !== 'queued') return ['active', 'pending', skipVerify('pending')];
+  if (reviewing && (!job || !isRunning(job)) && job?.phase !== 'queued') return ['active', 'pending', skipVerify('pending')];
   if (!job || job.phase === 'queued') return [scanning ? 'active' : inventory ? 'done' : 'pending', 'pending', skipVerify('pending')];
   if (job.phase === 'complete' || ended(job) && allVerified(job)) return ['done', 'done', skipVerify('done')];
   const progressPhase = job.progress?.phase;
@@ -1312,7 +1314,7 @@ const stageRank: Record<StepKind, number> = { scan: 0, read: 1, compare: 2, copy
 const jobPaused = (job: Job) => (job.phase === 'stopped' && !!job.paused) || job.stopping === 'pause';
 /** The whole queue is paused (or pausing): every job that is still to run or running is. Finished and failed jobs do not count. */
 function totalPaused(jobs: Job[]): boolean {
-  const open = jobs.filter(job => activePhases.includes(job.phase) || job.phase === 'queued' || jobPaused(job));
+  const open = jobs.filter(job => isRunning(job) || job.phase === 'queued' || jobPaused(job));
   return open.length > 0 && open.every(jobPaused);
 }
 interface StagePlan { kinds: StepKind[]; index: number; fraction: number; finished: boolean }
@@ -1470,7 +1472,7 @@ export function ProgressTiming({ startedAt, endedAt, left, etaTestId = 'eta' }: 
 }
 /** A job's elapsed time with its time left, and its total time once it ends. */
 function jobTiming(job: Job, t: ReturnType<typeof createTranslator>): { startedAt?: string; endedAt?: string; left?: string } {
-  const running = activePhases.includes(job.phase), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
+  const running = isRunning(job), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
   const startedAt = running || (finished && job.phaseStartedAt) ? job.startedAt : undefined;
   return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left: running ? jobRemaining(job, t) : undefined };
 }
@@ -1659,7 +1661,7 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
 }
 export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
   const { t, formatNumber, formatBytes } = useTranslation();
-  const progress = job.progress, working = activePhases.includes(job.phase), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
+  const progress = job.progress, working = isRunning(job), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
   const fraction = queued ? 0 : cardFraction(job);
   const count = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queued") : !progress ? undefined : progressCount(progress, t, formatNumber, true, formatBytes);
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
@@ -1720,7 +1722,7 @@ function containsBackup(source: Source, destinations: string[]): boolean {
 export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, capacity, startBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; capacity?: SourceCapacity; startBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
-  const active = !!job && activePhases.includes(job.phase);
+  const active = !!job && isRunning(job);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
   const status = reviewing && !active && !queued ? t("Building review…") : !job ? t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
@@ -1750,7 +1752,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
       <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
       <button type="button" className="source-disclosure-toggle" data-testid="drive-details-toggle" aria-expanded={detailsOpen} aria-controls={detailsId} onClick={() => setDetailsOpen(value => !value)}><span className="source-disclosure-label">{t("Drive details")}<Icon icon={ChevronDown} size={16} /></span></button>
     </div>
-    {job?.space && !already && (job.phase === 'queued' || activePhases.includes(job.phase)) && <SourceSpace space={job.space} />}
+    {job?.space && !already && (job.phase === 'queued' || isRunning(job)) && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" step="scan" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
@@ -1843,11 +1845,11 @@ function DestinationBay({ state, act, onOrganization, onSettings, configure = fa
   const { t, formatNumber } = useTranslation();
   const { preferences } = state;
   const descriptions: Record<CopyMode, string> = { single: t("One verified copy."), mirror: t("A verified copy on both drives."), sequential: t("Fill the first drive, then use the second.") };
-  return <aside className="destination-bay" aria-labelledby="destination-heading"><div className="section-heading"><h2 id="destination-heading">{t("Destinations")}</h2><Icon icon={HardDrive} size={19} /></div><div className="destination-panel"><div className="copy-policy">{configure ? <><label htmlFor="copy-policy">{t("Copy policy")}</label><div className="select-wrap"><select id="copy-policy" disabled={state.jobs.some(job => activePhases.includes(job.phase)) || !!state.review || !!state.busyReview} value={preferences.copyMode} onChange={event => act({ type: 'preferences', patch: { copyMode: event.target.value as CopyMode } })}><option value="single">{t("One destination")}</option><option value="mirror">{t("Copy to both destinations")}</option><option value="sequential" disabled={preferences.backupMode === 'mirror'}>{t("Fill first, then second")}</option></select><Icon icon={ChevronDown} size={15} /></div></> : <div className="copy-policy-summary"><strong>{t("Copy policy")}</strong><span>{{ single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") }[preferences.copyMode]}</span></div>}{configure && <p>{descriptions[preferences.copyMode]}</p>}{configure && preferences.backupMode === 'mirror' && <small>{t("Not available with Mirror.")}</small>}</div>{Array.from({ length: preferences.copyMode === 'single' ? 1 : 2 }, (_, index) => {
+  return <aside className="destination-bay" aria-labelledby="destination-heading"><div className="section-heading"><h2 id="destination-heading">{t("Destinations")}</h2><Icon icon={HardDrive} size={19} /></div><div className="destination-panel"><div className="copy-policy">{configure ? <><label htmlFor="copy-policy">{t("Copy policy")}</label><div className="select-wrap"><select id="copy-policy" disabled={state.jobs.some(job => isRunning(job)) || !!state.review || !!state.busyReview} value={preferences.copyMode} onChange={event => act({ type: 'preferences', patch: { copyMode: event.target.value as CopyMode } })}><option value="single">{t("One destination")}</option><option value="mirror">{t("Copy to both destinations")}</option><option value="sequential" disabled={preferences.backupMode === 'mirror'}>{t("Fill first, then second")}</option></select><Icon icon={ChevronDown} size={15} /></div></> : <div className="copy-policy-summary"><strong>{t("Copy policy")}</strong><span>{{ single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") }[preferences.copyMode]}</span></div>}{configure && <p>{descriptions[preferences.copyMode]}</p>}{configure && preferences.backupMode === 'mirror' && <small>{t("Not available with Mirror.")}</small>}</div>{Array.from({ length: preferences.copyMode === 'single' ? 1 : 2 }, (_, index) => {
     const path = preferences.destinations[index];
     const status = state.destinationStatus?.find(item => item.path === path);
-    const busy = state.jobs.some(job => activePhases.includes(job.phase)) || !!state.review || !!state.busyReview;
-    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? filename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} /><DriveActivityMeter activity={state.driveActivity?.[path]} /><div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && (preferences.autoOrganizeBackup ?? 'ask') !== 'off' && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span><Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button></div>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
+    const busy = state.jobs.some(job => isRunning(job)) || !!state.review || !!state.busyReview;
+    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? filename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} /><DriveActivityMeter activity={state.driveActivity?.[path]} /><div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && (preferences.autoOrganizeBackup ?? 'ask') !== 'off' && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span><Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (isRunning(job) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button></div>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
   })}</div>{(onSettings || onOrganization) && <div className="bay-actions">{onSettings && <Button icon={Settings2} onClick={onSettings}>{t("Settings")}</Button>}{onOrganization && <Button icon={FolderCog} onClick={onOrganization}>{t("Folder organization")}</Button>}</div>}</aside>;
 }
 
@@ -1892,13 +1894,13 @@ export function CardHeader({ icon, title, id, detail, children }: { icon: Lucide
 export function PerformanceSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatNumber } = useTranslation();
   const p = state.preferences, use = state.resources;
-  const cores = use?.cores ?? Math.max(p.maxCpuThreads ?? 1, 16), memoryMax = use ? Math.max(512, Math.floor(use.totalMemMB * 0.75)) : Math.max(p.memoryLimitMB ?? 512, 16384);
+  const cores = use?.cores ?? Math.max(p.maxCpuThreads ?? 1, 16), memoryMax = use ? use.memoryMaxMB : Math.max(p.memoryLimitMB ?? 512, 16384);
   const threads = p.maxCpuThreads ?? use?.defaultThreads ?? 2, memory = p.memoryLimitMB ?? use?.defaultMemoryMB ?? 2048;
   const atDefaults = !use || (threads === use.defaultThreads && memory === use.defaultMemoryMB);
   return <>
-    <div className="settings-row"><label htmlFor="settings-cpu-threads">{t("CPU threads")}</label><div className="text-size-control"><input id="settings-cpu-threads" data-testid="settings-cpu-threads" type="range" min={1} max={cores} step={1} value={Math.min(threads, cores)} onChange={event => act({ type: 'preferences', patch: { maxCpuThreads: Number(event.target.value) } })} /><strong>{t("{count} threads", { count: formatNumber(threads) })}</strong></div><p className="settings-row-note">{t("The most processors the importer uses at once for checksums and reading photo details. Lower it to keep the Mac responsive. Applies to the next import; file reading adjusts after you restart the app.")}</p></div>
+    <div className="settings-row"><label htmlFor="settings-cpu-threads">{t("CPU threads")}</label><div className="text-size-control"><input id="settings-cpu-threads" data-testid="settings-cpu-threads" type="range" min={1} max={cores} step={1} value={Math.min(threads, cores)} onChange={event => act({ type: 'preferences', patch: { maxCpuThreads: Number(event.target.value) } })} /><strong>{t("{count} threads", { count: formatNumber(threads) })}</strong></div><p className="settings-row-note">{t("The most threads each kind of work (checksums, reading photo details, thumbnails) uses at once; it is a limit per task, not a total. Lower it to keep the Mac responsive. Applies to the next import; file reading adjusts after you restart the app.")}</p></div>
     <div className="settings-row"><label htmlFor="settings-memory-limit">{t("Memory limit")}</label><div className="text-size-control"><input id="settings-memory-limit" data-testid="settings-memory-limit" type="range" min={512} max={memoryMax} step={256} value={Math.min(memory, memoryMax)} onChange={event => act({ type: 'preferences', patch: { memoryLimitMB: Number(event.target.value) } })} /><strong>{t("{count} MB", { count: formatNumber(memory) })}</strong></div><p className="settings-row-note">{t("A soft budget for buffers, caches and the app itself. Near the limit new files wait for running ones; nothing is stopped. Applies to the next import.")}</p></div>
-    <div className="settings-row"><span className="performance-readout" data-testid="performance-readout" role="status">{use ? t("Using up to {threads} threads · {used} MB of {limit} MB", { threads: formatNumber(use.threads), used: formatNumber(use.memoryMB), limit: formatNumber(use.limitMB) }) : ''}</span><Button kind="quiet" icon={RotateCcw} data-testid="performance-reset" disabled={atDefaults} onClick={() => use && act({ type: 'preferences', patch: { maxCpuThreads: use.defaultThreads, memoryLimitMB: use.defaultMemoryMB } })}>{t("Reset to defaults")}</Button></div>
+    <div className="settings-row"><span className="performance-readout" data-testid="performance-readout" role="status">{use ? t("Limit {threads} threads per task · {used} MB of {limit} MB budget", { threads: formatNumber(use.threads), used: formatNumber(use.memoryMB), limit: formatNumber(use.limitMB) }) : ''}</span><Button kind="quiet" icon={RotateCcw} data-testid="performance-reset" disabled={atDefaults} onClick={() => use && act({ type: 'preferences', patch: { maxCpuThreads: use.defaultThreads, memoryLimitMB: use.defaultMemoryMB } })}>{t("Reset to defaults")}</Button></div>
     {use?.warning && <p className="source-notice" data-testid="memory-warning"><Icon icon={Info} size={14} />{t("Memory use is above the limit. New files wait until it drops; running work continues.")}</p>}
   </>;
 }
@@ -1954,7 +1956,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
   const selectedFolders = destination ? state.organizationFolders?.[destination] : undefined;
   const targetFolder = destination ? [destination.replace(/[\\/]$/, ''), p.basePath].filter(Boolean).join('/') : '';
   const recovery = state.organizationRecovery ?? [];
-  const runningOrganization = state.jobs.find(job => job.organization && (activePhases.includes(job.phase) || job.phase === 'queued'));
+  const runningOrganization = state.jobs.find(job => job.organization && (isRunning(job) || job.phase === 'queued'));
   const organizing = organizeBusy(state);
   const organizeOptions = state.organizeOptions ?? { removeEmptyFolders: true, releaseDuplicates: true };
   return <div className="organization-page">
