@@ -19,7 +19,7 @@ import { ACTIVE_PHASES, isRunning } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
-import { formatCaptureDateTime, formatExposure } from './metadata-display';
+import { formatCaptureDateTime, formatExposure, shutterNoteText } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { remainingBucket, remainingRange } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
@@ -44,7 +44,8 @@ export function destinationReadiness(state: Pick<AppState, 'preferences' | 'dest
     offline: chosen.some(path => statusOf(path)?.available === false),
   };
 }
-type Preview = { path: string; metadata?: Metadata; loading: boolean; error?: string };
+/** metadata: the routing read the summary shows; fields: every tag, from the full read for All metadata. */
+type Preview = { path: string; metadata?: Metadata; fields?: Record<string, unknown>; loading: boolean; error?: string };
 /** DuplicatesPage reads the active phases from here until the shared UI module replaces this import. */
 export const activePhases = ACTIVE_PHASES;
 
@@ -377,8 +378,12 @@ export default function RootApp() {
   const inspect = useCallback((path: string) => {
     const request = ++previewSequence.current;
     setPreview({ path, loading: true });
-    window.importer.exif(path).then(metadata => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); if (request === previewSequence.current) setPreview({ path, metadata, loading: false }); })
-      .catch(error => { const detail=`${path}: ${String(error)}`; setInspectionErrors(errors => errors.includes(detail) ? errors : [...errors,detail]); if (request === previewSequence.current) setPreview({ path, loading: false, error: String(error) }); });
+    const update = (patch: Partial<Preview>) => { if (request === previewSequence.current) setPreview(preview => preview && { ...preview, ...patch }); };
+    const diagnose = (metadata: Metadata) => { const diagnostics=Object.entries(metadata.fields).filter(([key])=>key.split(':').at(-1)==='Error').map(([,value])=>`${path}: ${String(value)}`); if(diagnostics.length)setInspectionErrors(errors=>[...new Set([...errors,...diagnostics])]); };
+    const failed = (error: unknown) => { const detail=`${path}: ${String(error)}`; setInspectionErrors(errors => errors.includes(detail) ? errors : [...errors,detail]); update({ loading: false, error: String(error) }); };
+    // The summary is the cached routing read; only All metadata needs every tag.
+    window.importer.summary(path).then(metadata => { diagnose(metadata); update({ metadata, loading: false }); }).catch(failed);
+    window.importer.exif(path).then(metadata => { diagnose(metadata); update({ fields: metadata.fields }); }).catch(failed);
   }, []);
   function closePreview() { ++previewSequence.current; setPreview(null); }
   // Hooks stay above the early return below, so every render calls the same hooks.
@@ -2029,7 +2034,7 @@ export function MetadataDialog({ preview, onClose, act }: { preview: Preview; on
   const video = mediaKindForPath(preview.path) === 'Videos';
   const captured = formatCaptureDateTime(metadata?.date, language);
   const exposure = formatExposure(metadata?.exposure, language);
-  const fields = Object.entries(metadata?.fields ?? {}).filter(([key, value]) => key.split(':').at(-1)!=='Error' && `${key} ${metadataText(value)}`.toLowerCase().includes(query.toLowerCase()));
+  const fields = Object.entries(preview.fields ?? {}).filter(([key, value]) => key.split(':').at(-1)!=='Error' && `${key} ${metadataText(value)}`.toLowerCase().includes(query.toLowerCase()));
   return <dialog className="metadata-dialog" ref={dialog} aria-labelledby="metadata-heading" onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><div><span className="dialog-kicker"><Icon icon={FileImage} size={15} />{t("File metadata")}</span><h2 id="metadata-heading">{filename(preview.path)}</h2></div><Button kind="quiet" icon={X} data-testid="metadata-close" aria-label={t("Close metadata")} onClick={close} /></div>
     <div className="metadata-content">
@@ -2050,12 +2055,12 @@ export function MetadataDialog({ preview, onClose, act }: { preview: Preview; on
           <div><dt>{t("Focal length")}</dt><dd>{exposure.focalLength || t("Not recorded")}</dd></div>
           <div><dt>{t("Exposure compensation")}</dt><dd>{exposure.exposureCompensation || t("Not recorded")}</dd></div>
         </dl></section>
-        {!video && <section className="capture-shutter"><dl><div><dt>{t("Shutter count")}</dt><dd data-testid="metadata-shutter-count">{metadata?.shutterCount || t("Not available")}</dd></div></dl></section>}
-        <details className="metadata-details" key={preview.path} data-testid="metadata-details"><summary><Icon icon={ChevronDown} size={17} /><span>{t("All metadata")}</span><small>{t("{count} fields", { count: formatNumber(Object.keys(metadata?.fields ?? {}).length) })}</small></summary><div className="metadata-details-content">
-          {!video && metadata?.shutterNote && <p className="shutter-note"><Icon icon={Info} size={14} />{metadata.shutterNote}</p>}
+        {!video && <section className="capture-shutter"><dl><div><dt>{t("Shutter count")}</dt><dd data-testid="metadata-shutter-count">{metadata?.shutterCount !== undefined ? formatNumber(metadata.shutterCount) : t("Not available")}</dd></div></dl></section>}
+        <details className="metadata-details" key={preview.path} data-testid="metadata-details"><summary><Icon icon={ChevronDown} size={17} /><span>{t("All metadata")}</span><small>{preview.fields && t("{count} fields", { count: formatNumber(Object.keys(preview.fields).length) })}</small></summary><div className="metadata-details-content">
+          {!video && metadata?.shutterNote && <p className="shutter-note"><Icon icon={Info} size={14} />{t(shutterNoteText(metadata.shutterNote))}</p>}
           <input type="search" placeholder={t("Find a metadata field…")} aria-label={t("Search metadata fields")} value={query} onChange={event => setQuery(event.target.value)} />
           <dl className="metadata-fields">{fields.map(([key, value]) => <div key={key}><dt>{key.replace(/([a-z])([A-Z])/g, '$1 $2')}</dt><dd>{metadataText(value)}</dd></div>)}</dl>
-          {!preview.loading && fields.length === 0 && <p className="metadata-empty">{query ? t("No metadata fields match your search.") : t("No metadata fields were returned for this file.")}</p>}
+          {preview.fields && fields.length === 0 && <p className="metadata-empty">{query ? t("No metadata fields match your search.") : t("No metadata fields were returned for this file.")}</p>}
         </div></details>
       </section>
     </div>

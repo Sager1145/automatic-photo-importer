@@ -17,8 +17,8 @@ test('routing extraction avoids optional all-tag work while the inspector retain
  t.mock.method(ExifTool.prototype,'readRaw',async(_file:string,options:{readArgs:string[]})=>{
   args.push(options.readArgs);return {'IFD0:Model':'NIKON Z f','ExifIFD:DateTimeOriginal':'2025:06:26 13:50:35','ExifIFD:OffsetTimeOriginal':'+08:00','IFD0:Software':'Adobe Lightroom Classic 15.2.1','ExifIFD:LensModel':'NIKKOR Z 40mm f/2','Nikon:ShutterCount':1234};
  });
- assert.deepEqual(await metadata(file,{details:false}),{camera:'NIKON Z f',date:'2025-06-26T13:50:35+08:00',edited:true,fields:{},fingerprint:{date:'2025-06-26T13:50:35+08:00',camera:'NIKON Z f',shutterCount:'1234',lens:'NIKKOR Z 40mm f/2'},exposure:{lens:'NIKKOR Z 40mm f/2'}});
- const rich=await metadata(file);assert.equal(rich.camera,'NIKON Z f');assert.ok(Object.keys(rich.fields).length>0);assert.equal(rich.shutterCount,'1,234');
+ assert.deepEqual(await metadata(file,{details:false}),{camera:'NIKON Z f',date:'2025-06-26T13:50:35+08:00',edited:true,fields:{},fingerprint:{date:'2025-06-26T13:50:35+08:00',camera:'NIKON Z f',shutterCount:'1234',lens:'NIKKOR Z 40mm f/2'},exposure:{lens:'NIKKOR Z 40mm f/2'},shutterCount:1234,shutterNote:'total'});
+ const rich=await metadata(file);assert.equal(rich.camera,'NIKON Z f');assert.ok(Object.keys(rich.fields).length>0);assert.equal(rich.shutterCount,1234);
  const routing=args[0]!;
  assert.deepEqual(routing.slice(0,4),['-G1:4','-a','-n','-fast'],'Routing keeps groups, duplicates and decoded numbers, and skips trailer scans');
  for(const tag of ['-Model','-DeviceModelName','-DateTimeOriginal','-OffsetTimeOriginal','-CreationDateValue','-TimeZone','-Software','-HistorySoftwareAgent','-LensModel','-Error'])assert.ok(routing.includes(tag),`routing requests ${tag}`);
@@ -74,4 +74,22 @@ test('metadata read during a scan is handed to the import and used only while th
  assert.equal((await metadata(file,{details:false})).camera,'From scan');assert.equal(reads,1);
  await fs.writeFile(file,'changed after the scan');
  assert.equal((await metadata(file,{details:false})).camera,'Camera 2');
+});
+
+test('the routing read alone carries everything the summary card shows',async t=>{
+ const root=await scratch(t),file=path.join(root,'summary.NEF');await fs.writeFile(file,'only the external decoder is stubbed');
+ const args:string[][]=[];
+ t.mock.method(ExifTool.prototype,'readRaw',async(_file:string,options:{readArgs:string[]})=>{
+  args.push(options.readArgs);
+  return {'IFD0:Model':'NIKON Z f','ExifIFD:DateTimeOriginal':'2025:06:26 13:50:35','ExifIFD:OffsetTimeOriginal':'+08:00','ExifIFD:LensModel':'NIKKOR Z 40mm f/2',
+   'ExifIFD:ExposureTime':0.008,'ExifIFD:FNumber':2,'ExifIFD:ISO':400,'ExifIFD:FocalLength':40,'ExifIFD:ExposureCompensation':-0.3,'Nikon:ShutterCount':1234};
+ });
+ const summary=await metadata(file,{details:false});
+ assert.deepEqual({camera:summary.camera,date:summary.date,exposure:summary.exposure,shutterCount:summary.shutterCount,shutterNote:summary.shutterNote},{
+  camera:'NIKON Z f',date:'2025-06-26T13:50:35+08:00',
+  exposure:{lens:'NIKKOR Z 40mm f/2',exposureTime:0.008,aperture:2,iso:400,focalLength:40,exposureCompensation:-0.3},
+  shutterCount:1234,shutterNote:'total',
+ });
+ for(const tag of ['-FocalLength','-ImageCount','-ExifToolVersion'])assert.ok(args[0]!.includes(tag),`the summary reads ${tag} with the routing tags`);
+ assert.ok(args.every(list=>!list.includes('RequestAll=3')),'the summary never reads all tags');
 });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inferCameraHints, analyzeSourceCameras } from '../source-cameras';
+import { metadataFromTags } from '../platform/metadata';
 import type { Inventory, InventoryFile, Source } from '../shared';
 
 const source: Source = { id:'card', name:'NIKON Z6III', path:'/Volumes/NIKON Z6III', transport:'storage' };
@@ -41,7 +42,8 @@ test('all media metadata confirms multiple cameras with normalized names and exa
   const result = await analyzeSourceCameras(source,scan,async path=>{
     reads.push(path);
     const camera = path.endsWith('a.NEF') ? '  Nikon   Z6III ' : path.endsWith('b.JPG') ? 'nikon z6iii' : path.endsWith('clip.MP4') ? 'Sony ILCE-7M4' : undefined;
-    return {camera,fields:{}};
+    // Through the interpreter, which normalizes spacing and rejects placeholder names.
+    return metadataFromTags(camera?{'IFD0:Model':camera}:{},{details:false});
   },undefined,summary=>updates.push(summary));
   assert.deepEqual(reads,['/Volumes/card/a.NEF','/Volumes/card/b.JPG','/Volumes/card/clip.MP4','/Volumes/card/unknown.PNG']);
   assert.equal(result.status,'complete');
@@ -74,7 +76,7 @@ test('unreadable files are unknown and reported while later camera metadata is s
     file('damaged.NEF','RAW',10),file('good.ARW','RAW',20),file('unlabeled.JPG','JPEG',5),
   ]),async path=>{
     if (path.endsWith('damaged.NEF')) throw new Error('Unreadable EXIF');
-    return {camera:path.endsWith('good.ARW') ? 'Sony ILCE-7M4' : 'Unknown Camera',fields:{}};
+    return metadataFromTags({'IFD0:Model':path.endsWith('good.ARW') ? 'Sony ILCE-7M4' : 'Unknown Camera'},{details:false});
   });
   assert.equal(result.status,'error'); assert.equal(result.checked,3); assert.equal(result.total,3); assert.equal(result.unknown,2);
   assert.equal(result.error,'1 media file could not be read.');

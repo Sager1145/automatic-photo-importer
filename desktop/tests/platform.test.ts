@@ -24,19 +24,20 @@ test('Windows SD cards are removable even with a fixed volume drive type', () =>
 });
 test('mechanical and total counters remain distinct and image counts never substitute', () => {
   const result = metadataFromTags({'Nikon:MechanicalShutterCount':9059,'Nikon:ShutterCount':10057,'Nikon:ImageCount':20000});
-  assert.equal(result.shutterCount,'9,059'); assert.match(result.shutterNote!,/mechanical/);
-  assert.equal(metadataFromTags({'Sony:ImageCount':300}).shutterCount,undefined);
+  assert.equal(result.shutterCount,9059); assert.equal(result.shutterNote,'mechanical');
+  assert.equal(metadataFromTags({'Sony:ImageCount':300}).shutterCount,undefined); assert.equal(metadataFromTags({'Sony:ImageCount':300}).shutterNote,'image-count');
   assert.equal(metadataFromTags({'Nikon:ShutterCount':4294965247}).shutterCount,undefined);
   assert.equal(metadataFromTags({'Nikon:ShutterCount':4294967295}).shutterCount,undefined);
-  assert.equal(metadataFromTags({'Nikon:ShutterCount':0}).shutterCount,'0');
+  assert.equal(metadataFromTags({'Nikon:ShutterCount':0}).shutterCount,0);
 });
 test('conflicting counters are reported without selecting an arbitrary value', () => {
   assert.equal(metadataFromTags({'Nikon:ShutterCount':10,'XMP:ShutterCount':11}).shutterCount,undefined);
-  assert.match(metadataFromTags({'Nikon:MechanicalShutterCount':10,'XMP:MechanicalShutterCount':11}).shutterNote!,/Conflicting/);
+  assert.equal(metadataFromTags({'Nikon:MechanicalShutterCount':10,'XMP:MechanicalShutterCount':11}).shutterNote,'mechanical-conflict');
+  assert.equal(metadataFromTags({'Nikon:ShutterCount':10,'XMP:ShutterCount':11}).shutterNote,'total-conflict');
 });
 test('Sony ILCE-7M5 requires a corrected identified decoder', () => {
   for(const version of ['13.43',undefined]) assert.equal(metadataFromTags({'EXIF:Model':'ILCE-7M5','Sony:ShutterCount':568,'ExifTool:ExifToolVersion':version}).shutterCount,undefined);
-  assert.equal(metadataFromTags({'EXIF:Model':'ILCE-7M5','Sony:ShutterCount':568,'ExifTool:ExifToolVersion':'13.59'}).shutterCount,'568');
+  assert.equal(metadataFromTags({'EXIF:Model':'ILCE-7M5','Sony:ShutterCount':568,'ExifTool:ExifToolVersion':'13.59'}).shutterCount,568);
   assert.equal(metadataFromTags({'EXIF:Model':'ILCE-7M5','XMP:ShutterCount':568,'ExifTool:ExifToolVersion':'13.59'}).shutterCount,undefined);
 });
 test('capture dates preserve wall-clock date and normalized camera model', () => {
@@ -234,8 +235,8 @@ test('routing metadata skips inspector work with identical camera/date normaliza
   for(const fixture of fixtures){
     const tags={...fixture,'ExifIFD:ISO':400,'Nikon:ShutterCount':0,'Maker:Details':{nested:['a','b']}};
     const rich=metadataFromTags(tags),routing=metadataFromTags(tags,{details:false});
-    assert.deepEqual(routing,{camera:rich.camera,date:rich.date,fields:{},fingerprint:rich.fingerprint});
-    assert.deepEqual(rich.exposure,{iso:400});assert.equal(rich.shutterCount,'0');
+    assert.deepEqual(routing,{...rich,fields:{}},'both reads go through the one interpreter');
+    assert.deepEqual(rich.exposure,{iso:400});assert.equal(rich.shutterCount,0);
     assert.equal(rich.fields['Maker:Details.nested'],'["a","b"]');
     assert.deepEqual(metadataFromTags(tags,{details:true}),rich);
   }
@@ -261,6 +262,13 @@ test('Android phone videos are named from their QuickTime Keys model',()=>{
 });
 
 test('Sony bodies that record only ShutterCount2 or ShutterCount3 still report a count',()=>{
-  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7M3','Sony:ShutterCount2':12345}).shutterCount,'12,345');
-  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7RM3','Sony:ShutterCount3':678}).shutterCount,'678');
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7M3','Sony:ShutterCount2':12345}).shutterCount,12345);
+  assert.equal(metadataFromTags({'IFD0:Model':'ILCE-7RM3','Sony:ShutterCount3':678}).shutterCount,678);
+});
+
+test('the duplicate fingerprint takes its exposure from the summary values, standard EXIF first',()=>{
+  const tags={'XMP:ISO':100,'ExifIFD:ISO':400,'XMP:FNumber':0,'ExifIFD:FNumber':2.8,'ExifIFD:ExposureTime':0.004,'ExifIFD:ExposureCompensation':-0.3};
+  const {fingerprint,exposure}=metadataFromTags(tags,{details:false});
+  assert.deepEqual(exposure,{iso:400,aperture:2.8,exposureTime:0.004,exposureCompensation:-0.3});
+  assert.deepEqual({iso:fingerprint?.iso,aperture:fingerprint?.aperture,exposureTime:fingerprint?.exposureTime,exposureCompensation:fingerprint?.exposureCompensation},{iso:'400',aperture:'2.8',exposureTime:'0.004',exposureCompensation:'-0.3'});
 });

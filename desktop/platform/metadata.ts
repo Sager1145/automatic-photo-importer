@@ -3,7 +3,7 @@ import { ReadRawTask } from 'exiftool-vendored/dist/ReadRawTask';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
-import type { DuplicateExif, Exposure, Metadata } from '../shared';
+import type { DuplicateExif, Exposure, Metadata, ShutterNote } from '../shared';
 import { djiProduct } from './dji-models';
 import { streams, STREAMS, ROUTING_BATCH } from '../core/devices';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
@@ -198,7 +198,7 @@ function dimension(entries:TagEntries,names:string[]):number|undefined {
 }
 /** What tells two captures apart without reading their bytes: camera body serial, shutter count or image
  * number, dimensions and lens, next to the capture time and camera model. */
-export function duplicateFingerprint(entries:TagEntries,camera:string|undefined,date:string|undefined):DuplicateExif {
+export function duplicateFingerprint(entries:TagEntries,camera:string|undefined,date:string|undefined,exposure:Exposure|undefined):DuplicateExif {
   const fingerprint:DuplicateExif={};
   if(date)fingerprint.date=date;
   if(camera)fingerprint.camera=camera;
@@ -207,28 +207,41 @@ export function duplicateFingerprint(entries:TagEntries,camera:string|undefined,
   const number=identifier(entries,['ImageNumber','FileNumber']);if(number&&!fingerprint.shutterCount)fingerprint.imageNumber=number;
   const width=dimension(entries,['ExifImageWidth','ImageWidth','SourceImageWidth']),height=dimension(entries,['ExifImageHeight','ImageHeight','SourceImageHeight']);
   if(width&&height){fingerprint.width=width;fingerprint.height=height;}
-  const lens=lensModel(entries);if(lens)fingerprint.lens=lens;
-  for(const [field,name] of [['exposureTime','ExposureTime'],['aperture','FNumber'],['iso','ISO'],['exposureCompensation','ExposureCompensation']] as const)
-    for(const [key,value] of entries){
-      if(tagName(key)!==name)continue;
-      const number=typeof value==='number'?value:typeof value==='string'&&value.trim()!==''?Number(value):NaN;
-      if(Number.isFinite(number)){fingerprint[field]=String(number);break;}
-    }
+  if(exposure?.lens)fingerprint.lens=exposure.lens;
+  for(const field of ['exposureTime','aperture','iso','exposureCompensation'] as const)if(exposure?.[field]!==undefined)fingerprint[field]=String(exposure[field]);
   return fingerprint;
 }
-/** Pure interpretation keeps maker-note counter rules testable without camera hardware. */
-/** `file` (its name only) lets DJI clips take their local capture time from the name. */
+/** The shutter count to show, and what it means (or why there is none). */
+function shutter(entries:TagEntries,camera:string|undefined):{shutterCount?:number;shutterNote:ShutterNote} {
+  const mechanical=new Set(entries.filter(([key])=>tagName(key)==='MechanicalShutterCount').map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined));
+  // Sony bodies that keep their count only in ShutterCount2 or ShutterCount3 (ExifTool Sony Tag9050a-c) fall back to it.
+  const total=['ShutterCount','ShutterCount2','ShutterCount3'].map(name=>entries.filter(([key,value])=>tagName(key)===name&&counter(key,value)!==undefined)).find(found=>found.length)??[];
+  const totals=new Set(total.map(([key,value])=>counter(key,value)!));
+  if(mechanical.size>1)return {shutterNote:'mechanical-conflict'};
+  if(mechanical.size===1)return {shutterCount:[...mechanical][0]!,shutterNote:totals.size>1?'mechanical-total-conflict':'mechanical'};
+  if(totals.size>1)return {shutterNote:'total-conflict'};
+  if(totals.size===1){
+    const sonyA7V=/ILCE[ -]?7M5/i.test(camera??''),version=Number(find(entries,['ExifToolVersion']));
+    if(sonyA7V&&(!Number.isFinite(version)||version<13.44||total.some(([key])=>key.split(':')[0]!=='Sony')))return {shutterNote:'sony-unverified'};
+    return {shutterCount:[...totals][0]!,shutterNote:sonyA7V?'sony-total':'total'};
+  }
+  return {shutterNote:entries.some(([key])=>tagName(key)==='ImageCount')?'image-count':'none'};
+}
+/** The one interpreter of both reads: routing's short tag list and the inspector's every tag.
+ * Pure, so maker-note counter rules are testable without camera hardware. `details:false` keeps only the
+ * read errors in `fields`; `file` (its name only) lets DJI clips take their local capture time from the name. */
 export function metadataFromTags(tags:Record<string,unknown>, options:{details?:boolean;file?:string}={}):Metadata {
   const entries=Object.entries(tags);
-  const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries));
+  const camera=cameraModel(entries,options.file),date=djiLocalDate(options.file,entries,recordedDate(entries)),exposure=exposureSummary(entries);
   const fields:Record<string,unknown>={};
-  const result:Metadata={camera,date,fields,fingerprint:duplicateFingerprint(entries,camera,date)};
+  const result:Metadata={camera,date,fields,fingerprint:duplicateFingerprint(entries,camera,date,exposure),...shutter(entries,camera)};
+  if(exposure)result.exposure=exposure;
   if(!camera){const origin=sourceFolder(entries,options.file);if(origin)result.origin=origin;}
   const contentId=find(entries,['ContentIdentifier']),make=find(entries,['Make']);
   if(typeof contentId==='string'&&contentId.trim())result.contentId=contentId.trim();
   if(typeof make==='string'&&make.trim())result.make=make.trim();
   if(editorProvenance(entries))result.edited=true;
-  if(options.details===false){for(const [key,value] of entries)if(tagName(key)==='Error'&&value!==undefined)fields[key]=String(value);const lens=lensModel(entries);if(lens)result.exposure={lens};return result;}
+  if(options.details===false){for(const [key,value] of entries)if(tagName(key)==='Error'&&value!==undefined)fields[key]=String(value);return result;}
   function flatten(key:string,value:unknown) {
     if(value===undefined)return;
     if(value===null||typeof value==='string'||typeof value==='boolean'||typeof value==='number'){fields[key]=value;return;}
@@ -236,28 +249,6 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
     if(typeof value==='object')for(const [child,item] of Object.entries(value))flatten(`${key}.${child}`,item);
   }
   for(const [key,value] of entries)flatten(key,value);
-  const exposure=exposureSummary(entries);if(exposure)result.exposure=exposure;
-  const mechanical=entries.filter(([key])=>tagName(key)==='MechanicalShutterCount').map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined);
-  // Sony bodies that keep their count only in ShutterCount2 or ShutterCount3 (ExifTool Sony Tag9050a-c) fall back to it.
-  const total=['ShutterCount','ShutterCount2','ShutterCount3'].map(name=>entries.filter(([key])=>tagName(key)===name)).find(found=>found.some(([key,value])=>counter(key,value)!==undefined))??[];
-  const mechanicalValues=new Set(mechanical);
-  const totalValues=new Set(total.map(([key,value])=>counter(key,value)).filter((v):v is number=>v!==undefined));
-  if(mechanicalValues.size>1)result.shutterNote='Conflicting mechanical shutter counters were found. Review the individual metadata values.';
-  else if(mechanicalValues.size===1) {
-    result.shutterCount=[...mechanicalValues][0].toLocaleString('en-US');
-    result.shutterNote='Reported mechanical shutter actuations at capture time. Total exposures can be higher.'+(totalValues.size>1?' The separate total ShutterCount values disagree.':'');
-  } else if(totalValues.size>1)result.shutterNote='Conflicting ShutterCount values were found across metadata sources.';
-  else if(totalValues.size===1) {
-    const validEntries=total.filter(([key,value])=>counter(key,value)!==undefined);
-    const sonyA7V=/ILCE[ -]?7M5/i.test(camera??'');
-    const version=Number(find(entries,['ExifToolVersion']));
-    if(sonyA7V && (!Number.isFinite(version)||version<13.44||validEntries.some(([key])=>key.split(':')[0]!=='Sony'))) {
-      result.shutterNote='Shutter count unavailable for this ILCE-7M5 photo: validating its Sony counter requires ExifTool 13.44 or newer and an identified Sony tag.';
-    } else {
-      result.shutterCount=[...totalValues][0].toLocaleString('en-US');
-      result.shutterNote=sonyA7V?'Reported ShutterCount at capture time, read with the corrected Sony decoder; not necessarily mechanical actuations.':'Reported ShutterCount at capture time. Its meaning varies by camera and may include electronic exposures; it is not necessarily mechanical actuations.';
-    }
-  } else result.shutterNote=entries.some(([key])=>tagName(key)==='ImageCount')?'Shutter count unavailable. Image count is shown separately and does not establish mechanical shutter actuations.':'Shutter count unavailable: no supported counter was exposed in this file’s metadata.';
   return result;
 }
 const previewLimit=20*1024*1024;
@@ -279,8 +270,8 @@ export async function embeddedPreview(filename:string):Promise<Buffer|undefined>
     }
   }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
 }
-// Routing reads only what camera, capture date, editor provenance, lens and
-// read errors need. Composite SubSec* tags pull in their own source tags.
+// Routing reads only what camera, capture date, editor provenance, the summary card
+// (exposure, shutter count) and read errors need. Composite SubSec* tags pull in their own source tags.
 const routingTags=[
   'Make','Model','CameraModelName','CameraModel','DeviceModelName','AndroidModel','SamsungModel','Author','UniqueCameraModel','UserComment','ImageDescription','Copyright','Comment','Description',
   'DateTimeOriginal','SubSecDateTimeOriginal','SubSecTimeOriginal','OffsetTimeOriginal',
@@ -289,7 +280,7 @@ const routingTags=[
   'Encoder','LensModel','ContentIdentifier','Error','Warning',
   'SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber','ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3','ImageNumber','FileNumber',
   'ExifImageWidth','ExifImageHeight','ImageWidth','ImageHeight','SourceImageWidth','SourceImageHeight',
-  'ExposureTime','FNumber','ISO','ExposureCompensation',
+  'ExposureTime','FNumber','ISO','ExposureCompensation','FocalLength','ImageCount','ExifToolVersion',
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();

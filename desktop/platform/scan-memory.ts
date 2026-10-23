@@ -10,8 +10,8 @@ import { cacheRecord, readCache } from './user-caches';
  * every mount. Nothing here is trusted as-is: folders are reused only when their entry
  * names still match, and EXIF results only when a file's inode, size and times match. */
 interface Stored {
-  /** 4: routing metadata reads ContentIdentifier, Make, Samsung, CinemaDNG and source tags. */
-  version:4;volume:string;saved:string;backup:boolean;
+  /** 5: routing metadata carries the summary card's exposure numbers and shutter count (a number, with a note code). */
+  version:5;volume:string;saved:string;backup:boolean;
   folders:[string,string[]][];
   files:[string,number][];
   routing:[string,string,Metadata][];
@@ -23,7 +23,7 @@ const safeRelative=(relative:unknown):relative is string=>typeof relative==='str
 export async function saveScanMemory(store:string,volume:string,mount:string,scan:Inventory,routing:[string,Metadata][]):Promise<void> {
   if(!scan.listing) return;
   const prefix=mount+path.sep,stored:Stored={
-    version:4,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
+    version:5,volume,saved:new Date().toISOString(),backup:scan.listing.backup,
     // A folder without remembered names cannot be checked after a remount; it is listed again.
     folders:scan.listing.folders.filter((folder):folder is [string,string,string[]]=>Array.isArray(folder[2])).map(([relative,,names])=>[relative,names]),
     files:scan.files.map(file=>[file.relative,file.size]),
@@ -44,7 +44,7 @@ export async function loadScanMemory(store:string,volume:string,mount:string):Pr
   try {
     const file=memoryFile(store,volume);
     if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
-    const stored=readCache<Stored>(JSON.parse(await fs.readFile(file,'utf8')),'scan',4);
+    const stored=readCache<Stored>(JSON.parse(await fs.readFile(file,'utf8')),'scan',5);
     if(!stored || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
     const dev=(await fs.lstat(mount,{bigint:true})).dev;
     const folders=stored.folders.filter(([relative,names])=>safeRelative(relative)&&Array.isArray(names)&&names.every(name=>typeof name==='string'));

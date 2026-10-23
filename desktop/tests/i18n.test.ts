@@ -220,7 +220,7 @@ test('format problems and metadata read issues are isolated in All errors; ackno
 
 test('metadata disclosure does not repeat parser error messages outside the error panel',async()=>{
  const {MetadataDialog}=await import('../renderer/RootApp');
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}}},act:()=>{},onClose:()=>{}})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload'}},fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}},act:()=>{},onClose:()=>{}})}));
  assert.ok(!markup.includes('Invalid media payload'));assert.ok(markup.includes('EXIF:Model'));
 });
 

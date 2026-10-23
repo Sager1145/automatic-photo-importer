@@ -331,6 +331,15 @@ Captured|拍摄时间|拍攝時間|撮影日時
 Shutter count|快门次数|快門次數|シャッター回数
 Not recorded|未记录|未記錄|記録なし
 Not available|不可用|無法取得|取得不可
+Reported mechanical shutter actuations at capture time. Total exposures can be higher.|拍摄时记录的机械快门动作次数。总曝光次数可能更高。|拍攝時記錄的機械快門動作次數。總曝光次數可能更高。|撮影時に記録されたメカシャッターの作動回数です。総露光回数はこれより多い場合があります。
+Reported mechanical shutter actuations at capture time. Total exposures can be higher. The separate total ShutterCount values disagree.|拍摄时记录的机械快门动作次数。总曝光次数可能更高。另外记录的总 ShutterCount 值互不一致。|拍攝時記錄的機械快門動作次數。總曝光次數可能更高。另外記錄的總 ShutterCount 值互不一致。|撮影時に記録されたメカシャッターの作動回数です。総露光回数はこれより多い場合があります。別に記録された総 ShutterCount の値は一致しません。
+Conflicting mechanical shutter counters were found. Review the individual metadata values.|发现相互矛盾的机械快门计数。请查看各个元数据值。|發現互相矛盾的機械快門計數。請查看各個中繼資料值。|メカシャッターのカウンターが食い違っています。個々のメタデータの値を確認してください。
+Reported ShutterCount at capture time. Its meaning varies by camera and may include electronic exposures; it is not necessarily mechanical actuations.|拍摄时记录的 ShutterCount。其含义因相机而异，可能包含电子快门曝光，不一定是机械快门动作次数。|拍攝時記錄的 ShutterCount。其含義因相機而異，可能包含電子快門曝光，不一定是機械快門動作次數。|撮影時に記録された ShutterCount です。意味はカメラによって異なり、電子シャッターでの露光を含む場合があります。メカシャッターの作動回数とは限りません。
+Reported ShutterCount at capture time, read with the corrected Sony decoder; not necessarily mechanical actuations.|拍摄时记录的 ShutterCount，已用修正后的 Sony 解码器读取；不一定是机械快门动作次数。|拍攝時記錄的 ShutterCount，已用修正後的 Sony 解碼器讀取；不一定是機械快門動作次數。|撮影時に記録された ShutterCount を修正済みの Sony デコーダーで読み取りました。メカシャッターの作動回数とは限りません。
+Conflicting ShutterCount values were found across metadata sources.|不同元数据来源中的 ShutterCount 值相互矛盾。|不同中繼資料來源中的 ShutterCount 值互相矛盾。|メタデータの記録元によって ShutterCount の値が食い違っています。
+Shutter count unavailable for this ILCE-7M5 photo: validating its Sony counter requires ExifTool 13.44 or newer and an identified Sony tag.|这张 ILCE-7M5 照片的快门次数不可用：验证其 Sony 计数需要 ExifTool 13.44 或更高版本，以及可识别的 Sony 标签。|這張 ILCE-7M5 照片的快門次數無法取得：驗證其 Sony 計數需要 ExifTool 13.44 或更新版本，以及可識別的 Sony 標籤。|この ILCE-7M5 の写真のシャッター回数は取得できません。Sony のカウンターを検証するには ExifTool 13.44 以降と識別済みの Sony タグが必要です。
+Shutter count unavailable. Image count is shown separately and does not establish mechanical shutter actuations.|快门次数不可用。图像计数单独显示，不能说明机械快门动作次数。|快門次數無法取得。影像計數另行顯示，不能說明機械快門動作次數。|シャッター回数は取得できません。画像カウントは別に表示されますが、メカシャッターの作動回数を示すものではありません。
+Shutter count unavailable: no supported counter was exposed in this file’s metadata.|快门次数不可用：此文件的元数据中没有受支持的计数器。|快門次數無法取得：此檔案的中繼資料中沒有受支援的計數器。|シャッター回数は取得できません：このファイルのメタデータに対応するカウンターがありません。
 All metadata|所有元数据|所有中繼資料|すべてのメタデータ
 Find a metadata field…|查找元数据字段…|尋找中繼資料欄位…|メタデータの項目を検索…
 Search metadata fields|搜索元数据字段|搜尋中繼資料欄位|メタデータ項目を検索
