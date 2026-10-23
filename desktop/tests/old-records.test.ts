@@ -224,7 +224,7 @@ test('a refusal on an unconfigured sibling folder makes the notice appear for it
  await undoOrganization(root,id);
  // The app knows only the library's drive (the destination); the sibling is not configured anywhere.
  const notice=new OldRecordsNotice(async()=>[{drive:root,key:'library',roots:[root]}]);
- onOldRecordsFound(folder=>notice.note(folder));
+ onOldRecordsFound(folder=>{if(folder)notice.note(folder);});
  try{
   await notice.scan(true);
   assert.deepEqual(notice.drives,[],'nothing is known yet: the sibling is not configured');
@@ -255,4 +255,57 @@ test('the automatic cleanup keeps the empty slots and the pointers of a half-con
  await resealJournalLine(root,id,0,value=>({...value,convertedFrom:{path:path.join(root,OLD_FOLDER,id),records:3,sha256:'0'.repeat(64)}}));
  assert.equal(await storePointerLeftover(store,pointer),false,'a half-converted journal keeps its pointer');
  assert.ok(!(await findResidue([root])).items.some(item=>item.path===slot),'and its empty slots');
+});
+
+test('a source holding sealed old receipts never gets a notice, and acknowledging creates no store in it',async t=>{
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-source-')));
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
+ const library=path.join(parent,'library'),source=path.join(parent,'card');
+ await fs.mkdir(library);await fs.mkdir(path.join(source,'DCIM'),{recursive:true});
+ const photo=path.join(source,'DCIM','A.JPG');await fs.writeFile(photo,'x');
+ await oldReceipt(photo);await oldReceipt(photo,{kind:'intent'});
+ const notice=new OldRecordsNotice(async()=>[{drive:library,key:'library',roots:[library]}]);
+ let told=0;onOldRecordsFound(folder=>{told++;if(folder)notice.note(folder);});
+ try{
+  await core.inventory(source,{backup:false});
+  assert.ok(told>=1,'the listener hears of the hit');
+  assert.equal(notice.extra.size,0,'an inventory adds no folder');
+  await notice.scan(true);
+  assert.deepEqual(notice.drives,[],'no notice for a source');
+  assert.equal(await notice.acknowledge(library),0);
+  assert.equal(await fs.lstat(path.join(source,'Photo Importer Data')).then(()=>true,()=>false),false,'no store in the source');
+  assert.equal(await fs.lstat(path.join(source,'DCIM','Photo Importer Data')).then(()=>true,()=>false),false);
+  // Only a refusal names a folder.
+  await oldJournal(library);
+  await assert.rejects(refuseOldRecords(library),(error:any)=>error.key==='error.oldRecords');
+  assert.deepEqual([...notice.extra],[library]);
+ }finally{onOldRecordsFound(undefined);}
+});
+test('a folder named after a scan is looked at by the next scan, though the drive was already checked',async t=>{
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-race-')));
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
+ const library=path.join(parent,'library'),sibling=path.join(parent,'OldLibrary');
+ await fs.mkdir(library);await fs.mkdir(sibling);await oldJournal(sibling);
+ const notice=new OldRecordsNotice(async()=>[{drive:library,key:'library',roots:[library]}]);
+ await notice.scan(false);
+ assert.deepEqual(notice.drives,[]);
+ assert.equal(await notice.scan(false),false,'already checked');
+ notice.note(sibling);
+ assert.equal(await notice.scan(false),true,'naming a folder makes the drive be looked at again');
+ assert.deepEqual(notice.drives,[library]);
+});
+test('a library folder reached through a link never refuses a delete (it could never get a notice)',async t=>{
+ const parent=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-link-')));
+ t.after(()=>fs.rm(parent,{recursive:true,force:true}));
+ const outside=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'old-records-linked-'))),root=path.join(parent,'library'),elsewhere=path.join(outside,'elsewhere');
+ t.after(()=>fs.rm(outside,{recursive:true,force:true}));
+ await fs.mkdir(path.join(root,'incoming'),{recursive:true});await fs.mkdir(elsewhere);
+ await fs.writeFile(path.join(root,'incoming/A.JPG'),'an original');
+ await core.executeReorganization((await core.plan(root,[root],options,metadata)).plans[0]!,undefined,undefined,{strategy:'copy'});
+ const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
+ await undoOrganization(root,id);
+ const link=path.join(root,'link');await fs.symlink(elsewhere,link);
+ await oldJournal(elsewhere);
+ await resealJournalLine(root,id,0,value=>({...value,libraries:[link]}));
+ await deleteOrganizationRecovery(root,id);
 });

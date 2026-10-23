@@ -22,14 +22,15 @@ const identityOf=(file:string,stat:BigIntStats):OldRecord=>({path:file,dev:Strin
  * changes whenever the drive is mounted again (the inode, size and date of the same file do not). */
 const keyOf=(item:OldRecord)=>JSON.stringify([item.path,item.ino,item.size,item.mtimeNs]);
 
-/** Told, with the folder, when something new that may be an old record turns up (an inventory met a receipt) or a folder
- * was refused for one: the app looks at that folder's drive too, so the notice and its Acknowledge button appear. */
-let listener:((folder:string)=>void)|undefined;
-export function onOldRecordsFound(next:((folder:string)=>void)|undefined):void{listener=next;}
+/** Told when something new that may be an old record turns up (an inventory met a receipt: no folder, the configured
+ * folders are looked at again) or a folder was refused for one (with that folder, which the app then looks at too, so
+ * the notice and its Acknowledge button appear). Only a refusal ever names a folder. */
+let listener:((folder?:string)=>void)|undefined;
+export function onOldRecordsFound(next:((folder?:string)=>void)|undefined):void{listener=next;}
 
 /** Old files an inventory met (a receipt beside a media file), by path; looked at again when asked about the library. */
 const hits=new Set<string>();
-export function noteOldReceipt(file:string):void{if(hits.size<MAX_HITS&&!hits.has(file)){hits.add(file);listener?.(path.dirname(file));}}
+export function noteOldReceipt(file:string):void{if(hits.size<MAX_HITS&&!hits.has(file)){hits.add(file);listener?.();}}
 
 /** The earlier version's seal: an HMAC-SHA256 over the plain JSON text, with the host key. */
 function sealedByThisMac(value:unknown):boolean{
@@ -159,7 +160,9 @@ export class OldRecordsNotice {
  drives:string[]=[];
  private checked=new Set<string>();
  constructor(private readonly configured:()=>Promise<DriveRoots[]>){}
- note(folder:string):void{if(this.extra.has(folder))return;this.extra.add(folder);this.checked.clear();}
+ /** A folder a refusal named (never one an inventory met: a source may hold old receipts and gets no notice). */
+ note(folder:string):void{this.generation++;this.checked.clear();this.extra.add(folder);}
+ private generation=0;
  /** The drives with the folders to look at: the configured ones, and each extra folder beside them or on a volume of its own. */
  async groups():Promise<DriveRoots[]>{
   const groups=(await this.configured()).map(item=>({...item,roots:[...item.roots]}));
@@ -179,13 +182,14 @@ export class OldRecordsNotice {
  }
  /** Looks again at the drives not yet looked at (all of them with `force`). Returns whether the list of drives changed. */
  async scan(force=false):Promise<boolean>{
-  const groups=await this.groups(),connected=new Set(groups.map(group=>group.key));
+  const generation=this.generation,groups=await this.groups(),connected=new Set(groups.map(group=>group.key));
   for(const key of [...this.checked])if(!connected.has(key))this.checked.delete(key);
   const before=this.drives.join('\0'),holding=new Set(this.drives.filter(drive=>groups.some(group=>group.drive===drive)));
   for(const group of groups){
    if(!force&&this.checked.has(group.key))continue;
-   this.checked.add(group.key);
    const found=(await Promise.all(group.roots.map(root=>findOldRecords(root).catch(()=>[])))).flat();
+   // A folder named while this ran was not part of it: it stays to be looked at.
+   if(this.generation===generation)this.checked.add(group.key);
    if(found.length)holding.add(group.drive);else holding.delete(group.drive);
   }
   this.drives=groups.map(group=>group.drive).filter((drive,position,all)=>holding.has(drive)&&all.indexOf(drive)===position);

@@ -535,21 +535,25 @@ async function configuredOldRecordsDrives():Promise<DriveRoots[]>{
 const oldRecords=new OldRecordsNotice(configuredOldRecordsDrives);
 let oldRecordsTask:Promise<void>|undefined;
 /** Cheap: two folder checks per root, then one small file per old journal. Nothing is organized, converted or deleted. */
+let oldRecordsPending=false;
 function scheduleOldRecordsCheck(force=false){
- if(qa||hardwareTest||quitting||oldRecordsTask)return;
+ if(qa||hardwareTest||quitting)return;
+ // One at a time; a forced request made meanwhile runs again right after.
+ if(oldRecordsTask){if(force)oldRecordsPending=true;return;}
  const task:Promise<void>=(async()=>{
   const changed=await oldRecords.scan(force);
   if(!changed)return;
   if(oldRecords.drives.length)state.oldRecords=[...oldRecords.drives];else delete state.oldRecords;
   log('normal','records','old-records-found',{drives:oldRecords.drives.length});emit();
- })().catch(error=>{log('normal','records','old-records-check-failed',{error:toMessage(error)});}).finally(()=>{if(oldRecordsTask===task)oldRecordsTask=undefined;});
+ })().catch(error=>{log('normal','records','old-records-check-failed',{error:toMessage(error)});}).finally(()=>{if(oldRecordsTask===task)oldRecordsTask=undefined;if(oldRecordsPending){oldRecordsPending=false;scheduleOldRecordsCheck(true);}});
  oldRecordsTask=task;
 }
-/** A receipt met while listing, or a folder refused for old records: its drive is looked at too (once a second at most). */
+/** A receipt met while listing (the configured folders are looked at again), or a folder refused for old records (it is looked at too): once a second at most. */
 let oldRecordsAgain:NodeJS.Timeout|undefined;
-onOldRecordsFound(folder=>{oldRecords.note(folder);if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
+onOldRecordsFound(folder=>{if(folder)oldRecords.note(folder);if(oldRecordsAgain)return;oldRecordsAgain=setTimeout(()=>{oldRecordsAgain=undefined;scheduleOldRecordsCheck(true);},1000);oldRecordsAgain.unref();});
 /** The user acknowledged the notice of a drive: its items, exactly as they are now, are written to the reviewed list. */
 async function acknowledgeDrive(drive:string){
+ if(oldRecordsTask)await oldRecordsTask;
  const count=await oldRecords.acknowledge(drive);
  log('normal','records','old-records-acknowledged',{drive,items:count});
  if(oldRecords.drives.length)state.oldRecords=[...oldRecords.drives];else delete state.oldRecords;
