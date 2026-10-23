@@ -68,14 +68,14 @@ test('rotation: a file stops at the size limit and the next line starts a new on
 });
 
 test('retention keeps the newest N files', async () => {
-  const dir = await temp(), logger = make({ dir, level: 'normal', maxFileBytes: 1000, maxFiles: 3, maxTotalBytes: 1e9 });
-  for (let i = 0; i < 60; i++) logger.log('normal', 'x', 'line', { i, pad: 'p'.repeat(60) });
+  const dir = await temp(), logger = make({ dir, level: 'normal', maxFileBytes: 8000, maxFiles: 2, maxTotalBytes: 1e9 });
+  for (let i = 0; i < 300; i++) logger.log('normal', 'x', 'line', { i, pad: 'p'.repeat(60) });
   await logger.flush(); await logger.flush();
   const names = await files(dir);
-  assert.equal(names.length, 3);
+  assert.equal(names.length, 2);
   const kept = (await lines(dir)).filter(line => line.event === 'line');
-  assert.equal(kept.at(-1).i, 59, 'the newest line survives');
-  assert.ok(kept.every(line => line.i > 30), 'old files are gone');
+  assert.equal(kept.at(-1).i, 299, 'the newest line survives ');
+  assert.ok(kept.every(line => line.i > 100), 'old files are gone');
 });
 
 test('retention keeps the total under the byte limit but never deletes the file in use', async () => {

@@ -62,7 +62,7 @@ export class Logger {
  private level:LogLevel;
  private pending:string[]=[];private pendingBytes=0;private timer:NodeJS.Timeout|undefined;
  private chain:Promise<void>=Promise.resolve();
- private sink:LogSink|undefined;private file:string|undefined;private size=0;private total=0;private sequence=0;private ready=false;
+ private sink:LogSink|undefined;private file:string|undefined;private size=0;private total=0;private sequence=0;private lastName:string|undefined;private ready=false;
  private dropped=0;private failures=0;private reportedDrops=0;private closed=false;
  private readonly options:Required<Pick<LoggerOptions,'dir'|'maxFileBytes'|'maxFiles'|'maxTotalBytes'|'flushMs'|'maxPendingBytes'>>&Pick<LoggerOptions,'now'|'open'>;
  constructor(options:LoggerOptions){
@@ -129,8 +129,8 @@ export class Logger {
   await this.sink?.close().catch(()=>{});this.sink=undefined;
   const now=this.options.now?.()??new Date(),base=`importer-${stamp(now)}`;let name=`${base}.jsonl`;
   // Files started in the same second get a counter; names sort in creation order.
-  while(await fsp.stat(path.join(this.options.dir,name)).then(()=>true,()=>false))name=`${base}-${String(++this.sequence).padStart(4,'0')}.jsonl`;
-  const file=path.join(this.options.dir,name);
+  while((this.lastName!==undefined&&byAge(name,this.lastName)<=0)||await fsp.stat(path.join(this.options.dir,name)).then(()=>true,()=>false))name=`${base}-${String(++this.sequence).padStart(4,'0')}.jsonl`;
+  this.lastName=name;const file=path.join(this.options.dir,name);
   this.sink=await (this.options.open??defaultOpen)(file);this.file=file;this.size=0;
   await this.prune();
  }
@@ -158,10 +158,10 @@ export class Logger {
  /** Total size of the log files on disk, queued lines included. */
  async diskBytes():Promise<number>{await this.flush();let total=0;for(const name of await fsp.readdir(this.options.dir).catch(()=>[] as string[]))if(isLogFile(name))total+=(await fsp.stat(path.join(this.options.dir,name)).catch(()=>undefined))?.size??0;return total;}
  /** Write this job's lines (already filtered by the level they were logged at) to `destination`, at most `cap` bytes. */
- async excerpt(jobId:string,destination:string,options:{cap?:number;since?:number}={}):Promise<{lines:number;bytes:number;truncated:boolean}>{
+ async excerpt(jobId:string,destination:string,options:{cap?:number;since?:number;/** Other ids whose lines belong to this job too (the review it was applied from). */alsoIds?:string[]}={}):Promise<{lines:number;bytes:number;truncated:boolean}>{
   const cap=options.cap??EXCERPT_BYTES;await this.flush();
   const names=(await fsp.readdir(this.options.dir).catch(()=>[] as string[])).filter(isLogFile).sort(byAge);
-  const out=await fsp.open(destination,'wx',0o600);let lines=0,bytes=0,truncated=false;const needle=`"jobId":"${jobId}"`;
+  const out=await fsp.open(destination,'wx',0o600);let lines=0,bytes=0,truncated=false;const ids=new Set([jobId,...options.alsoIds??[]]),needles=[...ids].map(id=>`"jobId":"${id}"`);
   try{
    for(const name of names){
     const file=path.join(this.options.dir,name);
@@ -169,8 +169,8 @@ export class Logger {
     const reader=readline.createInterface({input:fs.createReadStream(file,{encoding:'utf8'}),crlfDelay:Infinity});
     try{
      for await(const line of reader){
-      if(!line.includes(needle))continue;
-      try{if(JSON.parse(line).jobId!==jobId)continue;}catch{continue;}
+      if(!needles.some(needle=>line.includes(needle)))continue;
+      try{if(!ids.has(JSON.parse(line).jobId))continue;}catch{continue;}
       const length=Buffer.byteLength(line)+1;
       if(bytes+length>cap){truncated=true;break;}
       await out.write(line+'\n');lines++;bytes+=length;
@@ -188,7 +188,7 @@ export class Logger {
   if(!this.pending.length||!this.ready||!this.file)return;
   try{fs.appendFileSync(this.file,this.pending.join(''));this.pending=[];this.pendingBytes=0;}catch{this.failures++;}
  }
- async close(){await this.flush();this.closed=true;await this.sink?.close().catch(()=>{});this.sink=undefined;}
+ async close(){this.closed=true;await this.flush();await this.sink?.close().catch(()=>{});this.sink=undefined;}
 }
 
 const jobStore=new AsyncLocalStorage<string>();
