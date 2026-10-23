@@ -45,6 +45,8 @@ after(async()=>{if(!base)return;await detach();await fs.rm(base,{recursive:true,
 async function ready(t:test.TestContext):Promise<{root:string;card:string}|undefined> {
   if(!available){t.skip('large exFAT disk images are unavailable here');return undefined;}
   const root=path.join(mount,`photobackup-${++counter}`);await fs.mkdir(root);
+  // A forced detach drops what was never flushed, so the new folder is made durable before any test detaches the volume.
+  for(const folder of [root,mount]){const handle=await fs.open(folder,'r');await handle.sync();await handle.close();}
   return {root,card};
 }
 const sha=(file:string)=>fs.readFile(file).then(data=>createHash('sha256').update(data).digest('hex'));

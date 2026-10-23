@@ -72,6 +72,40 @@ test('clicking the item removes just that receipt, and only while the file is un
   assert.ok(await fs.lstat(g.file));
 });
 
+test('a receipt that still binds its file is never refused because the source or its folder moved on: the file is finished',async t=>{
+  const f=await fixture(t,'exact');
+  // The card file is touched after the receipt was written: its recorded stat no longer matches.
+  await fs.utimes(path.join(f.card,'DSC_0001.NEF'),new Date(1_700_000_000_000),new Date(1_700_000_000_000));
+  assert.equal((await findResidue([f.root])).items.some(item=>item.kind==='unbound'),false,'Clean up has nothing to list');
+  const result=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);
+  assert.deepEqual(result.errors,[]);
+  assert.deepEqual(await receipts(f.root),[],'finished, so its receipt is released');
+  assert.ok(Math.abs((await fs.stat(f.file)).mtimeMs-Date.parse('2024-02-03T12:00:00Z'))<2000,'the capture date was applied');
+});
+
+test('finishing a file on the staged path also releases a stale staged copy of it',async t=>{
+  const f=await fixture(t,'exact');
+  const partial=path.join(path.dirname(f.file),'photo-importer-6f1c9a3e-1b2d-4c5e-8f70-123456789abc.partial');
+  await fs.writeFile(partial,Buffer.alloc(20_000,3));
+  await recordPartial('stage',partial,await fs.lstat(partial,{bigint:true}),f.entry,f.reviewed,new Map());
+  const result=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);
+  assert.deepEqual(result.errors,[]);
+  assert.equal(await fs.lstat(partial).then(()=>true,()=>false),false,'the stale stage is gone');
+  assert.deepEqual((await fs.readdir(path.dirname(f.file))).filter(name=>name.startsWith('photo-importer-')),[],'and so are the receipts');
+});
+
+test('the import refuses a receipt exactly when Clean up lists it',async t=>{
+  for(const [bind,touched] of [['none',false],['none',true],['exact',false],['exact',true],['creating',false]] as const) {
+    const f=await fixture(t,bind);
+    if(touched) await fs.utimes(path.join(f.card,'DSC_0001.NEF'),new Date(1_700_000_000_000),new Date(1_700_000_000_000));
+    const listed=(await findResidue([f.root])).items.some(item=>item.kind==='unbound');
+    const result=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);
+    const refused=result.errors.some(error=>/Remove the receipt in Settings/.test(error));
+    assert.equal(refused,listed,`${bind}${touched?' with the source touched':''}: listed ${listed}, refused ${refused}`);
+    assert.equal(listed,bind==='none');
+  }
+});
+
 test('the import stops on it with a message that names the file and points to Clean up, and releases nothing',async t=>{
   const f=await fixture(t);
   const result=await execute((await plan(f.card,[f.root],options,metadata)).plans[0]!);

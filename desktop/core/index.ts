@@ -903,7 +903,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   /** The destination already holds the whole file. With a receipt of ours binding it, it is finished (dates, flush); otherwise it is simply verified present. */
   const present=async(entry:PlanEntry,destination:string)=>{
     const sha=await resolve(entry);
-    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) result.copied++;
+    if(await finishDirect(entry,destination,sha,transfer,recovery,options,signal)) {await releaseStaleStage({...entry,destination},root,recovery,signal);result.copied++;}
     else {
       await syncFile(destination);await syncParents(destination,root);
       if(entry.sourceIdentity) options.onVerified?.(entry.source,sha,entry.sourceIdentity);
@@ -976,7 +976,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       try { members.push(await begin(entry,item.destination));i++; }
       catch(error) {
         if(error===NOT_DIRECT&&i!==0) throw new Error(`No creation date to bind a copy by: ${item.destination}`);
-        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);if(outside(allocated))throw WIDEN;continue;}
+        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);if(outside(allocated))throw WIDEN;busy(allocated.map(next=>next.destination));continue;}
         throw error;
       }
     }
@@ -1213,7 +1213,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
               await contained(entry.source,transfer.source);await rootUnchanged(transfer.root,transfer.rootIdentity);
               if(!sameStat(verifiedSources.get(entry.id)!,await fs.lstat(entry.source,{bigint:true})))throw sourceChanged(entry);
-              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){if(await finishDirect(entry,item.destination,entry.digest!,transfer,recovery,options,signal)){result.copied++;i++;continue;}await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
+              if(await existingMatches(item.destination,entry.size,async()=>entry.digest!,transfer.root,checks,signal)===true){if(await finishDirect(entry,item.destination,entry.digest!,transfer,recovery,options,signal)){await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.copied++;i++;continue;}await syncFile(item.destination);await syncParents(item.destination,transfer.root);if(entry.sourceIdentity)options.onVerified?.(entry.source,entry.digest!,entry.sourceIdentity);const recovered=await findPartial('publication',{...entry,destination:item.destination},transfer.root,recovery,signal);if(recovered)await clearPartialRecord(recovered,transfer.root,recovery);await releaseCreations({...entry,destination:item.destination},transfer.root,recovery);await releaseStaleStage({...entry,destination:item.destination},transfer.root,recovery,signal);result.skipped++;i++;continue;}
               const temporary=staged.get(entry.id);
               // Do not silently restart copying inside validation if an external
               // writer removes a duplicate after preflight; a fresh retry is safe.

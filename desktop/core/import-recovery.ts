@@ -59,6 +59,10 @@ const tolerantBinds=(s:BigIntStats,record:RecordData)=>{
  if(record.mode!=='direct'||!Array.isArray(record.finalBirth)||s.nlink!==1n||String(s.dev)!==String(record.fileIdentity).split(':')[0])return false;
  return record.finalBirth.some(value=>{try{const difference=BigInt(value)-s.birthtimeNs;return (difference<0n?-difference:difference)<=FINAL_BIRTH_TOLERANCE;}catch{return false;}});
 };
+/** The one definition of "a direct copy's receipt that no longer binds its file": Clean up lists exactly these, and the import refuses
+ * exactly these (finishDirect), so the two can never disagree. A receipt that still binds the file, exactly or tolerantly, is never
+ * one, whatever happened to the source or the folder meanwhile. */
+const directUnbound=(record:RecordData,stat:BigIntStats|undefined)=>record.mode==='direct'&&record.fileIdentity!==CREATING&&!!stat?.isFile()&&(stat.nlink!==1n||!binds(stat,record.fileIdentity)&&!tolerantBinds(stat,record));
 /** A device number names a mount, not a disk: after a re-attach the recorded dev is read as the
  * current one while the recorded root/source folder is still the same inode at the same path. */
 const sourceRebased=new WeakSet<RecordData>();
@@ -90,7 +94,7 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  const cardPresent=await identity(record.sourceRoot).then(found=>found===record.sourceIdentity,()=>false);
  const resumable=bound&&record.kind==='stage'&&!!record.sourceStat&&(!cardPresent||await fs.lstat(record.source,{bigint:true}).then(source=>source.isFile()&&sourceMatches(source,record.sourceStat),()=>false));
  const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
- const unbound=record.mode==='direct'&&record.fileIdentity!==CREATING&&!!stat?.isFile()&&!bound&&!tolerantBinds(stat,record);
+ const unbound=directUnbound(record,stat);
  return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,unbound};
 }
 
@@ -146,7 +150,11 @@ const publicationNames=(records:FolderReceipts,entry:PlanEntry)=>{
  * skipped nor released. */
 export async function unboundDirect(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
  const records=await receiptNames(path.dirname(entry.destination),root,index);
- for(const record of publicationNames(records,entry).values())if(record.mode==='direct'&&record.fileIdentity!==CREATING&&record.file===entry.destination&&record.root===root)return true;
+ for(const raw of publicationNames(records,entry).values()){
+  if(raw.mode!=='direct'||raw.file!==entry.destination||raw.root!==root)continue;
+  const record=await rebaseMount(raw),stat=await fs.lstat(record.file,{bigint:true}).catch(()=>undefined);
+  if(directUnbound(record,stat))return true;
+ }
  return false;
 }
 async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal:AbortSignal|undefined,finish:boolean):Promise<OwnedPartial|undefined>{
@@ -165,8 +173,10 @@ async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,si
    const read=await readRecord(journal,root),journalStat=read.journalStat,record=await rebaseMount(read.record);
    if(record.version!==1||record.kind!==kind||record.root!==root||record.source!==entry.source||record.destination!==entry.destination||(kind==='stage'?!stageMatch(record):record.sha256!==(entry.digest??'')&&!(record.mode==='direct'&&record.sha256===''))||!record.sourceStat||typeof record.file!=='string'||path.dirname(record.file)!==folder)continue;
    if(kind==='publication'?record.file!==entry.destination:!/^(?:\.import|photo-importer)-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
-   await rootUnchanged(root,record.rootIdentity);await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);await contained(record.file,root);
-   if(await identity(folder)!==record.parentIdentity)continue;
+   await rootUnchanged(root,record.rootIdentity);await contained(record.file,root);
+   // Finishing a whole file whose bytes the caller found equal to the source's needs only that the receipt binds that file: the card or the
+   // folder having moved on since proves nothing against it. Resuming (appending) still needs the same source and folder.
+   if(!finish){await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);if(await identity(folder)!==record.parentIdentity)continue;}
    const source=await fs.lstat(entry.source,{bigint:true});
    if(!finish&&kind==='publication'&&record.fileIdentity===CREATING&&!await fs.lstat(record.file,{bigint:true}).then(()=>true,error=>code(error)==='ENOENT'?false:Promise.reject(error))){
     if(!sourceMatches(source,record.sourceStat))continue;
@@ -174,7 +184,7 @@ async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,si
    }
    const stat=await fs.lstat(record.file,{bigint:true});
    const exact=binds(stat,record.fileIdentity),tolerant=finish&&!exact&&tolerantBinds(stat,record);
-   if(!sourceMatches(source,record.sourceStat)||!stat.isFile()||stat.nlink!==1n||!(exact||tolerant)||(finish?stat.size!==BigInt(entry.size):stat.size>BigInt(entry.size)))continue;
+   if(!(finish||sourceMatches(source,record.sourceStat))||!stat.isFile()||stat.nlink!==1n||!(exact||tolerant)||(finish?stat.size!==BigInt(entry.size):stat.size>BigInt(entry.size)))continue;
    if(!finish&&!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
    if(!sameStat(stat,await fs.lstat(record.file,{bigint:true}))||!sameStat(source,await fs.lstat(entry.source,{bigint:true})))continue;
    return {file:record.file,stat,journal,journalStat,record,...(tolerant?{tolerant:true}:{})};
