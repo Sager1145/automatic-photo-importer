@@ -742,6 +742,9 @@ No leftover files.|没有残留文件。|沒有殘留檔案。|残ったファ�
 Clean up|清理|清理|クリーンアップ
 {count} can continue when that card is imported again ({size}). Automatic cleanup keeps them; Clean up removes them too.|其中 {count} 个可在再次导入该存储卡时继续（{size}）。自动清理会保留它们；点击“清理”也会删除它们。|其中 {count} 個可在再次匯入該記憶卡時繼續（{size}）。自動清理會保留它們；點選「清理」也會刪除它們。|そのうち {count} 個は、そのカードをもう一度読み込むと続きから再開できます（{size}）。自動クリーンアップでは残し、「クリーンアップ」では削除します。
 {count} complete copies whose card file changed are kept: {folder}|{count} 个完整副本的存储卡文件已更改，已保留：{folder}|{count} 個完整副本的記憶卡檔案已變更，已保留：{folder}|カード上のファイルが変わった完全なコピー {count} 個を保管しています：{folder}
+A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.|{path} 处的文件有一份旧的复制回执，与它已不相符；文件会保留。请移除该回执，以便继续导入。|{path} 處的檔案有一份舊的複製回執，與它已不相符；檔案會保留。請移除該回執，以便繼續匯入。|{path} のファイルに、一致しなくなった古いコピーの受領記録があります。ファイルはそのままです。インポートを続けるには受領記録を削除してください。
+Remove receipt|移除回执|移除回執|受領記録を削除
+{count} more files have an old copy receipt. Clean up removes those receipts too; the files are kept.|另有 {count} 个文件有旧的复制回执。点击“清理”也会移除这些回执；文件会保留。|另有 {count} 個檔案有舊的複製回執。點選「清理」也會移除這些回執；檔案會保留。|ほかに {count} 個のファイルに古いコピーの受領記録があります。クリーンアップでこれらの受領記録も削除されます。ファイルは残ります。
 Last cleanup removed {files} ({size}).|上次清理删除了{files}（{size}）。|上次清理刪除了{files}（{size}）。|前回のクリーンアップで{files}を削除しました（{size}）。
 Staging files from interrupted imports, organization scratch copies and camera downloads are removed automatically when nothing is running. Originals kept for undo stay until you release them.|中断的导入留下的暂存文件、整理时的临时副本和相机下载内容会在没有任务运行时自动删除。为撤销而保留的原文件会一直保留，直到你释放它们。|中斷的匯入留下的暫存檔案、整理時的暫時副本和相機下載內容會在沒有工作執行時自動刪除。為復原而保留的原始檔案會一直保留，直到你釋放它們。|中断した読み込みの一時ファイル、整理中の一時コピー、カメラからのダウンロードは、何も実行していないときに自動で削除されます。取り消し用に保持している元のファイルは、解放するまで残ります。
 {completed} of {total} files checked|已检查 {completed}/{total} 个文件|已檢查 {completed}/{total} 個檔案|{total} 個中 {completed} 個のファイルを確認

@@ -76,6 +76,29 @@ test('a re-import releases a staged copy left by a crashed run once the publishe
   assert.equal((await fs.stat(entry.destination)).size,300_000);
 });
 
+// releaseStaleStage also releases a stage SHORTER than the file: findPartial has already proved it ours (signed receipt, same source and
+// destination, bound by identity) and a byte prefix of the unchanged source, and the published file is verified whole, so it holds nothing
+// the published file and the source do not. A stage that is not a prefix of the source is not ours to judge and stays.
+for(const [name,stageBytes,left] of [['a shorter staged prefix of the source',(data:Buffer)=>data.subarray(0,100_000),false],['a shorter stage whose bytes are not the source\'s',(data:Buffer)=>Buffer.alloc(100_000,1),true]] as const) {
+  test(`a re-import releases ${name} left by a crashed run once the published file matches`,async t=>{
+    const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'short-stage-')));
+    t.after(()=>fs.rm(base,{recursive:true,force:true}));
+    const source=path.join(base,'card'),root=path.join(base,'photobackup'),original=path.join(source,'DSC_0001.NEF');
+    await fs.mkdir(source);await fs.mkdir(root);
+    const data=Buffer.alloc(300_000,7);await fs.writeFile(original,data);
+    const first=(await plan(source,[root],options,metadata)).plans[0]!,entry=first.entries[0]!;
+    await fs.mkdir(path.dirname(entry.destination),{recursive:true});
+    const partial=path.join(path.dirname(entry.destination),`photo-importer-${randomUUID()}.partial`);
+    await fs.writeFile(partial,stageBytes(data));
+    await recordPartial('stage',partial,await fs.lstat(partial,{bigint:true}),entry,first,new Map());
+    await fs.copyFile(original,entry.destination);
+    const result=await execute((await plan(source,[root],options,metadata)).plans[0]!);
+    assert.deepEqual(result.errors,[]);
+    assert.equal(await fs.lstat(partial).then(()=>true,()=>false),left);
+    assert.equal((await fs.stat(entry.destination)).size,300_000);
+  });
+}
+
 test('a copy stopped while publishing on exFAT is finished in place by the next import, not copied again',async t=>{
   const mount=await exfat(t);
   if(!mount) return t.skip('exFAT disk images are unavailable here');

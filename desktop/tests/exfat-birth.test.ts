@@ -164,7 +164,7 @@ test('exFAT: a stage dated with a sub-second capture time is released after the 
     return link(...args);
   });syncBuiltinESMExports();
   t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
-  const result=await execute(reviewed);
+  const result=await execute(reviewed,undefined,undefined,{direct:false});
   t.mock.restoreAll();syncBuiltinESMExports();
   assert.equal(cycled,true);
   if(devChanged) return t.skip('the re-attached image got another device number, so the stage cannot be identified');

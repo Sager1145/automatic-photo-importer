@@ -92,6 +92,8 @@ export const backendMessages={
  'history.organizationRecovery':{en:'Library organization recovery','zh-Hans':'媒体库整理恢复','zh-Hant':'媒體庫整理復原',ja:'ライブラリ整理の復元'},
 
  'error.sourceDisconnected':{en:'Source disconnected.','zh-Hans':'来源已断开连接。','zh-Hant':'來源已中斷連線。',ja:'ソースが切断されました。'},
+ 'error.copyNotConfirmed':{en:'An unfinished copy of this file could not be confirmed just now, so nothing was changed: {path}. Try again.','zh-Hans':'暂时无法确认此文件的未完成副本，因此未作任何更改：{path}。请重试。','zh-Hant':'暫時無法確認此檔案的未完成副本，因此未作任何變更：{path}。請重試。',ja:'このファイルの未完了のコピーを今は確認できなかったため、何も変更していません：{path}。もう一度お試しください。'},
+ 'error.unboundReceipt':{en:'An unfinished copy of this file does not match its receipt, so the file is kept as it is: {path}. Remove the receipt in Settings > Clean up, then import again.','zh-Hans':'此文件的一份未完成副本与其回执不符，因此该文件保持原样：{path}。请在“设置 > 清理”中移除回执，然后重新导入。','zh-Hant':'此檔案的一份未完成副本與其回執不符，因此該檔案保持原樣：{path}。請在「設定 > 清理」中移除回執，然後重新匯入。',ja:'このファイルの未完了のコピーが受領記録と一致しないため、ファイルはそのままにしています：{path}。設定 > クリーンアップで受領記録を削除してから、もう一度インポートしてください。'},
  'error.sourceChanged':{en:'Source changed; scan again: {path}','zh-Hans':'来源已更改，请重新扫描：{path}','zh-Hant':'來源已變更，請重新掃描：{path}',ja:'ソースが変更されました。再スキャンしてください：{path}'},
  'error.alreadyInBackup':{en:'{source} is already in your backup ({root}); there is nothing to import from it.','zh-Hans':'{source} 已在你的备份中（{root}），无需从中导入。','zh-Hant':'{source} 已在你的備份中（{root}），無需從中匯入。',ja:'{source} はすでにバックアップ内にあります（{root}）。インポートするものはありません。'},
  'error.cameraScan':{en:'This camera must download originals before its media can be inspected. Use Review.','zh-Hans':'必须先下载此相机的原始文件才能检查其媒体。请使用“审核”。','zh-Hant':'必須先下載此相機的原始檔案才能檢查其媒體。請使用「審核」。',ja:'このカメラのメディアを確認するには、先に元のファイルをダウンロードする必要があります。「確認」を使ってください。'},

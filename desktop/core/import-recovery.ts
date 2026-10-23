@@ -5,13 +5,15 @@ import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
 import {MessageError} from '../messages';
-import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,syncDirectory,syncParents} from './paths';
+import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,commitFolder,dirtyFolder,syncParents,syncDirectory} from './paths';
 import {log,logDeletion} from '../logger';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
-interface RecordData {version:1;kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:Snapshot;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;}
-export interface OwnedPartial {file:string;stat:BigIntStats;journal:string;journalStat:BigIntStats;record:RecordData;/** A receipt written before its file was created: no file was there (stat is the receipt's). */absent?:boolean;}
+interface RecordData {version:1;kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:Snapshot;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];}
+export interface OwnedPartial {file:string;stat:BigIntStats;journal:string;journalStat:BigIntStats;record:RecordData;/** A receipt written before its file was created: no file was there (stat is the receipt's). */absent?:boolean;/** findPublication: the file no longer shows the birth time of the receipt, only one the finished copy may have (never resumed, only finished when its bytes are equal). */tolerant?:boolean;}
+/** What a direct copy adds to its receipts. */
+export interface DirectFields {size:number;finalBirth:bigint[];}
 /** What clearing a receipt needs. */
 export type Receipt=Pick<OwnedPartial,'journal'|'journalStat'|'record'>;
 /** The identity recorded in a receipt written before its file exists. */
@@ -50,6 +52,18 @@ const binds=(s:BigIntStats,recorded:string)=>{
  // A whole-second birth time recorded after the date helper matches within that second (exFAT re-reads the stored 10 ms value).
  return sameBirth(expected,s.birthtimeNs)&&(String(s.ino)===ino||ino.startsWith('-'));
 };
+/** After the dates are applied a direct copy no longer shows the birth time its receipt names. It then binds only by device,
+ * a single link and a birth time within 2 s (the helper's rounding on exFAT) of one the receipt lists. This never permits
+ * appending: the caller may only finish the file, and only when its bytes equal the source's. */
+const FINAL_BIRTH_TOLERANCE=2_000_000_000n;
+const tolerantBinds=(s:BigIntStats,record:RecordData)=>{
+ if(record.mode!=='direct'||!Array.isArray(record.finalBirth)||s.nlink!==1n||String(s.dev)!==String(record.fileIdentity).split(':')[0])return false;
+ return record.finalBirth.some(value=>{try{const difference=BigInt(value)-s.birthtimeNs;return (difference<0n?-difference:difference)<=FINAL_BIRTH_TOLERANCE;}catch{return false;}});
+};
+/** The one definition of "a direct copy's receipt that no longer binds its file": Clean up lists exactly these, and the import refuses
+ * exactly these (finishDirect), so the two can never disagree. A receipt that still binds the file, exactly or tolerantly, is never
+ * one, whatever happened to the source or the folder meanwhile. */
+const directUnbound=(record:RecordData,stat:BigIntStats|undefined)=>record.mode==='direct'&&record.fileIdentity!==CREATING&&!!stat?.isFile()&&(stat.nlink!==1n||!binds(stat,record.fileIdentity)&&!tolerantBinds(stat,record));
 /** A device number names a mount, not a disk: after a re-attach the recorded dev is read as the
  * current one while the recorded root/source folder is still the same inode at the same path. */
 const sourceRebased=new WeakSet<RecordData>();
@@ -71,7 +85,7 @@ const recordPattern=/^(?:\.import|photo-importer)-(?:stage|intent)-[a-f0-9-]+\.j
  * (size or mtime), so the copy cannot continue; a card not connected proves nothing. A source
  * volume whose device number had to be rewritten is not proven to be the same card (another one
  * may be mounted at the same path), so it is never stale. */
-export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;complete:boolean}>{
+export async function leftoverReceipt(journal:string,root:string):Promise<{kind:Kind;file?:string;present:boolean;bound:boolean;resumable:boolean;owned:boolean;stale:boolean;complete:boolean;/** A direct copy's receipt (not the one written before the name existed) beside a regular file it binds neither exactly nor tolerantly. */unbound:boolean}>{
  const record=await rebaseMount((await readRecord(journal,root)).record);
  const file=typeof record.file==='string'&&path.dirname(record.file)===path.dirname(journal)?record.file:undefined;
  const stat=file?await fs.lstat(file,{bigint:true}).catch(()=>undefined):undefined;
@@ -83,23 +97,24 @@ export async function leftoverReceipt(journal:string,root:string):Promise<{kind:
  const stale=record.kind==='stage'&&!!record.sourceStat&&cardPresent&&!sourceRebased.has(record)&&await fs.lstat(record.source,{bigint:true}).then(source=>!source.isFile()||String(source.size)!==record.sourceStat.size||String(source.mtimeNs)!==record.sourceStat.mtime,()=>true);
  // complete: the staged copy is as large as its source was, so it may be the only whole copy left.
  const complete=!!stat?.isFile()&&!!record.sourceStat&&String(stat.size)===record.sourceStat.size;
- return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,complete};
+ const unbound=directUnbound(record,stat);
+ return {kind:record.kind,file,present:!!stat,bound,resumable,owned:!!file,stale,complete,unbound};
 }
 
 /** Record exclusive creation durably before the first byte is written. */
-export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<OwnedPartial> {
- return {file,stat,...await writeReceipt(kind,file,fileIdentity(stat),entry,transfer,index)};
+export async function recordPartial(kind:Kind,file:string,stat:BigIntStats,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex,direct?:DirectFields):Promise<OwnedPartial> {
+ return {file,stat,...await writeReceipt(kind,file,fileIdentity(stat),entry,transfer,index,direct)};
 }
 /** Record, before a name is created, that this app is about to create it exclusively: a crash right
  * after leaves an empty file the receipt owns, which the next import resumes or replaces in place. */
-export function recordCreation(file:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<Receipt> {
- return writeReceipt('publication',file,CREATING,entry,transfer,index);
+export function recordCreation(file:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex,direct?:DirectFields):Promise<Receipt> {
+ return writeReceipt('publication',file,CREATING,entry,transfer,index,direct);
 }
-async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex):Promise<Receipt> {
+async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,transfer:TransferPlan,index:RecoveryIndex,direct?:DirectFields):Promise<Receipt> {
  await rootUnchanged(transfer.root,transfer.rootIdentity);await contained(file,transfer.root);await contained(entry.source,transfer.source);
  const sourceStat=await fs.lstat(entry.source,{bigint:true});
  if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
- const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId};
+ const record:RecordData={version:1,kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId,...(direct?{mode:'direct' as const,size:String(direct.size),finalBirth:direct.finalBirth.map(String)}:{})};
  const journal=path.join(path.dirname(file),`photo-importer-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;
  try {await handle.writeFile(JSON.stringify(sealImportRecord({...record})));await handle.sync();journalStat=await handle.stat({bigint:true});}finally{await handle.close();}
@@ -118,7 +133,40 @@ async function prefixMatches(file:string,source:string,length:number,signal?:Abo
 }
 
 /** Unknown, unsigned, replaced or non-prefix data is left untouched. */
-export async function findPartial(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal?:AbortSignal):Promise<OwnedPartial|undefined>{
+export function findPartial(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal?:AbortSignal):Promise<OwnedPartial|undefined>{
+ return scan(kind,entry,root,index,signal,false);
+}
+/** The receipt of a complete file at `entry.destination` that a direct copy left before it was finished (dates, flush): the
+ * file must be whole, single-linked and bound to the receipt exactly or, once its dates were applied, tolerantly. Nothing is
+ * read: the caller has already found its bytes equal to the source's, and that equality is what permits finishing it. */
+export function findPublication(entry:PlanEntry,root:string,index:RecoveryIndex,signal?:AbortSignal):Promise<OwnedPartial|undefined>{
+ return scan('publication',entry,root,index,signal,true);
+}
+/** Direct receipts hold no checksum: they match whatever checksum the plan has. */
+const publicationNames=(records:FolderReceipts,entry:PlanEntry)=>{
+ const names=new Map<string,RecordData>();
+ for(const sha of new Set([entry.digest??'','']))for(const [name,record] of records.get(recordKey({kind:'publication',source:entry.source,destination:entry.destination,sha256:sha}))??[])if(sha===(entry.digest??'')||record.mode==='direct')names.set(name,record);
+ return names;
+};
+/** Whether an authenticated direct-copy receipt names this destination yet binds no file there (the receipt written before the
+ * name existed is not counted: it proves nothing about a whole file). Such a file is not known to be finished, so it is neither
+ * skipped nor released. */
+export async function unboundDirect(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
+ const records=await receiptNames(path.dirname(entry.destination),root,index);
+ for(const raw of publicationNames(records,entry).values()){
+  if(raw.mode!=='direct'||raw.file!==entry.destination||raw.root!==root)continue;
+  const record=await rebaseMount(raw),stat=await fs.lstat(record.file,{bigint:true}).catch(()=>undefined);
+  if(directUnbound(record,stat))return true;
+ }
+ return false;
+}
+/** Whether any authenticated direct-copy receipt (not the one written before the name existed) names this destination. */
+export async function directReceiptExists(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
+ const records=await receiptNames(path.dirname(entry.destination),root,index);
+ for(const record of publicationNames(records,entry).values())if(record.mode==='direct'&&record.fileIdentity!==CREATING&&record.file===entry.destination&&record.root===root)return true;
+ return false;
+}
+async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,signal:AbortSignal|undefined,finish:boolean):Promise<OwnedPartial|undefined>{
  const folder=path.dirname(entry.destination),records=await receiptNames(folder,root,index);
  // A stage partial is bound to its source by stat identity and a byte-prefix
  // check, and the whole stream is hashed again, so a receipt written before the
@@ -126,26 +174,29 @@ export async function findPartial(kind:Kind,entry:PlanEntry,root:string,index:Re
  const stageMatch=(record:RecordData)=>record.sha256===''||entry.digest===undefined||record.sha256===entry.digest;
  const names=kind==='stage'
   ?new Map([...records.values()].flatMap(matches=>[...matches]).filter(([,record])=>record.kind==='stage'&&record.source===entry.source&&record.destination===entry.destination&&stageMatch(record)))
-  :records.get(recordKey({kind,source:entry.source,destination:entry.destination,sha256:entry.digest??''}));
+  :publicationNames(records,entry);
  if(!names?.size)return;
  for(const name of [...names.keys()].sort()){
   checkAbort(signal);const journal=path.join(folder,name);
   try {
    const read=await readRecord(journal,root),journalStat=read.journalStat,record=await rebaseMount(read.record);
-   if(record.version!==1||record.kind!==kind||record.root!==root||record.source!==entry.source||record.destination!==entry.destination||(kind==='stage'?!stageMatch(record):record.sha256!==(entry.digest??''))||!record.sourceStat||typeof record.file!=='string'||path.dirname(record.file)!==folder)continue;
+   if(record.version!==1||record.kind!==kind||record.root!==root||record.source!==entry.source||record.destination!==entry.destination||(kind==='stage'?!stageMatch(record):record.sha256!==(entry.digest??'')&&!(record.mode==='direct'&&record.sha256===''))||!record.sourceStat||typeof record.file!=='string'||path.dirname(record.file)!==folder)continue;
    if(kind==='publication'?record.file!==entry.destination:!/^(?:\.import|photo-importer)-[a-f0-9-]+\.partial$/.test(path.basename(record.file)))continue;
-   await rootUnchanged(root,record.rootIdentity);await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);await contained(record.file,root);
-   if(await identity(folder)!==record.parentIdentity)continue;
+   await rootUnchanged(root,record.rootIdentity);await contained(record.file,root);
+   // Finishing a whole file whose bytes the caller found equal to the source's needs only that the receipt binds that file: the card or the
+   // folder having moved on since proves nothing against it. Resuming (appending) still needs the same source and folder.
+   if(!finish){await rootUnchanged(record.sourceRoot,record.sourceIdentity);await contained(entry.source,record.sourceRoot);if(await identity(folder)!==record.parentIdentity)continue;}
    const source=await fs.lstat(entry.source,{bigint:true});
-   if(kind==='publication'&&record.fileIdentity===CREATING&&!await fs.lstat(record.file,{bigint:true}).then(()=>true,error=>code(error)==='ENOENT'?false:Promise.reject(error))){
+   if(!finish&&kind==='publication'&&record.fileIdentity===CREATING&&!await fs.lstat(record.file,{bigint:true}).then(()=>true,error=>code(error)==='ENOENT'?false:Promise.reject(error))){
     if(!sourceMatches(source,record.sourceStat))continue;
     return {file:record.file,stat:journalStat,journal,journalStat,record,absent:true};
    }
    const stat=await fs.lstat(record.file,{bigint:true});
-   if(!sourceMatches(source,record.sourceStat)||!stat.isFile()||stat.nlink!==1n||!binds(stat,record.fileIdentity)||stat.size>BigInt(entry.size))continue;
-   if(!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
+   const exact=binds(stat,record.fileIdentity),tolerant=finish&&!exact&&tolerantBinds(stat,record);
+   if(!(finish||sourceMatches(source,record.sourceStat))||!stat.isFile()||stat.nlink!==1n||!(exact||tolerant)||(finish?stat.size!==BigInt(entry.size):stat.size>BigInt(entry.size)))continue;
+   if(!finish&&!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
    if(!sameStat(stat,await fs.lstat(record.file,{bigint:true}))||!sameStat(source,await fs.lstat(entry.source,{bigint:true})))continue;
-   return {file:record.file,stat,journal,journalStat,record};
+   return {file:record.file,stat,journal,journalStat,record,...(tolerant?{tolerant:true}:{})};
   }catch(error){if((error as Error)?.name==='AbortError')throw error;/* Untrusted/unavailable records grant no overwrite permission. */}
  }
 }
@@ -160,21 +211,22 @@ export async function openPartial(partial:OwnedPartial,root:string){
 /** Once a destination is complete and verified, every authenticated publication receipt for it is
  * moot: the one written before its name was created, and an older one a kill left behind between
  * writing a newer receipt and removing it. */
-export async function releaseCreations(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<void>{
- const folder=path.dirname(entry.destination),names=(await receiptNames(folder,root,index)).get(recordKey({kind:'publication',source:entry.source,destination:entry.destination,sha256:entry.digest??''}));
- if(!names?.size)return;
+export async function releaseCreations(entry:PlanEntry,root:string,index:RecoveryIndex,sync:boolean|'lazy'=true):Promise<void>{
+ const folder=path.dirname(entry.destination),names=publicationNames(await receiptNames(folder,root,index),entry);
+ if(!names.size)return;
  for(const name of [...names.keys()]){
   const journal=path.join(folder,name);
   try {
    const {record,journalStat}=await readRecord(journal,root);
    if(record.kind!=='publication'||record.destination!==entry.destination||record.file!==entry.destination||record.root!==root)continue;
-   await clearPartialRecord({journal,journalStat,record},root,index);
+   await clearPartialRecord({journal,journalStat,record},root,index,sync);
   }catch{/* Unreadable or already gone: nothing to release. */}
  }
 }
-/** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. */
-export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync=true):Promise<void>{
+/** `sync:false` leaves synchronizing the folder to the caller, who removes several at once. `'lazy'` marks the folder to be flushed soon
+ * (see dirtyFolder): for a receipt beside a file that is already durable, whose leftover would only be released again later. */
+export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync:boolean|'lazy'=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
- await fs.unlink(partial.journal);logDeletion('receipt',partial.journal,'copy receipt of a staged or published file that is finished or abandoned','the receipt is this app\'s sealed record and was unchanged since it was read (same device, inode, size and times)',{recordKind:partial.record.kind,file:partial.record.file});(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
+ await fs.unlink(partial.journal);logDeletion('receipt',partial.journal,'copy receipt of a staged or published file that is finished or abandoned','the receipt is this app\'s sealed record and was unchanged since it was read (same device, inode, size and times)',{recordKind:partial.record.kind,file:partial.record.file});(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));const folder=path.dirname(partial.journal);if(sync==='lazy')dirtyFolder(folder);else if(sync)await commitFolder(folder);
 }

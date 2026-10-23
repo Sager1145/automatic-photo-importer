@@ -12,10 +12,12 @@ import { log, logDeletion } from '../logger';
  * proven dead (identity drift, no or unauthenticated receipt, card absent); only Clean up removes it.
  * partial: an incomplete staged copy whose authenticated receipt shows its source gone or changed.
  * recoverable: a complete staged copy whose source on the connected card changed or vanished; it may
- * be the only copy left, so neither the automatic check nor Clean up removes it. */
-export type ResidueKind='partial'|'recoverable'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary';
-export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat:BigIntStats;}
-export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};}
+ * be the only copy left, so neither the automatic check nor Clean up removes it.
+ * unbound: only a receipt - of a direct copy - that no longer matches the whole file at its name; the file is never touched, only Clean up
+ * (or removeUnboundReceipt, for one item) removes the receipt. */
+export type ResidueKind='partial'|'recoverable'|'resumable'|'kept'|'receipt'|'index'|'organization'|'folder'|'temporary'|'unbound';
+export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat:BigIntStats;/** unbound: the file the receipt names and its stat when found. */file?:string;fileStat?:BigIntStats;}
+export interface Residue {items:ResidueItem[];files:number;bytes:number;resumable:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};/** Receipts of unfinished direct copies that no longer match their files, and (up to 5) those files. */unbound?:{files:number;paths:string[]};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -59,6 +61,10 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
     try { receipt=await leftoverReceipt(file,root); } catch { items.push({path:file,kind:'kept',bytes:Number(stat.size),root,stat});continue; }
     // A publication receipt names a media path: while that file is there, the receipt is how a
     // re-import finishes it, and it is kept even when it no longer binds the file.
+    if(receipt.unbound&&receipt.file) {
+      const named=await regular(receipt.file);
+      if(named) {items.push({path:file,kind:'unbound',bytes:Number(stat.size),root,stat,file:receipt.file,fileStat:named});continue;}
+    }
     if(receipt.kind==='publication'&&receipt.present) continue;
     if(receipt.resumable&&receipt.file) resumable.add(receipt.file);
     if(receipt.kind==='stage'&&receipt.owned&&receipt.stale&&receipt.file) (receipt.complete?recoverable:dead).add(receipt.file);
@@ -176,7 +182,8 @@ function summary(items:ResidueItem[]):Residue {
   const sum=(list:ResidueItem[])=>list.reduce((total,item)=>total+item.bytes,0);
   // Counted by staged copy; the receipts that go with them are kept too but are not copies.
   const kept=items.filter(item=>item.kind==='recoverable'&&stagePattern.test(path.basename(item.path)));
-  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:kept.length,bytes:sum(kept),...(kept[0]?{folder:path.dirname(kept[0].path)}:{})}};
+  const unbound=items.filter(item=>item.kind==='unbound');
+  return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)},recoverable:{files:kept.length,bytes:sum(kept),...(kept[0]?{folder:path.dirname(kept[0].path)}:{})},unbound:{files:unbound.length,paths:unbound.slice(0,5).map(item=>item.file!)}};
 }
 
 const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':'leftover of an interrupted run (staging file, receipt or scratch file)';
@@ -186,18 +193,21 @@ const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-imp
 export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
   // Only what this run removes counts toward the total: kept copies are not work.
-  const doomed=residue.items.filter(item=>item.kind!=='recoverable'&&!(options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'))),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
+  const keeps=(item:ResidueItem)=>item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept'||item.kind==='unbound');
+  const doomed=residue.items.filter(item=>!keeps(item)),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
   let handled=0,handledBytes=0;
   options.onProgress?.(0,doomed.length,0,doomedBytes,'');
   for(const item of residue.items) {
     checkAbort(options.signal);
     left.push(item);
-    if(item.kind==='recoverable'||options.keepResumable&&(item.kind==='resumable'||item.kind==='kept')) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':'copy a re-import could continue'});continue;}
+    if(keeps(item)) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed automatically':'copy a re-import could continue'});continue;}
     handled++;handledBytes+=item.bytes;
     try {
       await contained(item.path,item.root);
       const now=await fs.lstat(item.path,{bigint:true});
-      if(item.kind==='folder'||item.kind==='temporary'||item.stat.isDirectory()) {
+      if(item.kind==='unbound') {
+        if(!await removeUnboundReceipt(item)) continue;
+      } else if(item.kind==='folder'||item.kind==='temporary'||item.stat.isDirectory()) {
         if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
         // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
         if(item.kind==='folder') await fs.rmdir(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
@@ -212,4 +222,19 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
     options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path));
   }
   return {removed,left:summary(left)};
+}
+
+/** Remove the receipt of an `unbound` item, and only that: it must still be the receipt found, still match nothing, and the file it names
+ * must be exactly as it was found. The file itself is never opened for writing, renamed or removed. */
+export async function removeUnboundReceipt(item:ResidueItem):Promise<boolean> {
+  if(item.kind!=='unbound'||!item.file||!item.fileStat) return false;
+  try {
+    await contained(item.path,item.root);await contained(item.file,item.root);
+    const now=await fs.lstat(item.path,{bigint:true}),file=await fs.lstat(item.file,{bigint:true});
+    if(!now.isFile()||!sameStat(now,item.stat)||!file.isFile()||!sameStat(file,item.fileStat)) return false;
+    const again=await leftoverReceipt(item.path,item.root);
+    if(!again.unbound||again.file!==item.file) return false;
+    await fs.unlink(item.path);
+    return true;
+  } catch { return false; }
 }
