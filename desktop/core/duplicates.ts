@@ -6,11 +6,20 @@ import type { DuplicateExif, DuplicateFile, DuplicateGroup, InventoryFile, Media
 import { buildGroups, candidates, groupId } from '../duplicate-rules';
 import { inventory } from './inventory';
 import { DRIVE_BACKUPS } from './drive-backup';
-import { checkAbort, code, directory, identity, syncDirectory } from './paths';
+import { LEGACY_RECOVERY_FOLDER, RECOVERY_FOLDER } from './recovery';
+import { PROBLEM_FILES_FOLDER } from '../shared';
+import { checkAbort, code, directory, identity, syncDirectory, within } from './paths';
 import type { DestinationIndex } from './destination-index';
 
 /** The per-library record of what duplicate detection found: visible, never hidden, and ignored by inventories. */
 export const DUPLICATES_PREFIX='photo-importer-duplicates';
+/** Folders the app owns, skipped at any depth: mirrors of other drives, the recovery store and collected problem files. */
+export const APP_FOLDERS=[DRIVE_BACKUPS,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER,PROBLEM_FILES_FOLDER];
+/** The destination libraries a chosen folder is, contains or sits inside. More than one means the scan would mix
+ * libraries (or pair a library with another), so the folder is refused. */
+export function overlappingLibraries(folder:string,libraries:string[]):string[] {
+  return [...new Set(libraries)].filter(library=>within(folder,library)||within(library,folder));
+}
 const NAME=`${DUPLICATES_PREFIX}.json`,MAX_BYTES=256*1024*1024;
 interface FileRecord {size:string;mtimeNs:string;ino:string;kind:MediaKind;birth:number;ctime:number;edited:boolean;exif?:DuplicateExif;sha256?:string;/** The file's metadata was read (a record without it only knows size and hash). */read?:boolean;}
 interface StoredGroup {strength:DuplicateGroup['strength'];files:string[];}
@@ -139,7 +148,7 @@ async function parallel<T>(items:T[],limit:number,work:(item:T)=>Promise<void>,s
 export async function scanDuplicates(rootPath:string,deps:ScanDeps,options:ScanOptions={}):Promise<ScanResult> {
   const root=await directory(rootPath),rootIdentity=await identity(root),store=await duplicateStore(root,rootIdentity),mode=options.mode??'full',signal=options.signal;
   const report=(progress:Omit<Progress,'phase'|'bytes'|'totalBytes'|'speed'>)=>options.onProgress?.({phase:'planning',bytes:0,totalBytes:0,speed:0,...progress});
-  const listed=await inventory(root,{backup:true,folders:options.folders,exclude:[path.join(root,DRIVE_BACKUPS)],onProgress:(found,_bytes,top,latest)=>report({step:'listing',completed:found,total:0,file:latest??'',...(top?.total?{share:top.done/top.total}:{})})},signal);
+  const listed=await inventory(root,{backup:true,folders:options.folders,excludeNames:APP_FOLDERS,onProgress:(found,_bytes,top,latest)=>report({step:'listing',completed:found,total:0,file:latest??'',...(top?.total?{share:top.done/top.total}:{})})},signal);
   const media=listed.files.filter((item:InventoryFile)=>item.kind!=='Other'&&!item.companionOf);
   const companions=new Map<string,string[]>();
   for(const item of listed.files) if(item.companionOf) { const primary=relativeOf(root,item.companionOf); companions.set(primary,[...companions.get(primary)??[],relativeOf(root,item.path)]); }

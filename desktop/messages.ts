@@ -24,6 +24,7 @@ export const backendMessages={
  'error.duplicatesScope':{en:'Choose a library to look through first.','zh-Hans':'请先选择要查找的媒体库。','zh-Hant':'請先選擇要查找的媒體庫。',ja:'先に調べるライブラリを選択してください。'},
  'error.duplicatesNothing':{en:'There is nothing to remove yet. Decide at least one group first.','zh-Hans':'暂时没有可移除的内容。请先决定至少一组。','zh-Hant':'暫時沒有可移除的內容。請先決定至少一組。',ja:'削除するものがまだありません。先に少なくとも 1 つのグループを決めてください。'},
  'error.duplicatesStale':{en:'Scan the library again first.','zh-Hans':'请先重新扫描该媒体库。','zh-Hant':'請先重新掃描該媒體庫。',ja:'先にライブラリをもう一度スキャンしてください。'},
+ 'error.duplicatesLibraries':{en:'That folder holds or overlaps more than one backup library. Choose one library, or a folder inside it.','zh-Hans':'该文件夹包含或重叠多个备份库。请选择单个库，或其中的文件夹。','zh-Hant':'該資料夾包含或重疊多個備份庫。請選擇單一庫，或其中的資料夾。',ja:'このフォルダには複数のバックアップライブラリが含まれるか重なっています。1つのライブラリ、またはその中のフォルダを選択してください。'},
  'error.duplicatesUnavailable':{en:'This library is not available. Reconnect its drive.','zh-Hans':'此媒体库不可用。请重新连接其驱动器。','zh-Hant':'此媒體庫不可用。請重新連接其磁碟。',ja:'このライブラリは利用できません。ドライブを接続し直してください。'},
  'job.stepChecking':{en:'Checking: {completed} of {total}','zh-Hans':'正在检查：{completed}/{total}','zh-Hant':'正在檢查：{completed}/{total}',ja:'確認中：{total} 件中 {completed} 件'},
  'job.stepReleasing':{en:'Releasing kept originals: {completed} of {total}','zh-Hans':'正在释放保留的原文件：{completed}/{total}','zh-Hant':'正在釋放保留的原始檔案：{completed}/{total}',ja:'保持中の元のファイルを解放中：{total} 件中 {completed} 件'},

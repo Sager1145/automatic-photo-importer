@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { plan } from '../core/index';
-import { scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
+import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
 import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
 import { identity } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
@@ -203,4 +203,27 @@ test('an all-zero sub-second is no discriminator, and exposure tells bracket and
   assert.equal(frame({ exposureTime: '0.004', iso: '100' }), frame({ exposureTime: '0.004', iso: '100' }));
   const bracket = [file('b1.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '-2' } }), file('b2.jpg', { exif: { ...bare, date: '2024-05-06T07:08:09.50', exposureCompensation: '0' } })];
   assert.deepEqual(candidates(bracket), [], 'a bracket is not a candidate set');
+});
+
+test('a chosen folder that holds, overlaps or sits inside more than one library is refused', () => {
+  const libraries = ['/Volumes/A/photos', '/Volumes/B/photos'];
+  assert.deepEqual(overlappingLibraries('/Users/me', libraries), [], 'unrelated paths are not overlaps');
+  assert.equal(overlappingLibraries('/Volumes/A', [...libraries, '/Volumes/A/photos']).length, 1, 'a parent of one library is fine');
+  assert.equal(overlappingLibraries('/Volumes/A/photos/2024', libraries).length, 1, 'inside one library is fine');
+  assert.equal(overlappingLibraries('/Volumes/A/photos', libraries).length, 1, 'the library itself');
+  assert.equal(overlappingLibraries('/Volumes', ['/Volumes/A', '/Volumes/B']).length, 2, 'a parent of two libraries');
+  assert.equal(overlappingLibraries('/Volumes/A/photos/2024', ['/Volumes/A/photos', '/Volumes/A/photos/2024/x']).length, 2, 'inside one and holding another');
+});
+test('app folders are skipped at any depth: a parent of one library never pairs its drive mirrors, recovery or problem files', async t => {
+  const base = await library(t), parent = path.join(base, 'parent');
+  const same = 'the same photo bytes';
+  await write(parent, 'lib/2024/202405/Nikon Z f/A.JPG', same);
+  await write(parent, 'lib/Drive backups/Mirror/2024/202405/Nikon Z f/A.JPG', same);
+  await write(parent, 'lib/Photo Importer Recovery/job/originals/A.JPG', same);
+  await write(parent, 'lib/Problem files/unreadable/A.JPG', same);
+  await write(parent, 'other/Drive backups/B.JPG', same);
+  await write(parent, 'other/Photo Importer Recovery/C.JPG', same);
+  const result = await scan(parent);
+  assert.equal(result.files, 1, 'only the library photo is looked at');
+  assert.deepEqual(result.groups, []);
 });

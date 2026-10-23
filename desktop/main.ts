@@ -26,7 +26,7 @@ import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue} from './core/residue';
-import {recordPlanDuplicates,scanDuplicates,type PlanDuplicates} from './core/duplicates';
+import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
@@ -670,7 +670,7 @@ async function action(input:Action):Promise<void>{
   case 'scanSource':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.sourceDisconnected');void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'scanSources':{if(busy()||state.busyReview||state.review)throw new MessageError('error.busyScan');for(const source of state.sources.filter(item=>item.transport!=='camera'&&item.selected))void scanSource(source).catch(error=>{state.error=toMessage(error);emit();});break;}
   case 'duplicatesScope':{if(!duplicateScope(input.root))throw new MessageError('error.duplicatesScope');if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');if(dup.root!==input.root){duplicateGroups=[];Object.assign(dup,{root:input.root,name:duplicateScope(input.root)!.name,status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
-  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
+  case 'duplicatesChooseFolder':{if(duplicateControl||dup.status==='removing')throw new MessageError('error.busy');const result=await dialog.showOpenDialog(window!,{title:'Choose a library to look through for duplicates',properties:['openDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const libraries=await Promise.all(duplicateScopes().filter(item=>item.destination).map(item=>fs.realpath(item.root).catch(()=>item.root)));if(overlappingLibraries(root,libraries).length>1)throw new MessageError('error.duplicatesLibraries');approved.add(root);chosenScopes.set(root,{root,name:path.basename(root)});duplicateGroups=[];Object.assign(dup,{root,name:path.basename(root),status:'idle' as const,groups:0,files:0,scannedAt:undefined,result:undefined,revision:dup.revision+1});}break;}
   case 'duplicatesScan':await scanDuplicatesAction();break;
   case 'duplicatesStop':duplicateControl?.abort();break;
   case 'duplicatesRemove':await removeDuplicatesAction(input.level,input.decisions);break;

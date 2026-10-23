@@ -46,7 +46,7 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   }
   return result;
 }
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;reuse?:Inventory;exclude?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;reuse?:Inventory;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
@@ -70,7 +70,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   const add=(file:string,size:number)=>{files.push({path:file,relative:path.relative(root,file),size,kind:mediaKindForPath(file),included:false});listedBytes+=size;report();};
   // Folders never listed, such as a backup folder inside the chosen source.
-  const excluded=new Set((options.exclude??[]).map(folder=>pathKey(path.resolve(folder))));
+  const excluded=new Set((options.exclude??[]).map(folder=>pathKey(path.resolve(folder)))),excludedNames=new Set((options.excludeNames??[]).map(pathKey));
   async function walk(folder:string,isRoot=false):Promise<void> {
     checkAbort(signal);
     if(excluded.has(pathKey(folder)))return;
@@ -96,7 +96,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       if(!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name)) continue;
       const file=path.join(folder,entry.name), stat=await fs.lstat(file);
       if(stat.isSymbolicLink()) continue;
-      if(stat.isDirectory()){await walk(file);if(isRoot){topDone++;report(true);}}
+      if(stat.isDirectory()){if(excludedNames.has(pathKey(entry.name)))continue;await walk(file);if(isRoot){topDone++;report(true);}}
       else if(stat.isFile()) add(file,stat.size);
     }
   }
