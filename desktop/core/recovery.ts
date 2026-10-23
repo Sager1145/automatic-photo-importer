@@ -680,14 +680,20 @@ const earliestStorableDate=new Date(1980,0,2).getTime();
  * Created/Modified, as copies get. The bytes, and so the EXIF data, are never rewritten.
  * A date the filesystem cannot store (exFAT before 1980, a file with other hard links)
  * leaves the file with its original dates instead of failing a move already made. */
+/** Told after a file was moved by rename: where it was (path and reviewed identity), where it is, and its final identity.
+ * Lets a cache keyed by path and stat follow the file (same bytes, so same metadata) instead of reading it again. */
+export type MoveObserver=(from:string,reviewed:FileIdentity,to:string,now:BigIntStats)=>void;
+let moveObserver:MoveObserver|undefined;
+export function setMoveObserver(observer:MoveObserver|undefined):void{moveObserver=observer;}
 async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void):Promise<void> {
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
  await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
  const handle=await fs.open(entry.destination,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
-  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:snapshot(stat)});state.renamed.set(index,snapshot(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
+  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:snapshot(stat)});final=stat;state.renamed.set(index,snapshot(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
   if(!movedIdentity(current,entry,state.dated.get(index)))throw new Error(`Moved file changed; it stays where it is: ${entry.destination}`);
   await remember('renamed',current);
   if(entry.captureTimeMs===undefined||String(current.mtimeNs)!==entry.stat.mtime)return;
@@ -704,6 +710,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
  } finally { await handle.close(); }
+ if(final){try{moveObserver?.(entry.source,entry.stat,entry.destination,final);}catch{/* A cache hint never fails a move. */}}
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */

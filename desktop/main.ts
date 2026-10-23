@@ -6,7 +6,7 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
-import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER} from './core';
+import {plan,findMisplaced,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,lockedPreferenceKeys,jobPreferences} from './settings-lock';
 import {makeParent,syncParents,within} from './core/paths';
 import {rules} from './core/inventory';
@@ -21,7 +21,7 @@ import {moveToFront,nextQueued,orderSources,queueOrder} from './queue-order';
 import {loadScanMemory,saveScanMemory,loadImported,rememberImported} from './platform/scan-memory';
 import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {listingEstimate,type ListingHint} from './listing-estimate';
-import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse} from './platform/metadata';
+import {metadata,closeMetadata,primeRouting,routingEntries,previewFoldersInUse,carryRouting} from './platform/metadata';
 import {findResidue,cleanResidue} from './core/residue';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
 import {scanSourceInWorker,scansSettled} from './scan-process';
@@ -50,6 +50,8 @@ let window:BrowserWindow|undefined;
 let timer:NodeJS.Timeout|undefined;
 let refreshing=false;
 // The recovery listing waits while a review or a job is planning: its file calls would queue ahead of the planner's.
+// A file the organization moved keeps its routing metadata under its new path, so the check after the job does not read it again.
+setMoveObserver(carryRouting);
 const recoveryRefresh=deferredRefresh({planning:()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'),run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
 let recoveryScope='';
 const folders=new Map<string,{source:Source;backup:boolean}>();
