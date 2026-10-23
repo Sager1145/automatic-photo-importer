@@ -30,12 +30,14 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
 }
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that
  * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays. */
-export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;onProgress?:(completed:number,total:number,file:string)=>void}={}):Promise<OriginalsResult> {
+export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** bytesDone/bytesTotal: what is re-read, counting the source and each backup copy of every file. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[]};
-  let completed=0;
+  let completed=0,bytesDone=0;
+  const reads=(file:VerifiedOriginal)=>file.size*(1+file.destinations.length),bytesTotal=files.reduce((sum,file)=>sum+reads(file),0);
   for(const file of files) {
     checkAbort(options.signal);
-    options.onProgress?.(completed++,files.length,file.source);
+    options.onProgress?.(completed++,files.length,file.source,bytesDone,bytesTotal);
+    bytesDone+=reads(file);
     const keep=(reason:KeptReason,error?:string)=>{result.kept.push({source:file.source,reason});if(error)result.errors.push(error);};
     try {
       if(!file.sha256||!file.destinations.length) {keep('unverified');continue;}
@@ -62,6 +64,6 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       keep('error',`${file.source}: ${error instanceof Error?error.message:String(error)}`);
     }
   }
-  options.onProgress?.(completed,files.length,'');
+  options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
   return result;
 }

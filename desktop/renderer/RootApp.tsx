@@ -18,6 +18,7 @@ import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, parseTemplate, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
+import { remainingBucket } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 
 type Page = 'desk' | 'drives' | 'organization' | 'history' | 'settings';
@@ -578,7 +579,8 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const warnings = gatherErrors(state).filter(error => error.severity === 'warning').length;
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
-  const remaining = active.length && active.every(job => job.eta !== undefined) ? Math.max(...active.map(job => job.eta!)) : undefined;
+  // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
+  const remaining = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta ?? Math.max(...active.map(job => job.eta!)) : undefined;
   const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
   const configured = state.preferences.destinations.length >= requiredDestinations;
   const readyDestinations = (state.destinationStatus ?? []).filter(disk => disk.available && state.preferences.destinations.slice(0,requiredDestinations).includes(disk.path));
@@ -586,8 +588,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   const organizing = active.length > 0 && active.every(job => job.organization), planningJob = active.find(job => !job.organization && job.progress?.phase === 'planning');
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
   const verify = state.preferences.verifyCopies !== false;
-  const measured = latestJobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
-  const overall = measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
+  const overall = overviewFraction(latestJobs, verify);
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
       <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
@@ -1056,19 +1057,31 @@ export function cardFraction(job: Job): number | undefined {
   if (job.phase === 'complete') return 1;
   const progress = job.progress;
   if (!progress) return undefined;
+  // The job's whole work (every step, weighted by what it costs), the same number the overview adds up.
+  if (job.fraction !== undefined) return job.fraction;
   return job.organization || progress.renames ? organizationFraction(job) : progressFraction(progress);
 }
 /** The fraction the dashboard's total counts for one job: the card's own for renames and organizations, the whole import's otherwise. */
 function totalFraction(job: Job, verify: boolean): number | undefined {
   return job.organization || job.progress?.renames ? organizationFraction(job) : importFraction(job, verify);
 }
+/** The dashboard's total: the work done by every job over the work of all, in the model's seconds (a finished job keeps its final cost). Jobs
+ * the model has not measured yet count by size, as before. Below 100% until every job is complete. */
+export function overviewFraction(jobs: Job[], verify = true): number | undefined {
+  const costed = jobs.filter(job => job.cost && job.cost.total > 0);
+  if (costed.length && costed.length === jobs.length) {
+    const total = costed.reduce((sum, job) => sum + job.cost!.total, 0), done = costed.reduce((sum, job) => sum + (job.phase === 'complete' ? job.cost!.total : Math.min(job.cost!.done, job.cost!.total)), 0);
+    return total > 0 ? (jobs.every(job => job.phase === 'complete') ? 1 : Math.min(.99, done / total)) : undefined;
+  }
+  const measured = jobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
+  return measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
+}
 /** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
 export function formatRemaining(seconds: number, t: ReturnType<typeof createTranslator>): string {
-  if (seconds < 60) return t("under a minute");
-  const minutes = Math.round(seconds / 60), rounded = minutes <= 10 ? minutes : Math.round(minutes / 5) * 5;
-  if (rounded < 60) return t("about {minutes} min", { minutes: rounded });
-  const hours = Math.floor(rounded / 60), rest = rounded % 60;
-  return hours >= 10 ? t("about {hours} h", { hours: Math.round(rounded / 60) }) : rest ? t("about {hours} h {minutes} min", { hours, minutes: rest }) : t("about {hours} h", { hours });
+  const bucket = remainingBucket(seconds);
+  if (bucket.unit === 'under') return t("under a minute");
+  if (bucket.unit === 'min') return t("about {minutes} min", { minutes: bucket.minutes });
+  return bucket.unit === 'hm' ? t("about {hours} h {minutes} min", { hours: bucket.hours, minutes: bucket.minutes }) : t("about {hours} h", { hours: bucket.hours });
 }
 /** Time left for a running job, and for its current step when that ends well before the job does. */
 function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>): string | undefined {
@@ -1103,12 +1116,13 @@ function organizationFraction(job: Job): number | undefined {
   const progress = job.progress;
   return job.phase === 'complete' ? 1 : !progress ? undefined : progress.phase === 'planning' ? progressFraction(progress) : progress.total ? progress.completed / progress.total : progressFraction(progress);
 }
-/** How far a whole import is: reading the source's metadata 10%, comparing with the destinations 10%,
- * then copying, and verifying the last 10% when it runs. Bytes drive the copy; a finished import is 100%. */
+/** How far a whole import is: the main process measures it (every step weighted by what it costs). Until it has, a rough guess: reading the
+ * source's metadata 10%, comparing with the destinations 10%, then copying, and verifying the last 10% when it runs. A finished import is 100%. */
 export function importFraction(job: Job, verify = true): number | undefined {
   const progress = job.progress;
   if (job.phase === 'complete') return 1;
   if (!progress) return undefined;
+  if (job.fraction !== undefined) return job.fraction;
   const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
   if (progress.phase === 'planning') return progress.step === 'listing' ? 0 : progress.step === 'comparing' ? .1 + .05 * share : progress.step === 'existing' ? .15 + .05 * share : .1 * share;
   return progress.phase === 'verifying' ? copied + (1 - copied) * share : .2 + (copied - .2) * share;
@@ -1203,7 +1217,7 @@ export function DeleteOriginals({ job, size, act, busy = false }: { job: Job; si
   return <div className="source-choice" data-testid="delete-originals">
     <p><Icon icon={Info} size={14} />{t("Import: copy, source untouched")}</p>
     {done && <p data-testid="originals-deleted"><Icon icon={CheckCircle2} size={14} />{t("{count} originals deleted ({size}); {kept} left in place", { count: formatNumber(done.files), size: bytes(done.bytes), kept: formatNumber(done.kept) })}</p>}
-    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}</p>}
+    {job.deletingOriginals && <p role="status"><Icon icon={LoaderCircle} size={14} />{t("Deleting originals: {completed} of {total}", { completed: formatNumber(job.deletingOriginals.completed), total: formatNumber(job.deletingOriginals.total) })}{job.deletingOriginals.eta !== undefined && ` · ${t("{time} left", { time: formatRemaining(job.deletingOriginals.eta, t) })}`}</p>}
     {!!job.verifiedOriginals && <div className="rule-actions"><Button kind="danger" icon={Trash2} data-testid="delete-originals-button" disabled={busy || !!job.deletingOriginals} title={t("Deletes only source files verified in the backup")} onClick={() => choose('open')}>{t("Delete originals already in the backup")}</Button></div>}
     {step !== 'closed' && <OriginalsConfirm key={step} step={step} name={job.source.name} size={measured} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
