@@ -600,7 +600,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
-        fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => job.phase === 'complete')}
+        fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && totalFraction(job, verify) === 1)}
         count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={{ speed: active.reduce((sum, job) => sum + (job.progress?.speed ?? 0), 0), fileRate: active.reduce((sum, job) => sum + (job.progress?.fileRate ?? 0), 0) }}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, state.etaTotal?.eta === remaining && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined) }) : undefined}
@@ -968,12 +968,21 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
     })}</ul><p className="settings-explanation">{t("Change this any time in Drives.")}</p></div>
   </dialog>;
 }
+/** The job has stopped for good: finished, failed or stopped. */
+const ended = (job: Job) => job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
+/** Every file was verified and none failed: whatever else ended the job (cleanup leftovers), the copy itself is done. */
+export function allVerified(job: Job): boolean {
+  const progress = job.progress;
+  return !!progress && progress.phase === 'verifying' && !progress.step && progress.total > 0 && progress.completed === progress.total && !progress.failed;
+}
+/** Complete, or ended with an error only after every file was verified. */
+export const jobFinished = (job: Job) => job.phase === 'complete' || (job.phase === 'error' && allVerified(job));
 type StepState = 'pending' | 'active' | 'done' | 'error' | 'paused' | 'skipped';
 // Scanning → Copying → Verifying for one source, derived from its latest job and read-only scan.
 export function sourceStepStates(job: Job | undefined, inventory: Inventory | undefined, scanning: boolean, verifyOff: boolean): StepState[] {
   const skipVerify = (state: StepState): StepState => verifyOff ? 'skipped' : state;
   if (!job || job.phase === 'queued') return [scanning ? 'active' : inventory ? 'done' : 'pending', 'pending', skipVerify('pending')];
-  if (job.phase === 'complete') return ['done', 'done', skipVerify('done')];
+  if (job.phase === 'complete' || ended(job) && allVerified(job)) return ['done', 'done', skipVerify('done')];
   const progressPhase = job.progress?.phase;
   const stage = progressPhase === 'verifying' ? 2 : progressPhase === 'copying' || job.phase === 'copying' ? 1 : 0;
   const current: StepState = job.phase === 'error' ? 'error' : job.phase === 'stopped' ? 'paused' : 'active';
@@ -1056,7 +1065,7 @@ function jobTiming(job: Job, t: ReturnType<typeof createTranslator>): { startedA
 }
 /** The bar of a job's card: files for renames and organizations, the step's own share otherwise; a finished job is full. */
 export function cardFraction(job: Job): number | undefined {
-  if (job.phase === 'complete') return 1;
+  if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
   const progress = job.progress;
   if (!progress) return undefined;
   // The job's whole work (every step, weighted by what it costs), the same number the overview adds up.
@@ -1072,8 +1081,8 @@ function totalFraction(job: Job, verify: boolean): number | undefined {
 export function overviewFraction(jobs: Job[], verify = true): number | undefined {
   const costed = jobs.filter(job => job.cost && job.cost.total > 0);
   if (costed.length && costed.length === jobs.length) {
-    const total = costed.reduce((sum, job) => sum + job.cost!.total, 0), done = costed.reduce((sum, job) => sum + (job.phase === 'complete' ? job.cost!.total : Math.min(job.cost!.done, job.cost!.total)), 0);
-    return total > 0 ? (jobs.every(job => job.phase === 'complete') ? 1 : Math.min(.99, done / total)) : undefined;
+    const total = costed.reduce((sum, job) => sum + job.cost!.total, 0), done = costed.reduce((sum, job) => sum + (jobFinished(job) ? job.cost!.total : Math.min(job.cost!.done, job.cost!.total)), 0);
+    return total > 0 ? (jobs.every(jobFinished) ? 1 : Math.min(.99, done / total)) : undefined;
   }
   const measured = jobs.flatMap(job => { const fraction = totalFraction(job, verify); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
   return measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
@@ -1128,7 +1137,7 @@ function organizationFraction(job: Job): number | undefined {
  * source's metadata 10%, comparing with the destinations 10%, then copying, and verifying the last 10% when it runs. A finished import is 100%. */
 export function importFraction(job: Job, verify = true): number | undefined {
   const progress = job.progress;
-  if (job.phase === 'complete') return 1;
+  if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
   if (!progress) return undefined;
   if (job.fraction !== undefined) return job.fraction;
   const share = progressFraction(progress) ?? 0, copied = verify ? .9 : 1;
@@ -1246,7 +1255,7 @@ export function OrganizationProgress({ job, act }: { job: Job; act?: Dispatch })
   const count = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queued") : !progress ? undefined : progressCount(progress, t, formatNumber, true, formatBytes);
   const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
   return <div className="organization-progress" data-testid="organization-progress">
-    <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={job.phase === 'complete'} count={count}
+    <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={jobFinished(job)} count={count}
       speed={working && progress ? progress : undefined} {...jobTiming(job, t)} file={working && progress ? progress.file : undefined} actions={actions} />
     {job.detail && <small>{t(job.detail)}</small>}
   </div>;
@@ -1301,7 +1310,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {already && <ProgressDisplay calm className="progress-in-card" testId="already-imported" fraction={1} finished label={t("{name} copy progress", { name: source.name })} count={progress?.total ? t("All {count} files are in the backup and verified", { count: formatNumber(progress.total) }) : t("All files are in the backup and verified")} />}
     {needsChoice && <div className="source-choice" data-testid="needs-choice"><p><Icon icon={CircleAlert} size={14} />{t("Choose whether to import this drive.")}</p><div className="rule-actions"><Button icon={X} onClick={() => selectSource(act, source.id, false)}>{t("Don't import")}</Button><Button kind="primary" icon={ArrowDownToLine} onClick={() => selectSource(act, source.id, true)}>{t("Import")}</Button></div></div>}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
-    {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={job?.phase === 'complete'}
+    {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={!!job && jobFinished(job)}
       count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
       speed={active ? progress : undefined} {...(job ? jobTiming(job, t) : {})} file={active ? progress.file : undefined}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
@@ -1309,7 +1318,7 @@ function SourceRow({ source, job, queuePosition, selected, onSelect, act, config
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
     <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} />
-    {job?.space && !already && <SourceSpace space={job.space} />}
+    {job?.space && !already && (job.phase === 'queued' || activePhases.includes(job.phase)) && <SourceSpace space={job.space} />}
     {scanning && <ScanProgress sourceName={source.name} listing={listing} cameraInfo={cameraInfo} usedBytes={scanTotalBytes(source, inventory)} />}
     {active && !progress && <ProgressDisplay className="progress-in-card" label={t("{name} scanning", { name: source.name })} startedAt={job?.startedAt} />}
     {job?.detail && active && (!progress || job.detail.key === 'job.destinationLabel') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
