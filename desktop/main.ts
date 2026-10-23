@@ -470,37 +470,45 @@ async function stopResidueCheck(){residueControl?.abort();await residueTask;migr
 // Data" folder while nothing else uses the drive. A job starting stops it; every step finishes from what is on
 // disk, so the next idle moment picks it up where it stopped.
 let migrationControl:AbortController|undefined,migrationTask:Promise<void>|undefined;
+/** Drives (path and volume) converted, or found with nothing to convert, while connected: looked at again only once
+ * reconnected or after a restart, so what the converter must leave alone is not looked at every few seconds. */
+const migrationChecked=new Set<string>();
 const migrationIdle=()=>!active.size&&!scanControls.size&&!resumingOrganizations.size&&!misplacedControl&&!residueControl&&!residueTask&&!duplicateControl&&!state.review&&!state.busyReview&&!state.jobs.some(job=>job.phase==='queued');
 /** Per connected, unchanged destination: the folders the converter looks at (the destination, its backup folders,
  * folders organized there) and those whose receipts it walks (all but the destination itself, unless imports go there). */
-async function migrationDrives():Promise<{drive:string;roots:string[];walk:string[]}[]>{
- const prefs=state.preferences,drives=new Map<string,{roots:string[];walk:string[]}>();
- const add=(drive:string,root:string,walk:boolean)=>{const entry=drives.get(drive)??{roots:[],walk:[]};if(!entry.roots.includes(root))entry.roots.push(root);if(walk&&!entry.walk.includes(root))entry.walk.push(root);drives.set(drive,entry);};
+async function migrationDrives():Promise<{drive:string;key:string;roots:string[];walk:string[]}[]>{
+ const prefs=state.preferences,drives=new Map<string,{key:string;roots:string[];walk:string[]}>();
+ const add=(drive:string,root:string,walk:boolean,volumeId:string)=>{const entry=drives.get(drive)??{key:`${drive}\0${volumeId}`,roots:[],walk:[]};if(!entry.roots.includes(root))entry.roots.push(root);if(walk&&!entry.walk.includes(root))entry.walk.push(root);drives.set(drive,entry);};
  prefs.destinations.forEach((destination,index)=>{
   const status=state.destinationStatus?.find(item=>item.path===destination);if(!status?.available||status.volumeId!==prefs.destinationIds?.[index])return;
-  add(destination,destination,false);
-  for(const folder of backupFolders(prefs)){const root=path.resolve(destination,folder);if(within(root,destination))add(destination,root,true);}
+  add(destination,destination,false,status.volumeId??"");
+  for(const folder of backupFolders(prefs)){const root=path.resolve(destination,folder);if(within(root,destination))add(destination,root,true,status.volumeId??"");}
  });
  for(const location of organizationLocations){
   const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):state.destinationStatus?.find(item=>item.path===location.destination);
-  if(status?.available&&status.volumeId===location.volumeId)add(location.destination,location.root,true);
+  if(status?.available&&status.volumeId===location.volumeId)add(location.destination,location.root,true,location.volumeId);
  }
  return [...drives].map(([drive,entry])=>({drive,...entry}));
 }
 function scheduleMigration(){
  if(qa||hardwareTest||quitting||migrationTask||!migrationIdle())return;
- const control=new AbortController();migrationControl=control;let changed=false;
+ const control=new AbortController();migrationControl=control;let changed=false,ran=false;
  const task:Promise<void>=(async()=>{
-  for(const {drive,roots,walk} of await migrationDrives()){
+  const drives=await migrationDrives(),connected=new Set(drives.map(item=>item.key));
+  for(const key of [...migrationChecked])if(!connected.has(key))migrationChecked.delete(key);
+  for(const {drive,key,roots,walk} of drives){
    if(control.signal.aborted)return;
-   if(!(await Promise.all(roots.map(root=>needsConversion(root).catch(()=>false)))).some(Boolean))continue;
-   state.migration={drive,step:'looking',completed:0,total:0,file:''};emit();
+   if(migrationChecked.has(key))continue;
+   if(!(await Promise.all(roots.map(root=>needsConversion(root).catch(()=>false)))).some(Boolean)){migrationChecked.add(key);continue;}
+   ran=true;state.migration={drive,step:'looking',completed:0,total:0,file:''};emit();
    const result=await migrateDrive(roots,{signal:control.signal,walk,onProgress:progress=>{state.migration={drive,...progress};progressEmit();}});
-   changed||=result.converted>0;
+   changed||=result.converted>0;migrationChecked.add(key);
    if(result.problems.length)(state.migrationProblems??={})[drive]=result.problems;else if(state.migrationProblems)delete state.migrationProblems[drive];
   }
  })().catch(error=>{if(!control.signal.aborted)state.error=message('error.migration',{error:toMessage(error)});}).finally(()=>{
-  if(migrationControl===control)migrationControl=undefined;if(migrationTask===task)migrationTask=undefined;delete state.migration;emit();
+  if(migrationControl===control)migrationControl=undefined;if(migrationTask===task)migrationTask=undefined;
+  if(!ran)return;
+  delete state.migration;emit();
   if(changed)void refreshOrganizations();
   // Picked up again at the next idle moment if a job stopped it; the cleanup runs once it is done.
   if(!control.signal.aborted)scheduleResidueCheck(true);void releaseIfIdle();
