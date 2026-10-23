@@ -26,6 +26,21 @@ async function folder(t:test.TestContext,name:string){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),name)));t.after(()=>fs.rm(base,{recursive:true,force:true}));return base;
 }
 
+// exFAT reports a change time equal to the modified time, so no stat there proves a file unchanged. Files under
+// `drive` get exactly that, from every stat call; mock this before counting reads.
+function simulateExfat(t:test.TestContext,drive:string){
+ const exfat=<T,>(file:string,stat:T):T=>{const value=stat as {mtimeNs?:bigint;ctimeNs?:bigint;mtimeMs?:number;ctimeMs?:number};if(typeof value?.mtimeNs==='bigint'&&file.startsWith(drive+path.sep)){value.ctimeNs=value.mtimeNs;value.ctimeMs=value.mtimeMs;}return stat;};
+ const lstat=fs.lstat.bind(fs),stat=fs.stat.bind(fs),open=fs.open.bind(fs);
+ t.mock.method(fs,'lstat',async(...args:Parameters<typeof fs.lstat>)=>exfat(String(args[0]),await lstat(...args)));
+ t.mock.method(fs,'stat',async(...args:Parameters<typeof fs.stat>)=>exfat(String(args[0]),await stat(...args)));
+ t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
+  const handle=await open(...args),file=String(args[0]),own=handle.stat.bind(handle);
+  t.mock.method(handle,'stat',async(...values:Parameters<typeof handle.stat>)=>exfat(file,await own(...values)));
+  return handle;
+ });syncBuiltinESMExports();
+ t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+}
+
 const organizing={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true};
 const sony=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
 const recovery=(file:string)=>file.includes(`${path.sep}Photo Importer Recovery${path.sep}`);
@@ -175,19 +190,10 @@ test('on exFAT the destination is still read twice per job that skips it',async 
  const {dropDestinationIndexes}=await import('../core/destination-index');
  const base=await folder(t,'verify-once-exfat-'),card=path.join(base,'card'),drive=path.join(base,'exfat'),source=path.join(card,'A.bin');
  await photo(source,Buffer.alloc(SIZE,4));await fs.mkdir(drive);
- const exfat=<T,>(file:string,stat:T):T=>{const value=stat as {mtimeNs?:bigint;ctimeNs?:bigint;mtimeMs?:number;ctimeMs?:number};if(typeof value?.mtimeNs==='bigint'&&file.startsWith(drive+path.sep)){value.ctimeNs=value.mtimeNs;value.ctimeMs=value.mtimeMs;}return stat;};
- const lstat=fs.lstat.bind(fs),stat=fs.stat.bind(fs),open=fs.open.bind(fs),read:Record<string,number>={};
- t.mock.method(fs,'lstat',async(...args:Parameters<typeof fs.lstat>)=>exfat(String(args[0]),await lstat(...args)));
- t.mock.method(fs,'stat',async(...args:Parameters<typeof fs.stat>)=>exfat(String(args[0]),await stat(...args)));
- t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{
-  const handle=await open(...args),file=String(args[0]),own=handle.stat.bind(handle),reading=handle.read.bind(handle);
-  t.mock.method(handle,'stat',async(...values:Parameters<typeof handle.stat>)=>exfat(file,await own(...values)));
-  if(file.startsWith(drive+path.sep)&&!file.endsWith('.partial'))t.mock.method(handle,'read',async(...values:Parameters<typeof handle.read>)=>{const result=await reading(...values);read.destination=(read.destination??0)+result.bytesRead;return result;});
-  return handle;
- });syncBuiltinESMExports();
- t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+ simulateExfat(t,drive);
+ const reads=countReads(t,file=>file.startsWith(drive+path.sep)&&!file.endsWith('.partial')?'destination':undefined);
  const options={backup:true,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
- const job=async()=>{read.destination=0;const {plans:[transfer]}=await core.plan(card,[drive],options,none);return {result:await core.execute(transfer!,undefined,undefined,{exclusiveCopy:true}),reads:read.destination/SIZE};};
+ const job=async()=>{const before=reads.files().destination??0;const {plans:[transfer]}=await core.plan(card,[drive],options,none);return {result:await core.execute(transfer!,undefined,undefined,{exclusiveCopy:true}),reads:(reads.files().destination??0)-before};};
  assert.equal((await job()).result.copied,1);
  for(const later of [false,true]){
   if(later)dropDestinationIndexes();
@@ -215,4 +221,19 @@ test('delete originals reads the source of a file the import found already in th
  assert.equal((await deleteOriginals(card,skipped.files)).deleted.length,1);
  reads.stop();
  assert.deepEqual(reads.files(),{source:1});
+});
+
+// On exFAT no stat proves a file unchanged between the check and setting the original aside, so both are read
+// again after the stash intent, as before.
+test('on exFAT an organization reads the original and the copy again before setting the original aside',async t=>{
+ const root=await folder(t,'verify-once-exfat-organize-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
+ await photo(original,data);
+ simulateExfat(t,root);
+ const {plans:[transfer]}=await core.plan(root,[root],organizing,sony);
+ const destination=transfer!.entries[0]!.destination;
+ const reads=countReads(t,file=>file===original?'source':file===destination?'destination':file.endsWith('.partial')?'stage':recovery(file)&&file.endsWith('A.JPG')?'stash':undefined);
+ const result=await core.executeReorganization(transfer!);
+ reads.stop();
+ assert.deepEqual(result.errors,[]);assert.equal(result.moved,1);
+ assert.deepEqual(reads.files(),{source:3,stage:1,destination:3});
 });

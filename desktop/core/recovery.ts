@@ -298,12 +298,13 @@ class Proofs {
  }
 }
 /** Runs `check` (which reads `file`) and returns the file's stat when it was the same before and after, so the
- * bytes just read belong to that stat; undefined when the file changed meanwhile. */
+ * bytes just read belong to that stat; undefined when the file changed meanwhile, or when its filesystem keeps no
+ * real change time (FAT, exFAT), where an unchanged stat proves nothing. */
 async function proven(file:string,check:()=>Promise<void>):Promise<BigIntStats|undefined> {
  const before=await fs.lstat(file,{bigint:true});await check();const after=await fs.lstat(file,{bigint:true});
- return sameStat(before,after)&&before.birthtimeNs===after.birthtimeNs?after:undefined;
+ return provable(after)&&sameStat(before,after)&&before.birthtimeNs===after.birthtimeNs?after:undefined;
 }
-const unchangedSince=(proof:BigIntStats|undefined,now:BigIntStats)=>!!proof&&sameStat(proof,now)&&proof.birthtimeNs===now.birthtimeNs;
+const unchangedSince=(proof:BigIntStats|undefined,now:BigIntStats)=>!!proof&&provable(now)&&sameStat(proof,now)&&proof.birthtimeNs===now.birthtimeNs;
 function validateManifest(value:unknown,root:string,id:string):Manifest {
  const m=value as Manifest;
  if(!m||m.version!==1||(m.strategy!==undefined&&m.strategy!=='rename')||(m.kind!==undefined&&m.kind!=='duplicates')||(m.keepFolders!==undefined&&m.keepFolders!==true)||m.id!==id||m.root!==root||typeof m.source!=='string'||path.resolve(m.source)!==m.source||!(m.source===root||beneath(root,m.source))||!Array.isArray(m.entries)||typeof m.rootIdentity!=='string'||typeof m.sourceIdentity!=='string'||(m.libraries!==undefined&&(!Array.isArray(m.libraries)||m.libraries.some(folder=>typeof folder!=='string'||path.resolve(folder)!==folder||!beneath(folder,m.source)))))throw new Error('Invalid or unsafe organization recovery journal');
