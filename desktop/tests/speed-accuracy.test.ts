@@ -180,6 +180,29 @@ test('the drive meter says it measures the whole disk, in every language', async
   }
 });
 
+test('comparing after a long frozen start: two minutes into the movement the time left is within 2x of the truth', () => {
+  // Live case: 30 min of journal reading at no progress, then 43,539 files compared at 561 MB/s (28 MB each, about 20 files/s).
+  const files = 43539, perFile = 28.5e6, filesPerSecond = 561e6 / perFile;
+  const tracker = new EtaTracker();
+  const job: Job = { id: 'j', source: card, phase: 'verifying', errors: [], backup: false };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  tracker.plan('j', { kind: 'import', verify: true, totals: { comparing: { files, bytes: files * perFile, bytesKnown: false }, copying: { files: 0, bytes: 0 }, verifying: { files: 0, bytes: 0 } } });
+  const frozen = 1800, moving = 120;
+  let step: number | undefined, whole: number | undefined;
+  for (let s = 0; s <= frozen + moving; s++) {
+    const seconds = Math.max(0, s - frozen), done = Math.floor(seconds * filesPerSecond);
+    job.progress = { phase: 'planning', step: 'comparing', completed: done, total: files, bytes: done * perFile, totalBytes: 0, speed: 0, file: 'f' };
+    stampEstimates(state, tracker, 1e9 + s * 1000);
+    step = job.progress.eta; whole = job.eta;
+  }
+  const truth = (files - Math.floor(moving * filesPerSecond)) / filesPerSecond;
+  assert.ok(step !== undefined, 'the step has an estimate');
+  assert.ok(step > truth / 2 && step < truth * 2, `step time left ${step} s against ${truth.toFixed(0)} s`);
+  assert.ok(whole === undefined || (whole > truth / 2 && whole < truth * 2), `job time left ${whole} s against ${truth.toFixed(0)} s`);
+  assert.ok(job.etaRange && job.etaRange.high / job.etaRange.low < 2, `the range has narrowed: ${JSON.stringify(job.etaRange)}`);
+  assert.ok(job.progress!.speed > 0.9 * 561e6 && job.progress!.speed < 1.1 * 561e6, `speed ${job.progress!.speed}`);
+});
+
 test('the speed window follows a steady rate, shows nothing for its first 2 s and falls to zero within 5 s of a stall', () => {
   const meter = new RateMeter();
   assert.equal(meter.next(0, 0), undefined);
