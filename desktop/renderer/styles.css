@@ -807,6 +807,10 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .progress-job-heading{display:flex;align-items:baseline;gap:.6rem;min-width:0}
 .progress-job-heading>strong{flex:none}
 .progress-job-place{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-footnote);color:var(--label-secondary)}
+/* A long path shortens itself; the Show in Finder button after it always stays in view. */
+.progress-job-place-action{display:flex;align-items:center;overflow:visible}
+.progress-job-place-action>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.progress-job-place-action>[data-testid=reveal]{flex:none}
 .progress-job-status{padding:.15rem .6rem;border-radius:var(--radius-capsule);background:var(--fill-3);white-space:nowrap}
 .progress-jobs li>p{grid-column:1/-1;font-size:var(--text-footnote);color:var(--label-secondary);overflow-wrap:anywhere}
 .progress-jobs li>.progress-track{grid-column:1/-1}
