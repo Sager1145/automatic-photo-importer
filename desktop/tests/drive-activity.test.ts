@@ -106,7 +106,13 @@ test('the sidebar drive row shows the utilization next to the capacity line', ()
   const state = { preferences: { copyMode: 'single', destinations: [], sourceLayout: 'cards' }, sources: [{ id: 's1', name: 'Card', path: '/Volumes/Card', transport: 'storage', total: 1000, free: 400 }], jobs: [], history: [], platform: 'darwin', driveActivity: { s1: sample } } as unknown as AppState;
   const markup = render(createElement(SidebarSources, { state, onOpen() {} }));
   assert.match(markup, /data-testid="sidebar-activity"/);
-  assert.ok(markup.includes('Activity 37%'));
+  assert.ok(markup.includes('Activity ≈37%'));
+  for (const language of languages) {
+    const t = createTranslator(language), tip = t('Estimated share of time the drive spent reading or writing, not its capacity');
+    assert.ok(language === 'en' || tip !== 'Estimated share of time the drive spent reading or writing, not its capacity', language);
+    assert.ok(render(createElement(SidebarSources, { state, onOpen() {} }), language).includes(tip), `${language}: tooltip says estimate`);
+    assert.ok(t('Activity ≈{percent}', { percent: '37%' }).includes('≈37%'));
+  }
   assert.ok(markup.includes('400') || markup.includes('free'));
 });
 

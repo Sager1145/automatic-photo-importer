@@ -199,7 +199,7 @@ export function DriveActivityMeter({ activity }: { activity?: DriveActivity }) {
   const { t } = useTranslation();
   if (!activity) return null;
   const percent = Math.round(Math.max(0, Math.min(100, activity.utilization)));
-  return <div className="drive-activity" data-testid="drive-activity" title={t("Share of time the drive spent reading or writing, not its capacity")}>
+  return <div className="drive-activity" data-testid="drive-activity" title={t("Estimated share of time the drive spent reading or writing, not its capacity")}>
     <div className="drive-activity-head"><span>{t("Drive activity")}</span><strong data-testid="drive-activity-percent">{percent}%</strong></div>
     <div className="drive-activity-graph"><span className="drive-activity-bar" role="meter" aria-label={t("Drive activity")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></span><Sparkline values={activity.history} /></div>
     <div className="drive-activity-rates"><span>{t("Read")} <Speed value={activity.readBps} /></span><span>{t("Write")} <Speed value={activity.writeBps} /></span></div>
@@ -210,7 +210,7 @@ function SidebarActivity({ activity }: { activity?: DriveActivity }) {
   const { t } = useTranslation();
   if (!activity) return null;
   const percent = Math.round(Math.max(0, Math.min(100, activity.utilization)));
-  return <div className="sidebar-activity" data-testid="sidebar-activity" title={t("Share of time the drive spent reading or writing, not its capacity")}><small>{t("Activity {percent}", { percent: `${percent}%` })}</small><span className="sidebar-activity-bar" role="meter" aria-label={t("Drive activity")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ transform: `scaleX(${percent / 100})` }} /></span></div>;
+  return <div className="sidebar-activity" data-testid="sidebar-activity" title={t("Estimated share of time the drive spent reading or writing, not its capacity")}><small>{t("Activity ≈{percent}", { percent: `${percent}%` })}</small><span className="sidebar-activity-bar" role="meter" aria-label={t("Drive activity")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ transform: `scaleX(${percent / 100})` }} /></span></div>;
 }
 /** The busiest drive in use and the combined speeds. Drives that share a disk report identical readings and count once. */
 export function totalDriveActivity(state: AppState, keys: string[]): { utilization: number; readBps: number; writeBps: number; count: number } | undefined {
