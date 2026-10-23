@@ -51,7 +51,9 @@ async function importLeftovers(folder:string,entries:Dirent[],root:string,items:
     const file=path.join(folder,entry.name),stat=await regular(file);
     if(!stat) continue;
     let receipt;
-    try { receipt=await leftoverReceipt(file,root); } catch { continue; }
+    // A receipt that cannot be read or authenticated (cut short by a kill, or altered) names nothing
+    // reliably: it is listed as kept, so automatic cleanup leaves it and only Clean up removes it.
+    try { receipt=await leftoverReceipt(file,root); } catch { items.push({path:file,kind:'kept',bytes:Number(stat.size),root,stat});continue; }
     // A publication receipt names a media path: while that file is there, the receipt is how a
     // re-import finishes it, and it is kept even when it no longer binds the file.
     if(receipt.kind==='publication'&&receipt.present) continue;
