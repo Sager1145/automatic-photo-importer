@@ -28,7 +28,7 @@ export interface InventoryFile {path:string;relative:string;size:number;kind:Med
 export interface Inventory {issues?:{path:string;message:string}[];files:InventoryFile[];media:number;companions:number;unknown:number;bytes:number;unknownExtensions:Record<string,number>;/** Each listed folder's identity, so a later import can reuse this listing. */listing?:{backup:boolean;folders:[string,string,string[]?][]};system?:number;/** Zero-byte files left where they are: nothing to import, and their identity is unreliable on exFAT. */empty?:number;systemKinds?:Record<string,number>;skipped?:SkippedFile[];elapsedMs:number;}
 /** Capture units: f-number, ISO, seconds, millimeters and EV respectively. */
 export interface Exposure {lens?:string;aperture?:number;iso?:number;exposureTime?:number;focalLength?:number;exposureCompensation?:number;}
-export interface Metadata {edited?:boolean;camera?:string;date?:string;fields:Record<string,unknown>;exposure?:Exposure;shutterCount?:string;shutterNote?:string;preview?:string;}
+export interface Metadata {edited?:boolean;camera?:string;/** Folder for a cameraless file recognised by its source (Screenshots, Screen Recordings, WeChat). */origin?:string;date?:string;fields:Record<string,unknown>;exposure?:Exposure;shutterCount?:string;shutterNote?:string;preview?:string;}
 /** digest is absent until a copy streams the source ("computed during copy"); planning hashes
  * only when a same-size file already sits at a candidate destination. sourceIdentity is the
  * plan-time dev:ino:size:mtimeNs:ctimeNs of the source. */

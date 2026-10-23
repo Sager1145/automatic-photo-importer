@@ -63,7 +63,7 @@ function folder(info:Metadata,mtime:Date,media:Media|undefined,options:Options):
   const year=String(capture.getUTCFullYear()).padStart(4,'0'), month=String(capture.getUTCMonth()+1).padStart(2,'0'), day=String(capture.getUTCDate()).padStart(2,'0');
   // Month names are English whatever the app language; the number first keeps calendar order.
   const monthName=`${month} ${MONTHS[capture.getUTCMonth()]}`;
-  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||'Unknown Camera')};
+  const values:Record<string,string>={year,month,day,yyyymm:year+month,yyyyMMdd:year+month+day,monthName,yearMonthName:`${year}-${monthName}`,camera:safeComponent(info.camera?.trim()||info.origin||'Unknown Camera')};
   const editedFolder=options.editedFolder??'editied';
   if(!editedFolder||editedFolder!==safeComponent(editedFolder)||/[{}]/.test(editedFolder)||/[\\/]/.test(editedFolder)||editedFolder==='.'||editedFolder==='..')throw new Error('Choose a single safe folder name for edited exports.');
   const video=options.layout==='video-root'&&!!media?.video;
@@ -317,7 +317,7 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
     const inherit=primary.path!==file.path && (file.companionOf || (file.kind!=='Other' && rawMembers.length===1));
-    const info:Metadata={fields:{},camera:own.camera?.trim() || (inherit?paired.camera:undefined),date:own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
+    const info:Metadata={fields:{},camera:own.camera?.trim() || (inherit?paired.camera:undefined),origin:own.origin||(inherit?paired.origin:undefined),date:own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let relative:string,place:ReturnType<typeof folder>|undefined;
