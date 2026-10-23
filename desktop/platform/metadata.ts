@@ -5,7 +5,7 @@ import { availableParallelism, tmpdir } from 'node:os';
 import path from 'node:path';
 import type { DuplicateExif, Exposure, Metadata } from '../shared';
 import { djiProduct } from './dji-models';
-import { streams, STREAMS } from '../core/devices';
+import { streams, STREAMS, ROUTING_BATCH } from '../core/devices';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
 import { log } from '../logger';
 
@@ -354,7 +354,6 @@ export function primeRouting(entries:[string,Metadata][]):void {
 }
 /** Files read by one ExifTool request. ExifTool re-parses its arguments and filters for every request,
  * so a request for 16 files is much cheaper than 16 requests (measured about 1.7x faster). 1 reads each file alone. */
-const ROUTING_BATCH=16;
 let routingBatch=ROUTING_BATCH;
 /** Files per ExifTool request for routing reads (1 turns batching off); mainly for tests. */
 export function setRoutingBatch(size:number):void {routingBatch=Math.max(1,Math.floor(size)||1);}
@@ -375,7 +374,7 @@ async function readBatch(files:string[]):Promise<Map<string,RawTags>> {
   const list=await exiftool().enqueueTask(()=>new RawBatchTask(files[0]!,args,{readArgs:routingArgs}) as never) as unknown as RawTags[];
   return new Map(list.flatMap(item=>typeof item?.SourceFile==='string'?[[item.SourceFile,item] as [string,RawTags]]:[]));
 }
-interface Waiting {file:string;dev:bigint;resolve:(tags:RawTags)=>void;reject:(error:unknown)=>void;}
+interface Waiting {at:number;file:string;dev:bigint;resolve:(tags:RawTags)=>void;reject:(error:unknown)=>void;}
 const waiting:Waiting[]=[],busy=new Map<bigint,number>(),limits=new Map<bigint,Promise<number>>(),limitOf=new Map<bigint,number>(),inFlight=new Map<string,Promise<RawTags>>();
 let maxRequests=1;
 const readSingle=(file:string)=>exiftool().readRaw(file,{readArgs:routingArgs}) as Promise<RawTags>;
@@ -396,14 +395,26 @@ async function run(group:Waiting[]):Promise<void> {
   }));
   log('detailed','metadata','batch',{files:group.length,batched:group.length>1,fellBackToSingle:fellBack,failed,ms:Math.round(performance.now()-began),exiftoolProcs:exiftoolProcs(),first:group[0]?.file});
 }
+/** A group smaller than a full request waits this long for more files when another request is already running on its device. */
+const LINGER_MS=10;
+let lingering=false;
 function pump():void {
   for(;;){
-    let index=-1;
+    let index=-1,wait=0;
+    const now=performance.now(),counts=new Map<bigint,number>();
+    for(const item of waiting)counts.set(item.dev,(counts.get(item.dev)??0)+1);
     for(let position=0;position<waiting.length;position++){
-      const item=waiting[position]!;
-      if((busy.get(item.dev)??0)<(limitOf.get(item.dev)??1)){index=position;break;}
+      const item=waiting[position]!,running=busy.get(item.dev)??0;
+      if(running>=(limitOf.get(item.dev)??1))continue;
+      // A short group starts at once only on an idle device; otherwise it gathers files until it is full or has waited long enough.
+      const age=now-waiting.find(other=>other.dev===item.dev)!.at;
+      if(running===0||counts.get(item.dev)!>=routingBatch||age>=LINGER_MS){index=position;break;}
+      wait=Math.max(wait,LINGER_MS-age);
     }
-    if(index<0)return;
+    if(index<0){
+      if(wait>0&&!lingering){lingering=true;setTimeout(()=>{lingering=false;pump();},Math.ceil(wait));}
+      return;
+    }
     const dev=waiting[index]!.dev,group:Waiting[]=[];
     for(let position=index;position<waiting.length&&group.length<routingBatch;)
       if(waiting[position]!.dev===dev){group.push(waiting[position]!);waiting.splice(position,1);}else position++;
@@ -419,7 +430,7 @@ async function readRouting(file:string,dev:bigint,key:string):Promise<RawTags> {
     if(routingBatch<=1)return readSingle(file);
     await requestLimit(file,dev);
     return new Promise<RawTags>((resolve,reject)=>{
-      waiting.push({file,dev,resolve,reject});
+      waiting.push({at:performance.now(),file,dev,resolve,reject});
       // Callers arriving together share a request; a free slot never waits for a full one.
       if(!scheduled){scheduled=true;setTimeout(()=>{scheduled=false;pump();},2);}
     });

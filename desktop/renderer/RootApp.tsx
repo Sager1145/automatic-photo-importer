@@ -489,9 +489,9 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
 }
 
 /** What a destination is doing now, from state the app already holds (jobs, the folder check, duplicates, leftover cleanup). */
-export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
-export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
-const destinationPriority: DestinationStatusKind[] = ['receiving', 'verifying', 'organizing', 'folder-check', 'cleaning'];
+export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'checking-files' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
+export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** checking-files: the step the bar is drawn in. */layer?: StepKind; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
+const destinationPriority: DestinationStatusKind[] = ['receiving', 'checking-files', 'verifying', 'organizing', 'folder-check', 'cleaning'];
 function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
 export function destinationActivity(state: AppState, path: string): DestinationActivity {
   const empty = { completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, fileRate: 0, sources: [] as string[] };
@@ -507,7 +507,10 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
     if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
-    parts.push({ kind: tidy ? 'cleaning' : job.phase === 'verifying' ? 'verifying' : 'receiving', progress: job.progress, eta: job.eta ?? job.progress?.eta, source: job.source.name, paused: jobPaused(job) });
+    // Progress left over from an earlier run (planning figures on a job already copying) says nothing about what the job does now; without any, the job's phase decides.
+    const progress = job.progress && job.phase === 'copying' && job.progress.phase === 'planning' ? undefined : job.progress;
+    const stage = progress?.phase ?? (job.phase === 'verifying' ? 'planning' : job.phase === 'copying' ? 'copying' : undefined);
+    parts.push({ kind: tidy ? 'cleaning' : stage === 'planning' ? 'checking-files' : stage === 'verifying' ? 'verifying' : 'receiving', progress, eta: job.eta ?? progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
   if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
@@ -516,7 +519,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
   const kind = destinationPriority.find(item => parts.some(part => part.kind === item));
   if (!kind) return { kind: 'idle', ...empty };
   const same = parts.filter(part => part.kind === kind);
-  const sum = { ...empty, sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
+  const layer = kind === 'checking-files' ? stepKind(same.find(part => part.progress)?.progress) : undefined;
+  const sum = { ...empty, ...(layer ? { layer } : {}), sources: [...new Set(same.flatMap(part => part.source ? [part.source] : []))] };
   const etas: (number | undefined)[] = [];
   for (const { progress, eta } of same) {
     etas.push(eta);
@@ -532,8 +536,8 @@ export function destinationActivity(state: AppState, path: string): DestinationA
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
 function SidebarDestinationStatus({ activity }: { activity: DestinationActivity }) {
   const { t, formatNumber, formatBytes, language } = useTranslation();
-  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
-  const step = ({ receiving: 'copy', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
+  const labels: Record<DestinationStatusKind, string> = { checking: t("Checking…"), offline: t("Offline"), idle: t("Idle"), receiving: t("Receiving files"), 'checking-files': t("Checking files"), verifying: t("Verifying"), 'folder-check': t("Checking folder layout"), organizing: t("Organizing"), cleaning: t("Cleaning up") };
+  const step = ({ receiving: 'copy', 'checking-files': activity.layer ?? 'read', verifying: 'verify', 'folder-check': 'folder-check', organizing: 'move', cleaning: 'tidy' } as Partial<Record<DestinationStatusKind, string>>)[activity.kind];
   const busy = step !== undefined, percent = activity.fraction === undefined ? undefined : Math.round(activity.fraction * 100);
   // Verifying sits over the finished copy layer, as in every other bar.
   const top = Math.min(1, Math.max(0, activity.fraction ?? 0)), layers: StageLayer[] = activity.kind === 'verifying' ? [{ kind: 'copy', fraction: 1 }, { kind: 'verify', fraction: top }] : step ? [{ kind: step as StepKind, fraction: top }] : [];
@@ -1282,14 +1286,36 @@ function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
   const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
   return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
 }
+/** Which stage of a plan's bar a step of the time-left model belongs to: for an import everything before copying is the first stage, then copying, then verifying and publishing. */
+function stageOfStep(plan: StagePlan, step: string): number {
+  const last = plan.kinds.length - 1;
+  const kind: StepKind | undefined = step === 'copying' ? 'copy' : /^(verifying|publish)/.test(step) ? 'verify' : stepKind({ step } as Pick<Progress, 'phase' | 'step' | 'renames'>);
+  if (plan.kinds !== organizationKinds) return kind === 'copy' ? Math.min(1, last) : kind === 'verify' ? last : 0;
+  const at = kind ? plan.kinds.indexOf(kind) : -1;
+  return at < 0 ? 0 : at;
+}
+/** The share of the whole job done once stage `stage` and those before it are counted (what the model's steps up to it have done), from the job's cumulative step shares. */
+function shareThrough(job: Job, plan: StagePlan, stage: number): number {
+  let share = 0;
+  for (const item of job.stageShares ?? []) if (stageOfStep(plan, item.step) <= stage) share = Math.max(share, item.share);
+  return share;
+}
+/** A running job's layers drawn by cost: layer i reaches as far as everything up to its stage has done of the whole job, so the bar's length is the percent shown
+ * (a finished stage stays as a full-colour segment and the next colour grows over it). Undefined when the job has no step shares yet. */
+function costLayers(job: Job, plan: StagePlan): StageLayer[] | undefined {
+  if (!job.stageShares?.length || plan.finished || job.fraction === undefined) return undefined;
+  const top = Math.min(1, Math.max(0, job.fraction));
+  return plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? Math.min(top, shareThrough(job, plan, index)) : top }));
+}
 const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
-/** A job's bar: one layer per stage up to the one it is on; the passed stages are full, the current one is as far as it is. */
+/** A job's bar: one layer per stage up to the one it is on, each as far as the job's cost done through that stage (the bar is as long as the percent). */
 export function jobStageLayers(job: Job, verify = true): StageLayer[] {
   const plan = stagePlan(job, verify);
-  return plan ? layersOfPlan(plan) : [];
+  return plan ? costLayers(job, plan) ?? layersOfPlan(plan) : [];
 }
 /** The total bar: the layers of the least advanced job, so the top color is the stage that still holds the whole back. Jobs already past that
- * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color. */
+ * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color.
+ * When every job reports its cost, each layer is the cost done through its stage over all jobs' cost, so the bar is as long as the percent. */
 export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const plans = jobs.flatMap(job => { const plan = stagePlan(job, verify); return plan ? [{ job, plan }] : []; });
   if (!plans.length) return [];
@@ -1297,6 +1323,11 @@ export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const open = plans.filter(item => !item.plan.finished);
   if (!open.length) return layersOfPlan(plans.reduce((best, item) => rank(item.plan) > rank(best.plan) ? item : best).plan);
   const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best), floor = rank(least.plan);
+  const comparable = plans.every(({ job, plan }) => job.cost && job.cost.total > 0 && (plan.finished || job.stageShares?.length) && (plan.kinds === organizationKinds) === (least.plan.kinds === organizationKinds) && plan.kinds.length === least.plan.kinds.length);
+  if (comparable) {
+    const weight = plans.reduce((sum, { job }) => sum + job.cost!.total, 0);
+    return least.plan.kinds.slice(0, least.plan.index + 1).map((kind, index) => ({ kind, fraction: Math.min(1, plans.reduce((sum, { job, plan }) => sum + job.cost!.total * (plan.finished ? 1 : shareThrough(job, plan, index)), 0) / weight) }));
+  }
   const weights = plans.map(({ job, plan }) => ({ fraction: rank(plan) > floor || plan.finished ? 1 : plan.fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }));
   const top = weights.reduce((sum, item) => sum + item.fraction * item.weight, 0) / weights.reduce((sum, item) => sum + item.weight, 0);
   return layersOfPlan(least.plan, top);
