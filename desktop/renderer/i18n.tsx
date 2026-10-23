@@ -598,6 +598,7 @@ No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到�
 Full recheck|完整重新检查|完整重新檢查|すべて再確認
 Reads every organized file again, not only those changed since the last recheck.|重新读取每个已整理的文件，而不只是自上次重新检查以来有变化的文件。|重新讀取每個已整理的檔案，而不只是自上次重新檢查以來有變化的檔案。|前回の再確認以降に変わったファイルだけでなく、整理したすべてのファイルを読み直します。
 Reading organization history…|正在读取整理记录…|正在讀取整理記錄…|整理の履歴を読み込み中…
+Reading organization history is paused while a job uses the drive. It continues afterwards.|有任务正在使用该磁盘，整理记录的读取已暂停，任务结束后会继续。|有工作正在使用該磁碟，整理記錄的讀取已暫停，工作結束後會繼續。|ジョブがドライブを使用中のため、整理履歴の読み込みを一時停止しています。終了後に再開します。
 No organization history.|没有整理记录。|沒有整理記錄。|整理の履歴はありません。
 No remembered drives.|没有已记住的驱动器。|沒有已記住的磁碟。|記憶したドライブはありません。
 Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{name} のカメラの詳細
@@ -660,6 +661,15 @@ Reading history|正在读取历史|正在讀取歷史|履歴を読み込み中
 Checking the earlier organization: {completed} of {total} records|正在检查之前的整理记录：{completed}/{total}|正在檢查先前的整理紀錄：{completed}/{total}|以前の整理記録を確認中：{total} 件中 {completed} 件
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
 Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
+Reading later organizations: {completed} of {total}|正在读取较新的整理记录：{completed}/{total}|正在讀取較新的整理記錄：{completed}/{total}|新しい整理の記録を読み込み中：{total} 件中 {completed} 件
+Reading earlier organization records: {completed} of {total}|正在读取较早的整理记录：{completed}/{total}|正在讀取較早的整理記錄：{completed}/{total}|以前の整理の記録を読み込み中：{total} 件中 {completed} 件
+Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}|正在读取较早的整理：第 {journal}/{journals} 份记录，已读 {completed}/{total} 条|正在讀取較早的整理：第 {journal}/{journals} 份記錄，已讀 {completed}/{total} 筆|以前の整理を読み込み中：記録 {journal}/{journals} 件目、{total} 件中 {completed} 件
+Converting the organization record: {completed} of {total}|正在转换整理记录：{completed}/{total}|正在轉換整理記錄：{completed}/{total}|整理の記録を変換中：{total} 件中 {completed} 件
+Removing old record files: {completed} of {total}|正在删除旧的记录文件：{completed}/{total}|正在刪除舊的記錄檔案：{completed}/{total}|古い記録ファイルを削除中：{total} 件中 {completed} 件
+Measuring: {completed} files|正在测量：{completed} 个文件|正在測量：{completed} 個檔案|計測中：{completed} ファイル
+Preparing destinations: {completed} of {total}|正在准备目标位置：{completed}/{total}|正在準備目的地：{completed}/{total}|保存先を準備中：{total} 件中 {completed} 件
+Comparing the backup with the drive: {completed} of {total}|正在比较备份与磁盘：{completed}/{total}|正在比較備份與磁碟：{completed}/{total}|バックアップとドライブを比較中：{total} 件中 {completed} 件
+Loading the destination index: {size} of {totalSize}|正在加载目标索引：{size}/{totalSize}|正在載入目的地索引：{size}/{totalSize}|保存先のインデックスを読み込み中：{totalSize} 中 {size}
 Checking the destination: {completed} of {total} files|正在检查目标：{completed}/{total} 个文件|正在檢查目的地：{completed}/{total} 個檔案|保存先を確認中：{total} ファイル中 {completed} 件
 Confirming files already on the destination: {completed} of {total}|正在确认目标中已有的文件：{completed}/{total}|正在確認目的地中已有的檔案：{completed}/{total}|保存先にあるファイルを確認中：{total} 件中 {completed} 件
 Confirming files before moving: {completed} of {total}|移动前确认文件：{completed}/{total}|移動前確認檔案：{completed}/{total}|移動前にファイルを確認中：{total} 件中 {completed} 件

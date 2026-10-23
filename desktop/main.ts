@@ -7,9 +7,9 @@ import os from 'node:os';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import type {ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile} from './shared';
-import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type OrganizationProgress,allocateDestinations,getOrganizationRecovery,setConversionGate,stopConversions,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,removeOrganizedFolders,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {makeParent,syncParents,within} from './core/paths';
+import {makeParent,syncParents,within,isAbort} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations} from './core/destinations';
 import {destinationEntries,destinationParts,destinationSpace,freeAfterReservations,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
@@ -69,7 +69,13 @@ let refreshing=false;
 // The recovery listing waits while a review or a job is planning: its file calls would queue ahead of the planner's.
 // A file the organization moved keeps its routing metadata under its new path, so the check after the job does not read it again.
 setMoveObserver(carryRouting);
-const recoveryRefresh=deferredRefresh({planning:()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'),run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
+/** A job planning, copying or verifying (or a review being built) needs the drive's file calls: the organization listing gives way to it. */
+const drivesInUse=()=>!!state.busyReview||state.jobs.some(job=>job.phase==='discovering'||job.phase==='verifying'||job.phase==='copying');
+/** Any job at all on a drive: converting an old organization record waits for none to be running. */
+const jobsActive=()=>drivesInUse()||active.size>0||resumingOrganizations.size>0||!!duplicateControl||!!residueControl||!!residueTask;
+setConversionGate(()=>!jobsActive());
+let listingControl:AbortController|undefined;
+const recoveryRefresh=deferredRefresh({planning:drivesInUse,run:()=>refreshOrganizations().then(()=>emit()).catch(error=>{state.error=toMessage(error);emit();}).finally(()=>{void releaseIfIdle();})});
 let recoveryScope='';
 const folders=new Map<string,{source:Source;backup:boolean}>();
 const active=new Map<string,AbortController>();
@@ -171,7 +177,7 @@ function etaTotals(plans:TransferPlan[]){
 setInterval(()=>{if(state.jobs.some(job=>['discovering','verifying','copying'].includes(job.phase)))emit();},5000).unref();
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
-const emit=()=>{activityLoop?.wake();state.resources=resourceUse();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const emit=()=>{yieldListing();activityLoop?.wake();state.resources=resourceUse();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 // Progress republishes at most 4 times a second while a job copies or verifies (the renderer is busy then), 10 otherwise. Phase changes and the final emit call emit() directly and are never dropped.
 const progressEmit=throttled(()=>emit(),()=>state.jobs.some(job=>job.phase==='copying'||job.phase==='verifying')?250:100);
 let saving:Promise<void>=Promise.resolve();
@@ -226,9 +232,23 @@ let organizationListing:Promise<void>|undefined,organizationListingAgain=false;
  * change made meanwhile (an undo or resume that just finished) is always shown. */
 function refreshOrganizations():Promise<void>{
  if(organizationListing){organizationListingAgain=true;return organizationListing;}
- return organizationListing=(async()=>{do{organizationListingAgain=false;await listOrganizations();}while(organizationListingAgain);})().finally(()=>{organizationListing=undefined;});
+ const control=listingControl=new AbortController();
+ return organizationListing=(async()=>{
+  try{do{organizationListingAgain=false;await listOrganizations(control.signal);}while(organizationListingAgain&&!control.signal.aborted);}
+  catch(error){
+   if(!isAbort(error))throw error;
+   // A job took the drive: what was read is kept, and the listing goes on once no job is using it.
+   organizationListingAgain=false;state.organizationRecoveryPaused=true;recoveryRefresh.defer();
+  }
+ })().finally(()=>{organizationListing=undefined;if(listingControl===control)listingControl=undefined;});
 }
-async function listOrganizations(){
+/** Called on every state change: stops a listing a job now needs the drive for, and starts a deferred one when none does. */
+function yieldListing(){
+ if(jobsActive()&&stopConversions())recoveryRefresh.defer();
+ if(listingControl){if(!listingControl.signal.aborted&&drivesInUse())listingControl.abort();}
+ else if(!drivesInUse())recoveryRefresh.resume();
+}
+async function listOrganizations(signal:AbortSignal){
  const destinations=state.preferences.destinations;
  const locations=[...organizationLocations];
  const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
@@ -239,12 +259,13 @@ async function listOrganizations(){
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
  const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
- const listed=new Set<string>();state.organizationRecoveryLoading=true;emit();
+ const listed=new Set<string>();state.organizationRecoveryLoading=true;state.organizationRecoveryPaused=false;emit();
  // Small folders first, so they show at once; a folder holding a large journal from an earlier version
  // (one file per event, slow to read on a USB drive) comes last.
  // Only folders on a connected, unchanged destination are weighed, one at a time.
  const weights=new Map<string,number>();
  for(const location of locations){
+  signal.throwIfAborted();
   const status=location.folder?undefined:destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
   weights.set(location.root,status?.available&&status.volumeId===location.volumeId?await journalWeight(location.root):0);
  }
@@ -252,18 +273,24 @@ async function listOrganizations(){
  let looked=0;
  try{
   for(let position=0;position<locations.length;position++){
-   const location=locations[position]!;
+   signal.throwIfAborted();const location=locations[position]!;
    // A folder organized in place is listed while its own drive is present and unchanged.
    const status=location.folder?await volumeInfo(location.destination):destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
-    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,onProgress:update=>{state.organizationRecoveryProgress={phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share:Math.min(.99,(position+update.share)/locations.length),speed:0,file:update.file||path.basename(location.root)};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
+    const found=await getOrganizationRecovery(location.root,{verifyContents:false,includeEnded:true,signal,onProgress:update=>{
+     const share=Math.min(.99,(position+update.share)/locations.length),file=update.file||path.basename(location.root);
+     // What the listing is doing now: converting a finished journal, reading a journal's events, or checking its entries.
+     state.organizationRecoveryProgress=update.later?{phase:'planning',step:'later',completed:update.later.done,total:update.later.total,bytes:0,totalBytes:0,share,speed:0,file}
+      :update.convert?{phase:'planning',step:update.convert.step,completed:update.convert.done,total:update.convert.total,bytes:0,totalBytes:0,share,speed:0,file}
+      :update.read!==undefined?{phase:'planning',step:'records',completed:update.read,total:update.total??0,bytes:0,totalBytes:0,share,speed:0,file}
+      :{phase:'planning',step:'scanning',completed:looked+update.looked,total:0,bytes:0,totalBytes:0,share,speed:0,file};progressEmit();}});byRoot.set(location.root,found);looked+=found.reduce((sum,job)=>sum+job.files,0);
     // A folder holding journals can be resumed, rechecked or undone from the list: remember it.
     if(found.length&&!organizationLocations.some(item=>item.root===location.root&&item.volumeId===location.volumeId)){organizationLocations.push({root:location.root,destination:location.destination,volumeId:location.volumeId,...(location.folder?{folder:true}:{})});await save();}
     // The sibling backup folders those journals list are read too, on the same drive.
     for(const library of found.flatMap(job=>job.libraries??[]))if(!location.folder)add(library,location.destination,location.volumeId);
-   }catch(error){state.error=toMessage(error);}
+   }catch(error){if(isAbort(error))throw error;state.error=toMessage(error);}
    publish();
   }
   // Folders not listed this time (drive away, or no longer configured) leave the list.
@@ -297,17 +324,31 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  if(kind!=='delete')etaTracker.plan(job.id,{kind:kind==='finalize'?'finalize':kind==='undo'?'undo':'organization',destinations:[etaDrive(await mountedVolumes(),root,'storage')]});
  void settle((async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
-  const stepProgress=(progress:OrganizationProgress)=>{job.phase=progress.step==='checking'?'verifying':'copying';job.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
+  const stepProgress=(progress:OrganizationProgress)=>{const verifying=progress.step==='checking'||recordSteps.includes(progress.step);job.phase=verifying?'verifying':'copying';job.progress={phase:verifying?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=recordsDetail(progress)??message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
   const duplicates=state.organizationRecovery?.find(item=>item.root===root&&item.id===id)?.kind==='duplicates';
   if(kind==='finalize'){const released=await finalizeOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesReleased',{count:released.removed,size:gigabytes(released.bytes)}):joined(message('job.released',{count:released.removed,size:gigabytes(released.bytes)}),released.handedOff>0&&message('job.handedOff',{count:released.handedOff}));addHistory(message(duplicates?'history.duplicatesReleased':'history.organization'),job.detail);}
   else if(kind==='undo'){const undone=await undoOrganization(root,id,control.signal,stepProgress);job.phase='complete';job.detail=duplicates?message('job.duplicatesUndone',{restored:undone.restored}):joined(message('job.undone',{restored:undone.restored,removed:undone.removed}),undone.handedOff>0&&message('job.handedOff',{count:undone.handedOff}));addHistory(message(duplicates?'history.duplicatesUndone':'history.organizationUndone'),job.detail);}
   else if(kind==='delete'){const deleted=await deleteOrganizationRecovery(root,id,control.signal,stepProgress);job.phase='complete';job.detail=message('job.recoveryDeleted',{count:deleted.files,size:gigabytes(deleted.bytes)});addHistory(message('history.recoveryDeleted'),job.detail);}
-  else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=progress.step==='history'?'verifying':'copying';job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
+  else{const result=await resumeOrganization(root,id,control.signal,progress=>{job.progress=progress;job.phase=recordSteps.includes(progress.step??'')?'verifying':'copying';job.detail=recordsDetail(progress)??message('job.resuming');progressEmit();},{full});job.errors=result.errors.map(text);job.phase=result.errors.length?'error':'complete';job.detail=joined(...organizedText(result.moved,result.retained,result.retainedBytes,result.errors.length));addHistory(message('history.organizationRecovery'),job.detail);}
  }catch(error){if(control.signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message('job.organizationPaused');}else{job.phase=control.signal.aborted?'stopped':'error';job.detail=toMessage(error);if(!control.signal.aborted)job.errors.push(job.detail);}}finally{if(kind!=='finalize'&&kind!=='delete')void duplicatesStale([root]);delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);await refreshOrganizations();emit();pump();
   // Undo puts files back where they were, so the backup folder check runs again.
   if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();}})()).finally(()=>{resumingOrganizations.delete(operation);void releaseIfIdle();});
  }catch(error){resumingOrganizations.delete(operation);throw error;}
 }
+/** The job line for the steps that read or convert organization records; undefined for any other step. */
+function recordsDetail(progress:{step?:string;completed:number;total:number}):Message|undefined{
+ const counts={count:progress.completed,total:progress.total};
+ switch(progress.step){
+  case 'history':return message('job.readingHistory',counts);
+  case 'later':return message('job.readingLater',counts);
+  case 'earlier':return message('job.readingEarlier',counts);
+  case 'converting':return message('job.converting',counts);
+  case 'cleaning':return message('job.cleaning',counts);
+  case 'measuring':return message('job.measuring',counts);
+ }
+}
+/** Steps that read or check records before anything changes: the job is verifying while they run. */
+const recordSteps=['history','later','earlier','converting','cleaning','measuring'];
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */
 function planningProgress(count:number,file:string,detail?:Parameters<PlanProgress>[2]):Progress{return {phase:'planning',step:detail?.step??'checking',completed:count,total:detail?.total??0,bytes:detail?.bytes??0,totalBytes:detail?.totalBytes??0,...(detail?.share!==undefined?{share:detail.share}:{}),speed:0,file};}
 /** Files staged from a USB camera so far (the camera reports counts, not bytes or names). */
@@ -580,7 +621,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const {copied,skipped,moved,retained,retainedBytes,released,releasedBytes,removed,errors,warnings=[],notes,appleDouble}=await executeDestinations(plans,{
    signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,strategy:'rename',verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onVerified:(file,sha256,identity)=>{verified[file]={sha256,identity};},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
-   progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined);progressEmit();},
+   progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    settled:index=>{reserved[index].bytes=0;}
   });job.errors.push(...errors.map(text));recordIssues(job,warnings);
   // "._" files kept or not checked are warnings too; recorded here so both reports below carry them.
@@ -686,7 +727,7 @@ async function scanDuplicatesAction(){
   const real=await fs.realpath(root).catch(()=>{throw new MessageError('error.duplicatesUnavailable');});
   const result=await scanDuplicates(real,{metadata:file=>metadata(file,{preview:false,details:false}),index:await destinationIndex(real,await identity(real))},{editedFolder:state.preferences.editedFolder,signal:control.signal,onProgress:progress=>{dup.progress=progress;progressEmit();}});
   duplicateGroups=result.groups;duplicateCompanions=result.companions;
-  dup.earlier=[...await placedByEarlierJournals(real,control.signal).catch(()=>new Set<string>())];
+  dup.earlier=[...await placedByEarlierJournals(real,control.signal,update=>{dup.progress={phase:'planning',step:'journals',completed:update.read,total:update.total,bytes:0,totalBytes:0,speed:0,file:update.file,journal:{index:update.journal,count:update.journals}};progressEmit();}).catch(()=>new Set<string>())];
   Object.assign(dup,{files:result.files,groups:result.groups.length,scannedAt:new Date().toISOString(),revision:dup.revision+1,status:'ready' as const});
  }catch(error){
   duplicateGroups=[];Object.assign(dup,{groups:0,files:0,revision:dup.revision+1,status:'idle' as const});
@@ -727,7 +768,7 @@ async function removeDuplicatesAction(level:1|2|3,decisions:Record<string,string
   let removal:RemovalResult|undefined;
   try{
    await stopResidueCheck();
-   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=progress.step==='history'?message('job.readingHistory',{count:progress.completed,total:progress.total}):message('job.removingDuplicates');progressEmit();}});
+   const result=removal=await removeDuplicates(real,resolved,duplicateCompanions,{signal:control.signal,onProgress:progress=>{job.phase=progress.phase==='verifying'?'verifying':'copying';job.progress=progress;job.detail=recordsDetail(progress)??message('job.removingDuplicates');progressEmit();}});
    job.errors.push(...(result.result?.errors??[]).map(text));
    await fs.mkdir(reports,{recursive:true});
    for(const [name,value] of [['duplicates.json',{producer:'desktop-app',jobId:job.id,root:real,journal:result.id,groups:result.groups,removed:result.removed,carried:result.carried,left:result.left,bytes:result.bytes,errors:result.result?.errors??[],files:result.report}],['summary.json',{producer:'desktop-app',passed:!job.errors.length,jobId:job.id,kind:'duplicates',retainedOriginals:true,finished:new Date().toISOString()}]] as const){const file=await fs.open(path.join(reports,name),'wx',0o600);try{await file.writeFile(JSON.stringify(value,null,2));await file.sync();}finally{await file.close();}}
@@ -794,7 +835,7 @@ async function action(input:Action):Promise<void>{
    // Read-only: what Delete recovery files would remove, shown in its confirmations.
    const {root,id}=input;if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
    state.recoverySize={root,id};emit();
-   try{const size=await measureOrganizationRecovery(root,id);if(state.recoverySize?.root===root&&state.recoverySize.id===id)state.recoverySize={root,id,...size};}
+   try{const size=await measureOrganizationRecovery(root,id,undefined,(files,estimate)=>{if(state.recoverySize?.root===root&&state.recoverySize.id===id){state.recoverySize={root,id,progress:{phase:'planning',step:'measuring',completed:files,total:estimate,share:Math.min(.99,files/Math.max(1,estimate)),bytes:0,totalBytes:0,speed:0,file:''}};progressEmit();}});if(state.recoverySize?.root===root&&state.recoverySize.id===id)state.recoverySize={root,id,...size};}
    catch(error){if(state.recoverySize?.root===root&&state.recoverySize.id===id)state.recoverySize={root,id,error:toMessage(error)};}
    break;
   }

@@ -89,10 +89,10 @@ export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>
   if (!progress) return undefined;
   switch (progress.step) {
     case 'listing': case 'scanning': return 'scan';
-    case 'checking': case 'reading': case 'history': case 'earlier': return 'read';
-    case 'comparing': case 'existing': case 'confirming': return 'compare';
+    case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'converting': case 'preparing': case 'index': return 'read';
+    case 'comparing': case 'existing': case 'confirming': case 'mirroring': return 'compare';
     case 'moving': return 'move';
-    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': return 'tidy';
+    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': case 'cleaning': case 'measuring': return 'tidy';
     case 'deleting': return 'delete';
     case 'downloading': return 'copy';
   }
@@ -1010,7 +1010,7 @@ export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }:
   useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
   const measured = size?.files !== undefined && size.bytes !== undefined;
   const amount = measured ? { count: formatNumber(size.files!), size: bytes(size.bytes!) } : undefined;
-  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{t("Measuring recovery files…")}</p>;
+  const detail = size?.error ? <p className="field-error">{t(size.error)}</p> : amount ? undefined : <p className="muted">{size?.progress ? t("Measuring: {completed} files", { completed: formatNumber(size.progress.completed) }) : t("Measuring recovery files…")}</p>;
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby="delete-recovery-heading" data-testid={`delete-recovery-${step}`} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id="delete-recovery-heading">{step === 'first' ? t("Delete recovery files for this organization?") : t("Delete recovery files permanently?")}</h2></div>
     <div className="activity-content">
@@ -1248,14 +1248,14 @@ export function shownPercent(fraction: number, finished: boolean): number {
   return finished ? 100 : Math.min(99, Math.floor(Math.max(0, fraction) * 100));
 }
 /** Steps that count files, not bytes: a rename moves no data, and checks, deletes and downloads read none. */
-const fileSteps = ['history', 'earlier', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
+const fileSteps = ['history', 'earlier', 'later', 'records', 'journals', 'converting', 'cleaning', 'measuring', 'preparing', 'mirroring', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
 /** How far a step is, the same number the count and the percent show. Undefined only while nothing can be estimated. */
 export function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
   const basis = copyBasis(progress);
   // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
   const files = basis.total ? basis.completed / basis.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
   // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
-  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
+  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning' || progress.step === 'measuring')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
   return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
 }
@@ -1287,6 +1287,15 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.step === 'deleting') return t("{completed} of {total} files deleted", counts);
   if (progress.step === 'history') return t("Reading organization history: {completed} of {total} files", counts);
   if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
+  if (progress.step === 'later') return t("Reading later organizations: {completed} of {total}", counts);
+  if (progress.step === 'records') return t("Reading earlier organization records: {completed} of {total}", counts);
+  if (progress.step === 'journals') return t("Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}", { ...counts, journal: formatNumber(progress.journal?.index ?? 1), journals: formatNumber(progress.journal?.count ?? 1) });
+  if (progress.step === 'converting') return t("Converting the organization record: {completed} of {total}", counts);
+  if (progress.step === 'cleaning') return t("Removing old record files: {completed} of {total}", counts);
+  if (progress.step === 'measuring') return t("Measuring: {completed} files", counts);
+  if (progress.step === 'preparing') return t("Preparing destinations: {completed} of {total}", counts);
+  if (progress.step === 'mirroring') return t("Comparing the backup with the drive: {completed} of {total}", counts);
+  if (progress.step === 'index') return t("Loading the destination index: {size} of {totalSize}", { size: formatBytes ? formatBytes(progress.bytes) : counts.completed, totalSize: formatBytes ? formatBytes(progress.totalBytes) : counts.total });
   if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
   if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
   if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
@@ -1795,7 +1804,7 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
     </div>
     <div className="organization-column">
     {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
-    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
+    <section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'resumeOrganization', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>
     </div>
 
   </div>;

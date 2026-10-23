@@ -27,7 +27,8 @@ test('after the metadata check, planning reports the destination comparison up t
  const onProgress:PlanProgress=(count,_file,detail)=>{if(detail)events.push({step:detail.step,count,total:detail.total});};
  const {plans}=await plan(source,roots,options,metadata,undefined,onProgress);
  const lastChecking=events.map(event=>event.step).lastIndexOf('checking');
- const comparing=events.slice(lastChecking+1);
+ // Preparing the destinations (and loading an index, comparing with a drive folder) report in between; this is about the comparison.
+ const comparing=events.slice(lastChecking+1).filter(event=>event.step==='comparing');
  // Before the fix nothing followed the last metadata check, so the card stayed at 100%.
  assert.ok(comparing.length>0,'the destination comparison reports progress');
  assert.ok(comparing.every(event=>event.step==='comparing'));

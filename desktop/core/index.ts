@@ -24,7 +24,7 @@ export type { AppleDoubleReport } from './appledouble';
 import {recordPartial,recordCreation,releaseCreations,findPartial,openPartial,clearPartialRecord,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {MessageError,toMessage} from '../messages';
 import type {PlacedFile} from '../platform/placement-memory';
-export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
+export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, setConversionGate, stopConversions, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationStrategy, OrganizationUndo } from './recovery';
 
 /** Files examined at once while planning; ExifTool itself caps its processes. */
@@ -187,7 +187,7 @@ export async function findMisplaced(source:string,root:string,options:Omit<Optio
  * that will move to checksum them. */
 /** step 'listing': files found so far (total and share are estimates, see listing-estimate.ts); 'checking': metadata of every file; 'reading': files organization moves;
  * 'comparing': planned files compared with what each destination already holds (bytes: source data read to compare, totalBytes 0). */
-export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates';total:number;bytes:number;totalBytes:number;share?:number})=>void;
+export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index';total:number;bytes:number;totalBytes:number;share?:number})=>void;
 async function planOnce(source:string,roots:string[],options:Options,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[]}> {
   checkAbort(signal);
   if(!roots.length)throw new Error('Choose at least one destination.');
@@ -492,7 +492,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   let lastCompared=files.at(-1)?.relative??'';
   const comparing=(file:string)=>{if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:readToCompare,totalBytes:0});}
   async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
-    const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity);
+    const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity,(read,total)=>onProgress?.(read,path.basename(destinationRoot),{step:'index',total,bytes:read,totalBytes:total}));
+    const mine=prepared.reduce((count,item)=>count+(item.root===kind?1:0),0);let made=0;
+    onProgress?.(0,path.basename(destinationRoot),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     // Drive backups land in the folder this drive owns on each destination.
     const drive=options.drive?{folder:await driveFolder(destinationRoot,options.drive),identity:options.drive.identity,name:options.drive.name}:undefined;
     for(const {entry,relative,root,camera} of prepared){
@@ -501,8 +503,9 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
       const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
       pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera)}});
+      onProgress?.(++made,path.relative(sourceRoot,entry.source),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     }
-    const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal):undefined;
+    const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0})):undefined;
     // A same-size file at a destination is compared by content. Both sides are hashed here, several
     // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
     // allocation below then reuses those digests unless a file changed in between.
