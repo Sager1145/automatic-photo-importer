@@ -5,6 +5,7 @@ import { INDEX_PREFIX } from './destination-index';
 import { leftoverReceipt } from './import-recovery';
 import { deletingPattern, isRecoveryName, journalTerminal, pointerLeftover } from './recovery';
 import { checkAbort, code, contained, sameStat } from './paths';
+import { log, logDeletion } from '../logger';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
@@ -171,6 +172,7 @@ function summary(items:ResidueItem[]):Residue {
   return {items,files:items.length,bytes:sum(items),resumable:{files:resumable.length,bytes:sum(resumable)}};
 }
 
+const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':'leftover of an interrupted run (staging file, receipt or scratch file)';
 /** Remove what findResidue listed, each only while it is still the very file or folder found.
  * Folders go only when empty. keepResumable leaves copies a re-import could continue and those not
  * proven dead. */
@@ -192,12 +194,14 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
         if(!now.isDirectory()||now.dev!==item.stat.dev||now.ino!==item.stat.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
         // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
         if(item.kind==='folder') await fs.rmdir(item.path); else await fs.rm(item.path,{recursive:true});
+        logDeletion('residue',item.path,residueReason(item.kind),item.kind==='folder'?'directory is still the one found by the scan (same device and inode) and rmdir only removes empty folders':`directory is still the one found by the scan (same device and inode) and is this app's own ${item.kind==='temporary'?'temporary':'set-aside'} folder, not in use`,{kind:item.kind,bytes:item.bytes,folder:true});
       } else {
         if(!now.isFile()||!sameStat(now,item.stat)) continue;
         await fs.unlink(item.path);
+        logDeletion('residue',item.path,residueReason(item.kind),'file is still the one found by the scan: same device, inode, size and modification time',{kind:item.kind,bytes:item.bytes});
       }
       left.pop();removed.files++;removed.bytes+=item.bytes;
-    } catch { /* Gone, changed, in use or unavailable: left for a later check. */ }
+    } catch(error) { log('detailed','residue','left',{path:item.path,kind:item.kind,error}); /* Gone, changed, in use or unavailable: left for a later check. */ }
     options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path));
   }
   return {removed,left:summary(left)};

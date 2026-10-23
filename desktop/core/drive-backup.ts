@@ -5,6 +5,7 @@ import type { MirrorRemoval, PlanEntry, TransferPlan } from '../shared';
 import { ignoredName } from './inventory';
 import type { DestinationIndex } from './destination-index';
 import { beneath, checkAbort, code, contained, makeParent, pathKey, safeComponent, statKey, syncDirectory, syncParents } from './paths';
+import { log, logDeletion } from '../logger';
 
 export const DRIVE_BACKUPS='Drive backups';
 const marker='photo-importer-drive.json', legacyMarker=`.${marker}`, holding='Removed by mirror';
@@ -104,6 +105,7 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
     const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root,rootIdentity);
     if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) throw new Error(`Mirror holding path already exists: ${target}`);
     await fs.rename(removal.path,target);
+    log('normal','mirror','moved-aside',{from:removal.path,to:target,bytes:removal.size,reason:'file no longer on the mirrored drive',proof:'reviewed removal whose stat was unchanged since review'});
     await syncDirectory(path.dirname(removal.path));await syncParents(target,root);
     parents.add(path.dirname(removal.path));
     movedBytes+=removal.size;onProgress?.(position+1,movedBytes,path.basename(removal.path));
@@ -111,7 +113,7 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
   // Mirror the source's folder layout: drop folders the moves left empty.
   for(const folder of [...parents].sort((a,b)=>b.length-a.length))
     for(let current=folder;beneath(current,base);current=path.dirname(current)) {
-      try { await fs.rmdir(current); } catch { break; }
+      try { await fs.rmdir(current); logDeletion('mirror',current,'folder left empty after mirror removals moved its files aside','rmdir succeeded, which only removes empty folders'); } catch { break; }
     }
   return removals.length;
 }

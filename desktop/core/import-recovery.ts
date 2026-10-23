@@ -6,6 +6,7 @@ import type {PlanEntry,TransferPlan} from '../shared';
 import {authenticateImportRecord,sealImportRecord} from './recovery';
 import {MessageError} from '../messages';
 import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat,syncDirectory,syncParents} from './paths';
+import {log,logDeletion} from '../logger';
 
 type Kind='stage'|'publication';
 interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
@@ -100,7 +101,7 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
  const journal=path.join(path.dirname(file),`photo-importer-${kind==='stage'?'stage':'intent'}-${randomUUID()}.json`),handle=await fs.open(journal,'wx',0o600);
  let journalStat:BigIntStats;
  try {await handle.writeFile(JSON.stringify(sealImportRecord({...record})));await handle.sync();journalStat=await handle.stat({bigint:true});}finally{await handle.close();}
- await syncParents(journal,transfer.root);
+ log('detailed','exec','receipt-written',{kind,file,journal,source:entry.source});await syncParents(journal,transfer.root);
  remember(await receiptNames(path.dirname(journal),transfer.root,index),path.basename(journal),record);
  return {journal,journalStat,record};
 }
@@ -173,5 +174,5 @@ export async function releaseCreations(entry:PlanEntry,root:string,index:Recover
 export async function clearPartialRecord(partial:Receipt,root:string,index:RecoveryIndex,sync=true):Promise<void>{
  await contained(partial.journal,root);
  if(!sameStat(partial.journalStat,await fs.lstat(partial.journal,{bigint:true})))throw new Error('Incomplete copy journal changed');
- await fs.unlink(partial.journal);(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
+ await fs.unlink(partial.journal);logDeletion('receipt',partial.journal,'copy receipt of a staged or published file that is finished or abandoned','the receipt is this app\'s sealed record and was unchanged since it was read (same device, inode, size and times)',{recordKind:partial.record.kind,file:partial.record.file});(await receiptNames(path.dirname(partial.journal),root,index)).get(recordKey(partial.record))?.delete(path.basename(partial.journal));if(sync)await syncDirectory(path.dirname(partial.journal));
 }

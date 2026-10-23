@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import type {FileHandle} from 'node:fs/promises';
 import type {BigIntStats} from 'node:fs';
 import {nativeCameraHelperPath} from './camera-bridge';
+import {log} from '../logger';
 
 /** Parse an actual capture clock; date-only/inferred folder dates are not capture instants.
  * A missing offset describes the user's local camera wall clock. Resolve it at
@@ -42,11 +43,13 @@ async function setDates(output:FileHandle,source:BigIntStats,created:number,modi
  const applied=await output.stat();
  if(Math.abs(applied.birthtimeMs-created*1000)<1&&Math.abs(applied.mtimeMs-modified*1000)<1)return;
  const executable=await nativeCameraHelperPath();if(!executable)throw new Error('The native helper is required to preserve macOS Created dates. Run npm run native:mac.');
+ const helperStart=performance.now();
  await new Promise<void>((resolve,reject)=>{
   const child=spawn(executable,['--set-file-times',String(created),String(modified)],{stdio:['ignore','ignore','pipe',output.fd],windowsHide:true,timeout:10000});let stderr='';
   child.stderr!.on('data',data=>{stderr=(stderr+data.toString()).slice(-4096);});
   child.on('error',reject);child.on('exit',status=>status===0?resolve():reject(new Error(stderr.trim()||'Unable to set filesystem Created date')));
  });
+ log('detailed','exec','timestamps-helper',{ms:Math.round(performance.now()-helperStart),created:Math.round(created),modified:Math.round(modified)});
  const result=await output.stat();
  // Filesystems can round timestamp precision, but silently ignoring creation
  // dates must never produce a successful import with copy-time Created dates.
