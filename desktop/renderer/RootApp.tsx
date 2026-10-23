@@ -1685,13 +1685,14 @@ export function DiagnosticsSettings({ state, act }: { state: AppState; act: Disp
   const labels: Record<LogLevel, string> = { off: t("Off"), normal: t("Normal"), detailed: t("Detailed"), trace: t("Trace") };
   const explanations: Record<LogLevel, string> = { off: t("Nothing is recorded."), normal: t("Records settings changes, job phases, every file the app deletes, and errors."), detailed: t("Also records each file's steps and decisions, drives, memory and timing."), trace: t("Also records every routing decision and journal entry. Large; for troubleshooting.") };
   return <>
-    <div className="settings-row"><label htmlFor="settings-log-level">{t("Log detail")}</label><div className="select-wrap"><select id="settings-log-level" data-testid="settings-log-level" value={level} onChange={event => act({ type: 'preferences', patch: { logLevel: event.target.value as LogLevel } })}>{(Object.keys(labels) as LogLevel[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}</select><Icon icon={ChevronDown} size={15} /></div><p className="settings-row-note" data-testid="log-level-explanation">{explanations[level]}</p></div>
-    <div className="settings-row"><span data-testid="log-size" role="status">{t("Log size: {size}", { size: formatBytes(info?.bytes ?? 0) })}</span><div className="text-size-control">
+    <div className="settings-row"><label htmlFor="settings-log-level">{t("Log detail")}</label><div className="select-wrap"><select id="settings-log-level" data-testid="settings-log-level" value={level} onChange={event => act({ type: 'preferences', patch: { logLevel: event.target.value as LogLevel } })}>{(Object.keys(labels) as LogLevel[]).map(value => <option key={value} value={value}>{labels[value]}</option>)}</select><Icon icon={ChevronDown} size={15} /></div></div>
+    <p className="diagnostics-note" data-testid="log-level-explanation">{explanations[level]}</p>
+    <div className="diagnostics-actions"><span className="diagnostics-size" data-testid="log-size" role="status">{t("Log size: {size}", { size: formatBytes(info?.bytes ?? 0) })}</span>
       <Button icon={FolderOpen} data-testid="log-open-folder" onClick={() => act({ type: 'logOpenFolder' })}>{t("Open log folder")}</Button>
       <Button icon={Copy} data-testid="log-copy-path" onClick={() => act({ type: 'logCopyPath' })}>{t("Copy latest log path")}</Button>
       <Button icon={ArrowUpRight} data-testid="log-export" onClick={() => act({ type: 'logExport' })}>{t("Export logs…")}</Button>
-    </div></div>
-    <p className="settings-row-note diagnostics-note">{t("Logs stay on this Mac. They never include file contents or recovery keys.")}</p>
+    </div>
+    <p className="diagnostics-note">{t("Logs stay on this Mac. They never include file contents or recovery keys.")}</p>
   </>;
 }
 function SettingsSection({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
