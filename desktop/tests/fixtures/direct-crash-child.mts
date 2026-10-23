@@ -11,14 +11,14 @@ import {plan,execute,configureOrganizationRecovery} from '../../core/index';
 //   after-r1     R1 durable, the name not created              after-open  the empty name exists, no R2
 //   after-r2     R2 durable, no data                           mid-stream  part of the data written
 //   full-unverified  every byte written, nothing checked       after-times dates applied, not flushed
-//   after-m      dates and data flushed, folder not            after-p     folder flushed, receipts remain
-//   after-unlink the first receipt removed
+//   after-m      dates and data flushed, folder not            after-p     folder flushed, the finished file's receipts remain
+//   after-unlink the first receipt of a finished file removed
 const [source,root,mode]=process.argv.slice(2) as [string,string,string];
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const die=():Promise<never>=>{process.kill(process.pid,'SIGKILL');return new Promise<never>(()=>{});};
 const media=(file:string)=>/^DSC_/.test(path.basename(file))&&file.startsWith(root+path.sep);
 const receipt=(file:string)=>path.basename(file).startsWith('photo-importer-intent-');
-const names=new WeakMap<object,string>(),timed=new WeakSet<object>(),writes=new Map<string,number>();
+const names=new WeakMap<object,string>(),timed=new WeakSet<object>(),writes=new Map<string,number>(),flushed=new Set<string>();
 let patched=false;
 const patchHandle=(handle:Awaited<ReturnType<typeof fs.open>>)=>{
   if(patched)return;patched=true;
@@ -37,7 +37,7 @@ const patchHandle=(handle:Awaited<ReturnType<typeof fs.open>>)=>{
   proto.sync=async function(this:object,...args){
     if(timed.has(this)&&mode==='after-times')await die();
     const result=await sync.apply(this,args);
-    if(timed.has(this)&&mode==='after-m')await die();
+    if(timed.has(this)){flushed.add(names.get(this)!);if(mode==='after-m')await die();}
     return result;
   };
   proto.writeFile=async function(this:object,...args){
@@ -60,9 +60,11 @@ fsPatchable.open=async(...args:Parameters<typeof fs.open>)=>{
 };
 fsPatchable.unlink=async(...args:Parameters<typeof fs.unlink>)=>{
   const file=String(args[0]);
-  if(mode==='after-p'&&receipt(file))await die();
+  // Only the removal of a receipt of a file whose data and dates are already flushed (its folder entry is flushed right after that) counts.
+  const settled=receipt(file)&&await fsPatchable.readFile(file,'utf8').then(text=>flushed.has(JSON.parse(text).file as string),()=>false);
+  if(mode==='after-p'&&settled)await die();
   await unlink(...args);
-  if(mode==='after-unlink'&&receipt(file))await die();
+  if(mode==='after-unlink'&&settled)await die();
 };
 syncBuiltinESMExports();
 const options={backup:false,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};

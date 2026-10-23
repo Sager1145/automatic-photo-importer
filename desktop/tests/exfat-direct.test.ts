@@ -103,6 +103,14 @@ for(const point of POINTS) {
   test(`a crash at ${point} of a direct copy is finished by the next import without conflicts`,async t=>{
     const env=await ready(t);if(!env) return;
     await crash(env.card,env.root,point);
+    if(point==='after-p'||point==='after-unlink') {
+      // The kill came after a file was flushed: a whole, dated file is at its name (and, after-p, its receipt is still beside it).
+      let whole=0,receipts=0;
+      for(const file of await media(env.root)) if((await fs.stat(file)).size===(await fs.stat(path.join(env.card,path.basename(file)))).size&&Math.abs((await fs.stat(file)).birthtimeMs-CAPTURE)<2000) whole++;
+      for(const file of await leftovers(env.root)) if(file.endsWith('.json')) receipts++;
+      assert.ok(whole>=1,'a finished file was left');
+      if(point==='after-p') assert.ok(receipts>=1,'its receipt was still there');
+    }
     await reimport(env.card,env.root);
   });
 }
