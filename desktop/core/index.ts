@@ -11,11 +11,11 @@ import { destinationIndex, flushIndex, type DestinationIndex, type Digests } fro
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps,captureTimestamp} from '../platform/file-timestamps';
 import { formatFolder, layoutFolders } from '../media-formats';
+import { destinationParts, fillFirst } from './allocation';
 import { editedTemplate, expandTemplate, templateValues } from '../folder-template';
 import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, safeComponent, sameBirth, sameStat, statKey, unreliableIno, validateRelative, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 export { removeRedundantFolders, removeOrganizedFolders } from './redundant-folders';
-export { allocateDestinations } from './allocation';
 import { streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
 import { APP_FOLDERS, confirmCandidates, type PlanDuplicates } from './duplicates';
@@ -48,7 +48,7 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
   }));
   if(failure!==undefined) throw failure;
 }
-interface Options {backup:boolean;/** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;/** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};}
+interface Options {backup:boolean;/** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;/** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;/** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];unknownRules:Record<string,UnknownFileRule>;reorganize?:boolean;/** Organization: move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;editedFolder?:string;sourceFolders?:string[];/** What an earlier listing of this scope found, to estimate how far a listing is. */listingHint?:ListingHint;/** Called when the listing ends with the files and bytes it found. */onListed?:(files:number,bytes:number)=>void;drive?:Drive;unknownDefault?:UnknownDefault;/** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;/** A finished scan of this source, reused while its folders are unchanged. */reuse?:Inventory;/** Library organization: stop after routing and list the files that would move. */misplacedOnly?:boolean;/** misplacedOnly: true for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */inPlace?:(relative:string,size:number,mtimeNs:bigint,ino:bigint)=>boolean;/** A file that cannot be checked, read or allocated is left out of the plan and listed in `failures` instead of failing the whole plan. */skipErrors?:boolean;/** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];/** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;/** Imports: whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(rootIdentities:string[])=>boolean|Promise<boolean>;/** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};/** Fill-first copy mode across two destinations: the first one's free space after other jobs' reservations, read once it is planned. The second is planned only for the families the first cannot take (`fillFirst` in allocation.ts). */fillFirst?:()=>number;}
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
@@ -540,20 +540,22 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // One plan per backup folder: the files routed to it, checked against what it already holds.
   // Each file is compared once per destination; the count runs across all of them.
   // bytes: source data read to compare with same-size files already there (how much is not known ahead).
-  const comparingTotal=prepared.length*destinations.length;
+  let comparingTotal=prepared.length*destinations.length;
   let compared=0,compareBytes=0,matched=0,matchedBytes=0;
   let lastCompared=files.at(-1)?.relative??'';
   // While files are looked for elsewhere, the reads that settle them count under that step instead.
   let lookingUp=false;
   const comparing=(file:string)=>{if(lookingUp)return;if(file)lastCompared=file;onProgress?.(compared,file||lastCompared,{step:'comparing',total:comparingTotal,bytes:Math.min(readToCompare,compareBytes||readToCompare),totalBytes:compareBytes,matched,matchedBytes});}
-  async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos'):Promise<TransferPlan> {
+  /** `elsewhere`: sources another destination took (fill-first), left out of this one's plan and its names. */
+  async function rootPlan({root:destinationRoot,identity:rootIdentity}:Root,kind:'photos'|'videos',elsewhere?:Set<string>):Promise<TransferPlan> {
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity,(read,total)=>onProgress?.(read,path.basename(destinationRoot),{step:'index',total,bytes:read,totalBytes:total}));
-    const mine=prepared.reduce((count,item)=>count+(item.root===kind?1:0),0);let made=0;
+    const mine=prepared.reduce((count,item)=>count+(item.root===kind&&!elsewhere?.has(item.entry.source)?1:0),0);let made=0;
     onProgress?.(0,path.basename(destinationRoot),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     // Drive backups land in the folder this drive owns on each destination.
     const drive=options.drive?{folder:await driveFolder(destinationRoot,options.drive),identity:options.drive.identity,name:options.drive.name}:undefined;
     for(const {entry,relative,root,camera} of prepared){
       if(root!==kind) continue;
+      if(elsewhere?.has(entry.source)) {comparingTotal--;continue;}
       checkAbort(signal);
       const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
@@ -738,10 +740,16 @@ async function planOnce(source:string,roots:string[],options:Options,metadata:(f
   // send another family to a conflict folder; those destinations are planned again without it.
   for(let known=-1;known!==failures.size;) {
     known=failures.size;plans=[];elsewhereFiles=0;partialFamilies=0;elsewhereSkipped=[];
+    // Fill-first: the sources the first destination took.
+    let first:Set<string>|undefined;
     for(const destination of destinations){
-      const transfer=await rootPlan(destination,'photos');
-      if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos');
+      const transfer=await rootPlan(destination,'photos',first);
+      if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos',first);
       if(lookup) partialFamilies+=await findElsewhere(destination,transfer);
+      if(options.fillFirst&&!first&&destinations.length===2) {
+        const kept=fillFirst(transfer,options.fillFirst());first=kept;
+        for(const part of destinationParts(transfer)) part.entries=part.entries.filter(entry=>kept.has(entry.source));
+      }
       plans.push(transfer);
     }
     if(destinations.length<2) break;

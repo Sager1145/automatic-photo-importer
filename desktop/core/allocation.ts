@@ -35,31 +35,32 @@ export function destinationSpace(plan:TransferPlan,free:number,sameDrive=false):
  return {needed:requiredTransferSpace(plan),free,existing,existingFiles,newFiles,...(sameDrive?{sameDrive:true}:{})};
 }
 
-/** Allocate against free space after other jobs' reservations. Sequential mode
- * filters plans only after the entire assignment, including workspace, fits.
- */
+/** Fill-first copy mode: the sources the first disk takes, family by family in plan order, while the
+ * pending bytes plus the largest family still fit `available`; from the first family that does not,
+ * every later family goes to the second disk. Paths on the second disk are planned afterwards, for
+ * those families only, so no name there depends on a file that stayed on the first. */
+export function fillFirst(first:TransferPlan,available:number):Set<string>{
+ const families=new Map<string,PlanEntry[]>();
+ for(const entry of destinationEntries(first)){const family=families.get(entry.family)??[];family.push(entry);families.set(entry.family,family);}
+ const kept=new Set<string>();let assigned=0,largest=0;
+ for(const family of families.values()){
+  const bytes=family.reduce((sum,entry)=>sum+(entry.skip?0:entry.size),0);
+  if(assigned+bytes+Math.max(largest,bytes)>available)break;
+  assigned+=bytes;largest=Math.max(largest,bytes);for(const entry of family)kept.add(entry.source);
+ }
+ return kept;
+}
+
+/** The space each destination's plan needs, checked against its free space after other jobs'
+ * reservations. Fill-first plans arrive already split by `fillFirst`. */
 export function allocateDestinations(plans:TransferPlan[],available:number[],mode:Preferences['copyMode']):number[]{
  if(plans.length!==available.length||plans.length!==(mode==='single'?1:2))throw new MessageError('error.chooseDestinations');
- if(mode==='sequential'){
-  const secondaryBytes=new Map<string,number>();
-  for(const entry of destinationEntries(plans[1])){const source=entry.source;secondaryBytes.set(source,(secondaryBytes.get(source)??0)+(entry.skip?0:entry.size));}
-  const groups=new Map<string,TransferPlan['entries']>();
-  for(const entry of destinationEntries(plans[0])){const group=groups.get(entry.family)??[];group.push(entry);groups.set(entry.family,group);}
-  const assignments=[new Set<string>(),new Set<string>()],assigned=[0,0],largest=[0,0];let destination=0;
-  for(const group of groups.values()){
-   const sources=new Set(group.map(entry=>entry.source));
-   let bytes=group.reduce((sum,entry)=>sum+(entry.skip?0:entry.size),0);
-   if(destination===0&&assigned[0]+bytes+Math.max(largest[0],bytes)>available[0])destination=1;
-   if(destination===1)bytes=[...sources].reduce((sum,source)=>sum+(secondaryBytes.get(source)??0),0);
-   if(assigned[destination]+bytes+Math.max(largest[destination],bytes)>available[destination])throw new MessageError('error.bothNeedSpace');
-   assigned[destination]+=bytes;largest[destination]=Math.max(largest[destination],bytes);for(const source of sources)assignments[destination].add(source);
-  }
-  plans.forEach((plan,index)=>{for(const part of destinationParts(plan))part.entries=part.entries.filter(entry=>assignments[index].has(entry.source));});
- }
  return plans.map((plan,index)=>{
   const space=destinationSpace(plan,available[index]);
-  if(space.needed>space.free)throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:size(space.needed),free:size(space.free),existing:size(space.existing)});
-  return space.needed;
+  if(space.needed<=space.free)return space.needed;
+  // The second disk of fill-first holds what the first could not.
+  if(mode==='sequential'&&index===1)throw new MessageError('error.bothNeedSpace');
+  throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:size(space.needed),free:size(space.free),existing:size(space.existing)});
  });
 }
 
