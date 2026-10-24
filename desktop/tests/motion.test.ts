@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {animateInterfaceChange,interfaceChangeKind} from '../renderer/RootApp';
+import {interfaceChangeKind} from '../renderer/RootApp';
+import {animateInterfaceChange} from '../renderer/ui';
 import type {AppState,Job,Preferences} from '../shared';
 
 // A minimal browser: View Transitions record the kind they ran with; reduced motion is switchable.

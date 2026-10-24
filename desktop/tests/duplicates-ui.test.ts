@@ -6,7 +6,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,translationCatalogs,languages} from '../renderer/i18n';
 import {categories} from '../renderer/exif-categories';
 import {LevelSelector,ScanUnread,GroupView,DuplicatesConfirm,RemovedDuplicates,removalPlan,fileBadges,GROUPS_PER_PAGE,Pagination} from '../renderer/DuplicatesPage';
-import {nextConfirmStep} from '../renderer/RootApp';
+import {nextConfirmStep} from '../renderer/ui';
 import type {FileDetails} from '../renderer/duplicate-details';
 import type {DuplicateFile,DuplicateGroup,Language,Metadata,Thumbnail,OrganizationRecovery} from '../shared';
 
@@ -113,7 +113,7 @@ test('thousands of groups are paged: only one page of groups is ever drawn',()=>
 
 test('every new string, EXIF category, label and value is translated in all languages',()=>{
  const keys=new Set<string>();
- for(const name of ['DuplicatesPage.tsx','RootApp.tsx'])for(const match of readFileSync(new URL(`../renderer/${name}`,import.meta.url),'utf8').matchAll(/\bt\("([^"\n]+)"/g))keys.add(match[1]!);
+ for(const name of ['DuplicatesPage.tsx','RootApp.tsx','ui.tsx','progress.tsx'])for(const match of readFileSync(new URL(`../renderer/${name}`,import.meta.url),'utf8').matchAll(/\bt\("([^"\n]+)"/g))keys.add(match[1]!);
  for(const category of categories){keys.add(category.title);for(const tag of category.tags)keys.add(tag.label);}
  for(const match of readFileSync(new URL('../renderer/exif-categories.ts',import.meta.url),'utf8').matchAll(/\d+: '([^']+)'/g))keys.add(match[1]!);
  for(const language of languages.filter(language=>language!=='en'))for(const key of keys)assert.ok(Object.hasOwn(translationCatalogs[language as Exclude<Language,'en'>],key),`${language}: ${key}`);

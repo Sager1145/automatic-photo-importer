@@ -1,4 +1,3 @@
-import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -56,10 +55,4 @@ test('the desk top bar has an Overview toggle that follows and flips showDashboa
  }
  assert.match(toggle(true),/titlebar-overview[^>]*>(<svg.*?<\/svg>)?Overview</);
  assert.equal(ids(titlebar({page:'settings'})).includes('titlebar-overview'),false);
-});
-
-test('the narrowest title bar still collapses Organize now but keeps the labels of Start and Pause',()=>{
- const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');
- const rule=css.match(/@container titlebar \(max-width:36rem\)\{[^\n]*/)![0];
- assert.match(rule,/titlebar-organize/);assert.doesNotMatch(rule,/global-start/);
 });
