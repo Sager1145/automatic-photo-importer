@@ -98,7 +98,7 @@ test('the stage palette keeps neighbouring stages apart in hue and for color-bli
  const light=css.slice(css.indexOf(':root{'),css.indexOf(':root[data-theme=dark]{')),dark=css.slice(css.indexOf(':root[data-theme=dark]{'));
  // Neighbours in the order a job moves through its steps: an import, its scan sub-steps, an organization, delete originals.
  const neighbours=[['scan','read'],['read','compare'],['scan','copy'],['read','copy'],['compare','copy'],['copy','verify'],['compare','move'],['move','tidy'],['tidy','delete'],['move','verify']];
- const surfaces={light:[light.match(/--window:(#[0-9a-f]{6})/)![1]!,light.match(/--surface:(#[0-9a-f]{6})/)![1]!],dark:[dark.match(/--window:(#[0-9a-f]{6})/)![1]!,dark.match(/--surface:(#[0-9a-f]{6})/)![1]!,dark.match(/--surface-raised:(#[0-9a-f]{6})/)![1]!]};
+ const surfaces={light:[light.match(/--window:(#[0-9a-f]{6})/)![1]!,light.match(/--surface:(#[0-9a-f]{6})/)![1]!],dark:[dark.match(/--window:(#[0-9a-f]{6})/)![1]!,dark.match(/--surface:(#[0-9a-f]{6})/)![1]!,dark.match(/--surface-raised:(#[0-9a-f]{6})/)![1]!,/* filled rows: the translucent fill over --surface, as painted */'#343438']};
  for(const [theme,block] of [['light',light],['dark',dark]] as const){
   const color=Object.fromEntries(kinds.map(kind=>[kind,block.match(new RegExp(`--step-${kind}:(#[0-9a-f]{6})`))?.[1]!]));
   assert.equal(new Set(Object.values(color)).size,kinds.length,`${theme}: distinct`);
