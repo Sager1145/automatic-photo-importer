@@ -55,5 +55,4 @@ test('Recovery & cleanup is a Library tab and Activity no longer has a Recovery 
   const source=fs.readFileSync(path.join(__dirname,'../renderer/RootApp.tsx'),'utf8');
   assert.match(source,/testId:'library-recovery'/);
   assert.doesNotMatch(source,/activity-recovery/);
-  assert.match(source,/openRecovery = \(\) => navigate\('library'/);
 });

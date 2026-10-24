@@ -73,11 +73,22 @@ test('a backup-scope review plans only files under the backup folder, never the 
   const destination=path.dirname(root);
   const stray=await put('wrong place/A.JPG');
   const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
-  // main.ts opens a 'backup' scope review on the destination with sourceFolders = the backup folder(s); the whole-destination review has none.
+  // With a separate video root, main.ts opens a 'backup' review on the destination with sourceFolders = the backup folders; the whole-destination review has none.
   const scoped=(await plan(destination,[root],{...options,reorganize:true,sourceFolders:[path.basename(root)]},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
   assert.deepEqual(scoped,[stray]);
   const whole=(await plan(destination,[destination],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
   assert.ok(whole.includes(outside),'the whole destination would have planned the outside file');
+});
+
+test('with the default layout the backup library is the backup folder itself, so a review plans only files under it',async t=>{
+  const {root,put}=await fixture(t);
+  const destination=path.dirname(root);
+  const stray=await put('wrong place/A.JPG');
+  const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
+  // backupLibrary returns source=<destination>/<basePath> and no sourceFolders for this layout; that source is planned directly.
+  const planned=(await plan(root,[root],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.deepEqual(planned,[stray]);
+  assert.ok(!planned.includes(outside));
 });
 
 test('main.ts wires the backup-scope review: refuses outside folders, uses the backup library folders, keeps the scope for re-plans',async()=>{

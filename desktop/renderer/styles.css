@@ -278,6 +278,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .status-dot{flex:none;width:.6rem;height:.6rem;border-radius:50%}
 .status-dot.is-online{background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 22%,transparent)}
 .status-dot.is-offline{background:var(--danger);box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 22%,transparent)}
+.status-dot.is-checking{background:var(--label-secondary);box-shadow:0 0 0 3px color-mix(in srgb,var(--label-secondary) 22%,transparent)}
 .sidebar-empty{padding:0 .75rem;font-size:var(--text-footnote);color:var(--label-tertiary)}
 .sidebar nav{display:grid;gap:2px}
 .nav-item{position:relative;isolation:isolate;display:flex;align-items:center;gap:.7rem;width:100%;min-height:2.6rem;padding:0 .75rem;border-radius:var(--radius-md);color:var(--label);font-weight:500;text-align:left;transition:background-color var(--quick) var(--ease-out),color var(--quick) var(--ease-out),transform var(--spring-duration) var(--spring)}
