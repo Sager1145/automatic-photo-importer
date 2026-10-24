@@ -44,7 +44,8 @@ test('all new files finish staging before any standalone content validation read
 
 test('source cards distinguish copying from verification in every language',async()=>{
  const {createElement}=await import('react'),{renderToStaticMarkup}=await import('react-dom/server');
- const {ImportDesk,progressFraction}=await import('../renderer/RootApp'),{I18nProvider,languages}=await import('../renderer/i18n');
+ const {ImportDesk}=await import('../renderer/RootApp');
+ const {progressFraction}=await import('../renderer/progress'),{I18nProvider,languages}=await import('../renderer/i18n');
  const labels=[['Copying files','Verifying copied files'],['正在复制文件','正在验证已复制文件'],['正在複製檔案','正在驗證已複製檔案'],['ファイルをコピー中','コピーしたファイルを検証中']];
  for(const [index,language] of languages.entries())for(const phase of ['copying','verifying'] as const){
   const source={id:'card',name:'Card',path:'/fixture/card',transport:'storage' as const};

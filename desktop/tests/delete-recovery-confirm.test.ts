@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,createTranslator,formatBytes} from '../renderer/i18n';
-import {RetainedOriginals,DeleteRecoveryConfirm,nextConfirmStep,recoveryDeletable} from '../renderer/RootApp';
+import {RetainedOriginals,DeleteRecoveryConfirm,recoveryDeletable} from '../renderer/RootApp';
+import {nextConfirmStep} from '../renderer/ui';
 import type {AppState,Language} from '../shared';
 
 type Recovery=NonNullable<AppState['organizationRecovery']>[number];

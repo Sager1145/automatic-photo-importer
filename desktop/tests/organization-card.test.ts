@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {OrganizationCard,organizationPlace,shownPercent} from '../renderer/RootApp';
+import {OrganizationCard,organizationPlace} from '../renderer/RootApp';
+import {shownPercent} from '../renderer/progress';
 import type {Job} from '../shared';
 
 const job=(extra:Partial<Job>):Job=>({id:'o',source:{id:'library:/Volumes/A006',name:'Backup organization',path:'/Volumes/A006',transport:'folder'},organization:true,folders:['photobackup','videobackup'],phase:'verifying',errors:[],backup:false,...extra});

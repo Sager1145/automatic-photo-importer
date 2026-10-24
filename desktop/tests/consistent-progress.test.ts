@@ -11,7 +11,8 @@ import {findResidue,cleanResidue} from '../core/residue';
 import {organizeByCopy} from './fixtures/records';
 import {EtaTracker,stampEstimates} from '../eta';
 import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
-import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,progressCount,progressFraction,ReviewPanel} from '../renderer/RootApp';
+import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,ReviewPanel} from '../renderer/RootApp';
+import {progressCount,progressFraction} from '../renderer/progress';
 import type {AppState,Job,Progress} from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -138,7 +139,7 @@ test('every progress location renders the shared ProgressDisplay',()=>{
  const before=places[1]![1];
  assert.ok(before.includes('progress-discovering')&&before.includes('Starting…'),'indeterminate only before the first event, labelled Starting…');
  // The bar exists once, inside the shared component, so no operation can draw its own.
- const source=readFileSync(new URL('../renderer/RootApp.tsx',import.meta.url),'utf8');
+ const source=['RootApp.tsx','DuplicatesPage.tsx','ui.tsx','progress.tsx'].map(name=>readFileSync(new URL(`../renderer/${name}`,import.meta.url),'utf8')).join('\n');
  assert.equal((source.match(/<ProgressBar /g)??[]).length,1,'only ProgressDisplay draws a bar');
  assert.equal((source.match(/role="progressbar"/g)??[]).length,1);
 });

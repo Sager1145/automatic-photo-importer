@@ -10,7 +10,8 @@ import {listingEstimate} from '../listing-estimate';
 import {loadListingHint,rememberListing} from '../platform/listing-memory';
 import {EtaTracker} from '../eta';
 import {I18nProvider} from '../renderer/i18n';
-import {OrganizationCard,ScanProgress,truncateMiddle} from '../renderer/RootApp';
+import {OrganizationCard,ScanProgress} from '../renderer/RootApp';
+import {truncateMiddle} from '../renderer/progress';
 import type {Job,Metadata} from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');

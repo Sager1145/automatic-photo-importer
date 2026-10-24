@@ -50,7 +50,7 @@ test('copy and discovery labels describe destinations, media types and mounted s
 });
 
 test('every literal UI translation key has translations in all supported languages', () => {
-  const source = readFileSync(new URL('../renderer/RootApp.tsx', import.meta.url), 'utf8');
+  const source = ['RootApp.tsx', 'ui.tsx', 'progress.tsx'].map(name => readFileSync(new URL(`../renderer/${name}`, import.meta.url), 'utf8')).join('\n');
   const keys = [...source.matchAll(/\bt\("([^"\n]+)"/g)].map(match => match[1]);
   for (const key of keys) for (const [language, catalog] of Object.entries(translationCatalogs)) {
     assert.ok(Object.hasOwn(catalog, key), `${language}: ${key}`);
@@ -386,7 +386,8 @@ test('drives pause and continue individually, Start becomes Pause while importin
 });
 
 test('completed organizations explain retained originals and confirm before releasing them', async () => {
-  const { RetainedOriginals, ReleaseConfirm } = await import('../renderer/RootApp');
+  const { RetainedOriginals } = await import('../renderer/RootApp');
+  const { ReleaseConfirm } = await import('../renderer/ui');
   type Recovery = NonNullable<AppState['organizationRecovery']>[number];
   const job: Recovery = { id: 'o1', root: '/backup/photobackup', status: 'complete', files: 2592, completed: 2592, retainedFiles: 2592, retainedBytes: 49_000_000_000, finalizable: true, undoable: true };
   for (const language of languages) {
@@ -554,7 +555,8 @@ test('organizing removes emptied source folders by default, and a run can turn i
 });
 
 test('scans show a percentage of used space, organizations show n of x with %, and unanswered new drives are marked', async () => {
-  const { ScanProgress, OrganizationProgress, ImportDesk } = await import('../renderer/RootApp');
+  const { ScanProgress, ImportDesk } = await import('../renderer/RootApp');
+  const { OrganizationProgress } = await import('../renderer/progress');
   const source = { id: 'stick', name: 'Work stick', path: '/Volumes/WORK', transport: 'storage' as const, selected: false, total: 100e9, free: 60e9 };
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const org = (progress?: Job['progress']): Job => ({ id: 'o', source: { id: 'library:/b', name: 'Library organization', path: '/b', transport: 'folder' }, organization: true, phase: 'copying', errors: [], backup: false, ...(progress ? { progress } : {}) });
@@ -619,7 +621,8 @@ test('the backup folder can be organized by button, shows misplaced files, and t
 });
 
 test('planning shows files checked or read with a percentage, and jobs show elapsed time while running and when finished', async () => {
-  const { ImportDesk, OrganizationProgress, formatDuration } = await import('../renderer/RootApp');
+  const { ImportDesk } = await import('../renderer/RootApp');
+  const { OrganizationProgress, formatDuration } = await import('../renderer/progress');
   const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const start = '2026-10-21T10:00:00.000Z', end = '2026-10-21T11:02:05.000Z';
@@ -814,7 +817,8 @@ test('the parallel drives slider runs from 1 to 10', async () => {
 });
 
 test('a finished organization shows 100%, and one misplaced file is counted in the singular', async () => {
-  const { OrganizationProgress, Organization, ImportDesk } = await import('../renderer/RootApp');
+  const { Organization, ImportDesk } = await import('../renderer/RootApp');
+  const { OrganizationProgress } = await import('../renderer/progress');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 5, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
   const source = { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' as const };
   for (const language of languages) {
@@ -862,7 +866,7 @@ test('locked settings use a hover explanation in every language, never an error'
 });
 
 test('time-left ranges and the verifying byte count read naturally in every language', async () => {
-  const { formatEstimate, progressCount } = await import('../renderer/RootApp');
+  const { formatEstimate, progressCount } = await import('../renderer/progress');
   const expected = { en: ['about 2–4 h', 'about 20–40 min'], 'zh-Hans': ['约 2–4 小时', '约 20–40 分钟'], 'zh-Hant': ['約 2–4 小時', '約 20–40 分鐘'], ja: ['約 2～4 時間', '約 20～40 分'] } as const;
   for (const language of languages) {
     const t = createTranslator(language);
