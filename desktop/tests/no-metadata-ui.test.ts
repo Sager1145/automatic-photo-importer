@@ -57,7 +57,7 @@ test('the Settings control renders its three choices and folder name in every la
   const settings=(language:'en'|'zh-Hans'|'zh-Hant'|'ja',folder?:string)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(NoMetadataSettings,{preferences:{...defaultPreferences,...(folder?{noMetadataFolder:folder}:{})},act:()=>{}})}));
   const html=settings('en');
   for(const label of ['Leave where they are','Move to a folder','Use file date','Unknown files folder name'])assert.match(html,new RegExp(label));
-  assert.match(html,/aria-pressed="true">Leave where they are/);assert.match(html,/value="Unknown files"/);assert.doesNotMatch(html,/no-metadata-folder-error/);
+  assert.match(html,/aria-pressed="true">Move to a folder/);assert.match(html,/value="Unknown files"/);assert.doesNotMatch(html,/no-metadata-folder-error/);
   assert.match(settings('en','2024'),/data-testid="no-metadata-folder-error"/);
   for(const language of languages.filter(item=>item!=='en'))assert.doesNotMatch(settings(language),/Leave where they are|Move to a folder|Unknown files folder name/,language);
 });
@@ -69,12 +69,13 @@ test('the prompt layers below error layers',()=>{
 });
 
 test('the notice offers three choices for this review, marks the active one and dispatches reviewNoMetadata',()=>{
-  const pressed=(html:string)=>[...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*>([^<]*)<\/button>/g)].filter(item=>/Move to|Leave where|Use file date/.test(item[2]!)).map(item=>`${item[1]}:${item[2]}`);
+  const pressed=(html:string)=>[...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*>([^<]*)<\/button>/g)].filter(item=>/Move to|Copy to|Leave where|Use file date/.test(item[2]!)).map(item=>`${item[1]}:${item[2]}`);
   assert.deepEqual(pressed(render(review(summary({handling:'folder',folder:'Not dated'})))),['true:Move to Not dated','false:Leave where they are','false:Use file date']);
   assert.deepEqual(pressed(render(review(summary()))),['false:Move to Unknown files','true:Leave where they are','false:Use file date']);
+  assert.deepEqual(pressed(render(review(summary(),'import'))),['false:Copy to Unknown files','true:Leave where they are','false:Use file date']);
   assert.deepEqual(pressed(render({...review(undefined),fileDated:summary(),noMetadataHandling:'fileDate'})),['false:Move to Unknown files','false:Leave where they are','true:Use file date']);
   assert.match(render({...review(undefined),fileDated:summary(),noMetadataHandling:'fileDate'}),/2,324 unknown files will be filed by their file date\./);
-  assert.match(render({...review(summary(),'import'),noMetadataHandling:'folder'}),/aria-pressed="true">Move to Unknown files/);
+  assert.match(render({...review(summary(),'import'),noMetadataHandling:'folder'}),/aria-pressed="true">Copy to Unknown files/);
   for(const handling of ['folder','keep','fileDate'] as const)assert.deepEqual(noMetadataChoiceAction(handling),{type:'reviewNoMetadata',handling});
   const source=readFileSync(new URL('../renderer/RootApp.tsx',import.meta.url),'utf8');
   assert.match(source,/noMetadataChoiceAction\(choice\.handling\)/);assert.doesNotMatch(source,/type: 'reviewFileDate'/);

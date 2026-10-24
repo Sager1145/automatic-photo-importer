@@ -78,3 +78,11 @@ test('the log level defaults to normal, persists, rejects unknown values, and is
  assert.deepEqual(lockedPreferenceKeys({logLevel:'trace'}),[]);
  assert.deepEqual(acceptedPreferences({logLevel:'trace'},true),{logLevel:'trace'},'applies while jobs run');
 });
+
+test('unknown files default to a folder; a saved keep or fileDate stays, an invalid value falls back',()=>{
+ assert.equal(defaultPreferences.noMetadataHandling,'folder');
+ const bare={...defaultPreferences} as Record<string,unknown>;delete bare.noMetadataHandling;
+ assert.equal(normalizePreferences({},bare as never).noMetadataHandling,'folder');
+ assert.equal(normalizePreferences({noMetadataHandling:'bogus'},bare as never).noMetadataHandling,'folder');
+ for(const mode of ['keep','fileDate'] as const)assert.equal(normalizePreferences({noMetadataHandling:mode},defaultPreferences).noMetadataHandling,mode);
+});
