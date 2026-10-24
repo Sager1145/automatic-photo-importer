@@ -742,7 +742,7 @@ test('Settings is organized into categories with live summaries, one open panel,
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: true, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {},
     rememberedDevices: { card: { name: 'Card', lastSelected: '2026-10-20T10:00:00Z' } } };
   const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [{ path: '/Volumes/A006', available: true, total: 2e12, free: 8e11 }] };
-  const order = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance'];
+  const order = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance', 'diagnostics'];
   for (const language of languages) {
     const t = createTranslator(language), render = (busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state, act: () => {}, busy }) }));
     const markup = render();
@@ -750,18 +750,20 @@ test('Settings is organized into categories with live summaries, one open panel,
     assert.equal((markup.match(/role="tab"[^>]*aria-selected="true"|aria-selected="true"[^>]*role="tab"/g) ?? []).length, 1, `${language}: one selected category`);
     const tab = (id: string) => markup.split(`data-testid="settings-tab-${id}"`)[1]?.split('</button>')[0] ?? '';
     const panel = (html: string, id: string) => html.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0] ?? '';
-    assert.ok(tab('defaults').includes(t('Automatic')), `${language}: defaults summary`);
+    assert.ok(tab('defaults').includes(t('Automatic')) && tab('defaults').includes(t('Importing')), `${language}: defaults summary`);
+    assert.ok(tab('diagnostics').includes(t('Normal')), `${language}: diagnostics summary is the log level`);
     assert.ok(tab('performance').includes(t('{count} at once', { count: '2' })), `${language}: performance summary`);
     assert.ok(tab('storage').includes('A006'), `${language}: storage summary`);
     assert.ok(tab('folders').includes('2026') && tab('folders').includes('202610'), `${language}: folders summary`);
     assert.ok(tab('devices').includes(t('{count} remembered', { count: '1' })), `${language}: devices summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
     assert.ok(!/<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-storage"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
-    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Backup folder'], folders: ['Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying'], files: ['Collect problem files', 'Remove macOS ._ files'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once', 'Diagnostics'] };
+    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Backup folder', 'Drive backups'], folders: ['Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying'], files: ['Collect problem files', 'Remove macOS ._ files', 'Same name, different content'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once'], diagnostics: ['Diagnostics', 'Log detail'] };
     for (const [id, labels] of Object.entries(controls)) for (const label of labels) assert.ok(panel(markup, id).includes(t(label)), `${language}: ${id}: ${label}`);
     assert.ok(!markup.includes('data-testid="residue-cleanup"'), `${language}: maintenance belongs to Activity`);
     const busy = render(true);
     for (const id of ['storage', 'folders', 'defaults', 'files', 'performance']) assert.ok(/<fieldset[^>]*disabled/.test(panel(busy, id)), `${language}: ${id} policy lock`);
+    assert.ok(!/<fieldset/.test(panel(busy, 'diagnostics')), `${language}: diagnostics stay usable`);
     assert.ok(!/<fieldset[^>]*disabled/.test(panel(busy, 'general')) && !/<input[^>]*id="settings-parallel"[^>]*disabled/.test(panel(busy, 'performance')), `${language}: general and live controls stay usable`);
   }
 });

@@ -787,7 +787,6 @@ Use file date instead|改用文件日期|改用檔案日期|ファイルの日�
 1 unknown file was filed in the unknown files folder|有 1 个未知文件被放入未知文件文件夹|有 1 個未知檔案被放入未知檔案資料夾|不明なファイル 1 件を不明ファイル用フォルダーに入れました
 {count} unknown files were filed in the unknown files folder|有 {count} 个未知文件被放入未知文件文件夹|有 {count} 個未知檔案被放入未知檔案資料夾|不明なファイル {count} 件を不明ファイル用フォルダーに入れました
 They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取。你可以在“设置”中更改。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取。你可以在「設定」中變更。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです。設定で変更できます。
-Files without metadata|无元数据的文件|無中繼資料的檔案|メタデータのないファイル
 Files with unknown metadata|元数据未知的文件|中繼資料未知的檔案|メタデータが不明なファイル
 Leave where they are|保留在原位|保留在原位|そのままにする
 Not moved or copied, and Delete originals never removes them. You are warned before a job starts.|不移动也不复制，“删除原件”也绝不会删除它们。任务开始前会提醒你。|不移動也不複製，「刪除原始檔」也絕不會刪除它們。工作開始前會提醒你。|移動もコピーもされず、「元ファイルを削除」でも削除されません。ジョブの開始前に警告します。

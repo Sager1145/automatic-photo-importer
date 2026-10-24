@@ -35,6 +35,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   await h.nav('Settings');
   await h.settingsTab('storage');
   assert.equal(await h.js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Storage');
+  assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=backup-mode]')!==null&&document.querySelector('.settings-page .destination-check-actions .destination-check')===null"),true,'Drive backup mode lives in Settings → Storage, which no longer runs the folder check');
   await h.settingsTab('folders');
   assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings]')!==null"),true,'Folder paths live in Settings → Folders');
   await h.settingsTab('general');
@@ -114,8 +115,8 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   assert.equal(after.error,undefined,'Changing a locked setting raised an error');
   assert.equal(await h.js<boolean>("!document.querySelector('[data-testid=error-toast]')"),true,'Changing a locked setting showed an error toast');
  }},
- {id:'settings-detailed-logging',stage:'settings',title:'Diagnostics log detail stays live and persists in Settings Performance',covers:['Diagnostics log-level selector','live logging preference','persisted logging preference'],run:async h=>{
-  await h.nav('Settings');await h.settingsTab('performance');
+ {id:'settings-detailed-logging',stage:'settings',title:'Diagnostics log detail stays live and persists in Settings Diagnostics',covers:['Diagnostics log-level selector','live logging preference','persisted logging preference'],run:async h=>{
+  await h.nav('Settings');await h.settingsTab('diagnostics');
   const initial=(await h.state()).preferences.logLevel;
   try{for(const level of ['detailed','off'] as const){
    await h.js(`{const select=document.querySelector('#settings-log-level');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));}`);

@@ -193,3 +193,16 @@ test('a result shows when it was checked',async()=>{
     assert.ok(page.includes(t('Checked {time}',{time:formatWhen(result.checkedAt,language)})),`${language}: checked`);
   }
 });
+
+test('Settings Storage destinations have no check, Organize or Stop buttons, but link the misplaced count to Library',async()=>{
+  const {DestinationBay}=await import('../renderer/RootApp');
+  for(const language of languages){
+    const t=createTranslator(language);
+    const bay=(extra:Partial<AppState>,onLibrary?:()=>void)=>html(language,createElement(DestinationBay,{state:stateOf(extra),act:()=>{},configure:true,onLibrary}));
+    for(const markup of [bay({}),bay({misplacedFiles:{'/Volumes/A006':result}}),bay({misplacedProgress:{'/Volumes/A006':progress}})])
+      assert.ok(!markup.includes('destination-check-backup-folder')&&!markup.includes('destination-stop-backup-check')&&!markup.includes(`>${t('Organize')}<`),`${language}: no operation buttons`);
+    const found=bay({misplacedFiles:{'/Volumes/A006':result}},()=>{});
+    assert.ok(found.includes('data-testid="destination-misplaced"')&&found.includes(t('Open in Library'))&&found.includes(t('Change…')),`${language}: count, Library link and Change stay`);
+    assert.ok(!bay({misplacedFiles:{'/Volumes/A006':result}}).includes(t('Open in Library')),`${language}: link only where Library can open`);
+  }
+});

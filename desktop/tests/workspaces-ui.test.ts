@@ -24,7 +24,7 @@ test('Media and Files & folders expose the appropriate registered sources and pi
  assert.match(f,/data-source-id="files"/);assert.doesNotMatch(f,/data-source-id="card"/);
  assert.match(m,/Choose media folders…/);assert.match(f,/Back up drives or folders…/);
  assert.ok(m.indexOf('Choose media folders…') < m.indexOf('data-testid="source-cards"'));
- assert.doesNotMatch(m,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode"/);
+ assert.doesNotMatch(m,/data-testid="backup-mode-summary"/);assert.doesNotMatch(f,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
  assert.match(f,/Back up<\/button>/);assert.match(f,/Scan media/);
 });
 test('queued backup jobs stay in Files mode when the next source run is Media',()=>{

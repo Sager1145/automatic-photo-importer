@@ -23,3 +23,12 @@ test('the Settings control shows both choices, explains the chosen one, and is t
  assert.match(number,/aria-pressed="true">Add a number/);assert.match(number,/IMG_0001 \(1\)\.JPG/);
  for(const language of languages.filter(item=>item!=='en'))for(const naming of ['folder','number'] as const)assert.doesNotMatch(render(language,naming),/Conflicts folder|Add a number|Same name, different content/,`${language} ${naming}`);
 });
+
+test('Same name, different content sits in Settings File handling, not Folders',async()=>{
+ const {SettingsPage}=await import('../renderer/RootApp');
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SettingsPage,{state:{preferences:{...defaultPreferences,destinations:['/backup']},sources:[],jobs:[],history:[],platform:'darwin'},act:()=>{},busy:false})}));
+ const panel=(id:string)=>markup.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0]??'';
+ assert.ok(panel('files').includes('data-testid="conflict-naming-settings"')&&!panel('folders').includes('conflict-naming-settings'));
+ assert.ok(panel('files').includes('Files without date or camera')&&panel('files').includes('Unrecognized file types'));
+ assert.ok(panel('storage').includes('data-testid="backup-mode"')&&!panel('defaults').includes('data-testid="backup-mode"'));
+});
