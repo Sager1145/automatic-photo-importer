@@ -15,7 +15,7 @@ export const GROUPS_PER_PAGE = 8;
 
 export const duplicateLevels = (t: Translator): { level: DuplicateLevel; label: string; detail: string }[] => [
   { level: 1, label: t("Choose every keeper"), detail: t("You decide every group. Nothing is moved until you confirm Remove.") },
-  { level: 2, label: t("Suggest keepers for identical files"), detail: t("Files with the same SHA-256 get a suggested keeper; you decide everything else. Nothing is moved until you confirm Remove.") },
+  { level: 2, label: t("Suggest keepers for identical files"), detail: t("When you confirm Remove, every group of identical files (same SHA-256) is set aside keeping the suggested copy, including groups you did not open; you decide every other group.") },
 ];
 
 export function LevelSelector({ level, onChange, disabled = false }: { level: DuplicateLevel; onChange: (level: DuplicateLevel) => void; disabled?: boolean }) {
