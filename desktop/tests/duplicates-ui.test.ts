@@ -26,7 +26,7 @@ test('the level selector explains two options in plain words and marks the chose
  const html=render(createElement(LevelSelector,{level:2,onChange:()=>{}}));
  for(const level of [1,2])assert.match(html,new RegExp(`data-testid="duplicate-level-${level}"`));
  assert.doesNotMatch(html,/duplicate-level-3/);assert.equal((html.match(/role="radio"/g)??[]).length,2);
- assert.match(html,/Choose every keeper/);assert.match(html,/you decide every group/i);assert.match(html,/Suggest keepers for identical files/);assert.match(html,/same SHA-256 get a suggested keeper/);assert.match(html,/nothing is moved until you confirm Remove/i);assert.doesNotMatch(html,/EXIF are removed/);
+ assert.match(html,/Choose every keeper/);assert.match(html,/you decide every group/i);assert.match(html,/Suggest keepers for identical files/);assert.match(html,/every group of identical files \(same SHA-256\) is set aside keeping the suggested copy, including groups you did not open/);assert.match(html,/nothing is moved until you confirm Remove/i);assert.doesNotMatch(html,/EXIF are removed/);
  assert.equal((html.match(/aria-checked="true"/g)??[]).length,1);
  assert.match(html.match(/<button[^>]*data-testid="duplicate-level-2"[^>]*>/)![0],/aria-checked="true"/);
  assert.match(render(createElement(LevelSelector,{level:1,onChange:()=>{},disabled:true})),/disabled/);
