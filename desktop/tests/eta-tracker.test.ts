@@ -142,7 +142,7 @@ test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time
 });
 
 // Recorded 2026-10-24: a folder of 6,759 planned files (2,110 already in the backup, 20.0 GB to copy) to an exFAT drive written directly.
-// At 1:46 the copy count read 3,490 of 4,649 files and 15 GB of 20 GB, but the job showed 7% and about 13 min left: the model still
+// At 1:46 the copy count read 3,490 of 4,649 files (it then left out the 2,110 being confirmed as the copy went) and 15 GB of 20 GB, but the job showed 7% and about 13 min left: the model still
 // planned an exFAT verify step that a direct copy never runs (it checks each file in place as it copies).
 test('a direct copy to exFAT plans no verify step: the job percent and time left follow the copy counts',async()=>{
  const {overviewFraction}=await import('../renderer/RootApp');
@@ -161,16 +161,18 @@ test('a direct copy to exFAT plans no verify step: the job percent and time left
  for(const point of logged){
   for(let step=1;step<=5;step++){
    const completed=Math.round(previous[0]+(point[0]-previous[0])*step/5),bytes=previous[1]+(point[1]-previous[1])*step/5;
-   job.progress={phase:'copying',completed,total,skipped,bytes,totalBytes,speed:0,file:'',work:{files:completed,bytes,totalFiles:total,totalBytes,direct:{files:total,bytes:totalBytes}}};
+   job.progress={phase:'copying',completed,total,bytes,totalBytes,speed:0,file:'',work:{files:completed,bytes,totalFiles:total,totalBytes,direct:{files:total,bytes:totalBytes,present:skipped}}};
    stampEstimates(state,tracker,now);now+=1000;
   }
   previous=point;
  }
  // 08:09:46: 18 s before the copy (and the job) ended.
  const basis=copyBasis(job.progress!),files=basis.completed/basis.total,data=job.progress!.bytes/totalBytes;
- assert.equal(basis.completed,3743);assert.equal(basis.total,4649);
+ assert.equal(basis.completed,5853);assert.equal(basis.total,total);
  const percent=cardFraction(job)!;
- for(const [name,value] of [['files copied',files],['bytes copied',data]] as const)assert.ok(Math.abs(percent-value)<0.1,`job ${Math.round(percent*100)}% vs ${name} ${Math.round(value*100)}%`);
+ assert.equal(percent,files,'the card reads its counter: files copied or confirmed');
+ // The model's share of the whole job (what the time left is measured against) has no verify step left to add.
+ for(const [name,value] of [['files',files],['bytes',data]] as const)assert.ok(Math.abs(job.fraction!-value)<0.1,`job share ${Math.round(job.fraction!*100)}% vs ${name} ${Math.round(value*100)}%`);
  assert.equal(overviewFraction([job]),percent,'the overview reads the same number');
  assert.ok(job.eta!>0&&job.eta!<120,`time left ${job.eta} s, not the ~13 min a verify step would add`);
 });

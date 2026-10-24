@@ -138,32 +138,11 @@ export function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
   const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
   return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
 }
-/** Which stage of a plan's bar a step of the time-left model belongs to: for an import everything before copying is the first stage, then copying, then verifying and publishing. */
-function stageOfStep(plan: StagePlan, step: string): number {
-  const last = plan.kinds.length - 1;
-  const kind: StepKind | undefined = step === 'copying' ? 'copy' : /^(verifying|publish)/.test(step) ? 'verify' : stepKind({ step } as Pick<Progress, 'phase' | 'step' | 'renames'>);
-  if (plan.kinds !== organizationKinds) return kind === 'copy' ? Math.min(1, last) : kind === 'verify' ? last : 0;
-  const at = kind ? plan.kinds.indexOf(kind) : -1;
-  return at < 0 ? 0 : at;
-}
-/** The share of the whole job done once stage `stage` and those before it are counted (what the model's steps up to it have done), from the job's cumulative step shares. */
-export function shareThrough(job: Job, plan: StagePlan, stage: number): number {
-  let share = 0;
-  for (const item of job.stageShares ?? []) if (stageOfStep(plan, item.step) <= stage) share = Math.max(share, item.share);
-  return share;
-}
-/** A running job's layers drawn by cost: layer i reaches as far as everything up to its stage has done of the whole job, so the bar's length is the percent shown
- * (a finished stage stays as a full-colour segment and the next colour grows over it). Undefined when the job has no step shares yet. */
-function costLayers(job: Job, plan: StagePlan): StageLayer[] | undefined {
-  if (!job.stageShares?.length || plan.finished || job.fraction === undefined) return undefined;
-  const top = Math.min(1, Math.max(0, job.fraction));
-  return plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? Math.min(top, shareThrough(job, plan, index)) : top }));
-}
 export const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
-/** A job's bar: one layer per stage up to the one it is on, each as far as the job's cost done through that stage (the bar is as long as the percent). */
+/** A job's bar: one layer per stage up to the one it is on; finished stages are full and the current one is as far as its counter (the percent shown). */
 export function jobStageLayers(job: Job, verify = true): StageLayer[] {
   const plan = stagePlan(job, verify);
-  return plan ? costLayers(job, plan) ?? layersOfPlan(plan) : [];
+  return plan ? layersOfPlan(plan) : [];
 }
 // A scan first lists the card's files, then reads camera metadata from each media file.
 // A library organization: planning first (files checked), then moving and verifying, with n of x and %.
@@ -184,8 +163,11 @@ export function progressFraction(progress: NonNullable<Job['progress']>): number
   // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
   if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning' || progress.step === 'measuring')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
   if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
-  return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
+  // A direct copy also confirms the files already in the backup as it goes: its counter counts files, and so does its share.
+  return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) || confirming(progress) ? files ?? data : data ?? files;
 }
+/** A copy that confirms files already in the backup as it goes (a direct destination): they are counted in its work. */
+const confirming = (progress: NonNullable<Job['progress']>) => progress.phase === 'copying' && !progress.step && !progress.renames && (progress.work?.direct?.present ?? 0) > 0;
 /** Copying counts only the files being copied: those already verified on the destination are skipped and shown apart. */
 export function copyBasis(progress: NonNullable<Job['progress']>): { completed: number; total: number; skipped: number } {
   const copying = progress.phase === 'copying' && !progress.step && !progress.renames, skipped = copying ? Math.min(progress.skipped ?? 0, progress.total) : 0;
@@ -224,6 +206,7 @@ export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnT
   if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
   // Verifying also shows how many bytes of the copied files are published.
   if (progress.phase === 'verifying' && progress.work?.totalBytes && formatBytes) return t("{completed} of {total} files verified · {size} of {totalSize}", { ...counts, size: formatBytes(progress.work.bytes), totalSize: formatBytes(progress.work.totalBytes) });
+  if (confirming(progress)) return t("{completed} of {total} files copied or confirmed", counts);
   return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : progress.renames ? "{completed} of {total} files moved" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
 }
 export function formatDuration(ms: number): string {
@@ -248,11 +231,15 @@ export function jobTiming(job: Job, t: ReturnType<typeof createTranslator>, held
   const left = jobRemaining(job, t, held, running);
   return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left };
 }
-/** How far a whole job is: the share of its work the main process measured (every step weighted by what it costs, the same number the
- * overview adds up); a finished job is full. Undefined while nothing is measured, so the bar is indeterminate rather than guessed. */
+/** How far a job's row is: its current step's share, the same work its counter counts (the time left is the whole job's); a finished job is
+ * full. Undefined while nothing is measured, so the bar is indeterminate rather than guessed. */
 export function cardFraction(job: Job): number | undefined {
   if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
-  return job.progress ? job.fraction : undefined;
+  // A listing's total is only an estimate and its counter shows none: no share of the job is claimed yet.
+  if (!job.progress || job.progress.phase === 'planning' && job.progress.step === 'listing') return undefined;
+  // Full only once finished: a step at its end (or one that failed its last file) is not a finished job.
+  const fraction = progressFraction(job.progress);
+  return fraction === undefined ? undefined : Math.min(.99, fraction);
 }
 /** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
 export function formatRemaining(seconds: number, t: ReturnType<typeof createTranslator>): string {

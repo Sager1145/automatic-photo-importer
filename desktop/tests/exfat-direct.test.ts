@@ -477,6 +477,14 @@ test('a direct copy says in its copy progress that it checks in place, and no ve
   const copying=seen.filter(item=>item.phase==='copying'&&!item.step);
   assert.ok(copying.length>0);
   // The time-left model counts these files as checked once copied: it plans no verify step for them.
-  assert.deepEqual(copying.at(-1)!.work?.direct,{files:FILES,bytes});
+  assert.deepEqual(copying.at(-1)!.work?.direct,{files:FILES,bytes,present:0});
   assert.deepEqual(seen.filter(item=>item.phase==='verifying'&&!item.step),[],'no verify step');
+  // Again: every file is already there and is confirmed as the copy goes, so it is work of the copy, counted in completed, not skipped before it.
+  const again=(await plan(env.card,[env.root],options,metadata)).plans[0]!,repeat:import('../shared').Progress[]=[];
+  assert.equal(again.entries.filter(entry=>entry.skip).length,FILES);
+  await executeDestinations([again],{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index,value)=>{repeat.push(value);},settled:()=>{}});
+  const last=repeat.filter(item=>item.phase==='copying'&&!item.step).at(-1)!;
+  assert.equal(last.skipped,undefined);
+  assert.deepEqual(last.work?.direct,{files:FILES,bytes:0,present:FILES});
+  assert.equal(last.completed,FILES);
 });

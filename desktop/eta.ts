@@ -13,8 +13,8 @@ export interface EtaContext {kind:JobKind;destinations:number;verify:boolean;sha
 export interface JobEta {step?:number;job?:number;/** The low and high end of `job` while the estimate is still wide. */low?:number;high?:number;}
 /** What a job is, told by the code that starts it: its kind (never guessed from step names), the drives it reads and writes, and what it will do. */
 export interface EtaPlan {kind:JobKind;source?:DriveInfo;destinations?:DriveInfo[];verify?:boolean;publish?:'link'|'copy';totals?:Record<string,StepTotal>;/** Backup copies a Delete originals run re-reads besides the source. */backups?:number;estimated?:boolean;}
-/** Where a job stands as a whole, for the bars and the overview. */
-export interface JobView {fraction?:number;cost?:{done:number;total:number};shares?:{step:string;share:number}[];}
+/** Where a job stands as a whole in the time-left model (logged with its progress; rows show their step's share). */
+export interface JobView {fraction?:number;}
 
 /** Seconds: a listing never shows more time left than this. */
 const MAX_LISTING_ETA=24*3600;
@@ -162,7 +162,7 @@ export class EtaTracker {
   const snapshot=state.model.update(now,step,done,total);
   for(const ended of state.model.drain())this.save(state,ended,now);
   // Nothing of the job's own steps measured yet (a listing or a download so far): no share of the job is claimed.
-  state.view={cost:snapshot.cost,fraction:state.fractions.next(snapshot.cost.total>0?snapshot.fraction:undefined),...(snapshot.shares?{shares:snapshot.shares}:{})};
+  state.view={fraction:state.fractions.next(snapshot.cost.total>0?snapshot.fraction:undefined)};
   if(!trusted||guessed&&(snapshot.step??0)>MAX_LISTING_ETA)return {};
   // The job's first seconds are spent estimating.
   const job=now-state.first>=10000?snapshot.job:undefined;
@@ -222,7 +222,6 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  for(const job of state.jobs){
   if(!ACTIVE_PHASES.includes(job.phase)||!job.progress){
    delete job.eta;delete job.etaRange;if(job.progress)delete job.progress.eta;
-   if(job.phase==='complete'&&job.cost)job.cost={done:job.cost.total,total:job.cost.total};
    if(job.phase==='complete')job.fraction=1;
    continue;
   }
@@ -236,8 +235,6 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
   if(job.stopping){delete job.eta;delete job.etaRange;}
   else{job.eta=eta.job;if(eta.low!==undefined&&eta.high!==undefined)job.etaRange={low:eta.low,high:eta.high};else delete job.etaRange;}
   if(view.fraction!==undefined)job.fraction=view.fraction;
-  if(view.cost)job.cost=view.cost;
-  if(view.shares)job.stageShares=view.shares;else delete job.stageShares;
   speeds('speed:'+job.id,job.progress);
   running.push({job,id:job.id});
  }

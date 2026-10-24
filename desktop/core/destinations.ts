@@ -40,7 +40,7 @@ export async function executeDestinations(plans:TransferPlan[],options:{
   const grown=own.some(other=>pending[other]>initialPending[other]);
   works[slot]=value.work;
   // Pieces copied directly are checked as they are copied: the estimate plans no verify step for them.
-  const direct=()=>{const pieces=works.flatMap(item=>item?.direct?[item.direct]:[]);return pieces.length?{direct:{files:pieces.reduce((a,b)=>a+b.files,0),bytes:pieces.reduce((a,b)=>a+b.bytes,0)}}:{};};
+  const direct=()=>{const pieces=works.flatMap(item=>item?.direct?[item.direct]:[]);return pieces.length?{direct:{files:pieces.reduce((a,b)=>a+b.files,0),bytes:pieces.reduce((a,b)=>a+b.bytes,0),present:pieces.reduce((a,b)=>a+b.present,0)}}:{};};
   // The same rule for the estimate's own counts: while verifying, a waiting piece counts nothing and a finished one all it staged.
   const stagedBytes=latest.reduce((count,item,other)=>count+(verifying&&(finished.has(other)||phases[other]==='verifying')?works[other]?.totalBytes??item.bytes:item.bytes),0);
   const verifiedBytes=latest.reduce((count,item,other)=>count+(finished.has(other)?works[other]?.totalBytes??item.bytes:phases[other]==='verifying'?works[other]?.bytes??0:0),0);

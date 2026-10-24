@@ -27,7 +27,7 @@ import { validNoMetadataFolder } from '../no-metadata';
 import { DuplicatesPage, RemovedDuplicates } from './DuplicatesPage';
 import { CleanupConfirmation } from './CleanupConfirmation';
 import { Button, CardHeader, ConfirmSheet, Icon, ReleaseConfirm, animateInterfaceChange, interfaceSettled, interfaceTransition, motionMs, nextConfirmStep, reducedMotion, sheetOrder, showSheet, useAnimatedClose, type DeleteRecoveryStep, type Dispatch, type InterfaceChange } from './ui';
-import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, formatEstimate, formatRemaining, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shareThrough, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
+import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, formatEstimate, formatRemaining, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
 import { BrandLogo } from './BrandLogo';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
@@ -450,7 +450,9 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     sum.bytes += work ? work.bytes : progress.bytes; sum.totalBytes += work ? work.totalBytes : progress.totalBytes;
     sum.speed += progress.speed; sum.fileRate += progress.fileRate ?? 0;
   }
-  const fraction = sum.totalBytes > 0 && sum.bytes > 0 ? sum.bytes / sum.totalBytes : sum.total > 0 ? sum.completed / sum.total : undefined;
+  // Each part's share as its own counter counts it (files for checks, bytes for copies), weighted by its files.
+  const shares = same.flatMap(({ progress }) => { const value = progress && progressFraction(progress); return value === undefined ? [] : [{ value, weight: Math.max(copyBasis(progress!).total, 1) }]; });
+  const fraction = shares.length ? shares.reduce((total, item) => total + item.value * item.weight, 0) / shares.reduce((total, item) => total + item.weight, 0) : undefined;
   return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)), ...(same.length && same.every(part => part.paused) ? { paused: true } : {}) };
 }
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
@@ -807,7 +809,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
         empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && cardFraction(job) === 1)}
-        count={total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
+        count={latestJobs.length === 1 && lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : lead?.progress ? `${leadStatus(lead, t)} · ${lead.source.name} · ${progressCount(lead.progress, t, formatNumber, !!lead.organization, bytes)}` : active.length ? undefined : t("No transfer planned")}
         speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, scaledRange(state.etaTotal && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined, raw!, remaining)) }) : undefined}
         step={stepKind(lead?.progress)} stages={totalStageLayers(latestJobs, verify)} paused={totalPaused(latestJobs)} />
@@ -1210,15 +1212,9 @@ export function totalStageLayers(jobs: Job[], verify = true): StageLayer[] {
   const rank = (plan: StagePlan) => stageRank[plan.kinds[plan.index]!];
   const open = plans.filter(item => !item.plan.finished);
   if (!open.length) return layersOfPlan(plans.reduce((best, item) => rank(item.plan) > rank(best.plan) ? item : best).plan);
-  const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best), floor = rank(least.plan);
-  const comparable = plans.every(({ job, plan }) => job.cost && job.cost.total > 0 && (plan.finished || job.stageShares?.length) && (plan.kinds === organizationKinds) === (least.plan.kinds === organizationKinds) && plan.kinds.length === least.plan.kinds.length);
-  if (comparable) {
-    const weight = plans.reduce((sum, { job }) => sum + job.cost!.total, 0);
-    return least.plan.kinds.slice(0, least.plan.index + 1).map((kind, index) => ({ kind, fraction: Math.min(1, plans.reduce((sum, { job, plan }) => sum + job.cost!.total * (plan.finished ? 1 : shareThrough(job, plan, index)), 0) / weight) }));
-  }
-  const weights = plans.map(({ job, plan }) => ({ fraction: rank(plan) > floor || plan.finished ? 1 : plan.fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }));
-  const top = weights.reduce((sum, item) => sum + item.fraction * item.weight, 0) / weights.reduce((sum, item) => sum + item.weight, 0);
-  return layersOfPlan(least.plan, top);
+  const least = open.reduce((best, item) => rank(item.plan) < rank(best.plan) ? item : best);
+  // The top layer is the overview's percent, so the bar and the number never disagree.
+  return layersOfPlan(least.plan, overviewFraction(jobs) ?? 0);
 }
 export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = false }: { job?: Job; inventory?: Inventory; scanning: boolean; verifyOff: boolean; reviewing?: boolean }) {
   const { t, formatNumber } = useTranslation();
@@ -1235,18 +1231,15 @@ export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = f
 
 /** The quiet note beside a copy count: how many files were already in the backup. */
 export function progressSkippedNote(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string): string | undefined {
-  const { skipped } = copyBasis(progress);
+  const skipped = copyBasis(progress).skipped || (progress.phase === 'copying' && !progress.step ? progress.work?.direct?.present ?? 0 : 0);
   return skipped > 0 ? t("{count} already in the backup", { count: formatNumber(skipped) }) : undefined;
 }
-/** The dashboard's total: the work done by every job over the work of all, in the model's seconds (a finished job keeps its final cost). Jobs
- * the model has not costed yet count by size. Below 100% until every job is complete. */
+/** The dashboard's total: each job's row share (its current step, as its counter counts; a finished job is full), weighted by its size, so
+ * with one job it reads that job's row. Below 100% until every job is complete. */
 export function overviewFraction(jobs: Job[]): number | undefined {
-  const costed = jobs.filter(job => job.cost && job.cost.total > 0);
-  if (costed.length && costed.length === jobs.length) {
-    const total = costed.reduce((sum, job) => sum + job.cost!.total, 0), done = costed.reduce((sum, job) => sum + (jobFinished(job) ? job.cost!.total : Math.min(job.cost!.done, job.cost!.total)), 0);
-    return total > 0 ? (jobs.every(jobFinished) ? 1 : Math.min(.99, done / total)) : undefined;
-  }
+  if (jobs.length && jobs.every(jobFinished)) return 1;
   const measured = jobs.flatMap(job => { const fraction = cardFraction(job); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
+  if (measured.length === 1) return measured[0]!.fraction;
   return measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
 }
 /** How fast a step reads: bytes per second, or files per second while checking metadata. */

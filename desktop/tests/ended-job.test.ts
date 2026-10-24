@@ -25,9 +25,8 @@ test('a job that ended with every file verified is 100%, on the card and in the 
   assert.ok(allVerified(verifiedError()));
   assert.ok(jobFinished(verifiedError()));
   // Not every file verified, a failed file, or a job still running: not 100%
-  assert.equal(cardFraction(verifiedError({ progress: { ...verifiedError().progress!, completed: 43538 } })), 0.9);
-  assert.equal(cardFraction(verifiedError({ progress: { ...verifiedError().progress!, failed: 2 } })), 0.9);
-  assert.equal(cardFraction(verifiedError({ phase: 'verifying' })), 0.9);
+  for (const job of [verifiedError({ progress: { ...verifiedError().progress!, completed: 43538 } }), verifiedError({ progress: { ...verifiedError().progress!, failed: 2 } }), verifiedError({ phase: 'verifying' })])
+    assert.equal(cardFraction(job), 0.99, 'its step is at its end, but the job is not finished');
   assert.ok(!jobFinished(verifiedError({ progress: { ...verifiedError().progress!, failed: 2 } })));
 });
 

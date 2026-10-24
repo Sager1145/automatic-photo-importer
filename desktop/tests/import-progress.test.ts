@@ -116,11 +116,12 @@ test('the source card names the step it is on and its own progress',()=>{
  assert.ok(verifying.includes('Verifying copied files'));
 });
 
-test('total progress is the job\'s measured share, and nothing is guessed before it is measured',()=>{
- const unmeasured=dashboard(job(checked));
- assert.ok(!unmeasured.includes('progress-percent')&&!unmeasured.includes('aria-valuenow'),'no hard-coded share of the import');
- assert.ok(unmeasured.includes('Reading metadata'));
- const measured=dashboard({...job(checked),fraction:.1,cost:{done:10,total:100}});
+test('total progress reads the step its counter counts, and nothing is guessed before a total is known',()=>{
+ const listing=dashboard(job({phase:'planning',step:'listing',completed:500,total:0,bytes:1e9,totalBytes:0,speed:0,file:''}));
+ assert.ok(!listing.includes('progress-percent')&&!listing.includes('aria-valuenow'),'no hard-coded share of the import');
+ // The whole-job share the main process sends is not the number shown: 6,483 of 64,832 files checked is 10%.
+ const measured=dashboard({...job({...checked,completed:6483}),fraction:.5});
+ assert.ok(measured.includes('6,483 of 64,832 files checked'));
  assert.ok(measured.includes('10%'));
  assert.equal(cardFraction(job(checked,'complete')),1);
 });
