@@ -760,7 +760,7 @@ test('Settings is organized into categories with live summaries, one open panel,
     assert.ok(tab('drives').includes(t('{count} remembered', { count: '1' })), `${language}: drives summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
     assert.ok(!/<section[^>]*data-testid="settings-panel-importing"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
-    assert.ok(panel('importing').includes(t('Automatic import')) && panel('importing').includes('id="settings-parallel"') && panel('importing').includes(t('Verify each copy after copying')) && panel('importing').includes(t('Enable media folder selection')), `${language}: importing controls`);
+    assert.ok(panel('importing').includes(t('Automatic import')) && panel('importing').includes('id="settings-parallel"') && panel('importing').includes(t('Verify each copy after copying')) && !panel('importing').includes(t('Enable media folder selection')), `${language}: importing controls`);
     assert.ok(panel('destinations').includes('destination-slot') && panel('destinations').includes(t('Backup folder')), `${language}: destination controls`);
     assert.ok(panel('folders').includes('data-testid="photo-path-builder"') && panel('folders').includes(t('Edited exports folder')), `${language}: folder controls`);
     assert.ok(!panel('organization').includes(t('Remove emptied source folders')) && panel('organization').includes(t('Check the backup folder')), `${language}: organization controls`);

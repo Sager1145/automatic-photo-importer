@@ -166,7 +166,6 @@ Maximum parallel sources|最大并行来源数|最大並行來源數|同時処�
 Connect camera storage or a memory card.|连接相机存储或存储卡。|連接相機儲存裝置或記憶卡。|カメラのストレージやメモリーカードを接続。
 Automatic import is watching for new connections.|自动导入正在监测新连接。|自動匯入正在監測新連接。|自動インポートで新しい接続を監視しています。
 Automatic import is off. Use Start when you’re ready.|自动导入已关闭，准备好后点击「开始」。|自動匯入已關閉，準備好後點選「開始」。|自動インポートはオフです。準備ができたら開始してください。
-Enable media folder selection|启用媒体文件夹选择|啟用媒體資料夾選擇|メディアフォルダーの選択を有効化
 Choose media folders…|选择媒体文件夹…|選擇媒體資料夾…|メディアフォルダーを選択…
 Bring an entire drive, too.|也能备份整个磁盘。|也能備份整個磁碟。|ドライブ全体もバックアップ。
 Back up drives or folders…|备份磁盘或文件夹…|備份磁碟或資料夾…|ドライブやフォルダーをバックアップ…
@@ -671,7 +670,6 @@ Backup folder check|备份文件夹检查|備份資料夾檢查|バックアッ�
 Starting imports|开始导入|開始匯入|読み込みの開始
 Imports start as soon as a selected drive connects.|选定的驱动器一连接就开始导入。|選定的磁碟一連接就開始匯入。|選択したドライブを接続するとすぐに読み込みを開始します。
 Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ
-Lets you choose a folder of photos as a source.|允许选择一个照片文件夹作为来源。|允許選擇一個照片資料夾作為來源。|写真フォルダーを読み込み元として選べます。
 Settings categories|设置类别|設定類別|設定のカテゴリ
 Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
 1 file outside your folder structure|1 个文件不在文件夹结构中|1 個檔案不在資料夾結構中|フォルダー構成の外に 1 個のファイル
@@ -767,7 +765,7 @@ Camera folders use a matching photo or video, or the card’s single confirmed c
 {count} unreadable|{count} 个无法读取|{count} 個無法讀取|読み取り不可 {count} 件
 No capture date|无拍摄日期|無拍攝日期|撮影日なし
 No camera|无相机|無相機|カメラなし
-They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you continue.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你继续之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你繼續之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。続行するまで何も始まりません。
+They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you apply the review.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你应用审核之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你套用審核之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。確認を適用するまで何も始まりません。
 Show files|显示文件|顯示檔案|ファイルを表示
 Hide files|隐藏文件|隱藏檔案|ファイルを隠す
 Use file date instead|改用文件日期|改用檔案日期|ファイルの日付を使う
@@ -814,12 +812,14 @@ Stopped after {count} originals deleted ({size}); {kept} left in place|已在删
 {count} originals deleted ({size}); {kept} left in place; {folders} empty folders removed|已删除 {count} 个原文件（{size}）；{kept} 个保留在原处；已移除 {folders} 个空文件夹|已刪除 {count} 個原始檔案（{size}）；{kept} 個保留在原處；已移除 {folders} 個空資料夾|元のファイル {count} 件（{size}）を削除、{kept} 件はそのまま残し、空のフォルダ {folders} 件を削除しました
 Removing empty folders: {completed} of {total}|正在移除空文件夹：{completed}/{total}|正在移除空資料夾：{completed}/{total}|空のフォルダを削除中：{total} 件中 {completed} 件
 Deleting originals: {completed} of {total}|正在删除原文件：{completed}/{total}|正在刪除原始檔案：{completed}/{total}|元のファイルを削除中：{total} 件中 {completed} 件
-Level 1: you decide|级别 1：由你决定|層級 1：由你決定|レベル1：すべて自分で決める
-You decide every group. Nothing is removed until you choose which file to keep.|每一组都由你决定。在你选择要保留的文件之前，不会删除任何内容。|每一組都由你決定。在你選擇要保留的檔案之前，不會移除任何內容。|すべてのグループを自分で決めます。残すファイルを選ぶまで何も削除されません。
-Level 2: identical files|级别 2：完全相同的文件|層級 2：完全相同的檔案|レベル2：完全に同一のファイル
-Files that are exactly the same (same SHA-256) are removed automatically, keeping the copy in your organized folders. You decide all other groups.|完全相同（SHA-256 相同）的文件会自动移除，并保留已整理文件夹中的那一份。其他分组由你决定。|完全相同（SHA-256 相同）的檔案會自動移除，並保留已整理資料夾中的那一份。其他群組由你決定。|完全に同一（SHA-256 が同じ）のファイルは自動で削除され、整理済みフォルダー内のものが残ります。それ以外のグループは自分で決めます。
-Level 3: automatic|级别 3：自动|層級 3：自動|レベル3：自動
-Exactly identical files (same SHA-256) are removed automatically. Files with the same EXIF are removed only after you confirm them, even when their size matches.|完全相同的文件（SHA-256 相同）会自动移除。EXIF 相同的文件即使大小一致，也要在你确认后才会移除。|完全相同的檔案（SHA-256 相同）會自動移除。EXIF 相同的檔案即使大小一致，也要在你確認後才會移除。|完全に同一のファイル（SHA-256 が同じ）は自動で削除されます。EXIF が同じファイルは、サイズが同じでも確認してから削除されます。
+Organizing a folder in place cannot be used with a separate video folder. Change the media layout in Settings → Folders.|就地整理文件夹无法与单独的视频文件夹一起使用。请在“设置 → 文件夹”中更改媒体文件布局。|就地整理資料夾無法與獨立的影片資料夾一起使用。請在「設定 → 資料夾」中更改媒體檔案配置。|フォルダーをその場で整理する機能は、動画用の別フォルダーとは併用できません。「設定 → フォルダー」でメディアの配置を変更してください。
+Pause imports|暂停导入|暫停匯入|インポートを一時停止
+Stop all|全部停止|全部停止|すべて停止
+Stops imports, scans and organizing, and discards the open review.|停止导入、扫描和整理，并放弃当前打开的审核。|停止匯入、掃描和整理，並捨棄目前開啟的審核。|インポート、スキャン、整理を停止し、開いている確認を破棄します。
+Choose every keeper|由你选择每一组要保留的文件|由你選擇每一組要保留的檔案|残すファイルをすべて自分で選ぶ
+You decide every group. Nothing is moved until you confirm Remove.|每一组都由你决定。在你确认“移除”之前，不会移动任何文件。|每一組都由你決定。在你確認「移除」之前，不會移動任何檔案。|すべてのグループを自分で決めます。「削除」を確認するまで何も移動されません。
+Suggest keepers for identical files|为完全相同的文件建议保留项|為完全相同的檔案建議保留項|同一のファイルには残すファイルを提案する
+Files with the same SHA-256 get a suggested keeper; you decide everything else. Nothing is moved until you confirm Remove.|SHA-256 相同的文件会得到建议保留的一份，其余分组由你决定。在你确认“移除”之前，不会移动任何文件。|SHA-256 相同的檔案會得到建議保留的一份，其餘群組由你決定。在你確認「移除」之前，不會移動任何檔案。|SHA-256 が同じファイルには残すファイルが提案され、それ以外は自分で決めます。「削除」を確認するまで何も移動されません。
 Removal level|移除级别|移除層級|削除レベル
 Identical files|完全相同的文件|完全相同的檔案|同一のファイル
 Same EXIF and size|EXIF 和大小相同|EXIF 和大小相同|EXIF とサイズが同じ
@@ -843,10 +843,9 @@ Loading…|正在加载…|正在載入…|読み込み中…
 No EXIF found|未找到 EXIF|找不到 EXIF|EXIF が見つかりません
 Group {number}|第 {number} 组|第 {number} 組|グループ {number}
 Group|分组|群組|グループ
-Removed automatically|自动移除|自動移除|自動で削除
+Will be set aside|将被搁置|將被擱置|退避されます
 Choose a file to keep|请选择要保留的文件|請選擇要保留的檔案|残すファイルを選んでください
 Keep all|全部保留|全部保留|すべて残す
-Will be removed|将被移除|將被移除|削除されます
 Remove duplicates from {name}?|要从 {name} 移除重复文件吗？|要從 {name} 移除重複檔案嗎？|{name} から重複ファイルを削除しますか？
 Remove {files} files?|要移除 {files} 个文件吗？|要移除 {files} 個檔案嗎？|{files} 件のファイルを削除しますか？
 {count} of these files were placed by an earlier organization; removing them ends that organization's Undo.|其中 {count} 个文件由之前的整理放置；移除它们会使该次整理无法再撤销。|其中 {count} 個檔案由先前的整理放置；移除它們會使該次整理無法再復原。|これらのうち {count} 件は以前の整理で配置されたものです。削除すると、その整理の取り消しはできなくなります。

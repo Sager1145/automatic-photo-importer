@@ -67,7 +67,7 @@ Each check is a named entry (`id`, `stage`, `title`, `covers`) and runs on its o
 |---|---|
 | No super-wide buttons, at text sizes 1, 1.25, 1.5, 1.6, 1.75, 2 | `rules-sweep` (3 viewports × 6 sizes × 6 pages and 6 categories) |
 | Bars shrink and never clip | `rules-sweep`, `rules-locales`, `import-storage-strips`, `import-review-footer`, `rules-layered-bars` |
-| Animations stay below popovers and `[data-error-layer]`; errors always on top | `boot-splash-gone`, `nav-transition-layers`, `errors-on-top-200`, `errors-above-sheets-and-animations` |
+| Animations stay below popovers and `[data-error-layer]`; errors always on top | `boot-splash-gone`, `nav-transition-layers`, `nav-transition-containment`, `nav-rapid-timing`, `errors-on-top-200`, `errors-above-sheets-and-animations` |
 | Every long step shows a live, moving counter | `final-heartbeat` (samples the main process every 250 ms and fails a real step frozen for more than 10 s; a gap between samples is a blocked main thread and counts as frozen time), `final-stall-watch` (`desktop/qa/stall-watch.ts`, fed every state the window receives, polled each second), `recovery-leftovers-counter`, `organization-review-progress` |
 | Everything updates (no frozen counters) | `rules-live-counters` (each update must reach the card, the overview total and files, the organization and the sidebar) |
 | No file name in the overall dashboard | `rules-dashboard-no-file-name` |
@@ -103,9 +103,6 @@ to the renderer). Checks use it to:
 
 ## Findings (open)
 
-- **Toast under a modal sheet is inert.** The toast is drawn above an open sheet (checked through top-layer order), but
-  a modal `<dialog>` makes it unclickable: View and Dismiss do nothing until the sheet closes.
-- **Warning count badge in dark mode:** white on light amber, 1.8:1 (`knownContrast` in `rules.ts`).
 - **"Existing library"** is named in English by `main.ts` (`previewOrganization`) and shows untranslated.
 - **Show in Finder in a locked Destinations fieldset** greys out with its own tooltip instead of the lock reason.
 - **A stopped queued organization** keeps an indeterminate bar segment with "Starting…" in the overview.
@@ -113,3 +110,7 @@ to the renderer). Checks use it to:
   rule as a list row; worth a look if it reads as a bar.
 - **A review can run for over 10 s with no counter at all** on a heavily loaded machine (first preview, before the
   planner reports); seen once in the heartbeat at load ~150.
+
+## Layer and timing regression additions
+
+The containment check reads the generated transition group stacking and finite durations (maximum 300 ms). Rapid navigation checks the final selected page after callbacks finish and opens a sheet mid-transition. The toast-over-sheet check uses real mouse input for Dismiss and View in both opening orders, and closes the sheet while the toast remains alive. Theme contrast now uses 4.5:1 for normal text and 3:1 for large text without the old warning-badge exception. See `docs/ui-audit-2026-10-23.md`.

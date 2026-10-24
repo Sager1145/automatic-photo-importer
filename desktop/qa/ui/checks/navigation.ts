@@ -79,6 +79,27 @@ export const navigationChecks=():Check[]=>[
   assert.deepEqual(layers.map(layer=>layer.kind.replace(/^category-(forward|back)$/,'category')),['forward','category','category','back']);
   for(const layer of layers){assert.ok(layer.labels&&layer.titlebarOpaque&&layer.shadowHidden,JSON.stringify(layer));if(layer.kind.startsWith('category'))assert.ok(layer.tabLabels,JSON.stringify(layer));}
  }},
+ {id:'nav-transition-containment',stage:'navigation',title:'Page snapshots contain their children and stay below the fixed chrome throughout page and category motion',covers:['nested transition layers','fixed chrome stacking','snapshot clipping','animation duration budget'],run:async h=>{
+  if(await reduced(h))return;
+  await h.js(`(()=>{window.qaContainment=[];const start=window.qaStartViewTransition??=document.startViewTransition;document.startViewTransition=function(update){const t=start.call(document,update);t.ready.then(()=>window.qaContainment.push({parents:['.main-content','.sidebar','.window-titlebar'].map(s=>getComputedStyle(document.querySelector(s)).viewTransitionGroup),page:Number(getComputedStyle(document.documentElement,'::view-transition-group(page)').zIndex),chrome:Number(getComputedStyle(document.documentElement,'::view-transition-group(titlebar)').zIndex),clips:['sidebar','titlebar'].map(name=>getComputedStyle(document.documentElement,'::view-transition-group-children('+name+')').overflowX),durations:document.getAnimations().filter(a=>a.timeline===document.timeline&&a.effect?.getTiming().iterations!==Infinity).map(a=>Number(a.effect.getTiming().duration))})).catch(()=>{});return t;};})()`);
+  try{
+   await h.nav('Settings');await h.settingsTab('destinations');await h.nav('Import desk');
+   const records=await h.js<{parents:string[];page:number;chrome:number;clips:string[];durations:number[]}[]>('window.qaContainment');
+   assert.ok(records.length>=2,'transitions reached ready');
+   for(const record of records){assert.deepEqual(record.parents,['contain','contain','contain']);assert.ok(record.chrome>record.page,JSON.stringify(record));assert.deepEqual(record.clips,['clip','clip'],'chrome snapshots must preserve scroll/text clipping');assert.ok(record.durations.length>0&&record.durations.every(ms=>ms>=0&&ms<=300),`interaction duration exceeds 300ms: ${JSON.stringify(record.durations)}`);}
+  }finally{await stopRecording(h);await h.js('delete window.qaContainment');}
+ }},
+ {id:'nav-rapid-timing',stage:'navigation',title:'Rapid navigation and opening a sheet mid-transition leave the last page selected and no click-blocking snapshots',covers:['animation interruption','rapid navigation timing','sheet during transition'],run:async h=>{
+  await h.js("for(const index of [1,2,4,5])document.querySelectorAll('.nav-item')[index].click()");
+  await h.until('last navigation wins',"document.querySelectorAll('.nav-item')[5].getAttribute('aria-current')==='page'");
+  await h.settle();
+  assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Settings','the last navigation remains selected after all callbacks finish');
+  await h.click('.nav-item');
+  await h.click('[data-testid=show-errors]');
+  await h.until('sheet opened during navigation',"document.querySelector('.activity-dialog')?.open===true");
+  await h.settle();
+  assert.equal(await h.js<boolean>("(()=>{const b=document.querySelector('[data-testid=activity-close]'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))&&!document.documentElement.dataset.transition;})()"),true,'sheet accepts clicks after interrupting navigation');
+ }},
  {id:'nav-reduced-motion-emulated',stage:'navigation',title:'With reduced motion on, pages and sheets change without View Transitions or animated closes, in every run',covers:['reduced motion'],run:async h=>{
   await h.media([{name:'prefers-reduced-motion',value:'reduce'}]);
   await h.until('reduced motion emulated',"matchMedia('(prefers-reduced-motion: reduce)').matches");

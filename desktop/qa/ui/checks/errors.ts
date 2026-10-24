@@ -59,9 +59,7 @@ export const errorChecks=():Check[]=>[
   await raise(h);
   const desk=await h.probe(errorLayers);
   assert.deepEqual(desk.map(layer=>layer.misses),[[]],'Something animated above the toast: '+JSON.stringify(desk));
-  // A sheet opened after the toast goes beneath it, and a toast raised over an open sheet goes above it. A modal sheet
-  // makes the rest of the page inert, so hit tests pass through the toast: the paint order is read from the order
-  // elements entered the top layer instead.
+  // Check both actual pointer hit testing and top-layer paint order, in both opening orders.
   h.notes.qaTopLayer=true;
   try{for(const order of ['toast first','sheet first']){
    await h.closeOverlays();
@@ -73,6 +71,33 @@ export const errorChecks=():Check[]=>[
    assert.equal(top.at(-1),'error-toast',`${order}: top layer from bottom to top is ${JSON.stringify(top)}`);
    assert.ok(top.some(name=>String(name).includes('metadata-dialog')),`${order}: the sheet is open: ${JSON.stringify(top)}`);
    await h.shot(`error-toast-over-sheet-${order.replace(' ','-')}`);
+   const hits=await h.probe(errorLayers);
+   assert.deepEqual(hits.find(layer=>layer.testid==='error-toast')?.misses,[],`${order}: toast must accept pointer input above a modal`);
+   const pointerClick=async(selector:string)=>{
+    const point=await h.js<{x:number;y:number}>(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`);
+    h.window.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point});
+    h.window.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});
+   };
+   if(order==='toast first'){
+    h.hooks!.set('newDevices',['fixture:2']);
+    await h.until('new drive opens above metadata',"document.querySelector('[data-testid=new-drive-prompt]')?.open===true");await h.settle();
+    assert.deepEqual((await h.probe(errorLayers)).find(layer=>layer.testid==='error-toast')?.misses,[],'toast stays interactive when a newer modal precedes metadata in DOM order');
+   }
+   await pointerClick('[data-testid=error-toast] button[aria-label=Dismiss]');
+   await h.until('toast dismissed by real pointer',"!document.querySelector('[data-testid=error-toast]')");
+   assert.equal(await h.js<boolean>("document.querySelector('.metadata-dialog')?.open"),true,'Dismissing toast keeps metadata open');
+   if(order==='toast first'){
+    await h.click('[data-testid=new-drive-close]');await h.until('new drive prompt closed',"!document.querySelector('[data-testid=new-drive-prompt]')");h.hooks!.set('newDevices',[]);
+   }
+   await raise(h);await h.settle();
+   await pointerClick('[data-testid=error-toast] button:not([aria-label])');
+   await h.until('View opens errors by real pointer',"document.querySelector('.activity-dialog')?.open===true");
+   await h.click('[data-testid=activity-close]');await h.until('errors sheet closed',"!document.querySelector('.activity-dialog')");
+   await raise(h);await h.click('[data-testid=metadata-close]');
+   await h.until('metadata closed with toast alive',"!document.querySelector('.metadata-dialog')&&document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')");
+   assert.deepEqual((await h.probe(errorLayers)).find(layer=>layer.testid==='error-toast')?.misses,[],'toast moves back to the document after modal unmount');
+
+
   }}finally{await h.js("for(const [proto,name] of [[HTMLElement.prototype,'showPopover'],[HTMLElement.prototype,'hidePopover'],[HTMLDialogElement.prototype,'showModal'],[HTMLDialogElement.prototype,'close']])if(proto['qa_'+name])proto[name]=proto['qa_'+name];true");}
  }},
  {id:'errors-grouped-skip',stage:'errors',title:'Grouped errors and warnings show one row per kind with counts, paged paths and skip buttons; Skip these clears the group',covers:['grouped errors and warnings','skip buttons','All errors panel'],skip:needsHook,run:async h=>{

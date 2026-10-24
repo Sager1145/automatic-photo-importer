@@ -121,7 +121,9 @@ export function lowContrast(minimum: number): {text:string;ratio:number;color:st
   const back=background(parent);if(!back)continue;
   const fore=parse(getComputedStyle(parent).color);const color=blend(fore,back);
   const l1=lum(color),l2=lum(back),ratio=(Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05);
-  if(ratio<minimum)out.push({text:text.slice(0,60),ratio:Math.round(ratio*100)/100,color:getComputedStyle(parent).color,background:`rgb(${Math.round(back.r)}, ${Math.round(back.g)}, ${Math.round(back.b)})`});
+  const style=getComputedStyle(parent),size=parseFloat(style.fontSize);
+  const required=minimum>=4.5&&(size>=24||size>=18.66&&Number(style.fontWeight)>=700)?3:minimum;
+  if(ratio<required)out.push({text:text.slice(0,60),ratio:Math.round(ratio*100)/100,color:getComputedStyle(parent).color,background:`rgb(${Math.round(back.r)}, ${Math.round(back.g)}, ${Math.round(back.b)})`});
  }
  return out;
 }

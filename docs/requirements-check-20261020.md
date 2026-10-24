@@ -91,7 +91,7 @@ Existing drive backups made before this change sit directly under the backup fol
 | SRC-04 | EVIDENCE | `docs/hardware-a006-20261020.md` records real-card detection. This check had no hardware to verify current detection. |
 | SRC-05 | MET | Recursive walk (`core/inventory.ts:26-40`). `core.test.ts`. |
 | SRC-06 | MET | Sony `PRIVATE/M4ROOT/CLIP/C####M01.XML` is linked to its MP4 (`inventory.ts:55-65`, `core.test.ts:22`). |
-| SRC-07 | MET | "Enable media folder selection" switch. `main.ts:265` refuses folder sources until it is enabled. |
+| SRC-07 | MET | "Enable media folder selection" switch. `main.ts:265` refuses folder sources until it is enabled. Retired on 2026-10-23: choosing media folders is always available, see docs/ui-audit-2026-10-23.md. |
 | SRC-08 | MET | Separate "Choose media folder" and "Back up a drive or folder" actions. |
 | SRC-09 | MET | `source-cameras.ts` uses drive-name, layout and file hints (labelled unconfirmed) plus EXIF-confirmed models. Tested. |
 | SRC-10 | MET | Per-model map with counts and per-file routing. `source-cameras.test.ts` "multiple cameras". |
