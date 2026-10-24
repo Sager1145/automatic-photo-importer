@@ -68,6 +68,7 @@ export class EtaTracker {
   const merged={...old,...plan,totals:{...old?.totals,...plan.totals}};
   this.plans.set(id,merged);
   const state=this.jobs.get(id);
+  if(state)state.plan=merged;
   if(state&&(plan.source||plan.destinations)){
    state.context=this.contextOf(merged);
    state.book=this.bookOf(merged,state.context);
@@ -118,7 +119,12 @@ export class EtaTracker {
      const files=Math.max(0,state.known.files*copies-progress.matched),bytes=Math.max(0,(state.known.bytes??0)*copies-(progress.matchedBytes??0));
      set('copying',{files,bytes});set('verifying',{files,bytes});
     }
-    if(step==='copying')set('verifying',{files:total.files,bytes:total.bytes});
+    if(step==='copying'){
+     // Files copied directly are checked in place as they copy: only the rest are verified afterwards, and with none left there is no verify step.
+     const direct=progress?.work?.direct,planned=state.plan.totals?.verifying??total;
+     if(direct)model.setTotal('verifying',{files:Math.max(0,planned.files-direct.files),bytes:Math.max(0,planned.bytes-direct.bytes)});
+     else set('verifying',{files:total.files,bytes:total.bytes});
+    }
     break;
    case 'organization':
     if(step==='checking'){set('reading',{files:total.files,bytes:total.bytes});set('moving',{files:total.files,bytes:0,bytesKnown:false});}

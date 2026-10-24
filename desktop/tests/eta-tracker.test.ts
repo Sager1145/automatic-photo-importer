@@ -140,3 +140,37 @@ test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time
  for(let i=1;i<etas.length;i++)assert.ok(etas[i]!<=etas[i-1]!,`eta at sample ${i}: ${etas[i-1]} -> ${etas[i]}`);
  assert.ok(etas.at(-1)!<etas[0]!*0.8,`eta ${etas[0]} -> ${etas.at(-1)}`);
 });
+
+// Recorded 2026-10-24: a folder of 6,759 planned files (2,110 already in the backup, 20.0 GB to copy) to an exFAT drive written directly.
+// At 1:46 the copy count read 3,490 of 4,649 files and 15 GB of 20 GB, but the job showed 7% and about 13 min left: the model still
+// planned an exFAT verify step that a direct copy never runs (it checks each file in place as it copies).
+test('a direct copy to exFAT plans no verify step: the job percent and time left follow the copy counts',async()=>{
+ const {overviewFraction}=await import('../renderer/RootApp');
+ const {cardFraction,copyBasis}=await import('../renderer/progress');
+ const total=6759,skipped=2110,totalBytes=20032300690;
+ const tracker=new EtaTracker();
+ tracker.plan('j',{kind:'import',verify:true,...drives,publish:tracker.predictPublish(drives.destinations),totals:{copying:{files:total-skipped,bytes:totalBytes},verifying:{files:total,bytes:totalBytes}}});
+ const job:Job={id:'j',source:card,phase:'verifying',errors:[],backup:false,progress:{phase:'planning',step:'existing',completed:0,total,bytes:0,totalBytes:0,speed:0,file:''}};
+ const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin'};
+ // Confirming the files already on the drive: about 4 s.
+ for(let t=0;t<=4;t++){job.progress={...job.progress!,completed:Math.round(6287*t/4)};stampEstimates(state,tracker,t*1000);}
+ // Copying, as logged every 5 s from 08:08:01.9 (completed files, bytes); the progress between them is interpolated each second.
+ const logged:[number,number][]=[[34,397938893],[216,2176764504],[424,3895583514],[600,5717159537],[784,7214368276],[1076,7605324344],[1413,7605324344],[1753,7605324344],[2089,7605324344],[2448,7605324344],[2737,7605324344],[3077,8195114656],[3245,9838477429],[3373,11452902090],[3517,12868051383],[3879,13638258024],[4343,14025964993],[4758,14329316111],[4994,14496662394],[5262,14678906897],[5495,14873610246],[5853,15160326622]];
+ job.phase='copying';
+ let previous:[number,number]=[0,0],now=5000;
+ for(const point of logged){
+  for(let step=1;step<=5;step++){
+   const completed=Math.round(previous[0]+(point[0]-previous[0])*step/5),bytes=previous[1]+(point[1]-previous[1])*step/5;
+   job.progress={phase:'copying',completed,total,skipped,bytes,totalBytes,speed:0,file:'',work:{files:completed,bytes,totalFiles:total,totalBytes,direct:{files:total,bytes:totalBytes}}};
+   stampEstimates(state,tracker,now);now+=1000;
+  }
+  previous=point;
+ }
+ // 08:09:46: 18 s before the copy (and the job) ended.
+ const basis=copyBasis(job.progress!),files=basis.completed/basis.total,data=job.progress!.bytes/totalBytes;
+ assert.equal(basis.completed,3743);assert.equal(basis.total,4649);
+ const percent=cardFraction(job)!;
+ for(const [name,value] of [['files copied',files],['bytes copied',data]] as const)assert.ok(Math.abs(percent-value)<0.1,`job ${Math.round(percent*100)}% vs ${name} ${Math.round(value*100)}%`);
+ assert.equal(overviewFraction([job]),percent,'the overview reads the same number');
+ assert.ok(job.eta!>0&&job.eta!<120,`time left ${job.eta} s, not the ~13 min a verify step would add`);
+});

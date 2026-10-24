@@ -466,3 +466,17 @@ test('a family whose files were left finished by a kill gets its dates from the 
   }
   await assertNothingOwned(env.root);
 });
+
+test('a direct copy says in its copy progress that it checks in place, and no verify step follows',async t=>{
+  const env=await ready(t);if(!env) return;
+  const {executeDestinations}=await import('../core/destinations');
+  const planned=(await plan(env.card,[env.root],options,metadata)).plans[0]!,bytes=planned.entries.reduce((sum,entry)=>sum+entry.size,0);
+  const seen:import('../shared').Progress[]=[];
+  const result=await executeDestinations([planned],{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index,value)=>{seen.push(value);},settled:()=>{}});
+  assert.deepEqual(result.errors,[]);
+  const copying=seen.filter(item=>item.phase==='copying'&&!item.step);
+  assert.ok(copying.length>0);
+  // The time-left model counts these files as checked once copied: it plans no verify step for them.
+  assert.deepEqual(copying.at(-1)!.work?.direct,{files:FILES,bytes});
+  assert.deepEqual(seen.filter(item=>item.phase==='verifying'&&!item.step),[],'no verify step');
+});
