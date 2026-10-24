@@ -11,7 +11,8 @@ import {destinationEntries} from '../core/allocation';
 import {sourcePolicy,freshOrganizeOptions,organizeDefaults} from '../run-policy';
 import {normalizePreferences} from '../preferences';
 import {I18nProvider,languages,createTranslator} from '../renderer/i18n';
-import {DeleteOriginals,OriginalsConfirm,nextConfirmStep} from '../renderer/RootApp';
+import {DeleteOriginals,OriginalsConfirm} from '../renderer/RootApp';
+import {nextConfirmStep} from '../renderer/ui';
 import type {Job,Metadata} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');

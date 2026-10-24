@@ -37,7 +37,8 @@ test('job fraction is the cost of the work done over the cost of all the work',(
 });
 
 test('the card bar and the overview use the same number',async()=>{
- const {cardFraction,overviewFraction}=await import('../renderer/RootApp');
+ const {overviewFraction}=await import('../renderer/RootApp');
+ const {cardFraction}=await import('../renderer/progress');
  const verifying=job({phase:'verifying',fraction:0.35,cost:{done:35,total:100},progress:{phase:'verifying',completed:34863,total:43539,bytes:0,totalBytes:167e9,speed:0,file:''}});
  assert.equal(cardFraction(verifying),0.35,'not the 98% the old weighting gave');
  assert.equal(overviewFraction([verifying]),cardFraction(verifying));

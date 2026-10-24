@@ -1,37 +1,38 @@
-import { createPortal, flushSync } from 'react-dom';
+import { createPortal } from 'react-dom';
 import {createStateReceiver} from '../state-channel';
 import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
-import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed, speedUnit, type SpeedUnit } from './i18n';
-import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed } from './i18n';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Copy,
   ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
   Activity, EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
   Circle, LayoutGrid, List, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
-  Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Timer, Trash2, Usb, X, ArrowUpToLine,
+  Save, ScanLine, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, AutoOrganizeBackup, BackupMode, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { ACTIVE_PHASES, isRunning } from '../shared';
+import { isRunning } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure, shutterNoteText } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
-import { DisplayHold, remainingBucket, remainingRange } from '../eta-format';
+import { DisplayHold } from '../eta-format';
 import { settingsLocked } from '../settings-lock';
 import { validNoMetadataFolder } from '../no-metadata';
 import { DuplicatesPage, duplicatesBusy } from './DuplicatesPage';
+import { Button, CardHeader, ConfirmSheet, Icon, ReleaseConfirm, animateInterfaceChange, interfaceSettled, interfaceTransition, motionMs, nextConfirmStep, reducedMotion, sheetOrder, showSheet, useAnimatedClose, type DeleteRecoveryStep, type Dispatch, type InterfaceChange } from './ui';
+import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, formatEstimate, formatRemaining, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shareThrough, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
 import { BrandLogo } from './BrandLogo';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
 
 type Page = 'desk' | 'drives' | 'organization' | 'duplicates' | 'history' | 'settings';
 const pageOrder: Page[] = ['desk', 'drives', 'organization', 'duplicates', 'history', 'settings'];
-type Dispatch = (action: Action) => void;
 /** Destinations are checked in the background after launch: one with no status yet is still being checked, and only a finished check that reports it unavailable makes it offline. */
 export function destinationReadiness(state: Pick<AppState, 'preferences' | 'destinationStatus'>) {
   const required = state.preferences.copyMode === 'single' ? 1 : 2;
@@ -45,8 +46,6 @@ export function destinationReadiness(state: Pick<AppState, 'preferences' | 'dest
 }
 /** metadata: the routing read the summary shows; fields: every tag, from the full read for All metadata. */
 type Preview = { path: string; metadata?: Metadata; fields?: Record<string, unknown>; loading: boolean; error?: string };
-/** DuplicatesPage reads the active phases from here until the shared UI module replaces this import. */
-export const activePhases = ACTIVE_PHASES;
 
 // In the order the options were asked for; 'flat' is the default.
 const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
@@ -81,100 +80,7 @@ function PathPreview({ label, parts, testId }: { label: string; parts: string[];
   return <div className="folder-preview" data-testid={testId}><span><Icon icon={Folder} size={17} />{label}</span><div>{parts.map((part, index) => <span key={`${index}-${part}`}>{index > 0 && <Icon icon={ChevronRight} size={13} />}<span>{part}</span></span>)}</div></div>;
 }
 function driveBackupFolder(basePath: string): string { return [...basePath.split(/[\\/]/).filter(Boolean), 'Drive backups', '<drive name>'].join('/'); }
-/** A long path cut in the middle so both its folder and its file name stay readable. */
-export function truncateMiddle(value: string, max = 56): string {
-  if (value.length <= max) return value;
-  const keep = max - 1, head = Math.ceil(keep * .4), tail = keep - head;
-  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
-}
-/** The file a step is on, as the path relative to the source root, with its full path as the tooltip. */
-/** The kinds of step a progress bar can show; each has one color (--step-<kind> in styles.css) everywhere it is drawn. */
-export type StepKind = 'scan' | 'read' | 'compare' | 'copy' | 'verify' | 'move' | 'tidy' | 'delete';
-export function stepKind(progress?: Pick<Progress, 'phase' | 'step' | 'renames'>): StepKind | undefined {
-  if (!progress) return undefined;
-  switch (progress.step) {
-    case 'listing': case 'scanning': return 'scan';
-    case 'checking': case 'reading': case 'history': case 'earlier': case 'later': case 'records': case 'journals': case 'preparing': case 'index': return 'read';
-    case 'comparing': case 'locating': case 'existing': case 'confirming': case 'mirroring': return 'compare';
-    case 'moving': return 'move';
-    case 'stashing': case 'tidying': case 'releasing': case 'restoring': case 'removing': case 'cleaning': case 'measuring': return 'tidy';
-    case 'deleting': return 'delete';
-    case 'downloading': return 'copy';
-  }
-  return progress.phase === 'verifying' ? 'verify' : progress.renames ? 'move' : progress.phase === 'planning' ? 'read' : 'copy';
-}
-/** The file in progress sits on its own full-width line below the stats, so a longer name never moves them. */
-function ProgressFile({ file }: { file?: string }) {
-  return file ? <span className="progress-file" data-testid="progress-file" title={file}>{truncateMiddle(file)}</span> : null;
-}
-/** The one progress layout every operation uses: the bar, then "{done} of {total} {unit}" with the percent, the speed,
- * elapsed and time left, and the file it is on. Indeterminate only before the first event (or while no estimate exists),
- * and never full before the work has ended. */
-export interface ProgressDisplayProps {
-  label: string; fraction?: number; finished?: boolean; count?: ReactNode; speed?: SpeedInput;
-  startedAt?: string; endedAt?: string; left?: string; etaTestId?: string; file?: string;
-  heading?: ReactNode; extra?: ReactNode; actions?: ReactNode; className?: string; testId?: string; calm?: boolean; step?: StepKind;
-  /** The bar's layers, first stage first: each fills its own color from the left over the stages before it. Without it, `step` draws one layer. */
-  stages?: StageLayer[];
-  /** Paused or pausing: every layer shows the paused color; the widths stay. */
-  paused?: boolean;
-  /** Nothing is planned: an empty bar and no percentage. */
-  empty?: boolean;
-}
-export function ProgressDisplay(props: ProgressDisplayProps) {
-  const { t, formatNumber } = useTranslation();
-  const known = props.fraction !== undefined;
-  const shown = known ? (props.finished ? 1 : Math.min(.99, Math.max(0, props.fraction!))) : 0;
-  const staged: StageLayer[] = props.stages?.length ? props.stages : props.step ? [{ kind: props.step, fraction: shown }] : !known && !props.empty ? [{ kind: 'scan', fraction: shown }] : [];
-  // A finished bar is full in every layer; a running one never shows its last layer full.
-  const layers = staged.map((layer, index) => ({ kind: layer.kind, fraction: props.finished ? 1 : Math.min(index === staged.length - 1 ? .99 : 1, Math.max(0, layer.fraction)) }));
-  return <div className={`progress-display ${props.className ?? ''} ${props.calm ? 'source-progress-calm' : ''}`} data-progress-display="" {...(props.step ? { 'data-step': props.step } : {})} {...(props.paused ? { 'data-paused': '' } : {})} {...(props.testId ? { 'data-testid': props.testId } : {})}>
-    {props.heading}
-    <ProgressBar value={shown} indeterminate={!known && !props.empty} label={props.label} layers={layers} />
-    <div className="progress-display-line">
-      <span className="progress-count" data-testid="progress-count">{props.count ?? t("Starting…")}</span>
-      {known && !props.empty && <strong className="progress-percent">{`${formatNumber(shownPercent(props.fraction!, !!props.finished))}%`}</strong>}
-      {props.speed && <ProgressSpeed progress={props.speed} />}
-      <ProgressTiming startedAt={props.startedAt} endedAt={props.endedAt} left={props.left} etaTestId={props.etaTestId} />
-      {props.extra}{props.actions}
-    </div>
-    <ProgressFile file={props.file} />
-  </div>;
-}
-/** The time-left display holds of this window, one per job id (or other timed operation), so every place that shows a time left shows
- * the same held, rounded value (eta-format's DisplayHold). The main process sends the model's seconds. Without a provider (a component
- * rendered on its own) a time is shown as given. */
-export const EtaHolds = createContext<Map<string, DisplayHold> | undefined>(undefined);
-type Held = (key: string, seconds: number | undefined) => number | undefined;
-function useHeld(): Held {
-  const holds = useContext(EtaHolds);
-  return (key, seconds) => {
-    if (!holds) return seconds;
-    if (seconds === undefined) { holds.delete(key); return undefined; }
-    let hold = holds.get(key);
-    if (!hold) { hold = new DisplayHold(); holds.set(key, hold); }
-    return hold.next(seconds, Date.now());
-  };
-}
-/** Time left for an operation that is not a job (a review, a check, a listing). */
-function progressLeft(progress: Pick<Progress, 'eta' | 'total' | 'share'>, t: ReturnType<typeof createTranslator>, eta = progress.eta): string | undefined {
-  return eta !== undefined ? t("{time} left", { time: formatRemaining(eta, t) }) : progress.total > 0 || progress.share !== undefined ? t("Estimating time left…") : undefined;
-}
-/** An operation that is not a job, shown with the shared layout: a review, the backup folder check, the leftover check, the recovery listing.
- * `holdKey` names it for the time-left hold; by default its test id and label. */
-export function OperationProgress({ progress, label, testId, className, holdKey }: { progress?: Progress; label: string; testId?: string; className?: string; holdKey?: string }) {
-  const { t, formatNumber, formatBytes } = useTranslation();
-  const eta = useHeld()(holdKey ?? `${testId ?? ''}:${label}`, progress?.eta);
-  if (!progress) return <ProgressDisplay label={label} testId={testId} className={className} />;
-  return <ProgressDisplay label={label} testId={testId} className={className} fraction={progressFraction(progress)} count={progressCount(progress, t, formatNumber, false, formatBytes)} speed={progress} startedAt={progress.startedAt} left={progressLeft(progress, t, eta)} file={progress.file} step={stepKind(progress)} />;
-}
 function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
-export function Icon({ icon: IconComponent, size = 18, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
-  return <IconComponent size={size} strokeWidth={1.8} aria-hidden="true" className={className} />;
-}
-export function Button({ children, icon, kind = 'secondary', className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: LucideIcon; kind?: 'primary' | 'secondary' | 'quiet' | 'danger' }) {
-  return <button type="button" className={`button button-${kind} ${children === undefined || children === null || children === false ? 'button-icon-only' : ''} ${className}`} {...props}>{icon && <Icon icon={icon} />}{children}</button>;
-}
 function Switch({ checked, onChange, label, detail, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; detail?: string; disabled?: boolean }) {
   return <label className={`switch-row ${disabled ? 'is-disabled' : ''}`}>
     <span className="switch-copy"><span>{label}</span>{detail && <small>{detail}</small>}</span>
@@ -260,41 +166,7 @@ export function totalDriveActivity(state: AppState, keys: string[]): { utilizati
   return { utilization: Math.max(...found.map(item => item.utilization)), readBps: found.reduce((sum, item) => sum + item.readBps, 0), writeBps: found.reduce((sum, item) => sum + item.writeBps, 0), count: found.length };
 }
 
-/** What a stage is called, for the bar's spoken value. */
-function stageName(kind: StepKind | 'folder-check', t: ReturnType<typeof createTranslator>): string {
-  return { scan: t("Scanning"), read: t("Reading"), compare: t("Comparing"), copy: t("Copying"), move: t("Moving"), verify: t("Verifying"), tidy: t("Tidying"), delete: t("Deleting"), 'folder-check': t("Checking folder") }[kind];
-}
-/** One fill layer per stage, stacked in the track in order: a finished stage keeps its full-width color and the next one grows over it. */
-function ProgressBar({ value, label, indeterminate = false, layers = [] }: { value: number; label: string; indeterminate?: boolean; layers?: StageLayer[] }) {
-  const { t, formatNumber } = useTranslation();
-  const percent = Math.round(Math.max(0, Math.min(1, value)) * 100), top = layers.at(-1);
-  return <div className={`progress-track ${indeterminate ? 'progress-discovering' : ''}`} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} {...(!indeterminate ? { 'aria-valuenow': percent } : {})} {...(!indeterminate && top ? { 'aria-valuetext': t("{stage}, {percent}%", { stage: stageName(top.kind, t), percent: formatNumber(percent) }) } : {})}>{layers.length
-    ? layers.map((layer, index) => <span key={index} data-layer="" data-step={layer.kind} style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, layer.fraction))})` }} />)
-    : <span style={indeterminate ? { width: '24%' } : { transform: `scaleX(${Math.max(0, Math.min(1, value))})` }} />}</div>;
-}
 
-// Motion: one set of durations and curves, defined in styles.css (:root) and read here. See docs/motion-audit.md.
-export function reducedMotion(): boolean { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
-function motionToken(name: '--quick' | '--base' | '--slow' | '--ease-ios'): string { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-const motionMs = (name: '--quick' | '--base' | '--slow') => parseFloat(motionToken(name)) || 0;
-/** Pages slide in the direction of travel, Settings panels rise or fall, cards morph to their new place, everything else crossfades. */
-export type InterfaceChange = 'crossfade' | 'layout' | 'forward' | 'back' | 'category-forward' | 'category-back';
-let interfaceTransition: ViewTransition | undefined;
-// DOM order does not reflect the top layer: an automatic prompt can open over
-// metadata even though its element occurs earlier in the tree.
-const sheetOrder = new WeakMap<HTMLDialogElement, number>();
-let sheetSequence = 0;
-/** Runs a DOM change as a View Transition; a newer change skips the running one, and reduced motion applies it directly. */
-export function animateInterfaceChange(change: () => void, kind: InterfaceChange = 'crossfade') {
-  interfaceTransition?.skipTransition();
-  // While a sheet or an error message is up the page changes without a transition: a transition's snapshots
-  // would be drawn above the sheet's backdrop, and it takes every click and hit test away from the error message.
-  if (!document.startViewTransition || reducedMotion() || document.querySelector('dialog[open], [data-error-layer]:popover-open')) { change(); return; }
-  document.documentElement.dataset.transition = kind;
-  const transition = interfaceTransition = document.startViewTransition(() => flushSync(change));
-  void transition.finished.catch(() => {}).then(() => { if (interfaceTransition === transition) { interfaceTransition = undefined; delete document.documentElement.dataset.transition; } });
-}
-const interfaceSettled = () => interfaceTransition?.finished.catch(() => {}) ?? Promise.resolve();
 /** Which importer updates are interface swaps, and how they animate. Progress ticks are not: they render directly. */
 export function interfaceChangeKind(previous: AppState, next: AppState): InterfaceChange | undefined {
   const a = previous.preferences, b = next.preferences;
@@ -302,30 +174,6 @@ export function interfaceChangeKind(previous: AppState, next: AppState): Interfa
   // Cards and rows that come, go or move: drives, organizations, the overview, destination slots, the review.
   const layout = (state: AppState) => [state.sources.map(source => source.id).join('|'), [...new Set(state.jobs.map(job => `${job.organization ? 'organization' : 'source'}:${job.source.id}`))].sort().join('|'), state.preferences.sourceLayout ?? 'list', state.preferences.showDashboard !== false, state.preferences.copyMode, state.preferences.destinations.join('|'), state.review?.id ?? !!state.busyReview].join('\n');
   return layout(previous) !== layout(next) ? 'layout' : undefined;
-}
-// A sheet opened mid-transition would render beneath the page snapshots, so finish the transition first.
-// Errors are always on top: a sheet that opens over an error surface (the toast, All errors) is put back beneath it.
-export function showSheet(dialog: HTMLDialogElement | null) {
-  interfaceTransition?.skipTransition();
-  if (dialog) { dialog.showModal(); sheetOrder.set(dialog, ++sheetSequence); }
-  for (const error of document.querySelectorAll<HTMLElement>('[data-error-layer]')) {
-    if (error === dialog) continue;
-    if (error instanceof HTMLDialogElement) { if (error.open) { error.close(); error.showModal(); sheetOrder.set(error, ++sheetSequence); } }
-    else if (error.matches(':popover-open')) { error.hidePopover(); error.showPopover(); }
-  }
-}
-/** Plays the exit of something React is about to remove (a sheet, the toast), then removes it. onClose returns false when new content arrived meanwhile: the element then stays, fully shown. */
-export function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose: () => void | false) {
-  const closing = useRef(false);
-  return useCallback(() => {
-    if (closing.current) return;
-    closing.current = true;
-    const done = () => { closing.current = false; if (onClose() === false) for (const animation of element.current?.getAnimations() ?? []) animation.cancel(); };
-    const node = element.current;
-    if (!node || reducedMotion()) { done(); return; }
-    const animation = node.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(10px) scale(.97)'}],{duration:motionMs('--quick'),easing:motionToken('--ease-ios'),fill:'forwards'});
-    void animation.finished.catch(() => {}).then(done);
-  },[element,onClose]);
 }
 
 export default function RootApp() {
@@ -1119,32 +967,7 @@ export function RetainedOriginals({ job, act, busy, recoverySize }: { job: NonNu
   </section>;
 }
 
-/** The skeleton every confirmation shares: a sheet with a title, a body and Cancel / danger buttons. A 'second' step opens with Cancel focused, so Return never confirms by accident. */
-export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
-  const { t } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null), heading = useId();
-  const close = useAnimatedClose(dialog, onCancel);
-  useEffect(() => { const element = dialog.current; showSheet(element); if (step === 'second') element?.querySelector<HTMLButtonElement>('[data-autofocus]')?.focus(); return () => element?.close(); }, [step]);
-  return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby={heading} data-testid={testId} onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><h2 id={heading}>{title}</h2></div>
-    <div className="activity-content">{children}</div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
-  </dialog>;
-}
-export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {
-  const { t } = useTranslation();
-  return <ConfirmSheet title={t("Release {size}?", { size })} confirmLabel={t("Release {size}", { size })} testId="release-confirm" onCancel={onCancel} onConfirm={onConfirm}><p>{t("This deletes the kept originals. Undo won't be possible.")}</p><p className="recovery-root">{root}</p></ConfirmSheet>;
-}
 
-/** Deleting recovery files asks twice: the first sheet says undo goes away and how much is freed, the
- * second asks again with the exact amount, Cancel focused. Only confirming the second deletes. */
-export type DeleteRecoveryStep = 'closed' | 'first' | 'second';
-export function nextConfirmStep(step: DeleteRecoveryStep, choice: 'open' | 'confirm' | 'cancel'): { step: DeleteRecoveryStep; delete: boolean } {
-  if (choice === 'cancel') return { step: 'closed', delete: false };
-  if (choice === 'open') return { step: step === 'closed' ? 'first' : step, delete: false };
-  if (step === 'first') return { step: 'second', delete: false };
-  return { step: 'closed', delete: step === 'second' };
-}
 /** Only a finished, replaced or fully undone organization's recovery files can be deleted. */
 export const recoveryDeletable = (job: NonNullable<AppState['organizationRecovery']>[number]) => !job.error && (job.status === 'complete' || job.status === 'superseded' || job.status === 'undone');
 
@@ -1321,15 +1144,6 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
     })}</ul><p className="settings-explanation">{t("Change this any time in Drives.")}</p></div>
   </dialog>;
 }
-/** The job has stopped for good: finished, failed or stopped. */
-const ended = (job: Job) => job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
-/** Every file was verified and none failed: whatever else ended the job (cleanup leftovers), the copy itself is done. */
-export function allVerified(job: Job): boolean {
-  const progress = job.progress;
-  return !!progress && progress.phase === 'verifying' && !progress.step && progress.total > 0 && progress.completed === progress.total && !progress.failed;
-}
-/** Complete, or ended with an error only after every file was verified. */
-export const jobFinished = (job: Job) => job.phase === 'complete' || (job.phase === 'error' && allVerified(job));
 type StepState = 'pending' | 'active' | 'done' | 'error' | 'paused' | 'skipped';
 // Scanning → Copying → Verifying for one source, derived from its latest job and read-only scan.
 export function sourceStepStates(job: Job | undefined, inventory: Inventory | undefined, scanning: boolean, verifyOff: boolean, reviewing = false): StepState[] {
@@ -1343,62 +1157,12 @@ export function sourceStepStates(job: Job | undefined, inventory: Inventory | un
   const current: StepState = job.phase === 'error' ? 'error' : job.phase === 'stopped' ? 'paused' : 'active';
   return [0, 1, 2].map(index => index === 2 && verifyOff ? 'skipped' : index < stage ? 'done' : index === stage ? current : 'pending');
 }
-/** The color kind of Scanning, Copying (or Moving) and Verifying; Scanning takes the kind of the sub-step it is on (reading metadata, comparing). */
-export function sourceStepKinds(job?: Job): [StepKind, StepKind, StepKind] {
-  const lead = job?.progress && job.progress.phase !== 'copying' && job.progress.phase !== 'verifying' ? stepKind(job.progress) : undefined;
-  return [lead ?? 'scan', job?.progress?.renames ? 'move' : 'copy', 'verify'];
-}
-/** One stage of a progress bar: its color kind and how far it is (0 to 1). */
-export interface StageLayer { kind: StepKind; fraction: number }
-/** The steps of an organization or other job that is not a plain import, in the order they run. */
-const organizationKinds: StepKind[] = ['scan', 'read', 'compare', 'move', 'copy', 'verify', 'tidy', 'delete'];
 /** Where a stage sits in a job's run, for comparing jobs of different kinds. */
 const stageRank: Record<StepKind, number> = { scan: 0, read: 1, compare: 2, copy: 3, move: 3, verify: 4, tidy: 5, delete: 6 };
-const jobPaused = (job: Job) => (job.phase === 'stopped' && !!job.paused) || job.stopping === 'pause';
 /** The whole queue is paused (or pausing): every job that is still to run or running is. Finished and failed jobs do not count. */
 function totalPaused(jobs: Job[]): boolean {
   const open = jobs.filter(job => isRunning(job) || job.phase === 'queued' || jobPaused(job));
   return open.length > 0 && open.every(jobPaused);
-}
-interface StagePlan { kinds: StepKind[]; index: number; fraction: number; finished: boolean }
-/** The stage a job is on, the stages it passes, and how far the current one is (the step progress the step list uses). */
-function stagePlan(job: Job, verify: boolean): StagePlan | undefined {
-  const progress = job.progress, finished = job.phase === 'complete' || jobFinished(job);
-  if (!progress && !finished) return undefined;
-  if (job.organization || progress?.renames) {
-    const index = Math.max(0, organizationKinds.indexOf(stepKind(progress) ?? 'move'));
-    return { kinds: organizationKinds, index, fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
-  }
-  const kinds: StepKind[] = sourceStepKinds(job).filter((_, index) => verify || index < 2);
-  const index = finished ? kinds.length - 1 : progress?.phase === 'verifying' ? 2 : progress?.phase === 'copying' || job.phase === 'copying' ? 1 : 0;
-  return { kinds, index: Math.min(index, kinds.length - 1), fraction: finished ? 1 : progress ? progressFraction(progress) ?? 0 : 0, finished };
-}
-/** Which stage of a plan's bar a step of the time-left model belongs to: for an import everything before copying is the first stage, then copying, then verifying and publishing. */
-function stageOfStep(plan: StagePlan, step: string): number {
-  const last = plan.kinds.length - 1;
-  const kind: StepKind | undefined = step === 'copying' ? 'copy' : /^(verifying|publish)/.test(step) ? 'verify' : stepKind({ step } as Pick<Progress, 'phase' | 'step' | 'renames'>);
-  if (plan.kinds !== organizationKinds) return kind === 'copy' ? Math.min(1, last) : kind === 'verify' ? last : 0;
-  const at = kind ? plan.kinds.indexOf(kind) : -1;
-  return at < 0 ? 0 : at;
-}
-/** The share of the whole job done once stage `stage` and those before it are counted (what the model's steps up to it have done), from the job's cumulative step shares. */
-function shareThrough(job: Job, plan: StagePlan, stage: number): number {
-  let share = 0;
-  for (const item of job.stageShares ?? []) if (stageOfStep(plan, item.step) <= stage) share = Math.max(share, item.share);
-  return share;
-}
-/** A running job's layers drawn by cost: layer i reaches as far as everything up to its stage has done of the whole job, so the bar's length is the percent shown
- * (a finished stage stays as a full-colour segment and the next colour grows over it). Undefined when the job has no step shares yet. */
-function costLayers(job: Job, plan: StagePlan): StageLayer[] | undefined {
-  if (!job.stageShares?.length || plan.finished || job.fraction === undefined) return undefined;
-  const top = Math.min(1, Math.max(0, job.fraction));
-  return plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? Math.min(top, shareThrough(job, plan, index)) : top }));
-}
-const layersOfPlan = (plan: StagePlan, top = plan.fraction): StageLayer[] => plan.kinds.slice(0, plan.index + 1).map((kind, index) => ({ kind, fraction: index < plan.index ? 1 : top }));
-/** A job's bar: one layer per stage up to the one it is on, each as far as the job's cost done through that stage (the bar is as long as the percent). */
-export function jobStageLayers(job: Job, verify = true): StageLayer[] {
-  const plan = stagePlan(job, verify);
-  return plan ? costLayers(job, plan) ?? layersOfPlan(plan) : [];
 }
 /** The total bar: the layers of the least advanced job, so the top color is the stage that still holds the whole back. Jobs already past that
  * stage count as done in it, which keeps the top layer growing as the slowest job catches up. With every job finished it is full in the final stage's color.
@@ -1432,99 +1196,10 @@ export function SourceSteps({ job, inventory, scanning, verifyOff, reviewing = f
   })}</ol>;
 }
 
-// A scan first lists the card's files, then reads camera metadata from each media file.
-// A library organization: planning first (files checked), then moving and verifying, with n of x and %.
-// Share done: planning reads use bytes, planning checks and verification use files, copying uses bytes.
-/** 100% only once the work is finished: the last file can still be in progress at 99.9%. */
-export function shownPercent(fraction: number, finished: boolean): number {
-  return finished ? 100 : Math.min(99, Math.floor(Math.max(0, fraction) * 100));
-}
-/** Steps that count files, not bytes: a rename moves no data, and checks, deletes and downloads read none. */
-const fileSteps = ['history', 'earlier', 'later', 'records', 'journals', 'cleaning', 'measuring', 'preparing', 'mirroring', 'confirming', 'existing', 'checking', 'releasing', 'restoring', 'deleting', 'removing', 'stashing', 'tidying', 'downloading'];
-/** How far a step is, the same number the count and the percent show. Undefined only while nothing can be estimated. */
-export function progressFraction(progress: NonNullable<Job['progress']>): number | undefined {
-  const basis = copyBasis(progress);
-  // Bytes at zero say nothing yet (a rename moves none): then the files are the measure.
-  const files = basis.total ? basis.completed / basis.total : undefined, data = progress.totalBytes && progress.bytes > 0 ? progress.bytes / progress.totalBytes : undefined;
-  // Looking for files elsewhere in the backup first lists it: no total yet.
-  if (progress.phase === 'planning' && progress.step === 'locating' && !progress.total) return 0;
-  // A listing's (or a look-through's) total is an estimate: its share stays below 100% until the step ends and the next begins.
-  if (progress.phase === 'planning' && (progress.step === 'listing' || progress.step === 'scanning' || progress.step === 'measuring')) { const share = progress.share ?? files ?? data; return share === undefined ? undefined : Math.min(.99, share); }
-  if (progress.phase === 'planning') return progress.step === 'reading' ? data ?? files : files ?? data;
-  return progress.phase === 'verifying' || progress.renames || (progress.step && fileSteps.includes(progress.step)) ? files ?? data : data ?? files;
-}
-/** Copying counts only the files being copied: those already verified on the destination are skipped and shown apart. */
-export function copyBasis(progress: NonNullable<Job['progress']>): { completed: number; total: number; skipped: number } {
-  const copying = progress.phase === 'copying' && !progress.step && !progress.renames, skipped = copying ? Math.min(progress.skipped ?? 0, progress.total) : 0;
-  return { completed: Math.max(0, progress.completed - skipped), total: progress.total - skipped, skipped };
-}
 /** The quiet note beside a copy count: how many files were already in the backup. */
 export function progressSkippedNote(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string): string | undefined {
   const { skipped } = copyBasis(progress);
   return skipped > 0 ? t("{count} already in the backup", { count: formatNumber(skipped) }) : undefined;
-}
-export function progressCount(progress: NonNullable<Job['progress']>, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
-  const basis = copyBasis(progress), counts = { completed: formatNumber(basis.completed), total: formatNumber(basis.total) };
-  // While listing, the size found so far is the only other measure.
-  if (progress.phase === 'planning' && progress.step === 'listing' && formatBytes) return t("{completed} files found · {size}", { ...counts, size: formatBytes(progress.bytes) });
-  if (progress.phase === 'planning' && progress.step === 'reading' && formatBytes && progress.totalBytes) return t("{completed} of {total} files read · {size} of {totalSize}", { ...counts, size: formatBytes(progress.bytes), totalSize: formatBytes(progress.totalBytes) });
-  if (progress.step === 'downloading') return t("{completed} of {total} files downloaded", counts);
-  if (progress.step === 'removing') return t("{completed} of {total} extra files set aside", counts);
-  if (progress.step === 'scanning') return t("{completed} files looked at", counts);
-  if (progress.step === 'stashing') return t("Setting aside duplicates: {completed} of {total}", counts);
-  if (progress.step === 'fingerprinting') return t("Reading metadata: {completed} of {total} files", counts);
-  if (progress.step === 'candidates') return t("Confirming possible duplicates: {completed} of {total} files", counts);
-  if (progress.step === 'collisions') return t("Looking for identical files: {completed} of {total} files", counts);
-  if (progress.step === 'tidying') return t("Finishing up: {completed} of {total}", counts);
-  if (progress.step === 'releasing') return t("{completed} of {total} files released", counts);
-  if (progress.step === 'restoring') return t("{completed} of {total} files put back", counts);
-  if (progress.step === 'deleting') return t("{completed} of {total} files deleted", counts);
-  if (progress.step === 'history') return t("Reading organization history: {completed} of {total} files", counts);
-  if (progress.step === 'earlier') return t("Checking the earlier organization: {completed} of {total} records", counts);
-  if (progress.step === 'later') return t("Reading later organizations: {completed} of {total}", counts);
-  if (progress.step === 'records') return t("Reading earlier organization records: {completed} of {total}", counts);
-  if (progress.step === 'journals') return t("Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}", { ...counts, journal: formatNumber(progress.journal?.index ?? 1), journals: formatNumber(progress.journal?.count ?? 1) });
-  if (progress.step === 'cleaning') return t("Removing old record files: {completed} of {total}", counts);
-  if (progress.step === 'measuring') return t("Measuring: {completed} files", counts);
-  if (progress.step === 'preparing') return t("Preparing destinations: {completed} of {total}", counts);
-  if (progress.step === 'mirroring') return t("Comparing the backup with the drive: {completed} of {total}", counts);
-  if (progress.step === 'index') return t("Loading the destination index: {size} of {totalSize}", { size: formatBytes ? formatBytes(progress.bytes) : counts.completed, totalSize: formatBytes ? formatBytes(progress.totalBytes) : counts.total });
-  if (progress.step === 'confirming') return t("Confirming files before moving: {completed} of {total}", counts);
-  if (progress.step === 'comparing') return progress.bytes > 0 && formatBytes ? t("Checking the destination: {completed} of {total} files · {size} read", { ...counts, size: formatBytes(progress.bytes) }) : t("Checking the destination: {completed} of {total} files", counts);
-  if (progress.step === 'locating') return progress.total ? t("Looking for files already in the backup: {completed} of {total}", counts) : t("{completed} files found", counts);
-  if (progress.step === 'existing') return t("Confirming files already on the destination: {completed} of {total}", counts);
-  if (progress.phase === 'planning') return t(progress.step === 'listing' ? "{completed} files found" : progress.step === 'reading' ? "{completed} of {total} files read" : "{completed} of {total} files checked", counts);
-  // Verifying also shows how many bytes of the copied files are published.
-  if (progress.phase === 'verifying' && progress.work?.totalBytes && formatBytes) return t("{completed} of {total} files verified · {size} of {totalSize}", { ...counts, size: formatBytes(progress.work.bytes), totalSize: formatBytes(progress.work.totalBytes) });
-  return t(progress.phase === 'verifying' ? "{completed} of {total} files verified" : progress.renames ? "{completed} of {total} files moved" : organization ? "{completed} of {total} files organized" : "{completed} of {total} files copied", counts);
-}
-export function formatDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, sec = String(seconds % 60).padStart(2, '0');
-  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
-}
-/** Elapsed time and time left side by side: "12:03 elapsed · about 8 min left". Ticks once a second only while
- * running, so just this label re-renders; endedAt shows the total time instead ("Took 1:02:05"). */
-export function ProgressTiming({ startedAt, endedAt, left, etaTestId = 'eta' }: { startedAt?: string; endedAt?: string; left?: string; etaTestId?: string }) {
-  const { t } = useTranslation();
-  const ticking = !!startedAt && !endedAt;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { if (!ticking) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [ticking]);
-  if (!startedAt && !left) return null;
-  const time = startedAt ? formatDuration((endedAt ? Date.parse(endedAt) : now) - Date.parse(startedAt)) : undefined;
-  return <span className="progress-elapsed" data-testid="timing"><Icon icon={Timer} size={12} />{time && <span data-testid="elapsed">{endedAt ? t("Took {time}", { time }) : t("{time} elapsed", { time })}</span>}{time && left && ' · '}{left && <em className="progress-eta" data-testid={etaTestId}>{left}</em>}</span>;
-}
-/** A job's elapsed time with its time left, and its total time once it ends. */
-function jobTiming(job: Job, t: ReturnType<typeof createTranslator>, held: Held): { startedAt?: string; endedAt?: string; left?: string } {
-  const running = isRunning(job), finished = job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
-  const startedAt = running || (finished && job.phaseStartedAt) ? job.startedAt : undefined;
-  const left = jobRemaining(job, t, held, running);
-  return { startedAt, endedAt: finished ? job.phaseStartedAt : undefined, left };
-}
-/** How far a whole job is: the share of its work the main process measured (every step weighted by what it costs, the same number the
- * overview adds up); a finished job is full. Undefined while nothing is measured, so the bar is indeterminate rather than guessed. */
-export function cardFraction(job: Job): number | undefined {
-  if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
-  return job.progress ? job.fraction : undefined;
 }
 /** The dashboard's total: the work done by every job over the work of all, in the model's seconds (a finished job keeps its final cost). Jobs
  * the model has not costed yet count by size. Below 100% until every job is complete. */
@@ -1537,54 +1212,10 @@ export function overviewFraction(jobs: Job[]): number | undefined {
   const measured = jobs.flatMap(job => { const fraction = cardFraction(job); return fraction === undefined ? [] : [{ fraction, weight: Math.max(job.progress?.totalBytes ?? 0, 1) }]; });
   return measured.length ? measured.reduce((sum, item) => sum + item.fraction * item.weight, 0) / measured.reduce((sum, item) => sum + item.weight, 0) : undefined;
 }
-/** Humane time left: "under a minute", "about 12 min", "about 2 h 15 min", "about 14 h". Minutes round to 5 past 10 min. */
-export function formatRemaining(seconds: number, t: ReturnType<typeof createTranslator>): string {
-  const bucket = remainingBucket(seconds);
-  if (bucket.unit === 'under') return t("under a minute");
-  if (bucket.unit === 'min') return t("about {minutes} min", { minutes: bucket.minutes });
-  return bucket.unit === 'hm' ? t("about {hours} h {minutes} min", { hours: bucket.hours, minutes: bucket.minutes }) : t("about {hours} h", { hours: bucket.hours });
-}
-/** A time left as "about 12 min", or "about 2–4 h" while the estimate is still wide. */
-export function formatEstimate(seconds: number, t: ReturnType<typeof createTranslator>, range?: { low: number; high: number }): string {
-  const wide = range && remainingRange(seconds, range.low, range.high);
-  if (!wide) return formatRemaining(seconds, t);
-  return wide.unit === 'min' ? t("about {low}–{high} min", { low: wide.low, high: wide.high }) : t("about {low}–{high} h", { low: wide.low, high: wide.high });
-}
-/** Time left for a running job, held per job id: the job's, or its current step's while the job's is still being estimated
- * (held apart: a step's time is not the job's). A job that is not running lets its holds go. */
-function jobRemaining(job: Job, t: ReturnType<typeof createTranslator>, held: Held, running: boolean): string | undefined {
-  const progress = running ? job.progress : undefined;
-  const all = held(job.id, progress && job.eta), step = held(`${job.id}:step`, progress && job.eta === undefined ? progress.eta : undefined);
-  if (!progress) return undefined;
-  if (all === undefined && step === undefined) return progress.total > 0 ? t("Estimating time left…") : undefined;
-  return t("{time} left", { time: all === undefined ? formatRemaining(step!, t) : formatEstimate(all, t, scaledRange(job.etaRange, job.eta!, all)) });
-}
-/** The model's range around `raw`, in proportion around the held value shown instead. */
-function scaledRange(range: { low: number; high: number } | undefined, raw: number, shown: number): { low: number; high: number } | undefined {
-  const ratio = raw > 0 ? shown / raw : 1;
-  return range && { low: range.low * ratio, high: range.high * ratio };
-}
-/** A speed whose unit holds near a boundary while this display stays on screen (see speedUnit). */
-function Speed({ value }: { value: number }) {
-  const { language } = useTranslation();
-  const shown = useRef<SpeedUnit | undefined>(undefined);
-  const unit = speedUnit(value, shown.current);
-  useEffect(() => { shown.current = unit; });
-  return <>{formatSpeed(value, language, unit)}</>;
-}
 /** How fast a step reads: bytes per second, or files per second while checking metadata. */
 function FileRate({ value }: { value: number }) {
   const { t, language } = useTranslation();
   return <>{t("{count} files/s", { count: numberIn(value, language, { maximumSignificantDigits: 3 }) })}</>;
-}
-/** What a speed display needs: the rates, and the step when it is verification (its bytes are bytes read, so it is labelled). */
-export type SpeedInput = Pick<Progress, 'speed' | 'fileRate'> & Partial<Pick<Progress, 'phase' | 'step'>>;
-/** Bytes per second with files per second beside it where the step reports both; files per second alone before bytes have a measure. */
-function ProgressSpeed({ progress }: { progress: SpeedInput }) {
-  const { t, language } = useTranslation();
-  const rate = progress.fileRate && progress.fileRate > 0 ? t("{count} files/s", { count: numberIn(progress.fileRate, language, { maximumSignificantDigits: 3 }) }) : undefined;
-  if (progress.speed > 0) return <span className="progress-speed" data-testid="speed">{progress.phase === 'verifying' && !progress.step && <>{t("Verify read")} </>}<Speed value={progress.speed} />{rate && <> · <span data-testid="file-rate">{rate}</span></>}</span>;
-  return rate ? <span className="progress-speed" data-testid="speed">{rate}</span> : null;
 }
 /** What a running job is doing, for the dashboard's total. */
 function leadStatus(job: Job, t: ReturnType<typeof createTranslator>): string {
@@ -1686,18 +1317,6 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
   if (!job.skippablePath) return <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}{skipAll}</div></div>;
   const file = job.skippablePath;
   return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: job.id })}>{t("Skip all")}</Button></div></div>;
-}
-export function OrganizationProgress({ job, act, showFile = true }: { job: Job; act?: Dispatch; showFile?: boolean }) {
-  const { t, formatNumber, formatBytes } = useTranslation();
-  const progress = job.progress, working = isRunning(job), queued = job.phase === 'queued', running = working || queued, paused = job.phase === 'stopped' && !!job.paused;
-  const held = useHeld(), fraction = queued ? 0 : cardFraction(job);
-  const count = job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queued") : !progress ? undefined : progressCount(progress, t, formatNumber, true, formatBytes);
-  const actions = <>{act && running && <Button kind="quiet" icon={Pause} disabled={!!job.stopping} aria-label={t("Pause")} title={t("Pause")} onClick={() => act({ type: 'pause', sourceId: job.source.id })} />}{act && paused && <Button kind="quiet" icon={Play} aria-label={t("Resume")} title={t("Resume")} onClick={() => act({ type: 'continueOrganization', jobId: job.id })} />}{act && running && <Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop")} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} />}</>;
-  return <div className="organization-progress" data-testid="organization-progress">
-    <ProgressDisplay label={t("{name} copy progress", { name: job.source.name })} fraction={fraction} finished={jobFinished(job)} count={count}
-      speed={working && progress ? progress : undefined} {...jobTiming(job, t, held)} file={showFile && working && progress ? progress.file : undefined} actions={actions} step={job.phase === 'discovering' && !progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job)} paused={jobPaused(job)} />
-    {job.detail && <small>{t(job.detail)}</small>}
-  </div>;
 }
 
 /** Files checked (or read) before anything is written: import and organization reviews, the backup folder check. */
@@ -1915,9 +1534,6 @@ function UnknownRules({ extensions, act }: { extensions: Record<string, number>;
   return <div className="unknown-rules"><h3>{t("Other file rules")}</h3><div className="rule-fields"><label>{t("Extension")}<div className="select-wrap"><select value={extension} onChange={event => { setExtension(event.target.value); }}>{choices.map(ext => <option key={ext} value={ext}>{ext ? `.${ext}` : t("No extension")} ({extensions[ext]})</option>)}</select><Icon icon={ChevronDown} size={14} /></div></label><label>{t("Action")}<div className="select-wrap"><select value={action} onChange={event => { setAction(event.target.value as typeof action); }}><option value="ignore">{t("Ignore")}</option><option value="camera">{t("Copy to camera folders")}</option><option value="copy">{t("Copy to folder")}</option></select><Icon icon={ChevronDown} size={14} /></div></label></div>{action === 'copy' && <label className="field-label">{t("Folder beneath each destination")}<input value={folder} onChange={event => { setFolder(event.target.value); }} placeholder="Documents/Camera notes" />{!valid && <span className="field-error">{t("Use a relative folder without empty components, . or ..")}</span>}</label>}<div className="rule-actions"><label className="checkbox-label"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} />{t("Remember for this extension")}</label><Button icon={Check} disabled={action === 'copy' && !valid} onClick={() => { act({ type: 'unknownRule', extension, folder: action === 'camera' ? { action: 'camera' } : action === 'copy' ? folder : null, remember }); }}>{t("Apply rule")}</Button></div></div>;
 }
 
-export function CardHeader({ icon, title, id, detail, children }: { icon: LucideIcon; title: string; id?: string; detail?: ReactNode; children?: ReactNode }) {
-  return <div className="card-header"><span className="card-icon"><Icon icon={icon} size={17} /></span><div className="card-title"><h3 id={id}>{title}</h3>{detail && <p>{detail}</p>}</div>{children && <div className="card-actions">{children}</div>}</div>;
-}
 /** CPU thread and memory limits: defaults keep the importer from taking over the machine; a change applies to the next import. */
 export function PerformanceSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatNumber } = useTranslation();

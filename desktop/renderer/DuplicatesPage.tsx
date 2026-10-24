@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock3, CopyCheck, ImageOff, Info, LoaderCircle, RotateCcw, ScanSearch, Square, Trash2, FolderOpen } from 'lucide-react';
-import type { Action, AppState, DuplicatesState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
+import type { AppState, DuplicatesState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
+import { isLive } from '../shared';
 import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
 import { message } from '../messages';
 import { createDetailStore, type FileDetails, type Outcome } from './duplicate-details';
-import { Button, CardHeader, Icon, OperationProgress, OrganizationProgress, ConfirmSheet, ReleaseConfirm, activePhases, nextConfirmStep, type DeleteRecoveryStep } from './RootApp';
+import { Button, CardHeader, Icon, ConfirmSheet, ReleaseConfirm, nextConfirmStep, type DeleteRecoveryStep, type Dispatch } from './ui';
+import { OperationProgress, OrganizationProgress } from './progress';
 
-type Dispatch = (action: Action) => void;
 /** Groups shown per page: only these are drawn and only their previews are fetched, so thousands of groups stay responsive. */
 export const GROUPS_PER_PAGE = 8;
 
@@ -182,7 +183,7 @@ export function Pagination({ page, pages, onPage }: { page: number; pages: numbe
 
 export function duplicatesBusy(state: AppState): boolean {
   const status = state.duplicates?.status;
-  return status === 'scanning' || status === 'removing' || !!state.review || !!state.busyReview || state.jobs.some(job => activePhases.includes(job.phase) || job.phase === 'queued');
+  return status === 'scanning' || status === 'removing' || !!state.review || !!state.busyReview || state.jobs.some(isLive);
 }
 
 type Filter = 'all' | 'manual' | 'auto';
@@ -221,7 +222,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
   const decide = (id: string, keep: string) => setDecisions(current => ({ ...current, [id]: keep }));
   const keepSuggested = () => setDecisions(current => ({ ...current, ...Object.fromEntries(plan.resolved.filter(item => item.needsDecision).map(item => [item.group.id, item.suggested])) }));
   const removed = (state.organizationRecovery ?? []).filter(job => job.kind === 'duplicates' && job.root === dup.root);
-  const running = dup.root ? state.jobs.find(job => job.organization && job.source.id === `duplicates:${dup.root}` && (activePhases.includes(job.phase) || job.phase === 'queued')) : undefined;
+  const running = dup.root ? state.jobs.find(job => job.organization && job.source.id === `duplicates:${dup.root}` && isLive(job)) : undefined;
   const { summary } = plan;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
     const next = nextConfirmStep(confirm, choice);

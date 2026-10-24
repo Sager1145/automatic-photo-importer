@@ -11,7 +11,7 @@ const preferences: AppState['preferences'] = { language: 'en', appearance: 'syst
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 
 test('time left reads humanely in every language', async () => {
-  const { formatRemaining } = await import('../renderer/RootApp');
+  const { formatRemaining } = await import('../renderer/progress');
   const t = createTranslator('en');
   assert.equal(formatRemaining(20, t), 'under a minute');
   assert.equal(formatRemaining(7 * 60 + 20, t), 'about 7 min');
@@ -24,7 +24,8 @@ test('time left reads humanely in every language', async () => {
 });
 
 test('source cards, organization cards and the dashboard show time left, or that it is being estimated', async () => {
-  const { ImportDesk, OrganizationProgress, formatRemaining } = await import('../renderer/RootApp');
+  const { ImportDesk } = await import('../renderer/RootApp');
+  const { OrganizationProgress, formatRemaining } = await import('../renderer/progress');
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const desk = (job: Job, extra: Partial<AppState> = {}) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', ...(job.eta !== undefined ? { etaTotal: { eta: job.eta } } : {}), ...extra }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
@@ -82,7 +83,7 @@ test('a copy with already-verified files counts only the files being copied, wit
 });
 
 test('the window holds one time left per job: an upward jump is held, and every place shows the same value', async t => {
-  const { OrganizationProgress, EtaHolds, formatRemaining } = await import('../renderer/RootApp');
+  const { OrganizationProgress, EtaHolds, formatRemaining } = await import('../renderer/progress');
   const { DisplayHold } = await import('../eta-format');
   const tr = createTranslator('en'), holds = new Map<string, InstanceType<typeof DisplayHold>>();
   t.mock.timers.enable({ apis: ['Date'], now: 0 });
