@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {pages,pageTitle,type Check,type Harness} from '../harness';
+import {pages,pageTitle,settingsCategories,type Check,type Harness} from '../harness';
 
 const reduced=(h:Harness)=>h.js<boolean>("matchMedia('(prefers-reduced-motion: reduce)').matches");
 /** Records the kind of each View Transition the renderer starts, and optionally what its layers look like once it is ready. */
@@ -7,20 +7,41 @@ const recordTransitions=(h:Harness,layers=false)=>{h.notes.qaTransitions=true;h.
 const stopRecording=(h:Harness)=>h.js('if(window.qaStartViewTransition)document.startViewTransition=window.qaStartViewTransition;true');
 
 export const navigationChecks=():Check[]=>[
- {id:'nav-titlebar-buttons',stage:'navigation',title:'Every page opens from the sidebar with its own title-bar buttons; the command bar and old buttons are gone',covers:['navigation of every page','per-page title-bar actions'],run:async h=>{
-  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=show-progress]')===null"),true,'Total progress button has been removed');
-  assert.equal(await h.js<boolean>("document.querySelector('.sidebar').getBoundingClientRect().top===0&&Math.abs(document.querySelector('.window-titlebar').getBoundingClientRect().left-document.querySelector('.sidebar').getBoundingClientRect().right)<1"),true,'Sidebar reaches the top beside the titlebar');
-  const expected:Record<string,string[]>={'Organization':['show-errors','titlebar-review-organization','titlebar-organize'],'Duplicates':['show-errors','titlebar-duplicates-scan','titlebar-duplicates-stop'],'Drives':['show-errors'],'History':['show-errors'],'Settings':['show-errors'],'Import desk':['show-errors','global-start','global-stop','global-automatic']};
-  for(const page of [...pages.slice(1),pages[0]!]){
+ {id:'nav-settings-highlight-order',stage:'navigation',title:'Every Settings category icon and text stays above its highlight; navigation and panel snapshots remain in separate layers',covers:['Settings upward highlight layering','category snapshot ordering','contained category navigation'],run:async h=>{
+  if(await reduced(h))return;
+  await h.nav('Settings');await h.settingsTab('general');
+  await h.js(`(()=>{window.qaCategoryPaint=[];const start=window.qaStartViewTransition??=document.startViewTransition;document.startViewTransition=function(update){const t=start.call(document,update);t.ready.then(()=>{const root=document.documentElement;window.qaCategoryPaint.push({kind:root.dataset.transition,navigation:getComputedStyle(root,'::view-transition-group(settings-navigation)').zIndex,panel:getComputedStyle(root,'::view-transition-group(settings-panel)').zIndex,contain:getComputedStyle(document.querySelector('.settings-nav')).viewTransitionGroup,indicator:getComputedStyle(root,'::view-transition-group(settings-indicator)').zIndex,labels:${JSON.stringify(settingsCategories)}.flatMap(id=>['text','icon'].map(part=>({name:'settings-'+id+'-'+part,z:getComputedStyle(root,'::view-transition-group(settings-'+id+'-'+part+')').zIndex})))})}).catch(()=>{});return t;};})()`);
+  try{
+   await h.settingsTab('performance');for(const id of settingsCategories.slice(0,-1).reverse())await h.settingsTab(id);
+   const frames=await h.js<{kind:string;navigation:string;panel:string;contain:string;indicator:string;labels:{name:string;z:string}[]}[]>('window.qaCategoryPaint');assert.ok(frames.filter(frame=>frame.kind==='category-back').length>=6);
+   for(const frame of frames){assert.equal(frame.contain,'contain');assert.ok(Number(frame.navigation)>Number(frame.panel));for(const label of frame.labels)assert.ok(Number(label.z)>Number(frame.indicator),`${label.name}: ${JSON.stringify(frame)}`);}
+  }finally{await stopRecording(h);await h.js('delete window.qaCategoryPaint');}
+ }},
+ {id:'nav-highlight-text-order',stage:'navigation',title:'Bottom-to-top navigation keeps every sidebar text and icon snapshot above the moving highlight',covers:['upward highlight layering','sidebar text above highlight','anchored Settings transition'],run:async h=>{
+  if(await reduced(h))return;
+  await h.js(`(()=>{window.qaNavPaint=[];const start=window.qaStartViewTransition??=document.startViewTransition;document.startViewTransition=function(update){const t=start.call(document,update);t.ready.then(()=>{const root=document.documentElement;window.qaNavPaint.push({kind:root.dataset.transition,indicator:getComputedStyle(root,'::view-transition-group(nav-indicator)').zIndex,devices:getComputedStyle(root,'::view-transition-group(sidebar-devices)').zIndex,brand:getComputedStyle(root,'::view-transition-group(sidebar-brand)').zIndex,labels:['desk','library','activity','settings'].flatMap(id=>['text','icon'].map(part=>({name:'nav-'+id+'-'+part,z:getComputedStyle(root,'::view-transition-group(nav-'+id+'-'+part+')').zIndex})))})}).catch(()=>{});return t;};})()`);
+  try{
+   for(const page of ['Settings','Activity','Library tools','Import','Library tools','Activity','Settings','Import'] as const)await h.nav(page);
+   const paint=await h.js<{kind:string;indicator:string;devices:string;brand:string;labels:{name:string;z:string}[]}[]>('window.qaNavPaint');
+   const moves=paint.filter(frame=>frame.kind==='forward'||frame.kind==='back');assert.ok(moves.filter(frame=>frame.kind==='back').length>=4,'upward transitions sampled');
+   for(const frame of moves){assert.ok(Number(frame.devices)>Number(frame.indicator)&&Number(frame.brand)>Number(frame.indicator),'device and brand text remain above the travelling highlight');for(const label of frame.labels)assert.ok(Number.isFinite(Number(label.z))&&Number(label.z)>Number(frame.indicator),`${label.name} must paint above highlight: ${JSON.stringify(frame)}`);}
+  }finally{await stopRecording(h);await h.js('delete window.qaNavPaint');}
+ }},
+ {id:'nav-titlebar-buttons',stage:'navigation',title:'Task navigation has Import, Library tools and Activity with anchored Settings; workflow actions are not duplicated in the titlebar',covers:['navigation of every page','per-page title-bar actions','four primary navigation items','workflow action ownership'],run:async h=>{
+  assert.deepEqual(await h.js<string[]>("[...document.querySelectorAll('.sidebar .nav-item')].map(e=>e.textContent.trim())"),['Import','Library tools','Activity','Settings']);
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=show-progress]')===null&&document.querySelector('.command-bar')===null"),true);
+  for(const page of pages){
    await h.nav(page);
-   const ids=await h.js<string[]>("Array.from(document.querySelectorAll('.window-titlebar [data-testid]')).map(e=>e.dataset.testid)");
-   assert.ok(expected[page]!.every(id=>ids.includes(id))&&(page==='Import desk'||!ids.includes('global-start')),`title-bar buttons on ${page}: ${ids}`);
-   assert.equal(await h.js<boolean>("document.querySelector('.command-bar')===null"),true);
    assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),pageTitle(page));
+   const ids=await h.js<string[]>("[...document.querySelectorAll('.window-titlebar [data-testid]')].map(e=>e.dataset.testid)");
+   assert.ok(ids.includes('show-errors'),`issues remain accessible on ${page}`);
+   assert.ok(!ids.some(id=>/^titlebar-(review-organization|organize|duplicates-scan|duplicates-stop)$/.test(id)),`duplicate workflow execution controls on ${page}: ${ids}`);
   }
-  assert.equal(await h.js<boolean>("document.querySelector('button[aria-label=\"Preview photo and metadata\"]')===null"),true);
+  await h.nav('Import desk');
+  assert.equal(await h.js<boolean>("document.querySelector('.sidebar').getBoundingClientRect().top===0&&Math.abs(document.querySelector('.window-titlebar').getBoundingClientRect().left-document.querySelector('.sidebar').getBoundingClientRect().right)<1"),true);
  }},
  {id:'nav-desk-dashboard',stage:'navigation',title:'The desk shows the import dashboard with live metrics and drive activity, Automatic toggles, and errors open only on request',covers:['import dashboard','drive activity meters','Automatic button'],run:async h=>{
+  await h.js("document.querySelectorAll('details.workspace-details').forEach(details=>details.open=true)");
   assert.equal(await h.js<boolean>("document.querySelector('[aria-label=\"Import dashboard\"]')!==null"),true);
   await h.click('[data-testid=global-automatic]');await h.waitFor('automatic on',async()=>(await h.state()).preferences.automatic);
   await h.until('automatic button pressed',"document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='true'");
@@ -50,15 +71,15 @@ export const navigationChecks=():Check[]=>[
   let seen:string[];
   try{
    await recordTransitions(h);
-   for(const page of ['Drives','Organization','History','Settings'] as const)await h.nav(page);
-   await h.settingsTab('importing');await h.js('window.qaTransitions=window.qaTransitions.filter(kind=>!kind?.startsWith("category"))');
-   const categories=['importing','destinations','folders','organization','drives','general'];
+   for(const page of ['Library tools','Activity','Settings'] as const)await h.nav(page);
+   await h.settingsTab('general');await h.js('window.qaTransitions=window.qaTransitions.filter(kind=>!kind?.startsWith("category"))');
+   const categories=settingsCategories;
    for(const id of [...categories.slice(1),...categories.slice(0,-1).reverse()])await h.settingsTab(id);
    assert.equal(await h.js<boolean>("document.querySelectorAll('.settings-indicator').length===1&&document.querySelector('[aria-selected=true] .settings-indicator')!==null"),true,'One selection indicator, on the open category');
    await h.nav('Import desk');
    seen=(await h.js<string[]>('window.qaTransitions')).filter(kind=>/^(forward|back|category-)/.test(kind??''));
   }finally{await stopRecording(h);}
-  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward','forward',...Array(5).fill('category-forward'),...Array(5).fill('category-back'),'back']);
+  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward',...Array(6).fill('category-forward'),...Array(6).fill('category-back'),'back']);
  }},
  {id:'nav-transition-layers',stage:'navigation',title:'Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet',covers:['animation layering during transitions','sheets suspend transitions'],run:async h=>{
   const isReduced=await reduced(h);
@@ -90,8 +111,8 @@ export const navigationChecks=():Check[]=>[
   }finally{await stopRecording(h);await h.js('delete window.qaContainment');}
  }},
  {id:'nav-rapid-timing',stage:'navigation',title:'Rapid navigation and opening a sheet mid-transition leave the last page selected and no click-blocking snapshots',covers:['animation interruption','rapid navigation timing','sheet during transition'],run:async h=>{
-  await h.js("for(const index of [1,2,4,5])document.querySelectorAll('.nav-item')[index].click()");
-  await h.until('last navigation wins',"document.querySelectorAll('.nav-item')[5].getAttribute('aria-current')==='page'");
+  await h.js("for(const index of [1,2,3])document.querySelectorAll('.nav-item')[index].click()");
+  await h.until('last navigation wins',"document.querySelectorAll('.nav-item')[3].getAttribute('aria-current')==='page'");
   await h.settle();
   assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Settings','the last navigation remains selected after all callbacks finish');
   await h.click('.nav-item');

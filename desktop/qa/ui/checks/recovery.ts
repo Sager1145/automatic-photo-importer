@@ -12,7 +12,7 @@ export const recoveryChecks=():Check[]=>[
   await h.waitFor('recovery list loaded',async()=>!(await h.state()).organizationRecoveryLoading);
   const recovery=(await h.state()).organizationRecovery?.find(job=>job.status==='complete');
   if(!recovery)throw new SkipCheck('no finished organization in this run');
-  await h.nav('Organization');await h.until('recovery list on the Organization page',"document.querySelector('.organization-recovery')");
+  await h.nav('Recovery');await h.until('recovery list in Activity',"document.querySelector('.organization-recovery')");
   const before=new Set((await h.state()).jobs.map(job=>job.id));
   const resume=JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root});
   await h.js(`Promise.all([window.importer.action(${resume}),window.importer.action(${resume})])`);
@@ -23,9 +23,8 @@ export const recoveryChecks=():Check[]=>[
   await h.action({type:'clearErrors'});
  }},
  {id:'recovery-leftovers-counter',stage:'recovery',title:'Looking for leftover files shows a counter that keeps moving',covers:['live progress counters','leftover files'],skip:async h=>h.hooks?undefined:'needs the QA injection hook',run:async h=>{
-  await h.nav('Settings');
-  let found=false;for(const id of settingsCategories){await h.settingsTab(id);if(await h.js<boolean>("!!document.querySelector('[data-testid=residue-cleanup]')?.checkVisibility()")){found=true;break;}}
-  assert.ok(found,'Leftover files section in Settings');
+  await h.nav('Recovery');
+  await h.until('Leftover files in Activity',"document.querySelector('[data-testid=residue-cleanup]')?.checkVisibility()");
   let completed=0;
   const tick=()=>h.hooks!.set('residue',{files:3,bytes:9e6,resumable:{files:0,bytes:0},checking:true,progress:{phase:'planning',step:'scanning',completed:++completed*37,total:4000,bytes:0,totalBytes:0,speed:0,file:`.importer-staging/part-${completed}.tmp`,fileRate:180}});
   tick();await h.until('leftover files progress',"document.querySelector('[data-testid=residue-progress]')");

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {groupedCodes} from '../../../error-log';
-import {pages,pageTitle,type Check} from '../harness';
+import {pages,pageTitle,workspaceRoute,type Page,type Check} from '../harness';
 import {groupedErrorJobs,LONG_NAME,manyRunningJobs} from '../synthetic';
 
 /** Milliseconds from a navigation click until the new page's title is painted, measured in the renderer. */
-const navTime=(page:string)=>`(async()=>{const t0=performance.now();Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click();while(document.querySelector('.window-titlebar h1')?.textContent!==${JSON.stringify(pageTitle(page as never))})await new Promise(r=>requestAnimationFrame(r));await new Promise(r=>requestAnimationFrame(r));return performance.now()-t0;})()`;
+const navTime=(page:string)=>{const route=workspaceRoute(page as Page),tab=route.tab??route.mode;return `(async()=>{const t0=performance.now();document.querySelector('.nav-item[data-page="${route.page}"]').click();while(document.querySelector('.window-titlebar h1')?.textContent!==${JSON.stringify(pageTitle(page as Page))})await new Promise(r=>requestAnimationFrame(r));${tab?`while(!document.querySelector('[data-testid="${tab}"]'))await new Promise(r=>requestAnimationFrame(r));document.querySelector('[data-testid="${tab}"]').click();while(document.querySelector('[data-testid="${tab}"]')?.getAttribute('aria-selected')!=='true')await new Promise(r=>requestAnimationFrame(r));`:''}await new Promise(r=>requestAnimationFrame(r));return performance.now()-t0;})()`;};
 
 export const stressChecks=():Check[]=>[
  {id:'stress-large-state',stage:'stress',title:'With 50,000 grouped errors, 60 running jobs and long file names the UI stays responsive: a navigation click paints in under 500 ms',covers:['injected large state','responsiveness','grouped errors at scale'],budgetMs:180000,skip:async h=>h.hooks?undefined:'needs the QA injection hook',run:async h=>{

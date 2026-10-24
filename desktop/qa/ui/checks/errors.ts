@@ -42,7 +42,7 @@ export const errorChecks=():Check[]=>[
   else{await scanned(h);await h.prefs({unknownDefault:'ask'});await h.until('warning toast in the top layer',"document.querySelector('[data-error-layer]')?.matches(':popover-open')");}
   try{
    await h.settle();settled=await h.probe(errorLayers);await h.shot('error-toast-on-top-200');
-   for(const page of ['Drives','Organization','Import desk']){if(h.hooks)await raise(h);during.push(await go(page));}
+   for(const page of ['Library tools','Activity','Import']){if(h.hooks)await raise(h);during.push(await go(page));}
   }finally{if(!h.hooks)await h.prefs({unknownDefault:'skip'});}
   assert.equal(settled.length,1,'one error surface is open');
   assert.deepEqual(settled[0],{...settled[0],topLayer:true,misses:[],transition:false});

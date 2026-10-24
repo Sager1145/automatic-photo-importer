@@ -19,7 +19,9 @@ async function busyDesk(h:Harness):Promise<Job[]>{
   syntheticJob('paused',{phase:'stopped',paused:true,source:await fixture(h,4)}),
   syntheticJob('organizing',{phase:'copying',organization:true,step:'moving',file:'2026/2026-10 October/Nikon Z6III/DSC_0042.NEF'}),
  ];
+ for(const job of jobs)if(!job.organization)job.backup=job.source.backup===true;
  h.hooks!.addJobs(jobs);
+ await h.js("document.querySelectorAll('details.workspace-details').forEach(details=>details.open=true)");
  // Real jobs may already show bars on these cards, so wait for what only the synthetic ones show.
  await h.until('synthetic jobs on the desk',`document.querySelector('${card(2)} [data-testid=progress-file]')?.title===${JSON.stringify(LONG_NAME)}&&document.querySelector('${card(4)} [data-state=paused]')&&Array.from(document.querySelectorAll('.import-dashboard .progress-job-place')).some(e=>e.textContent==='organizing')`);
  return jobs;
@@ -54,7 +56,7 @@ export const ruleChecks=():Check[]=>[
   for(const [w,height] of [[1000,720],[1440,940],[1920,1200]] as const){await h.size(w,height);
    for(const scale of [1,1.25,1.5,1.6,1.75,2]){await h.prefs({textScale:scale});
     await eachView(h,async(view,page)=>{
-     if(scale===2&&(!view.includes('/')||view==='Settings/importing'))await h.capture(path.join(h.report,`scale-200-${w}x${height}-${page.replace(/\s+/g,'-').toLowerCase()}.png`));
+     if(scale===2&&(!view.includes('/')||view==='Settings/defaults'))await h.capture(path.join(h.report,`scale-200-${w}x${height}-${page.replace(/\s+/g,'-').toLowerCase()}.png`));
      for(const item of await h.probe(wideButtons))wide.push({window:`${w}x${height}`,scale,view,...item});
      for(const item of await h.probe(clippedControls))clipped.push({window:`${w}x${height}`,scale,view,...item});
     });
@@ -97,7 +99,7 @@ export const ruleChecks=():Check[]=>[
  }},
  {id:'rules-stage-colours',stage:'rules',title:'Each step colours its bar with its own stage colour, in light and dark, and the passed steps stay layered beneath it',covers:['per-step colours','stage-coloured layered bars','light and dark mode'],skip:needsHook,run:async h=>{
   // An organization runs through every stage (an import card shows only scan, copy and verify), so its card is stepped through them.
-  const organizing=(await busyDesk(h))[3]!,orgCard=`article.source-row[data-source-id=${JSON.stringify(organizing.source.id)}]`;
+  const organizing=(await busyDesk(h))[3]!;await h.nav('Jobs');const orgCard=`article.source-row[data-source-id=${JSON.stringify(organizing.source.id)}]`;
   const steps:[Progress['phase'],Progress['step']|undefined,string][]=[['planning','listing','scan'],['planning','checking','read'],['planning','comparing','compare'],['copying','moving','move'],['copying',undefined,'copy'],['verifying',undefined,'verify'],['copying','tidying','tidy'],['copying','deleting','delete']];
   for(const appearance of ['light','dark'] as const){
    await h.prefs({appearance});

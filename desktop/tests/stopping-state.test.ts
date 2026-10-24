@@ -27,7 +27,7 @@ test('after Pause the global Pause shows Pausing and Stop stays available to sto
  const html=titlebar([job('pause')]);
  const stop=tag(html,'global-stop'),pause=tag(html,'global-start');
  assert.match(pause[0]!,/disabled/);assert.match(pause[1]!,/Pausing…/);
- assert.doesNotMatch(stop[0]!,/disabled/);assert.match(stop[1]!,/>Stop all$/);assert.match(stop[0]!,/title="Stops imports, scans and organizing, and discards the open review."/);
+ assert.doesNotMatch(stop[0]!,/disabled/);assert.match(stop[1]!,/>Stop imports$/);assert.match(stop[0]!,/title="Stops queued, paused and running media imports and file backups. Scans, reviews and library tools continue."/);
 });
 
 test('the global controls stay active while any job is still running normally or queued',()=>{

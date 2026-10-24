@@ -1,11 +1,13 @@
 // Test-only access to the main process state for the automated Electron QA. main.ts creates it only for a
 // --codex-test launch of an unpackaged build, and never exposes it to the renderer.
-import type {AppState,Job} from '../shared';
+import type {Action,AppState,Job} from '../shared';
 
 /** Ids of synthetic jobs start with this; nothing else uses it. */
 export const SYNTHETIC='qa:';
 
 export interface QaHooks {
+ /** Test-only action observer/guard: false consumes a renderer action before the backend runs it. */
+ beforeAction?:(action:Action)=>boolean|void;
  /** The live main process state. Read only: change it through the methods below. */
  peek():AppState;
  /** Puts synthetic jobs in front of the real ones (newest first, like real jobs) and publishes. Never queued ones: the queue would run them. */
@@ -31,6 +33,7 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
  const waiting=new Set<string>();
  let release:Promise<void>|undefined,open:(()=>void)|undefined;
  const hooks:QaHooks={
+  beforeAction:undefined,
   peek:()=>state,
   addJobs(jobs){
    if(jobs.some(job=>!job.id.startsWith(SYNTHETIC)||job.phase==='queued'))throw new Error('Synthetic jobs need a qa: id and must not be queued.');
@@ -41,7 +44,7 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
   clear(){
    state.jobs=state.jobs.filter(job=>!job.id.startsWith(SYNTHETIC));
    for(const [key,value] of saved){if(value===undefined)delete state[key];else (state as unknown as Record<string,unknown>)[key]=value;}
-   saved.clear();hooks.inspect=undefined;emit();
+   saved.clear();hooks.inspect=undefined;hooks.beforeAction=undefined;emit();
   },
   hold(){
    if(!release)release=new Promise(resolve=>{open=resolve;});
