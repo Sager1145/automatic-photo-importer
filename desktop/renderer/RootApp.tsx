@@ -504,7 +504,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {code?: string; count?: number; items?: {path: string; detail?: string}[]; id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string; /** Old records of an earlier version on this drive: the row offers Acknowledge, and Clear does not apply. */oldDrive?: string};
+type DisplayError = {code?: string; count?: number; items?: {path: string; detail?: string}[]; reasons?: Record<string, number>; id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string; /** Old records of an earlier version on this drive: the row offers Acknowledge, and Clear does not apply. */oldDrive?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -634,8 +634,11 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 /** The plain-language title and one-sentence explanation of a group of like problems. */
-export function groupInfo(code: string, count: number, drive: string, t: Translate, formatNumber: (value: number) => string): { title: string; text?: string } {
+export function groupInfo(code: string, count: number, drive: string, t: Translate, formatNumber: (value: number) => string, reasons?: Record<string, number>): { title: string; text?: string; breakdown?: string } {
   const n = formatNumber(count), one = count === 1;
+  // Unknown files: how many had no date, no camera, or could not be read, over all of them.
+  const unknown = reasons && [reasons.noDate ? t("{count} without a date", { count: formatNumber(reasons.noDate) }) : '', reasons.noCamera ? t("{count} without a camera", { count: formatNumber(reasons.noCamera) }) : '', reasons.unreadable ? t("{count} unreadable", { count: formatNumber(reasons.unreadable) }) : ''].filter(Boolean).join(' · ');
+  const breakdown = unknown ? { breakdown: unknown } : {};
   switch (code) {
     case 'staging-left': return { title: one ? t("1 temporary copy was left on {drive} — your photo is safe", { drive }) : t("{count} temporary copies were left on {drive} — your photos are safe", { count: n, drive }), text: t("These are scratch files from the copy step. Every real copy was checked and is complete; Clean up removes the leftovers.") };
     case 'unreadable': return { title: one ? t("1 file could not be read for photo details") : t("{count} files could not be read for photo details", { count: n }), text: t("The files are still copied; their dates may come from the file instead.") };
@@ -643,8 +646,8 @@ export function groupInfo(code: string, count: number, drive: string, t: Transla
     case 'copy-failed': return { title: one ? t("1 file could not be copied") : t("{count} files could not be copied", { count: n }), text: t("These files are not in the backup yet. Retry runs the job again.") };
     case 'file-skipped': return { title: one ? t("1 file was skipped because it failed") : t("{count} files were skipped because they failed", { count: n }), text: t("The other files were copied. Retry runs the job again, including these files.") };
     case 'appledouble-kept': return { title: one ? t("1 macOS ._ file was kept") : t("{count} macOS ._ files were kept", { count: n }), text: t("A ._ file may hold tags or comments, so it was left in place. Your photos are not affected.") };
-    case 'kept-no-metadata': return { title: one ? t("1 unknown file was left where it is") : t("{count} unknown files were left where they are", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.") };
-    case 'filed-no-metadata': return { title: one ? t("1 unknown file was filed in the unknown files folder") : t("{count} unknown files were filed in the unknown files folder", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.") };
+    case 'kept-no-metadata': return { title: one ? t("1 unknown file was left where it is") : t("{count} unknown files were left where they are", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings."), ...breakdown };
+    case 'filed-no-metadata': return { title: one ? t("1 unknown file was filed in the unknown files folder") : t("{count} unknown files were filed in the unknown files folder", { count: n }), text: t("They have no capture date, no camera or known origin, or could not be read. You can change this in Settings."), ...breakdown };
     case 'appledouble-failed': return { title: one ? t("1 macOS ._ file or folder could not be checked") : t("{count} macOS ._ files or folders could not be checked", { count: n }), text: t("These were left as they are. Your photos are not affected.") };
     default: return { title: one ? t("1 issue needs attention") : t("{count} issues need attention", { count: n }) };
   }
@@ -657,8 +660,8 @@ function skippableJob(state: AppState, list: DisplayError[]): boolean {
 const rowDrive = (row: ErrorRow<DisplayError>) => row.entries[0]!.drive || row.entries[0]!.source;
 /** A group as text: its title, then the first paths with their technical detail. */
 function rowReport(row: ErrorRow<DisplayError>, t: Translate, formatNumber: (value: number) => string): string {
-  const info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber);
-  return [`${row.entries[0]!.source || t("App")}: ${info.title}`, ...row.items.map(item => `  ${item.path ?? ''}${(item.detail ?? (item.entry ? t(item.entry.message) : '')) ? ' — ' + (item.detail ?? t(item.entry!.message)) : ''}`)].join('\n') + (row.count > row.items.length ? `\n  ${t("and {count} more", { count: formatNumber(row.count - row.items.length) })}` : '');
+  const info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber, row.reasons);
+  return [`${row.entries[0]!.source || t("App")}: ${info.title}${info.breakdown ? ` (${info.breakdown})` : ''}`, ...row.items.map(item => `  ${item.path ?? ''}${(item.detail ?? (item.entry ? t(item.entry.message) : '')) ? ' — ' + (item.detail ?? t(item.entry!.message)) : ''}`)].join('\n') + (row.count > row.items.length ? `\n  ${t("and {count} more", { count: formatNumber(row.count - row.items.length) })}` : '');
 }
 /** The latest handlers of the panel, behind a stable ref so memoized rows do not re-render when only these change. */
 type RowApi = { current: { act: Dispatch; copy: (text: string) => void; clear: (ids?: string[], severity?: Severity) => void; onOpenSource?: (sourceId: string) => void } };
@@ -667,7 +670,7 @@ const ITEM_PAGE = 200;
 const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { row: ErrorRow<DisplayError>; api: RowApi; retryable: boolean; skippable: boolean }) {
   const { t, formatNumber } = useTranslation();
   const [open, setOpen] = useState(false), [shown, setShown] = useState(ITEM_PAGE);
-  const first = row.entries[0]!, info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber);
+  const first = row.entries[0]!, info = groupInfo(row.code, row.count, rowDrive(row), t, formatNumber, row.reasons);
   const visible = open ? row.items.slice(0, shown) : [];
   const copyAll = () => {
     const local = row.entries.flatMap(entry => entry.items ? [] : [pathOf(entry.message) ?? ''].filter(Boolean));
@@ -675,7 +678,7 @@ const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { 
     else api.current.copy((local.length ? local : row.items.map(item => item.path ?? '')).join('\n'));
   };
   return <li className={`error-item error-group-row is-${row.severity}`} data-severity={row.severity} data-testid="error-group" data-code={row.code} data-count={row.count}>
-    <div className="error-summary"><Icon icon={row.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title" data-testid="error-group-title">{info.title}</p>{info.text && <p className="error-hint">{info.text}</p>}</div></div>
+    <div className="error-summary"><Icon icon={row.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title" data-testid="error-group-title">{info.title}</p>{info.breakdown && <p className="error-hint" data-testid="error-group-breakdown">{info.breakdown}</p>}{info.text && <p className="error-hint">{info.text}</p>}</div></div>
     <div className="card-actions error-group-actions">
       <Button kind="quiet" icon={Copy} data-testid="error-group-copy" onClick={() => api.current.copy(rowReport(row, t, formatNumber))}>{t("Copy details")}</Button>
       {first.sourceId && api.current.onOpenSource && <Button kind="quiet" icon={ArrowUpRight} data-testid="error-group-drive" onClick={() => { api.current.onOpenSource!(first.sourceId!); }}>{t("Show drive")}</Button>}
@@ -1692,7 +1695,8 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
   const scope: 'backup' | 'whole' | 'chosen' = selectedFolders ? 'chosen' : chosenScope === 'whole' || !p.basePath ? 'whole' : 'backup';
   const pickScope = (next: 'backup' | 'whole') => { if (destination) setChosenScopes(scopes => ({ ...scopes, [destination]: next })); if (selectedFolders) act({ type: 'resetOrganizationFolders', destinationIndex }); };
   const videoTarget = p.mediaLayout === 'video-root' ? [destination?.replace(/[\\/]$/, ''), p.videoBasePath].filter(Boolean).join('/') : '';
-  const organizeOptions = state.organizeOptions ?? { removeEmptyFolders: true, releaseDuplicates: true };
+  // An open organize review runs with its own options: the switches show those, never the next run's.
+  const organizeOptions = (state.review?.kind === 'reorganize' ? state.review.options : undefined) ?? state.organizeOptions ?? { removeEmptyFolders: true, releaseDuplicates: true };
   return <div className="organization-page">
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
