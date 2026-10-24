@@ -833,7 +833,7 @@ Stops imports, scans and organizing, and discards the open review.|停止导入�
 Choose every keeper|由你选择每一组要保留的文件|由你選擇每一組要保留的檔案|残すファイルをすべて自分で選ぶ
 You decide every group. Nothing is moved until you confirm Remove.|每一组都由你决定。在你确认“移除”之前，不会移动任何文件。|每一組都由你決定。在你確認「移除」之前，不會移動任何檔案。|すべてのグループを自分で決めます。「削除」を確認するまで何も移動されません。
 Suggest keepers for identical files|为完全相同的文件建议保留项|為完全相同的檔案建議保留項|同一のファイルには残すファイルを提案する
-Files with the same SHA-256 get a suggested keeper; you decide everything else. Nothing is moved until you confirm Remove.|SHA-256 相同的文件会得到建议保留的一份，其余分组由你决定。在你确认“移除”之前，不会移动任何文件。|SHA-256 相同的檔案會得到建議保留的一份，其餘群組由你決定。在你確認「移除」之前，不會移動任何檔案。|SHA-256 が同じファイルには残すファイルが提案され、それ以外は自分で決めます。「削除」を確認するまで何も移動されません。
+When you confirm Remove, every group of identical files (same SHA-256) is set aside keeping the suggested copy, including groups you did not open; you decide every other group.|确认“移除”后，每一组完全相同的文件（SHA-256 相同）都会只保留建议的一份，其余移到恢复区域，包括你没有打开的分组；其他分组由你决定。|確認「移除」後，每一組完全相同的檔案（SHA-256 相同）都會只保留建議的一份，其餘移到復原區域，包括你沒有打開的群組；其他群組由你決定。|「削除」を確定すると、同一ファイル（SHA-256 が同じ）のグループはすべて、開いていないグループも含めて提案されたファイルだけを残し、ほかは復元用の領域に移動します。それ以外のグループはあなたが決めます。
 Removal level|移除级别|移除層級|削除レベル
 Identical files|完全相同的文件|完全相同的檔案|同一のファイル
 Same EXIF and size|EXIF 和大小相同|EXIF 和大小相同|EXIF とサイズが同じ

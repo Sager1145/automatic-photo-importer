@@ -158,7 +158,7 @@ flowchart TD
 | 错误聚合、显示清除与按需路径 | `job-issues/error-groups/error-log/acknowledge` | 错误写入只经 `addErrors/recordIssue`，身份在记录时确定；错误日志缓存按真实变更版本重建，等长替换也会更新 |
 | 四语言与消息 | `messages.ts` + `renderer/i18n.tsx` | 后端发 Message key/参数，前端翻译；部分原生/低层错误保留原文 |
 | 导入页、来源详情、审核、组织、设置、历史 | `renderer/RootApp.tsx` 中具体界面函数 | 同一个 React 应用；list/grid 是展示配置，不改变复制逻辑 |
-| 去重页 | `renderer/DuplicatesPage.tsx` + `renderer/duplicate-details.ts` | 详情按 root + revision 分代缓存，成功与在途分开，单项失败可显式重试；共享界面组件见 A13 |
+| 去重页 | `renderer/DuplicatesPage.tsx` + `renderer/duplicate-details.ts` | 详情按 root + revision 分代缓存，成功与在途分开，单项失败可显式重试；与主界面共用的组件在 `renderer/ui.tsx`、`renderer/progress.tsx`，两边不再互相导入 |
 | 缩略图 | `platform/thumbnails.ts` | macOS 系统 decoder/视频海报，必要时提取内嵌图片；磁盘图片缓存；其它 OS 系统 decoder 返回不可用 |
 | 启动画面、品牌与动画 | `Boot/boot-controller/BrandLogo/styles.css` | 纯呈现，不参与文件计划和执行 |
 | 并发与物理盘 I/O | `pump`、`core/devices.ts`、`queue-order.ts` | 任务槽位与盘读写限制是两个不同约束；同盘目录来源不能当独立硬盘 |
