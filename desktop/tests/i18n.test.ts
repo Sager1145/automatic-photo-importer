@@ -178,7 +178,8 @@ test('global controls stay independent of pages and source error details are iso
     const t=createTranslator(language);
     const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const controls=render(createElement(TitlebarControls,{state,act:()=>{},errorCount:errors.length,onErrors:()=>{}}));
-    for(const label of ['Start all selected','Stop imports','Automatic','All errors'])assert.ok(controls.includes(t(label)));
+    for(const label of ['Start all selected','Stop imports','All errors'])assert.ok(controls.includes(t(label)));
+    assert.ok(!controls.includes('global-automatic')&&!controls.includes('titlebar-overview'));
     assert.ok(!controls.includes('show-progress'));
     assert.ok(!controls.includes('Preview photo'));
     const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
@@ -780,18 +781,17 @@ test('queue positions follow the published start order, so a drive moved to the 
   }
 });
 
-test('the Import overview can be hidden from the desk and turned back on in Settings', async () => {
+test('the Import overview collapses to a slim header on the desk and no longer has a Settings switch', async () => {
   const { ImportDesk, SettingsPage } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const desk = (showDashboard?: boolean) => render(createElement(ImportDesk, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     assert.ok(desk().includes('class="import-dashboard"') && desk().includes(`aria-label="${t('Hide the import overview')}"`), `${language}: shown by default with a hide button`);
-    assert.ok(!desk(false).includes('class="import-dashboard"'), `${language}: can be hidden`);
-    assert.ok(desk(false).includes(`aria-label="${t('Show the import overview')}"`) && !desk().includes('data-testid="show-dashboard-desk"'), `${language}: the desk offers to show it again only while hidden`);
-    const settings = (showDashboard?: boolean) => render(createElement(SettingsPage, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: true })).match(/data-testid="show-dashboard"[\s\S]*?<\/label>/)?.[0] ?? '';
-    assert.ok(settings().includes(t('Show the import overview')) && /checked=""/.test(settings()) && !/disabled/.test(settings()), `${language}: Settings switch, on by default, usable while importing`);
-    assert.ok(!/checked=""/.test(settings(false)), `${language}: off when hidden`);
+    assert.ok(!desk(false).includes('dashboard-metrics') && desk(false).includes('import-dashboard-collapsed'), `${language}: collapsed to a slim header`);
+    assert.ok(desk(false).includes(`aria-label="${t('Show the import overview')}"`) && !desk().includes('data-testid="show-dashboard-desk"') && !desk(false).includes('data-testid="show-dashboard-desk"'), `${language}: the same header toggle reopens it`);
+    const settings = render(createElement(SettingsPage, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: true }));
+    assert.ok(!settings.includes('data-testid="show-dashboard"'), `${language}: no Settings switch for the overview`);
   }
 });
 

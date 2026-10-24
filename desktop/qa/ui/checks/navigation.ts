@@ -40,13 +40,18 @@ export const navigationChecks=():Check[]=>[
   await h.nav('Import desk');
   assert.equal(await h.js<boolean>("document.querySelector('.sidebar').getBoundingClientRect().top===0&&Math.abs(document.querySelector('.window-titlebar').getBoundingClientRect().left-document.querySelector('.sidebar').getBoundingClientRect().right)<1"),true);
  }},
- {id:'nav-desk-dashboard',stage:'navigation',title:'The desk shows the import dashboard with live metrics and drive activity, Automatic toggles, and errors open only on request',covers:['import dashboard','drive activity meters','Automatic button'],run:async h=>{
+ {id:'nav-desk-dashboard',stage:'navigation',title:'The desk shows the import dashboard with live metrics and drive activity, Automatic toggles in Settings, and errors open only on request',covers:['import dashboard','drive activity meters','Automatic switch in Settings'],run:async h=>{
   await h.js("document.querySelectorAll('details.workspace-details').forEach(details=>details.open=true)");
   assert.equal(await h.js<boolean>("document.querySelector('[aria-label=\"Import dashboard\"]')!==null"),true);
-  await h.click('[data-testid=global-automatic]');await h.waitFor('automatic on',async()=>(await h.state()).preferences.automatic);
-  await h.until('automatic button pressed',"document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='true'");
-  await h.click('[data-testid=global-automatic]');await h.waitFor('automatic off',async()=>!(await h.state()).preferences.automatic);
-  await h.until('automatic button unpressed',"document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='false'");
+  // Automatic lives in Settings > Importing; the Import empty state's line opens it, and the titlebar no longer has the button.
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=global-automatic]')===null&&document.querySelector('[data-testid=titlebar-overview]')===null"),true,'no Automatic or Overview button in the titlebar');
+  const automatic="[data-testid=settings-panel-defaults] input[type=checkbox]";
+  await h.nav('Settings');await h.settingsTab('defaults');
+  await h.click(automatic);await h.waitFor('automatic on',async()=>(await h.state()).preferences.automatic);
+  await h.until('automatic switch on',`document.querySelector('${automatic}').checked===true`);
+  await h.click(automatic);await h.waitFor('automatic off',async()=>!(await h.state()).preferences.automatic);
+  await h.until('automatic switch off',`document.querySelector('${automatic}').checked===false`);
+  await h.nav('Import desk');
   assert.equal(await h.js<string>("document.querySelector('.import-dashboard [data-metric=sources]').textContent"),'6');
   assert.equal(await h.js<string>("document.querySelector('.import-dashboard [data-metric=destinations]').textContent"),'1 / 1');
   // Fixture folders live on the internal disk, so utilization of that disk appears for the destination and in the UI.

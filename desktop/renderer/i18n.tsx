@@ -84,7 +84,6 @@ Last verified: {completed} of {total} files|上次校验：{completed}/{total} �
 Photo Importer|照片导入器|照片匯入器|写真インポーター
 Automatic Photo Importer|自动照片导入器|自動照片匯入器|自動写真インポーター
 Opening your camera workbench…|正在打开相机工作台…|正在開啟相機工作台…|カメラワークベンチを開いています…
-Import desk|导入工作台|匯入工作台|インポート
 Organization|整理|整理|整理
 History|历史记录|歷史記錄|履歴
 Settings|设置|設定|設定
@@ -119,8 +118,6 @@ Ocean accent|海洋蓝|海洋藍|オーシャン
 Forest accent|森林绿|森林綠|フォレスト
 Import dashboard|导入仪表板|匯入儀表板|インポートダッシュボード
 Import overview|导入概览|匯入概覽|インポート概要
-Overview|概览|概覽|概要
-Show or hide the import overview|显示或隐藏导入概览|顯示或隱藏匯入概覽|インポート概要の表示/非表示
 Transfers running|正在传输|正在傳輸|転送中
 Review pending|等待审核|等待審核|確認待ち
 Idle|空闲|閒置|待機中
@@ -481,7 +478,7 @@ Apply or discard the review.|请应用或放弃此审核。|請套用或放棄�
 Backup matches the drive. Removed files are moved aside, not deleted.|备份与驱动器保持一致。已删除的文件会被移开，不会被删除。|備份與磁碟保持一致。已刪除的檔案會被移開，不會被刪除。|バックアップをドライブと一致させます。削除されたファイルは移動され、消去されません。
 Camera folders (DCIM) found.|找到相机文件夹（DCIM）。|找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）があります。
 Connected as a camera over USB.|已作为相机通过 USB 连接。|已作為相機透過 USB 連接。|USBでカメラとして接続されています。
-Change this any time in Drives.|可随时在“驱动器”中更改。|可隨時在「磁碟」中變更。|「ドライブ」でいつでも変更できます。
+Change this any time in Settings › Devices.|可随时在“设置 › 设备”中更改。|可隨時在「設定 › 裝置」中變更。|「設定 › デバイス」でいつでも変更できます。
 Checking files. Nothing is copied yet.|正在检查文件，尚未复制任何内容。|正在檢查檔案，尚未複製任何內容。|ファイルを確認中です。まだ何もコピーしていません。
 Connect a memory card or camera to start.|连接存储卡或相机即可开始。|連接記憶卡或相機即可開始。|メモリーカードかカメラを接続して開始します。
 Copied to an Other files folder.|复制到“其他文件”文件夹。|複製到「其他檔案」資料夾。|「その他のファイル」フォルダーにコピーします。
@@ -691,9 +688,7 @@ Imports start as soon as a selected drive connects.|选定的驱动器一连接�
 Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ
 Drives at once: {count}/10|同时处理的驱动器：{count}/10|同時處理的磁碟：{count}/10|同時に処理するドライブ：{count}/10
 Settings categories|设置类别|設定類別|設定のカテゴリ
-Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
 1 file outside your folder structure|1 个文件不在文件夹结构中|1 個檔案不在資料夾結構中|フォルダー構成の外に 1 個のファイル
-Limit: {count} simultaneous|上限：同时 {count} 个|上限：同時 {count} 個|同時処理上限：{count}
 of {size} planned|计划共 {size}|計畫共 {size}|予定 {size} 中
 {complete} sources complete · {errors} need attention|{complete} 个来源完成 · {errors} 个需处理|{complete} 個來源完成 · {errors} 個需處理|{complete} 件完了 · {errors} 件要確認
 {size} free across destinations|目标合计剩余 {size}|目的地合計剩餘 {size}|保存先の空き容量 {size}
@@ -720,9 +715,7 @@ Files {start}–{end} of {total}|文件 {start}–{end}，共 {total} 个|檔案
 {count} sources connected. Choose two backup destinations to enable imports.|已连接 {count} 个来源。选择两个备份目标以启用导入。|已連接 {count} 個來源。選擇兩個備份目的地以啟用匯入。|{count} 件接続中です。2つのバックアップ先を選ぶとインポートできます。
 
 Import controls|导入控制|匯入控制|インポート操作
-Drive controls|驱动器控制|磁碟控制|ドライブ操作
 Organization controls|整理控制|整理控制|整理操作
-Refresh drives|刷新驱动器|重新整理磁碟|ドライブを更新
 Scan all|扫描全部|掃描全部|すべてスキャン
 Scanning…|正在扫描…|正在掃描…|スキャン中…
 Scan to see formats and counts|扫描以查看格式和数量|掃描以檢視格式與數量|スキャンで形式と件数を表示

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {Organization,TitlebarControls} from '../renderer/RootApp';
+import {ImportDashboard,Organization,SidebarSources,TitlebarControls} from '../renderer/RootApp';
 import type {AppState,Job,Language} from '../shared';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
@@ -14,23 +14,22 @@ const titlebar=(props:Partial<Props>,language:Language='en')=>renderToStaticMark
 const ids=(html:string)=>[...html.matchAll(/data-testid="([^"]+)"/g)].map(match=>match[1]);
 const button=(html:string,id:string)=>html.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))![0];
 
-test('each page shows its own top-bar buttons, and All errors on every page',()=>{
- assert.deepEqual(ids(titlebar({page:'desk'})),['global-start','global-stop','global-automatic','titlebar-overview','show-errors']);
- assert.deepEqual(ids(titlebar({page:'drives'})),['show-errors','refresh-drives']);
- assert.deepEqual(ids(titlebar({page:'organization'})),['show-errors']);
- assert.deepEqual(ids(titlebar({page:'settings'})),['show-errors']);
- assert.deepEqual(ids(titlebar({page:'history'})),['show-errors']);
+test('every page shows the same run controls, and All errors',()=>{
+ for(const page of ['desk','library','activity','settings'] as const) assert.deepEqual(ids(titlebar({page})),['global-start','global-stop','show-errors'],page);
+ assert.doesNotMatch(titlebar({page:'settings'}),/global-automatic|titlebar-overview|refresh-button/);
  assert.match(titlebar({page:'settings'}),/class="error-count" data-count="2"/);
 });
 
-test('the desk is the default page, so the import controls stay where they were',()=>{
+test('the desk is the default page, and refresh lives in the sidebar Sources heading',()=>{
  assert.equal(titlebar({}),titlebar({page:'desk'}));
- assert.match(titlebar({}),/Refresh connected sources/);
+ assert.doesNotMatch(titlebar({}),/Refresh connected sources/);
+ const sidebar=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:state(),onOpen:()=>{},act:()=>{}})}));
+ assert.match(sidebar,/<h2 id="sidebar-sources">Sources<\/h2><button[^>]*data-testid="refresh-sources"[^>]*aria-label="Refresh connected sources"/);
 });
 
-test('Library keeps execution below the destination scope and All errors in the top bar',()=>{
+test('Library keeps execution below the destination scope and the same run controls and All errors in the top bar',()=>{
  for(const organizationDestination of [1,5]) {
-  assert.deepEqual(ids(titlebar({page:'library',organizationDestination})),['show-errors']);
+  assert.deepEqual(ids(titlebar({page:'library',organizationDestination})),['global-start','global-stop','show-errors']);
   const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:state(),act:()=>{},busy:false,selectedDestination:organizationDestination})}));
   assert.ok(html.indexOf('data-testid="organization-execute"')>html.indexOf('organization-scope'));
   assert.equal((html.match(/>Organize now</g)??[]).length,1);
@@ -47,12 +46,17 @@ test('the content actions retain review locking and organization queue semantics
  assert.match(queued,/<button[^>]*class="button button-primary[^>]*disabled/);
 });
 
-test('the desk top bar has an Overview toggle that follows and flips showDashboard',()=>{
- const toggle=(showDashboard?:boolean,act:(action:unknown)=>void=()=>{})=>titlebar({page:'desk',act:act as Props['act'],state:state({preferences:{...preferences,...(showDashboard===undefined?{}:{showDashboard})}})});
- for(const [shown,pressed] of [[undefined,'true'],[true,'true'],[false,'false']] as const) {
-  const html=button(toggle(shown),'titlebar-overview');
-  assert.match(html,new RegExp(`aria-pressed="${pressed}"`));
+test('the import overview has one toggle that follows showDashboard and collapses to a slim header',()=>{
+ const dashboard=(showDashboard?:boolean)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:state({preferences:{...preferences,...(showDashboard===undefined?{}:{showDashboard})}}),act:()=>{}})}));
+ for(const shown of [undefined,true]) {
+  const html=dashboard(shown);
+  assert.match(button(html,'dashboard-toggle'),/aria-expanded="true"[^>]*aria-label="Hide the import overview"|aria-label="Hide the import overview"[^>]*aria-expanded="true"/);
+  assert.match(html,/dashboard-metrics/);
+  assert.match(html,/data-testid="parallel-summary"/);
  }
- assert.match(toggle(true),/titlebar-overview[^>]*>(<svg.*?<\/svg>)?Overview</);
- assert.equal(ids(titlebar({page:'settings'})).includes('titlebar-overview'),false);
+ const collapsed=dashboard(false);
+ assert.match(button(collapsed,'dashboard-toggle'),/aria-label="Show the import overview"/);
+ assert.match(collapsed,/import-dashboard-collapsed/);
+ assert.match(collapsed,/Import overview/);
+ assert.doesNotMatch(collapsed,/dashboard-metrics|parallel-summary/);
 });

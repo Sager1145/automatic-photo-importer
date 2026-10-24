@@ -19,7 +19,7 @@ test('Settings exposes seven task-focused categories and opens General by defaul
 test('each saved policy and live control is grouped under its intended category', () => {
   const markup = render();
   const contents: Record<SettingsCategory, string[]> = {
-    general: ['App language', 'Text size', 'Appearance', 'Show the import overview'],
+    general: ['App language', 'Text size', 'Appearance'],
     storage: ['Backup location', 'Backup folder'],
     folders: ['Folder structure', 'Same name, different content'],
     defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Drive backups'],
