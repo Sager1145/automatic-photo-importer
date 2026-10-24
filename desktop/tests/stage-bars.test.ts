@@ -133,7 +133,7 @@ test('a finished first stage stays under the next colour, and the layers are cum
  assert.ok(Math.abs(total[0]!.fraction-.13)<1e-9&&Math.abs(total[1]!.fraction-.278)<1e-9);
 });
 
-test('the Drive details toggle sits in the step row with the steps and controls the panel',()=>{
+test('the Drive details toggle keeps stage telemetry visible and controls its detail panel',()=>{
  const markup=render(createElement(SourceRow,{source:card,act:()=>{},configured:true}));
  const row=markup.match(/<div class="source-step-row"[^>]*>([\s\S]*?)<\/button><\/div>/)?.[1]??'';
  assert.match(row,/data-testid="source-steps"/);
@@ -141,6 +141,7 @@ test('the Drive details toggle sits in the step row with the steps and controls 
  assert.match(toggle,/aria-expanded="false"/);
  const id=toggle.match(/aria-controls="([^"]+)"/)?.[1];
  assert.ok(id);assert.ok(markup.includes(`id="${id}"`));
+
  assert.doesNotMatch(markup.match(/<summary[\s\S]*?<\/summary>/)?.[0]??'',/Drive details/);
 
  assert.match(css,/\.source-step-row\{[^}]*flex-wrap:wrap/);

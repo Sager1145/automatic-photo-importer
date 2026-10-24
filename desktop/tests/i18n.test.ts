@@ -109,7 +109,7 @@ test('edited-export folder settings localize the default and custom preview with
 });
 
 test('organization shows the exact selected folder scope and retains an explicit whole-destination option', async () => {
-  const { Organization } = await import('../renderer/RootApp');
+  const { Organization, ReviewPanel } = await import('../renderer/RootApp');
   for (const language of languages) {
     const state: AppState = { preferences: { language, appearance:'system', textScale:1.25, accent:'coral', automatic:true, parallel:2, destinations:['/Volumes/A006'], copyMode:'single', basePath:'photobackup', template:'{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource:false, unknownRules:{} }, sources:[], jobs:[], history:[], platform:'darwin', organizationFolders:{'/Volumes/A006':['2024','2025','2026']} };
     const t = createTranslator(language);
@@ -126,8 +126,8 @@ test('organization shows the exact selected folder scope and retains an explicit
     assert.ok(whole.includes(t('All folders on this destination will be scanned.')));
     assert.ok(!whole.includes(t('Use whole destination')));
     state.busyReview = true; state.reviewProgress = {phase:'planning', step:'checking', completed:123, total:400, bytes:0, totalBytes:0, speed:0, file:'/Volumes/A006/2024/photo.JPG'};
-    const checking = render();
-    assert.ok(checking.includes(t('Checking organization files: {count} · {file}', {count:(123).toLocaleString(language), file:'/Volumes/A006/2024/photo.JPG'})));
+    const checking = renderToStaticMarkup(createElement(I18nProvider, {language, children:createElement(ReviewPanel, {state,act:()=>{},inspect:()=>{}})}));
+    assert.ok(checking.includes(t('Building your file review…')) && checking.includes('/Volumes/A006/2024/photo.JPG'));
     assert.ok(checking.includes('aria-valuenow="31"') && checking.includes(t('{completed} of {total} files checked', {completed:(123).toLocaleString(language), total:(400).toLocaleString(language)})), `${language}: organization review shows a determinate bar`);
   }
 });
@@ -178,7 +178,7 @@ test('global controls stay independent of pages and source error details are iso
     const t=createTranslator(language);
     const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const controls=render(createElement(TitlebarControls,{state,act:()=>{},errorCount:errors.length,onErrors:()=>{}}));
-    for(const label of ['Start imports','Stop','Automatic','All errors'])assert.ok(controls.includes(t(label)));
+    for(const label of ['Start all selected','Stop imports','Automatic','All errors'])assert.ok(controls.includes(t(label)));
     assert.ok(!controls.includes('show-progress'));
     assert.ok(!controls.includes('Preview photo'));
     const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
@@ -341,7 +341,7 @@ test('new drives prompt for a choice, unselected drives are excluded on their ca
     assert.ok(/data-testid="source-select" aria-pressed="true"/.test(cardCard) && cardCard.includes(t('Selected')) && cardCard.includes('source-included'), `${language}: selected drive is marked`);
     assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?<\/svg>[^<]*<\/button>/.test(usbCard) && (usbCard.match(/<button[^>]*disabled/g) ?? []).length >= 3, `${language}: scan, review and import are disabled`);
     const controls = render(createElement(TitlebarControls, { state, act, errorCount: 0, onErrors: () => {} }));
-    assert.ok(controls.includes(t('Start imports ({count})', { count: 1 })), `${language}: Start counts only selected drives`);
+    assert.ok(controls.includes(t('Start all selected ({count})', { count: 1 })), `${language}: Start counts only selected drives`);
     const settings = render(createElement(RememberedDrives, { preferences: state.preferences, act }));
     assert.ok(settings.includes('data-testid="remembered-devices"') && settings.includes('NIKON Z6III') && settings.includes(t('Forget')));
   }
@@ -417,7 +417,7 @@ test('copy verification is a Settings toggle that defaults on, with a dashboard 
   const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin' };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
-    const toggle = (markup: string) => markup.split('<label class="switch-row').map(chunk => chunk.slice(0, chunk.indexOf('</label>'))).find(row => row.includes(t('Verify each copy after copying'))) ?? '';
+    const toggle = (markup: string) => markup.split('<label class="switch-row').slice(1).map(chunk => chunk.slice(0, chunk.indexOf('</label>'))).find(row => row.includes(t('Verify each copy after copying'))) ?? '';
     const on = render(createElement(SettingsPage, { state, act: () => {}, busy: false }));
     assert.ok(on.includes(t('Verify each copy after copying')) && /checked=""/.test(toggle(on)), `${language}: defaults on`);
     const offState = { ...state, preferences: { ...preferences, verifyCopies: false } };
@@ -738,31 +738,27 @@ test('Settings is organized into categories with live summaries, one open panel,
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: true, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {},
     rememberedDevices: { card: { name: 'Card', lastSelected: '2026-10-20T10:00:00Z' } } };
   const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [{ path: '/Volumes/A006', available: true, total: 2e12, free: 8e11 }] };
-  const order = ['importing', 'destinations', 'folders', 'organization', 'drives', 'general'];
+  const order = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance'];
   for (const language of languages) {
-    const t = createTranslator(language), render = (s: AppState, busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state: s, act: () => {}, busy }) }));
-    const markup = render(state);
+    const t = createTranslator(language), render = (busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state, act: () => {}, busy }) }));
+    const markup = render();
     assert.deepEqual([...markup.matchAll(/data-testid="settings-tab-(\w+)"/g)].map(m => m[1]), order, `${language}: categories in task order`);
     assert.equal((markup.match(/role="tab"[^>]*aria-selected="true"|aria-selected="true"[^>]*role="tab"/g) ?? []).length, 1, `${language}: one selected category`);
-    const tab = (id: string) => markup.match(new RegExp(`<button[^>]*data-testid="settings-tab-${id}"[\\s\\S]*?</button>`))?.[0] ?? '';
-    const panel = (id: string) => markup.match(new RegExp(`<section[^>]*data-testid="settings-panel-${id}"[\\s\\S]*?(?=<section[^>]*data-testid="settings-panel-|$)`))?.[0] ?? '';
-    assert.ok(tab('importing').includes(t('Automatic')) && tab('importing').includes(t('{count} at once', { count: '2' })), `${language}: importing summary`);
-    assert.ok(tab('destinations').includes('A006'), `${language}: destinations summary`);
+    const tab = (id: string) => markup.split(`data-testid="settings-tab-${id}"`)[1]?.split('</button>')[0] ?? '';
+    const panel = (html: string, id: string) => html.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0] ?? '';
+    assert.ok(tab('defaults').includes(t('Automatic')), `${language}: defaults summary`);
+    assert.ok(tab('performance').includes(t('{count} at once', { count: '2' })), `${language}: performance summary`);
+    assert.ok(tab('storage').includes('A006'), `${language}: storage summary`);
     assert.ok(tab('folders').includes('2026') && tab('folders').includes('202610'), `${language}: folders summary`);
-    assert.ok(tab('organization').includes(t('Leftover files')), `${language}: organization summary`);
-    assert.ok(tab('drives').includes(t('{count} remembered', { count: '1' })), `${language}: drives summary`);
+    assert.ok(tab('devices').includes(t('{count} remembered', { count: '1' })), `${language}: devices summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
-    assert.ok(!/<section[^>]*data-testid="settings-panel-importing"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
-    assert.ok(panel('importing').includes(t('Automatic import')) && panel('importing').includes('id="settings-parallel"') && panel('importing').includes(t('Verify each copy after copying')) && !panel('importing').includes(t('Enable media folder selection')), `${language}: importing controls`);
-    assert.ok(panel('destinations').includes('destination-slot') && panel('destinations').includes(t('Backup folder')), `${language}: destination controls`);
-    assert.ok(panel('folders').includes('data-testid="photo-path-builder"') && panel('folders').includes(t('Edited exports folder')), `${language}: folder controls`);
-    assert.ok(!panel('organization').includes(t('Remove emptied source folders')) && !panel('organization').includes('segmented'), `${language}: organization controls`);
-    assert.ok(panel('drives').includes('data-testid="remembered-devices"') && panel('drives').includes('data-testid="ignored-devices"'), `${language}: drive memory`);
-    assert.ok(panel('general').includes('id="app-language"') && panel('general').includes('id="text-size"'), `${language}: general controls`);
-    const busy = render(state, true);
-    const busyPanel = (id: string) => busy.match(new RegExp(`<section[^>]*data-testid="settings-panel-${id}"[\\s\\S]*?(?=<section[^>]*data-testid="settings-panel-|$)`))?.[0] ?? '';
-    assert.ok(/<fieldset[^>]*disabled/.test(busyPanel('destinations')) && /<fieldset[^>]*disabled/.test(busyPanel('folders')), `${language}: pipeline settings lock while importing`);
-    assert.ok(!/<fieldset[^>]*disabled/.test(busyPanel('general')) && !/<input[^>]*id="settings-parallel"[^>]*disabled/.test(busyPanel('importing')), `${language}: general and live controls stay usable`);
+    assert.ok(!/<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-storage"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
+    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Backup folder'], folders: ['Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying'], files: ['Collect problem files', 'Remove macOS ._ files'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once', 'Diagnostics'] };
+    for (const [id, labels] of Object.entries(controls)) for (const label of labels) assert.ok(panel(markup, id).includes(t(label)), `${language}: ${id}: ${label}`);
+    assert.ok(!markup.includes('data-testid="residue-cleanup"'), `${language}: maintenance belongs to Activity`);
+    const busy = render(true);
+    for (const id of ['storage', 'folders', 'defaults', 'files', 'performance']) assert.ok(/<fieldset[^>]*disabled/.test(panel(busy, id)), `${language}: ${id} policy lock`);
+    assert.ok(!/<fieldset[^>]*disabled/.test(panel(busy, 'general')) && !/<input[^>]*id="settings-parallel"[^>]*disabled/.test(panel(busy, 'performance')), `${language}: general and live controls stay usable`);
   }
 });
 
@@ -797,14 +793,14 @@ test('the Import overview can be hidden from the desk and turned back on in Sett
 });
 
 test('the parallel drives slider runs from 1 to 10', async () => {
-  const { ImportDesk } = await import('../renderer/RootApp');
+  const { SettingsPage } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 5, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
   for (const language of languages) {
     const t = createTranslator(language);
-    const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));
-    const slider = markup.match(/<input id="parallel-source-limit"[^>]*>/)?.[0] ?? '';
+    const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: false, requestedCategory: 'performance' }) }));
+    const slider = markup.match(/<input id="settings-parallel"[^>]*>/)?.[0] ?? '';
     assert.ok(/min="1"/.test(slider) && /max="10"/.test(slider) && /value="5"/.test(slider), `${language}: 1–10, showing 5`);
-    assert.ok(markup.includes(t('{count} of 10', { count: 5 })), `${language}: label out of 10`);
+    assert.ok(markup.includes(t('Drives at once')), `${language}: labeled slider in Performance`);
   }
 });
 
@@ -829,12 +825,12 @@ test('a finished organization shows 100%, and one misplaced file is counted in t
   }
 });
 
-test('Settings › Organization shows leftover temporary files with a Clean up button in every language', async () => {
-  const { SettingsPage } = await import('../renderer/RootApp');
+test('Activity maintenance shows leftover temporary files with a Clean up button in every language', async () => {
+  const { LeftoverFiles } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   for (const language of languages) {
     const t = createTranslator(language);
-    const row = (residue?: AppState['residue'], busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', residue }, act: () => {}, busy }) })).match(/data-testid="residue-cleanup"[\s\S]*?<\/section>/)?.[0] ?? '';
+    const row = (residue?: AppState['residue'], busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(LeftoverFiles, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', residue }, act: () => {}, busy }) }));
     const cleanUp = (markup: string) => markup.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?<\/button>/g)?.find(button => button.includes(t('Clean up'))) ?? '';
     assert.ok(row().includes(t('Not checked yet.')) && cleanUp(row()) && !/disabled/.test(cleanUp(row())), `${language}: unchecked, Clean up available`);
     const found = row({ files: 37, bytes: 2.5e9, resumable: { files: 2, bytes: 1e8 }, checkedAt: '2026-10-22T10:00:00Z' });

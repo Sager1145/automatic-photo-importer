@@ -1,0 +1,85 @@
+{
+  "timings": [
+    {
+      "page": "Files & folders",
+      "ms": 5
+    },
+    {
+      "page": "Organization",
+      "ms": 38
+    },
+    {
+      "page": "Duplicates",
+      "ms": 23
+    },
+    {
+      "page": "Jobs",
+      "ms": 297
+    },
+    {
+      "page": "History",
+      "ms": 36
+    },
+    {
+      "page": "Issues",
+      "ms": 109
+    },
+    {
+      "page": "Recovery",
+      "ms": 103
+    },
+    {
+      "page": "Settings",
+      "ms": 22
+    },
+    {
+      "page": "Import",
+      "ms": 141
+    },
+    {
+      "page": "Files & folders",
+      "ms": 39
+    },
+    {
+      "page": "Organization",
+      "ms": 39
+    },
+    {
+      "page": "Duplicates",
+      "ms": 16
+    },
+    {
+      "page": "Jobs",
+      "ms": 140
+    },
+    {
+      "page": "History",
+      "ms": 19
+    },
+    {
+      "page": "Issues",
+      "ms": 91
+    },
+    {
+      "page": "Recovery",
+      "ms": 112
+    },
+    {
+      "page": "Settings",
+      "ms": 91
+    },
+    {
+      "page": "Import",
+      "ms": 302
+    }
+  ],
+  "median": 91,
+  "max": 302,
+  "panelMs": 252,
+  "rows": {
+    "groups": 125,
+    "nodes": 5167
+  },
+  "errors": 50000,
+  "jobs": 85
+}

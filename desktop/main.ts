@@ -1,4 +1,6 @@
 import './threadpool';
+import {stopOperations} from './stop-scope';
+import {publishSourceModes} from './source-modes';
 import {app,BrowserWindow,clipboard,dialog,ipcMain,shell,session,nativeTheme,powerMonitor,powerSaveBlocker} from 'electron';
 import {keepAwake} from './keep-awake';
 import fs from 'node:fs/promises';
@@ -212,7 +214,7 @@ setInterval(()=>{if(state.jobs.some(isRunning)){logProgress(state.jobs);emit();}
 // Imports and organizations must not stall because the Mac slept or dimmed the display mid-run.
 const awake=keepAwake(powerSaveBlocker);
 let lastEmit=0;
-const emit=()=>{lastEmit=Date.now();yieldListing();activityLoop?.wake();state.resources=resourceUse();state.logInfo=logInfo();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(state.sources,sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
+const emit=()=>{lastEmit=Date.now();yieldListing();activityLoop?.wake();state.resources=resourceUse();state.logInfo=logInfo();state.duplicates={...dup,scopes:duplicateScopes()};stampJobs();awake(state.jobs);stampEstimates(state,etaTracker,Date.now());state.errorLog=errorCache.refresh(state);state.sources=orderSources(publishSourceModes(state.sources,folders),sourceOrder);state.queueOrder=queueOrder(state.jobs,sourceOrder);stateChannel.publish(state);};
 // Progress republishes at most 4 times a second while a job copies or verifies (the renderer is busy then), 10 otherwise. Phase changes and the final emit call emit() directly and are never dropped.
 const progressEmit=throttled(()=>emit(),()=>state.jobs.some(job=>job.phase==='copying'||job.phase==='verifying')?250:100);
 let saving:Promise<void>=Promise.resolve();
@@ -1207,8 +1209,8 @@ async function action(input:Action):Promise<void>{
    state.sources=selection.apply(state.sources,state.preferences.rememberedDevices,state.preferences.ignoredDevices,state.preferences.deviceHistory??={});publishDevices();await save();break;
   }
   case 'stopBackupCheck':misplacedControl?.abort();break;
-  case 'stop':{misplacedControl?.abort();if(!input.jobId){await discardReview();for(const control of scanControls.values())control.abort();}for(const [id,control] of originalsControls)if(!input.jobId||id===input.jobId)control.abort();for(const job of state.jobs)if(!input.jobId||job.id===input.jobId){pausing.delete(job.id);if(job.phase==='queued'||job.paused){job.phase='stopped';job.paused=false;job.detail=message('job.removedFromQueue');}if(active.has(job.id))job.stopping='stop';active.get(job.id)?.abort();}for(const s of state.sources)seen.add(s.id);break;}
   case 'unknownRule':{if(state.busyReview)throw new MessageError('error.rulesDuringReview');const ext=input.extension.replace(/^\.+/,'').trim().toLowerCase();const rule=rules({[ext]:input.folder})[ext];sessionRules[ext]=rule;if(input.remember){state.preferences.unknownRules[ext]=rule;await save();}dropStaleMisplaced();emit();if(reviewed?.review.kind==='import')await discardReview();break;}
+  case 'stop':{if(input.jobId===undefined&&input.scope===undefined)misplacedControl?.abort();await stopOperations(input,{jobs:state.jobs,sources:state.sources,active,originalsControls,scanControls,pausing,seen,discardReview,organizationJobIds});break;}
   case 'reveal':{
    // A file that is gone (moved, or its drive disconnected) shows the nearest folder that still exists, within the same allowed places.
    let target=input.path;
@@ -1247,7 +1249,7 @@ async function boot(){
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
  function trusted(event:Electron.IpcMainInvokeEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
- ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{await action(value);}catch(e){state.error=toMessage(e);emit();}});
+ ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{if(qaHooks?.beforeAction?.(value)===false)return;await action(value);}catch(e){state.error=toMessage(e);emit();}});
  ipcMain.handle('importer:summary',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file),{details:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});

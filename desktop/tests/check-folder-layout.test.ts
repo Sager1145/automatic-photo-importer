@@ -90,8 +90,8 @@ test('Settings no longer has the Off, Ask, Automatic check control',async()=>{
   const {SettingsPage}=await import('../renderer/RootApp');
   for(const language of languages){
     const markup=html(language,createElement(SettingsPage,{state:stateOf(),act:()=>{},busy:false}));
-    const panel=markup.match(/<section[^>]*data-testid="settings-panel-organization"[\s\S]*?(?=<section[^>]*data-testid="settings-panel-|$)/)?.[0]??'';
-    assert.ok(panel.length>0&&!panel.includes('segmented')&&!panel.includes('aria-pressed'),`${language}: no mode control`);
+    const panel=markup.match(/<section[^>]*data-testid="settings-panel-files"[\s\S]*?(?=<section[^>]*data-testid="settings-panel-|$)/)?.[0]??'';
+    assert.ok(panel.length>0&&!panel.includes('Auto-organize backup')&&!panel.includes('Automatic folder check'),`${language}: no mode control`);
     assert.ok(!markup.includes('Check the backup folder'),`${language}: no label`);
   }
 });
@@ -122,6 +122,13 @@ test('the prompt emphasis is static: no animation, transition or layering of its
   const rule=/\.backup-check-prompt\{([^}]*)\}/.exec(css)?.[1]??'';
   assert.ok(rule.includes('var(--accent-soft)')&&rule.includes('var(--accent-border)'),rule);
   assert.ok(!/animation|keyframes|z-index|transform|translate|will-change|position/.test(rule),rule);
+});
+
+test('the destination-slot Check folder layout button keeps its natural width instead of stretching',async()=>{
+  const fs=await import('node:fs'),path=await import('node:path');
+  const css=fs.readFileSync(path.join(__dirname,'../renderer/styles.css'),'utf8');
+  const rule=/\.destination-check\{([^}]*)\}/.exec(css)?.[1]??'';
+  assert.ok(rule.includes('align-self:flex-start')&&rule.includes('justify-self:start'),rule);
 });
 
 const missing={count:0,bytes:0,checkedAt:'2026-10-23T10:00:00Z',missing:true as const};

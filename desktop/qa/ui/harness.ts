@@ -1,5 +1,6 @@
 // The QA harness: helpers every check uses, and the runner that gives each check a clean start, a time budget,
 // a timing and a screenshot when it fails. Waits poll a condition; nothing sleeps for a fixed time.
+import assert from 'node:assert/strict';
 import {nativeTheme,screen,type BrowserWindow} from 'electron';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs/promises';
@@ -12,10 +13,17 @@ import {SYNTHETIC,type QaHooks} from '../hooks';
 import {Heartbeat,pulses} from './heartbeat';
 import {createStallWatch} from '../stall-watch';
 
-export type Page='Import desk'|'Drives'|'Organization'|'Duplicates'|'History'|'Settings';
-export const pages:Page[]=['Import desk','Drives','Organization','Duplicates','History','Settings'];
-export const pageTitle=(page:Page)=>page==='History'?'Import history':page==='Duplicates'?'Remove duplicates':page;
-export const settingsCategories=['importing','destinations','folders','organization','drives','general'];
+export type Page='Import desk'|'Import'|'Files & folders'|'Drives'|'Library tools'|'Organization'|'Duplicates'|'Activity'|'Jobs'|'History'|'Issues'|'Recovery'|'Settings';
+export const pages:Page[]=['Import','Files & folders','Organization','Duplicates','Jobs','History','Issues','Recovery','Settings'];
+export const pageTitle=(page:Page)=>['Import desk','Import','Files & folders'].includes(page)?'Import':['Library tools','Organization','Duplicates'].includes(page)?'Library tools':['Activity','Jobs','History','Issues','Recovery'].includes(page)?'Activity':'Settings';
+export const settingsCategories=['general','storage','folders','defaults','files','devices','performance'];
+export const workspaceRoute=(page:Page):{page:string;tab?:string;mode?:string}=>{
+ if(page==='Drives')return {page:'settings',tab:'settings-tab-devices'};
+ if(page==='Settings')return {page:'settings'};
+ if(['Import desk','Import','Files & folders'].includes(page))return {page:'desk',mode:page==='Import'?'import-mode-media':'import-mode-files'};
+ if(['Library tools','Organization','Duplicates'].includes(page))return {page:'library',tab:page==='Duplicates'?'library-duplicates':'library-organize'};
+ return {page:'activity',tab:'activity-'+(({History:'history',Issues:'issues',Recovery:'recovery'} as Record<string,string>)[page]??'jobs')};
+};
 export type Stage='boot'|'navigation'|'imports'|'organization'|'duplicates'|'settings'|'errors'|'recovery'|'rules'|'stress'|'final';
 export const stages:Stage[]=['boot','navigation','imports','organization','duplicates','settings','errors','recovery','rules','stress','final'];
 /** ui: every run; import: real copies (not with --ui-only); organization: real organization runs (full and --organization-only). */
@@ -106,14 +114,18 @@ export class Harness {
  async shot(name:string){await this.settle();await this.capture(path.join(this.report,name+'.png'));}
  click(selector:string){return this.js<boolean>(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return false;e.click();return true;})()`);}
  async nav(page:Page){
-  const index=this.navLabels.indexOf(page);
-  if(index<0||!await this.js<boolean>(`(()=>{const b=document.querySelectorAll('.nav-item')[${index}];b?.click();return !!b;})()`))throw new Error(`No navigation item ${page} in ${JSON.stringify(this.navLabels)}`);
-  // The title is checked in English; in other languages the selected item stands for it.
-  await this.until(`page ${page}`,`document.querySelectorAll('.nav-item')[${index}].getAttribute('aria-current')==='page'&&(document.documentElement.lang!=='en'||document.querySelector('.window-titlebar h1')?.textContent===${JSON.stringify(pageTitle(page))})`);await this.settle();
+  const route=workspaceRoute(page),selector=`.nav-item[data-page="${route.page}"]`;
+  if(!await this.click(selector))throw new Error(`No navigation item ${page} (${selector})`);
+  await this.until(`workspace ${page}`,`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-current')==='page'`);await this.settle();
+  if(route.mode){if(!await this.click(`[data-testid=${route.mode}]`))throw new Error(`Missing import mode ${route.mode}`);await this.settle();}
+  if(route.tab){if(!await this.click(`[data-testid=${route.tab}],#${route.tab}`))throw new Error(`Missing task tab ${route.tab}`);await this.settle();}
+  if(await this.js<string>('document.documentElement.lang')==='en')assert.equal(await this.js<string>("document.querySelector('.window-titlebar h1')?.textContent"),pageTitle(page));
  }
  async settingsTab(id:string){
-  if(!await this.click(`#settings-tab-${id}`))throw new Error(`No Settings category ${id}`);
-  await this.until(`settings category ${id}`,`document.querySelector('#settings-tab-${id}')?.getAttribute('aria-selected')==='true'`);await this.settle();
+  const current=({importing:'defaults',destinations:'storage',organization:'files',drives:'devices'} as Record<string,string>)[id]??id;
+  if(!await this.js<boolean>("!!document.querySelector('.settings-page')"))await this.nav('Settings');
+  if(!await this.click(`#settings-tab-${current}`))throw new Error(`No Settings category ${current}`);
+  await this.until(`settings category ${current}`,`document.querySelector('#settings-tab-${current}')?.getAttribute('aria-selected')==='true'`);await this.settle();
  }
  /** Applies a settings change and waits until the state shows it. Settings that jobs read are dropped while anything is
   * running or scanning, so those first wait for idle (stopping read-only scans) and are sent again until they hold. */
@@ -174,7 +186,7 @@ export class Harness {
   const patch=Object.fromEntries(Object.entries(want).filter(([key,value])=>s.preferences[key as keyof Preferences]!==value));
   if(Object.keys(patch).length)await this.prefs(patch);
   if(nativeTheme.themeSource!==this.initial.theme)nativeTheme.themeSource=this.initial.theme;
-  if(await this.js<string>("document.querySelector('.window-titlebar h1')?.textContent??''")!=='Import desk')await this.nav('Import desk');
+  await this.nav('Import desk');
   await this.settle();
  }
  releaseHold?:()=>void;

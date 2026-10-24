@@ -37,11 +37,15 @@ export function clippedControls(): Record<string,unknown>[] {
   const r=e.getBoundingClientRect();if(r.width<1||r.height<1)continue;
   const s=getComputedStyle(e);
   if(s.overflowX==='visible'&&s.textOverflow!=='ellipsis'&&e.scrollWidth>e.clientWidth+1&&e.clientWidth>0){out.push({kind:'content spills out',control:name(e),need:e.scrollWidth,width:e.clientWidth});continue;}
+  let visibleTop=r.top,visibleBottom=r.bottom;
   for(let a=e.parentElement;a&&a!==document.body;a=a.parentElement){
    const c=getComputedStyle(a);if(c.display==='contents')continue;
    const b=a.getBoundingClientRect(),left=b.left+a.clientLeft,top=b.top+a.clientTop,right=left+a.clientWidth,bottom=top+a.clientHeight;
+   // A scroll viewport may intentionally show only part of a control. Test the
+   // portion it can paint against outer clipping layers; horizontal spills still fail.
+   if(c.overflowY==='auto'||c.overflowY==='scroll'){visibleTop=Math.max(visibleTop,top);visibleBottom=Math.min(visibleBottom,bottom);}
    const clipX=c.overflowX!=='visible'&&!a.matches(scrollers),clipY=c.overflowY==='hidden'||c.overflowY==='clip';
-   if(clipX&&(r.left<left-1||r.right>right+1)||clipY&&(r.top<top-1||r.bottom>bottom+1)){out.push({kind:'clipped by ancestor',control:name(e),by:name(a).replace(/^.*</,'<'),control_box:[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)],clip_box:[Math.round(left),Math.round(top),Math.round(right),Math.round(bottom)]});break;}
+   if(clipX&&(r.left<left-1||r.right>right+1)||clipY&&visibleBottom>visibleTop&&(visibleTop<top-1||visibleBottom>bottom+1)){out.push({kind:'clipped by ancestor',control:name(e),by:name(a).replace(/^.*</,'<'),control_box:[Math.round(r.left),Math.round(r.top),Math.round(r.right),Math.round(r.bottom)],clip_box:[Math.round(left),Math.round(top),Math.round(right),Math.round(bottom)]});break;}
   }
  }
  return out;

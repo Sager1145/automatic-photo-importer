@@ -41,11 +41,11 @@ test('every Diagnostics string is translated in all four languages', () => {
   assert.equal(createTranslator('ja')('Diagnostics'), '診断');
 });
 
-test('the Diagnostics section sits in General outside the job-locked fieldset, and adds no stacking layers', async () => {
+test('the Diagnostics section sits in Performance outside the job-locked fieldset, and adds no stacking layers', async () => {
   const source = await fs.readFile(path.join(import.meta.dirname, '../renderer/RootApp.tsx'), 'utf8');
-  const general = source.slice(source.indexOf('    general: <>'), source.indexOf('  const onKeyDown'));
+  const general = source.slice(source.indexOf('    performance: <>'), source.indexOf('  const onKeyDown'));
   assert.match(general, /<DiagnosticsSettings state=\{state\} act=\{act\} \/>/);
-  assert.doesNotMatch(general, /settings-fieldset/);
+  assert.ok(general.indexOf('<DiagnosticsSettings') > general.indexOf('</fieldset>'), 'diagnostics stays outside the locked fieldset');
   const part = source.slice(source.indexOf('export function DiagnosticsSettings'), source.indexOf('function SettingsSection'));
   assert.doesNotMatch(part, /z-index|zIndex|createPortal|popover|dialog/i);
   assert.match(part, /type: 'logOpenFolder'/); assert.match(part, /type: 'logCopyPath'/); assert.match(part, /type: 'logExport'/); assert.match(part, /logLevel: event\.target\.value/);

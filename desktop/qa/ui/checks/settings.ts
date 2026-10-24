@@ -33,8 +33,8 @@ export const settingsChecks=(ctx:Context):Check[]=>[
  }},
  {id:'settings-text-size',stage:'settings',title:'Settings provides live, persistent text sizing with a readable default, and each category holds its settings',covers:['text size slider','settings categories'],run:async h=>{
   await h.nav('Settings');
-  await h.settingsTab('destinations');
-  assert.equal(await h.js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Destinations');
+  await h.settingsTab('storage');
+  assert.equal(await h.js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Storage');
   await h.settingsTab('folders');
   assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings]')!==null"),true,'Folder paths live in Settings → Folders');
   await h.settingsTab('general');
@@ -91,6 +91,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   for(const id of settingsCategories){await h.settingsTab(id);before[id]=await controls();}
   const basePath=(await h.state()).preferences.basePath;
   h.hooks!.addJobs([syntheticJob('locked',{phase:'copying'})]);
+  await h.settingsTab('storage');
   await h.until('settings locked',"document.querySelector('[data-testid=settings-lock-note]')");
   let locked=0;const problems:string[]=[];
   for(const id of settingsCategories){
@@ -103,7 +104,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
     if(!/locked/i.test(control.tip)&&!/^(Show in Finder|Show in file manager)/.test(control.tip))problems.push(`${id}: ${control.key} has no lock tooltip (title: ${JSON.stringify(control.tip)})`);
     if(control.opacity>.6)problems.push(`${id}: ${control.key} is not greyed out (opacity ${control.opacity})`);
    }
-   if(id==='destinations')await h.shot('settings-locked');
+   if(id==='storage')await h.shot('settings-locked');
   }
   assert.ok(locked>0,'No setting was locked while a job was active');
   assert.deepEqual(problems,[],'Locked settings');
@@ -113,20 +114,13 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   assert.equal(after.error,undefined,'Changing a locked setting raised an error');
   assert.equal(await h.js<boolean>("!document.querySelector('[data-testid=error-toast]')"),true,'Changing a locked setting showed an error toast');
  }},
- {id:'settings-detailed-logging',stage:'settings',title:'Detailed logging can be switched on and off in Settings and persists',covers:['detailed-logging settings section'],skip:async h=>{
-  await h.nav('Settings');
-  for(const id of settingsCategories){await h.settingsTab(id);if(await h.js<boolean>("Array.from(document.querySelectorAll('.settings-panel h3,.settings-panel label,[data-testid*=logging]')).some(e=>/detailed log/i.test(e.textContent)||/logging/.test(e.dataset?.testid??''))")){h.notes.qaLoggingTab=id;return undefined;}}
-  return 'no detailed-logging section on this build yet';
- },run:async h=>{
-  await h.idle();await h.nav('Settings');await h.settingsTab(String(h.notes.qaLoggingTab));
-  const before=(await h.state()).preferences;
-  const toggled=await h.js<boolean>("(()=>{const label=Array.from(document.querySelectorAll('.settings-panel label,.settings-panel [role=switch]')).find(e=>/detailed log/i.test(e.textContent));const control=label?.matches('input,[role=switch],button')?label:label?.querySelector('input,[role=switch],button')??document.querySelector('[data-testid*=logging] input,[data-testid*=logging] [role=switch]');if(!control)return false;control.click();return true;})()");
-  assert.ok(toggled,'No detailed-logging control to switch');
-  let changed:string[]=[];
-  await h.waitFor('a logging preference changes',async()=>{const now=(await h.state()).preferences as unknown as Record<string,unknown>;changed=Object.keys(now).filter(key=>JSON.stringify(now[key])!==JSON.stringify((before as unknown as Record<string,unknown>)[key]));return changed.length>0;});
-  assert.ok(changed.every(key=>/log/i.test(key)),`Switching detailed logging changed other settings: ${changed}`);
-  const key=changed[0]!,value=((await h.state()).preferences as unknown as Record<string,unknown>)[key];
-  await h.waitFor('saved logging preference',async()=>JSON.stringify((await savedPreferences(ctx.root))[key])===JSON.stringify(value));
-  await h.prefs({[key]:(before as unknown as Record<string,unknown>)[key]});
+ {id:'settings-detailed-logging',stage:'settings',title:'Diagnostics log detail stays live and persists in Settings Performance',covers:['Diagnostics log-level selector','live logging preference','persisted logging preference'],run:async h=>{
+  await h.nav('Settings');await h.settingsTab('performance');
+  const initial=(await h.state()).preferences.logLevel;
+  try{for(const level of ['detailed','off'] as const){
+   await h.js(`{const select=document.querySelector('#settings-log-level');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));}`);
+   await h.waitFor('live log level '+level,async()=>(await h.state()).preferences.logLevel===level);
+   await h.waitFor('saved log level '+level,async()=>(await savedPreferences(ctx.root)).logLevel===level);
+  }}finally{await h.prefs({logLevel:initial});}
  }},
 ];

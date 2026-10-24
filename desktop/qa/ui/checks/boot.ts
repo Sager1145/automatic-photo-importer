@@ -38,7 +38,7 @@ export const bootChecks=(ctx:Context):Check[]=>[
   assert.equal(result.animations,0,'a boot animation is still running');
   assert.deepEqual(result.stacked,[],'boot left an animation or transform on the app');
   assert.ok(result.logo,'the sidebar logo is not the topmost element at its centre');
-  assert.ok(result.nav.length>=5&&result.nav.every(Boolean),'a nav item is covered by another element: '+JSON.stringify(result.nav));
+  assert.ok(result.nav.length===4&&result.nav.every(Boolean),'a nav item is covered by another element: '+JSON.stringify(result.nav));
   assert.ok(result.popover,'a popover is not above the sidebar');
  }},
  {id:'boot-logo-text-sizes',stage:'boot',title:'The sidebar logo sits left of its title with a gap and overlaps neither the title nor any navigation item, at every text size',covers:['UI scale 1, 1.25, 1.6, 2'],run:async h=>{

@@ -1,0 +1,1027 @@
+{
+  "suite": "ui",
+  "passed": true,
+  "seconds": 10.432,
+  "uptime": 13.895360333,
+  "load": 62.056640625,
+  "scale": 3,
+  "heartbeat": {
+    "samples": 40,
+    "starvedMs": 0,
+    "freezes": 0
+  },
+  "checks": [
+    {
+      "name": "At startup the overview never calls a destination offline before its first check has finished",
+      "passed": true,
+      "id": "boot-overview-checking",
+      "stage": "boot",
+      "title": "At startup the overview never calls a destination offline before its first check has finished",
+      "covers": [
+        "destination status at first paint"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "The main process runs with a libuv thread pool sized by the CPU thread limit (twice it, 4 to 16; 16 without a saved limit)",
+      "passed": true,
+      "id": "boot-thread-pool",
+      "stage": "boot",
+      "title": "The main process runs with a libuv thread pool sized by the CPU thread limit (twice it, 4 to 16; 16 without a saved limit)",
+      "covers": [
+        "file reads and lstat do not queue behind fsync"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Fresh launch follows System, Automatic is off, and only fixture sources are present",
+      "passed": true,
+      "id": "boot-fresh-launch",
+      "stage": "boot",
+      "title": "Fresh launch follows System, Automatic is off, and only fixture sources are present",
+      "covers": [
+        "QA isolation from real drives",
+        "default preferences"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "macOS uses native window controls instead of HTML replicas",
+      "passed": true,
+      "id": "boot-native-controls",
+      "stage": "boot",
+      "title": "macOS uses native window controls instead of HTML replicas",
+      "covers": [
+        "traffic lights position",
+        "full screen"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "After boot nothing of the splash lingers: no node, animation, z-index or transform layer, and the sidebar logo, nav items and a popover are hit first",
+      "passed": true,
+      "id": "boot-splash-gone",
+      "stage": "boot",
+      "title": "After boot nothing of the splash lingers: no node, animation, z-index or transform layer, and the sidebar logo, nav items and a popover are hit first",
+      "covers": [
+        "boot splash data-boot=done",
+        "animation layering after boot"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "The sidebar logo sits left of its title with a gap and overlaps neither the title nor any navigation item, at every text size",
+      "passed": true,
+      "id": "boot-logo-text-sizes",
+      "stage": "boot",
+      "title": "The sidebar logo sits left of its title with a gap and overlaps neither the title nor any navigation item, at every text size",
+      "covers": [
+        "UI scale 1, 1.25, 1.6, 2"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Every Settings category icon and text stays above its highlight; navigation and panel snapshots remain in separate layers",
+      "passed": true,
+      "id": "nav-settings-highlight-order",
+      "stage": "navigation",
+      "title": "Every Settings category icon and text stays above its highlight; navigation and panel snapshots remain in separate layers",
+      "covers": [
+        "Settings upward highlight layering",
+        "category snapshot ordering",
+        "contained category navigation"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Bottom-to-top navigation keeps every sidebar text and icon snapshot above the moving highlight",
+      "passed": true,
+      "id": "nav-highlight-text-order",
+      "stage": "navigation",
+      "title": "Bottom-to-top navigation keeps every sidebar text and icon snapshot above the moving highlight",
+      "covers": [
+        "upward highlight layering",
+        "sidebar text above highlight",
+        "anchored Settings transition"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Task navigation has Import, Library tools and Activity with anchored Settings; workflow actions are not duplicated in the titlebar",
+      "passed": true,
+      "id": "nav-titlebar-buttons",
+      "stage": "navigation",
+      "title": "Task navigation has Import, Library tools and Activity with anchored Settings; workflow actions are not duplicated in the titlebar",
+      "covers": [
+        "navigation of every page",
+        "per-page title-bar actions",
+        "four primary navigation items",
+        "workflow action ownership"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "The desk shows the import dashboard with live metrics and drive activity, Automatic toggles, and errors open only on request",
+      "passed": true,
+      "id": "nav-desk-dashboard",
+      "stage": "navigation",
+      "title": "The desk shows the import dashboard with live metrics and drive activity, Automatic toggles, and errors open only on request",
+      "covers": [
+        "import dashboard",
+        "drive activity meters",
+        "Automatic button"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Motion follows the operating system preference and buttons retain immediate feedback",
+      "passed": true,
+      "id": "nav-motion-preference",
+      "stage": "navigation",
+      "title": "Motion follows the operating system preference and buttons retain immediate feedback",
+      "covers": [
+        "reduced motion (OS)"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Every page and Settings category switch animates through the motion helper, and reduced motion skips it",
+      "passed": true,
+      "id": "nav-transitions",
+      "stage": "navigation",
+      "title": "Every page and Settings category switch animates through the motion helper, and reduced motion skips it",
+      "covers": [
+        "page transitions",
+        "Settings category transitions",
+        "single selection indicator"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet",
+      "passed": true,
+      "id": "nav-transition-layers",
+      "stage": "navigation",
+      "title": "Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet",
+      "covers": [
+        "animation layering during transitions",
+        "sheets suspend transitions"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Page snapshots contain their children and stay below the fixed chrome throughout page and category motion",
+      "passed": true,
+      "id": "nav-transition-containment",
+      "stage": "navigation",
+      "title": "Page snapshots contain their children and stay below the fixed chrome throughout page and category motion",
+      "covers": [
+        "nested transition layers",
+        "fixed chrome stacking",
+        "snapshot clipping",
+        "animation duration budget"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Rapid navigation and opening a sheet mid-transition leave the last page selected and no click-blocking snapshots",
+      "passed": true,
+      "id": "nav-rapid-timing",
+      "stage": "navigation",
+      "title": "Rapid navigation and opening a sheet mid-transition leave the last page selected and no click-blocking snapshots",
+      "covers": [
+        "animation interruption",
+        "rapid navigation timing",
+        "sheet during transition"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "With reduced motion on, pages and sheets change without View Transitions or animated closes, in every run",
+      "passed": true,
+      "id": "nav-reduced-motion-emulated",
+      "stage": "navigation",
+      "title": "With reduced motion on, pages and sheets change without View Transitions or animated closes, in every run",
+      "covers": [
+        "reduced motion"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Import modes preserve review ownership and keyboard tabs; task links open the exact Settings category",
+      "passed": true,
+      "id": "nav-workspace-ownership",
+      "stage": "navigation",
+      "title": "Import modes preserve review ownership and keyboard tabs; task links open the exact Settings category",
+      "covers": [
+        "review ownership",
+        "Import modes",
+        "keyboard task tabs",
+        "precise Settings links"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Import and Activity dispatch their named Stop scopes without changing job ownership",
+      "passed": true,
+      "id": "nav-stop-scopes",
+      "stage": "navigation",
+      "title": "Import and Activity dispatch their named Stop scopes without changing job ownership",
+      "covers": [
+        "Stop imports UI scope",
+        "Stop all UI scope",
+        "mixed jobs"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Activity keeps per-job inventory selection and opens the selected file metadata",
+      "passed": true,
+      "id": "import-activity-inventory",
+      "stage": "imports",
+      "title": "Activity keeps per-job inventory selection and opens the selected file metadata",
+      "covers": [
+        "information parity",
+        "Activity inventory selection",
+        "Activity metadata access"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Complete capacity numbers and multi-format legends wrap without clipping or overlap at narrow widths and 100–200% text",
+      "passed": true,
+      "id": "import-capacity-responsive",
+      "stage": "imports",
+      "title": "Complete capacity numbers and multi-format legends wrap without clipping or overlap at narrow widths and 100–200% text",
+      "covers": [
+        "full-width capacity track",
+        "complete multi-format legend",
+        "capacity text clipping and overlap",
+        "list/grid/Activity/Settings capacity",
+        "four locales"
+      ],
+      "at": "2026-10-24T01:22:56.021Z",
+      "status": "passed",
+      "ms": 7623
+    },
+    {
+      "name": "Check folder layout and Open stay on the same row in Import and Settings at large text sizes in every locale",
+      "passed": true,
+      "id": "import-destination-action-row",
+      "stage": "imports",
+      "title": "Check folder layout and Open stay on the same row in Import and Settings at large text sizes in every locale",
+      "covers": [
+        "related buttons share a row",
+        "destination action grouping",
+        "large text action layout"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Import uses a horizontal header and destination rail; source cards retain capacity and stage information in a compact layout",
+      "passed": true,
+      "id": "import-compact-layout",
+      "stage": "imports",
+      "title": "Import uses a horizontal header and destination rail; source cards retain capacity and stage information in a compact layout",
+      "covers": [
+        "compact Import spacing",
+        "horizontal space",
+        "full-width capacity analysis",
+        "source density"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Read-only drive scanning exposes media formats without copying files, and drive cards expand and collapse in place",
+      "passed": true,
+      "id": "import-scan",
+      "stage": "imports",
+      "title": "Read-only drive scanning exposes media formats without copying files, and drive cards expand and collapse in place",
+      "covers": [
+        "scan flow",
+        "card disclosure",
+        "cancel and rescan"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Storage strips show continuous used/free segments and scanned media categories without overflow",
+      "passed": true,
+      "id": "import-storage-strips",
+      "stage": "imports",
+      "title": "Storage strips show continuous used/free segments and scanned media categories without overflow",
+      "covers": [
+        "capacity bars",
+        "bars never clip"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Source layout switches between a saved two-column grid and one-column list, adapting to narrow windows",
+      "passed": true,
+      "id": "import-source-layout",
+      "stage": "imports",
+      "title": "Source layout switches between a saved two-column grid and one-column list, adapting to narrow windows",
+      "covers": [
+        "grid and list layout",
+        "persisted layout",
+        "no horizontal overflow at large text"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Photo metadata is readable and collapsed; video summaries omit shutter count in every language",
+      "passed": true,
+      "id": "import-metadata",
+      "stage": "imports",
+      "title": "Photo metadata is readable and collapsed; video summaries omit shutter count in every language",
+      "covers": [
+        "per-file review preview",
+        "metadata sheet",
+        "4 locales"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Changing an unknown-file rule invalidates a ready import review",
+      "passed": true,
+      "id": "import-rule-invalidates-review",
+      "stage": "imports",
+      "title": "Changing an unknown-file rule invalidates a ready import review",
+      "covers": [
+        "review invalidation"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Review actions Copy reviewed files and Discard review stay fully inside the viewport at every window and text size",
+      "passed": true,
+      "id": "import-review-footer",
+      "stage": "imports",
+      "title": "Review actions Copy reviewed files and Discard review stay fully inside the viewport at every window and text size",
+      "covers": [
+        "sticky review footer",
+        "no clipping"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Five sources run and the sixth queues; an organization queues behind them; Stop stops every one of them",
+      "passed": true,
+      "id": "import-stop",
+      "stage": "imports",
+      "title": "Five sources run and the sixth queues; an organization queues behind them; Stop stops every one of them",
+      "covers": [
+        "parallel limit",
+        "queue",
+        "Stop",
+        "organization queue"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Importing copies all source contents and a second run verifies duplicates without copying",
+      "passed": true,
+      "id": "import-retry-duplicates",
+      "stage": "imports",
+      "title": "Importing copies all source contents and a second run verifies duplicates without copying",
+      "covers": [
+        "import flow end to end",
+        "duplicate detection on re-import"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Concurrent sources create a fresh nested backup folder without directory races",
+      "passed": true,
+      "id": "import-nested-folder",
+      "stage": "imports",
+      "title": "Concurrent sources create a fresh nested backup folder without directory races",
+      "covers": [
+        "parallel imports into a new folder"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "A fixture organization review shows its progress in the shared layout with the count, file name, time left and speed",
+      "passed": true,
+      "id": "organization-review-progress",
+      "stage": "organization",
+      "title": "A fixture organization review shows its progress in the shared layout with the count, file name, time left and speed",
+      "covers": [
+        "organization review",
+        "live progress counter",
+        "shared progress layout"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Organization applies changed folder settings once, even when Apply is clicked twice",
+      "passed": true,
+      "id": "organization-apply",
+      "stage": "organization",
+      "title": "Organization applies changed folder settings once, even when Apply is clicked twice",
+      "covers": [
+        "organization flow end to end",
+        "double-click safety"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "One-click organization executes through the public app action and writes real execution reports",
+      "passed": true,
+      "id": "organization-one-click",
+      "stage": "organization",
+      "title": "One-click organization executes through the public app action and writes real execution reports",
+      "covers": [
+        "one-click organization",
+        "operation reports",
+        "destination marker untouched"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Organization targets either selected destination using the same reviewed workflow",
+      "passed": true,
+      "id": "organization-second-destination",
+      "stage": "organization",
+      "title": "Organization targets either selected destination using the same reviewed workflow",
+      "covers": [
+        "destination picker on the Organization page"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Remove duplicates opens on the destination, scans a copied fixture photo and shows its group with previews",
+      "passed": true,
+      "id": "duplicates-scan",
+      "stage": "duplicates",
+      "title": "Remove duplicates opens on the destination, scans a copied fixture photo and shows its group with previews",
+      "covers": [
+        "duplicates flow",
+        "levels",
+        "previews",
+        "SHA badge"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "System appearance responds live to OS light and dark changes",
+      "passed": true,
+      "id": "settings-system-appearance",
+      "stage": "settings",
+      "title": "System appearance responds live to OS light and dark changes",
+      "covers": [
+        "light and dark mode (OS)"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Explicit Light and Dark controls override system appearance",
+      "passed": true,
+      "id": "settings-explicit-appearance",
+      "stage": "settings",
+      "title": "Explicit Light and Dark controls override system appearance",
+      "covers": [
+        "light and dark mode (setting)"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Settings provides live, persistent text sizing with a readable default, and each category holds its settings",
+      "passed": true,
+      "id": "settings-text-size",
+      "stage": "settings",
+      "title": "Settings provides live, persistent text sizing with a readable default, and each category holds its settings",
+      "covers": [
+        "text size slider",
+        "settings categories"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "All four interface languages switch live and persist",
+      "passed": true,
+      "id": "settings-languages",
+      "stage": "settings",
+      "title": "All four interface languages switch live and persist",
+      "covers": [
+        "4 locales",
+        "persisted language"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Edited exports folder edits persist, update the preview and reject unsafe names",
+      "passed": true,
+      "id": "settings-edited-folder",
+      "stage": "settings",
+      "title": "Edited exports folder edits persist, update the preview and reject unsafe names",
+      "covers": [
+        "text preference save on blur",
+        "preview",
+        "validation errors stay in All errors"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "While work is active, locked settings are greyed out with a tooltip saying why, and changing one raises no error",
+      "passed": true,
+      "id": "settings-locked",
+      "stage": "settings",
+      "title": "While work is active, locked settings are greyed out with a tooltip saying why, and changing one raises no error",
+      "covers": [
+        "locked settings greyed out with tooltip and no error"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Diagnostics log detail stays live and persists in Settings Performance",
+      "passed": true,
+      "id": "settings-detailed-logging",
+      "stage": "settings",
+      "title": "Diagnostics log detail stays live and persists in Settings Performance",
+      "covers": [
+        "Diagnostics log-level selector",
+        "live logging preference",
+        "persisted logging preference"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Unknown files are skipped quietly by default and appear in All errors only in Ask mode",
+      "passed": true,
+      "id": "errors-unknown-files",
+      "stage": "errors",
+      "title": "Unknown files are skipped quietly by default and appear in All errors only in Ask mode",
+      "covers": [
+        "format warnings",
+        "skipped files notice"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Errors stay on top: at 200% the error toast is the topmost element everywhere on it, also on the frames after each page switch",
+      "passed": true,
+      "id": "errors-on-top-200",
+      "stage": "errors",
+      "title": "Errors stay on top: at 200% the error toast is the topmost element everywhere on it, also on the frames after each page switch",
+      "covers": [
+        "error toasts always on top",
+        "UI scale 2",
+        "transitions suspended under errors"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Running animations never paint above an error toast, and the toast stays above a sheet opened before or after it",
+      "passed": true,
+      "id": "errors-above-sheets-and-animations",
+      "stage": "errors",
+      "title": "Running animations never paint above an error toast, and the toast stays above a sheet opened before or after it",
+      "covers": [
+        "animation layering",
+        "error toasts always on top",
+        "popovers and sheets"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Grouped errors and warnings show one row per kind with counts, paged paths and skip buttons; Skip these clears the group",
+      "passed": true,
+      "id": "errors-grouped-skip",
+      "stage": "errors",
+      "title": "Grouped errors and warnings show one row per kind with counts, paged paths and skip buttons; Skip these clears the group",
+      "covers": [
+        "grouped errors and warnings",
+        "skip buttons",
+        "All errors panel"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "A finished organization can recheck its recovery journal, once even when Resume is clicked twice",
+      "passed": true,
+      "id": "recovery-journal-recheck",
+      "stage": "recovery",
+      "title": "A finished organization can recheck its recovery journal, once even when Resume is clicked twice",
+      "covers": [
+        "organization recovery",
+        "double-click safety"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not in the ui suite"
+    },
+    {
+      "name": "Looking for leftover files shows a counter that keeps moving",
+      "passed": true,
+      "id": "recovery-leftovers-counter",
+      "stage": "recovery",
+      "title": "Looking for leftover files shows a counter that keeps moving",
+      "covers": [
+        "live progress counters",
+        "leftover files"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "After the window reloads, the app boots again to the same state and every page still opens",
+      "passed": true,
+      "id": "recovery-renderer-reload",
+      "stage": "recovery",
+      "title": "After the window reloads, the app boots again to the same state and every page still opens",
+      "covers": [
+        "renderer recovery",
+        "boot splash data-boot=done"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Activity maintenance previews cleanup consequences; opening or cancelling never dispatches cleanup",
+      "passed": true,
+      "id": "recovery-cleanup-confirmation",
+      "stage": "recovery",
+      "title": "Activity maintenance previews cleanup consequences; opening or cancelling never dispatches cleanup",
+      "covers": [
+        "cleanup consequence preview",
+        "manual cleanup confirmation",
+        "receipt-only cleanup keeps named files",
+        "recoverable copies retained",
+        "Cancel focused"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Cleanup confirmation tracks active/paused work, checking and unknown counts while Cancel remains available",
+      "passed": true,
+      "id": "recovery-cleanup-locks",
+      "stage": "recovery",
+      "title": "Cleanup confirmation tracks active/paused work, checking and unknown counts while Cancel remains available",
+      "covers": [
+        "cleanup busy/checking locks",
+        "paused jobs lock cleanup",
+        "unknown cleanup preview cannot confirm",
+        "no destructive fixture cleanup"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "No button stretches far past its label and no bar or control is cut off, on every page, at every text size and window size",
+      "passed": true,
+      "id": "rules-sweep",
+      "stage": "rules",
+      "title": "No button stretches far past its label and no bar or control is cut off, on every page, at every text size and window size",
+      "covers": [
+        "no super-wide buttons",
+        "bars shrink and never clip",
+        "UI scale 1, 1.25, 1.5, 1.6, 1.75, 2",
+        "windows 1000x720 to 1920x1200"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "The overall import dashboard never shows a file name, while each card does",
+      "passed": true,
+      "id": "rules-dashboard-no-file-name",
+      "stage": "rules",
+      "title": "The overall import dashboard never shows a file name, while each card does",
+      "covers": [
+        "no file name in the overall dashboard"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "The file-name row never moves the stats: the bar and the count, speed and time stay put whatever the file name",
+      "passed": true,
+      "id": "rules-file-row-stable",
+      "stage": "rules",
+      "title": "The file-name row never moves the stats: the bar and the count, speed and time stay put whatever the file name",
+      "covers": [
+        "file-name row never moves the stats",
+        "long file names"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "A paused job marks its step in the warning colour",
+      "passed": true,
+      "id": "rules-paused-steps",
+      "stage": "rules",
+      "title": "A paused job marks its step in the warning colour",
+      "covers": [
+        "paused state is yellow"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "A paused job’s bar turns yellow",
+      "passed": true,
+      "id": "rules-paused-bar",
+      "stage": "rules",
+      "title": "A paused job’s bar turns yellow",
+      "covers": [
+        "paused bars turn yellow"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Each step colours its bar with its own stage colour, in light and dark, and the passed steps stay layered beneath it",
+      "passed": true,
+      "id": "rules-stage-colours",
+      "stage": "rules",
+      "title": "Each step colours its bar with its own stage colour, in light and dark, and the passed steps stay layered beneath it",
+      "covers": [
+        "per-step colours",
+        "stage-coloured layered bars",
+        "light and dark mode"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Layered bars stack one stage-coloured layer per step inside the track",
+      "passed": true,
+      "id": "rules-layered-bars",
+      "stage": "rules",
+      "title": "Layered bars stack one stage-coloured layer per step inside the track",
+      "covers": [
+        "stage-coloured layered bars"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Every counter on screen moves with its job: card counts, the dashboard total and files, the organization, and the sidebar",
+      "passed": true,
+      "id": "rules-live-counters",
+      "stage": "rules",
+      "title": "Every counter on screen moves with its job: card counts, the dashboard total and files, the organization, and the sidebar",
+      "covers": [
+        "everything must update (no frozen counters)"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "All four locales render every page and Settings category without missing translations, broken placeholders or overflow",
+      "passed": true,
+      "id": "rules-locales",
+      "stage": "rules",
+      "title": "All four locales render every page and Settings category without missing translations, broken placeholders or overflow",
+      "covers": [
+        "4 locales",
+        "no missing keys",
+        "no clipping"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Light and dark mode render every page legibly; a screenshot of each page, category and panel per theme goes to the gallery",
+      "passed": true,
+      "id": "rules-themes-gallery",
+      "stage": "rules",
+      "title": "Light and dark mode render every page legibly; a screenshot of each page, category and panel per theme goes to the gallery",
+      "covers": [
+        "light and dark mode",
+        "text contrast",
+        "screenshot set per page and theme"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "With 50,000 grouped errors, 60 running jobs and long file names the UI stays responsive: a navigation click paints in under 500 ms",
+      "passed": true,
+      "id": "stress-large-state",
+      "stage": "stress",
+      "title": "With 50,000 grouped errors, 60 running jobs and long file names the UI stays responsive: a navigation click paints in under 500 ms",
+      "covers": [
+        "injected large state",
+        "responsiveness",
+        "grouped errors at scale"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "skipped",
+      "ms": 0,
+      "reason": "not selected"
+    },
+    {
+      "name": "Every long step kept a live counter: no running job, scan, review or check froze its {completed, bytes, file, share} for more than 10 s during the whole run",
+      "passed": true,
+      "id": "final-heartbeat",
+      "stage": "final",
+      "title": "Every long step kept a live counter: no running job, scan, review or check froze its {completed, bytes, file, share} for more than 10 s during the whole run",
+      "covers": [
+        "every long step shows a live, moving counter"
+      ],
+      "at": "2026-10-24T01:23:03.645Z",
+      "status": "passed",
+      "ms": 840
+    },
+    {
+      "name": "No running job, listing or recheck kept the same progress for more than 10 s in the states the window received",
+      "passed": true,
+      "id": "final-stall-watch",
+      "stage": "final",
+      "title": "No running job, listing or recheck kept the same progress for more than 10 s in the states the window received",
+      "covers": [
+        "everything must update (no frozen counters)",
+        "every long step shows a live, moving counter"
+      ],
+      "at": "2026-10-24T01:23:04.485Z",
+      "status": "passed",
+      "ms": 384
+    },
+    {
+      "name": "Every source original and the existing destination markers retain their exact bytes",
+      "passed": true,
+      "id": "final-originals",
+      "stage": "final",
+      "title": "Every source original and the existing destination markers retain their exact bytes",
+      "covers": [
+        "originals are never modified"
+      ],
+      "at": "2026-10-24T01:23:04.869Z",
+      "status": "passed",
+      "ms": 523
+    }
+  ]
+}

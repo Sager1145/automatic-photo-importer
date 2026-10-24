@@ -11,7 +11,7 @@ import {findResidue,cleanResidue} from '../core/residue';
 import {organizeByCopy} from './fixtures/records';
 import {EtaTracker,stampEstimates} from '../eta';
 import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
-import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,progressCount,progressFraction,ReviewPanel} from '../renderer/RootApp';
+import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationRecoveryPanel,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,progressCount,progressFraction,ReviewPanel} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -131,7 +131,7 @@ test('every progress location renders the shared ProgressDisplay',()=>{
   ['source scan',render(createElement(ScanProgress,{sourceName:'Card',listing:{files:5,bytes:1e9,fileRate:10,share:1e9/8e10}}))],
   ['leftover files',render(createElement(LeftoverFiles,{state:stateWith({residue:{files:0,bytes:0,resumable:{files:0,bytes:0},checking:true,progress:{...listing,step:'scanning'}}}),act:()=>{},busy:false}))],
   ['backup folder check',render(createElement(Organization,{state:stateWith({misplacedProgress:{'/Volumes/A006':{...listing,step:'checking',total:100}}}),act:()=>{},busy:false}))],
-  ['organization recovery listing',render(createElement(Organization,{state:stateWith({organizationRecoveryLoading:true,organizationRecoveryProgress:{...listing,step:'scanning'}}),act:()=>{},busy:false}))],
+  ['organization recovery listing',render(createElement(OrganizationRecoveryPanel,{state:stateWith({organizationRecoveryLoading:true,organizationRecoveryProgress:{...listing,step:'scanning'}}),act:()=>{},busy:false}))],
   ['review being built',render(createElement(ReviewPanel,{state:stateWith({busyReview:true,reviewProgress:listing}),act:()=>{},inspect:()=>{}}))],
  ];
  for(const [name,html] of places){assert.ok(shared(html)>=1,`${name} renders ProgressDisplay`);assert.ok(html.includes('role="progressbar"'),`${name} has a bar`);}

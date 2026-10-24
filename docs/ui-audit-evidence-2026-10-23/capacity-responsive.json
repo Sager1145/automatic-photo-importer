@@ -1,0 +1,6089 @@
+{
+  "measurements": [
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 466.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 466.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 466.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 466.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 466.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 466.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 509.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 509.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 509.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 509.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 509.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 509.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 716.40625,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 498.8046875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 607.8125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 577.3125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "en",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 568.734375,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 501.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 501.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 708.40625,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 490.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 607.8125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 577.3125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 568.734375,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 501.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 501.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 501.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 708.40625,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 490.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 607.8125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 577.3125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 568.734375,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 491.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 491.7109375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 491.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 182.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 698.40625,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 480.8203125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 622.15625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 622.15625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 607.8125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 577.3125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 616.5625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 616.5625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.125,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 132.5 GB"
+      ]
+    },
+    {
+      "width": 1000,
+      "height": 720,
+      "language": "ja",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 568.734375,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 609.5859375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 609.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 609.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 609.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 609.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 609.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 189.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 288.84375,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 288.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 288.84375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 288.8515625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 288.84375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 288.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 189.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 823.40625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 605.6953125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 715.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 715.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 715.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 698.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 670.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 654.71875,
+          "rows": 4
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "132.5 GB free"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "en",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 617.015625,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.5859375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 187.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 285.84375,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.84375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.84375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 187.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 815.40625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 597.703125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 700.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 700.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 683.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 655.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 654.71875,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 617.015625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 603.5859375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 603.5859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 187.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 285.84375,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.84375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.84375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 285.8515625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 187.734375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 815.40625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 597.703125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 700.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 700.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 700.65625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 683.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 655.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 654.71875,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 617.015625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 596.0859375,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 596.0859375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 596.0859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 596.0859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 596.0859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 596.0859375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 185.234375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 282.09375,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 282.1015625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 282.09375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 282.1015625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 282.09375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 282.1015625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 185.234375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 805.40625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 587.71875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 688.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 688.65625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 688.65625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 671.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 643.8125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 669.96875,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 669.96875,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 654.71875,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1120,
+      "height": 800,
+      "language": "ja",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 617.015625,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 871.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 871.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 871.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 871.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 871.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 871.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 269.3046875,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 269.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 269.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 269.3046875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 269.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 269.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1143.40625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 672.71875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 708.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 708.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 708.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1018.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 673.765625,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 906.09375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "Other or unscanned",
+        "47.0 GB free"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "en",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 868.40625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 266.640625,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1135.40625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 672.71875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 693.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 693.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1003.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 658.78125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 906.09375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未扫描",
+        "剩余 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hans",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 868.40625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 863.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 266.640625,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 266.640625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1135.40625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 672.71875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 693.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 693.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 693.0625,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1003.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 658.78125,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 906.09375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "其他或未掃描",
+        "剩餘 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "zh-Hant",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 868.40625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 853.7109375,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 853.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 853.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 853.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 853.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 853.7109375,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 263.3046875,
+          "rows": 4
+        },
+        {
+          "labels": 3,
+          "width": 263.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 263.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 263.3046875,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 263.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 263.3125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 247.609375,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 1125.40625,
+          "rows": 1
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 672.71875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 680.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 680.0625,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 680.0625,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 274.90625,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 990.109375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 1.5,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 645.796875,
+          "rows": 1
+        }
+      ],
+      "legend": []
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-list",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 2,
+      "view": "import-grid",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 928.203125,
+          "rows": 3
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 1
+        },
+        {
+          "labels": 3,
+          "width": 928.203125,
+          "rows": 2
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 2,
+      "view": "activity",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 15,
+          "width": 906.09375,
+          "rows": 3
+        }
+      ],
+      "legend": [
+        "ARW",
+        "CR3",
+        "HEIC",
+        "HEIF",
+        "JPEG",
+        "JPG",
+        "MOV",
+        "MP4",
+        "MTS",
+        "NEF",
+        "PNG",
+        "TIFF",
+        "その他・未スキャン",
+        "空き 47.0 GB"
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 940,
+      "language": "ja",
+      "textScale": 2,
+      "view": "settings",
+      "failures": [],
+      "surfaces": [
+        {
+          "labels": 3,
+          "width": 868.40625,
+          "rows": 2
+        }
+      ],
+      "legend": []
+    }
+  ],
+  "failures": []
+}

@@ -144,6 +144,7 @@ export function RemovedDuplicates({ jobs, act, busy }: { jobs: OrganizationRecov
     {jobs.length === 0 ? <p className="inline-note"><Icon icon={Info} size={14} />{t("No removed duplicates in this library.")}</p> : <div className="recovery-jobs">{jobs.map(job => {
       const size = formatBytes(job.retainedBytes ?? 0), retained = job.retainedFiles ?? 0;
       return <article className="recovery-job" key={`${job.root}-${job.id}`} data-testid="removed-duplicates-job">
+        <p className="recovery-root">{job.root}</p>
         <div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.status === 'undone' ? t("Undone") : job.status === 'pending' ? t("Needs recovery") : t("Removed")}</span><span className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</span></div>
         {retained > 0 && <p className="muted"><Icon icon={Info} size={14} />{t("{count} originals ({size}) kept for undo.", { count: formatNumber(retained), size })}</p>}
         {job.error && <p className="field-error">{job.error}</p>}
@@ -187,7 +188,7 @@ export function duplicatesBusy(state: AppState): boolean {
 
 type Filter = 'all' | 'manual' | 'auto';
 
-export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch }) {
+export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; act: Dispatch; onRecovery?: () => void }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const dup = state.duplicates ?? { scopes: [], status: 'idle' as const, revision: 0, groups: 0, files: 0 };
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
@@ -262,7 +263,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
         <dl className="dashboard-metrics duplicate-metrics">
           <div><dt>{t("Groups to clean up")}</dt><dd data-metric="groups">{formatNumber(summary.groups)}</dd></div>
           <div><dt>{t("Files to remove")}</dt><dd data-metric="files">{formatNumber(summary.files)}</dd></div>
-          <div><dt>{t("Space to free")}</dt><dd data-metric="bytes">{formatBytes(summary.bytes)}</dd></div>
+          <div><dt>{t("Space held for undo")}</dt><dd data-metric="bytes">{formatBytes(summary.bytes)}</dd></div>
           <div><dt>{t("Waiting for your choice")}</dt><dd data-metric="undecided">{formatNumber(summary.undecided)}</dd></div>
         </dl>
         {summary.earlier ? <p className="field-error" data-testid="duplicates-earlier-summary">{t("{count} of these files were placed by an earlier organization; removing them ends that organization's Undo.", { count: formatNumber(summary.earlier) })}</p> : null}
@@ -281,7 +282,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
       </section>
     </>}
     {dup.root && dup.status === 'idle' && !scanned && !running && <p className="inline-note" data-testid="duplicates-not-scanned"><Icon icon={Info} size={14} />{t("Scan to look for duplicates in this library.")}</p>}
-    {dup.root && <RemovedDuplicates jobs={removed} act={act} busy={busy} />}
+    {onRecovery ? <Button icon={RotateCcw} onClick={onRecovery}>{t("Recovery & maintenance")}</Button> : dup.root && <RemovedDuplicates jobs={removed} act={act} busy={busy} />}
     {confirm !== 'closed' && <DuplicatesConfirm key={confirm} step={confirm} summary={summary} name={dup.name ?? ''} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
 }

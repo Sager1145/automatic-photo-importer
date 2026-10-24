@@ -15,6 +15,8 @@ import {organizationChecks} from './ui/checks/organization';
 import {duplicateChecks} from './ui/checks/duplicates';
 import {settingsChecks} from './ui/checks/settings';
 import {errorChecks} from './ui/checks/errors';
+import {workspaceFlowChecks} from './ui/checks/workspace-flows';
+import {workspaceSafetyChecks} from './ui/checks/workspace-safety';
 import {recoveryChecks} from './ui/checks/recovery';
 import {ruleChecks} from './ui/checks/rules';
 import {stressChecks} from './ui/checks/stress';
@@ -23,7 +25,7 @@ import {finalChecks} from './ui/checks/final';
 export interface SmokeOptions {uiOnly:boolean;organizationOnly:boolean;/** Runs only checks whose id matches this pattern (final checks always run). */only?:string;/** When the run must have written its report (epoch ms). */deadline?:number}
 
 export function allChecks(ctx:Context):Check[]{
- const checks=[...bootChecks(ctx),...navigationChecks(),...importChecks(ctx),...organizationChecks(ctx),...duplicateChecks(ctx),...settingsChecks(ctx),...errorChecks(),...recoveryChecks(),...ruleChecks(),...stressChecks(),...finalChecks(ctx)];
+ const checks=[...bootChecks(ctx),...navigationChecks(),...workspaceFlowChecks(),...importChecks(ctx),...organizationChecks(ctx),...duplicateChecks(ctx),...settingsChecks(ctx),...errorChecks(),...recoveryChecks(),...workspaceSafetyChecks(),...ruleChecks(),...stressChecks(),...finalChecks(ctx)];
  // Stable sort: the stages run in their order, checks within a stage in the order written.
  return checks.sort((a,b)=>stages.indexOf(a.stage)-stages.indexOf(b.stage));
 }

@@ -11,7 +11,7 @@ import type {AppState} from '../shared';
 const state=(extra:Partial<AppState['preferences']>={}):AppState=>({preferences:{...defaultPreferences,destinations:['/Volumes/A'],...extra},sources:[],jobs:[],history:[],platform:'darwin'} as AppState);
 const html=(node:React.ReactElement)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:node}));
 const desk=(value:AppState)=>html(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
-const choose=(markup:string)=>markup.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Choose media folders…/)![0];
+const choose=(markup:string)=>markup.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Add folder…/)![0];
 
 test('Add folder needs no preference: the button is enabled and there is no gate switch',()=>{
  for(const extra of [{},{allowFolderSource:false}]) {
