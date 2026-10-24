@@ -624,14 +624,18 @@ Clear all warnings for {name}|清除 {name} 的所有警告|清除 {name} 的所
 Show warnings for {name}|显示 {name} 的警告|顯示 {name} 的警告|{name} の警告を表示
 View|查看|查看|表示
 Off|关|關|オフ
-Ask|询问|詢問|確認する
 Organize backup|整理备份|整理備份|バックアップを整理
-Check the backup folder|检查备份文件夹|檢查備份資料夾|バックアップフォルダーの確認
+Check folder layout|检查文件夹结构|檢查資料夾結構|フォルダー構成を確認
+Check again|重新检查|重新檢查|もう一度確認
+Check whether every file in this backup is in the folder your rules give it.|检查此备份中的每个文件是否都在你的规则指定的文件夹里。|檢查此備份中的每個檔案是否都在你的規則指定的資料夾裡。|このバックアップのすべてのファイルが、ルールで決めたフォルダーに入っているか確認します。
+The folder layout is checked only when you click Check folder layout.|只有点击“检查文件夹结构”时才会检查文件夹结构。|只有點按「檢查資料夾結構」時才會檢查資料夾結構。|フォルダー構成は「フォルダー構成を確認」をクリックしたときだけ確認します。
+Reconnect this drive to check its folder layout.|重新连接此磁盘后才能检查文件夹结构。|重新連接此磁碟後才能檢查資料夾結構。|フォルダー構成を確認するには、このドライブを接続し直してください。
+No backup folder yet. The first import creates it.|还没有备份文件夹。首次导入时会创建。|還沒有備份資料夾。首次匯入時會建立。|バックアップフォルダーはまだありません。最初の読み込みで作成されます。
+Checked {time}|检查于 {time}|檢查於 {time}|{time} に確認
+Wait for the current work to finish before checking.|请等当前工作完成后再检查。|請等目前工作完成後再檢查。|現在の作業が終わってから確認してください。
+Another backup folder check is running.|另一个备份文件夹检查正在进行。|另一個備份資料夾檢查正在進行。|別のバックアップフォルダーの確認を実行中です。
 Backup folder is in order.|备份文件夹已整理好。|備份資料夾已整理好。|バックアップフォルダーは整理済みです。
 {count} files outside your folder structure|{count} 个文件不在文件夹结构中|{count} 個檔案不在資料夾結構中|フォルダー構成の外に {count} 個のファイル
-Misplaced files are moved into place after each import.|每次导入后，放错位置的文件会自动移到正确位置。|每次匯入後，放錯位置的檔案會自動移到正確位置。|読み込みのたびに、場所違いのファイルを正しい場所へ移動します。
-Checked after each import. You choose when to move files.|每次导入后检查，由你决定何时移动文件。|每次匯入後檢查，由你決定何時移動檔案。|読み込みのたびに確認し、移動するタイミングは自分で選べます。
-Not checked automatically.|不自动检查。|不自動檢查。|自動では確認しません。
 Leftover files|残留文件|殘留檔案|残ったファイル
 1 leftover file|1 个残留文件|1 個殘留檔案|残ったファイル 1 個
 {count} leftover files|{count} 个残留文件|{count} 個殘留檔案|残ったファイル {count} 個
@@ -680,7 +684,6 @@ Manual|手动|手動|手動
 {count} at once|同时 {count} 个|同時 {count} 個|同時に {count} 台
 Not set|未设置|未設定|未設定
 {count} remembered|已记住 {count} 个|已記住 {count} 個|{count} 台を記憶
-Backup folder check|备份文件夹检查|備份資料夾檢查|バックアップフォルダーの確認
 Starting imports|开始导入|開始匯入|読み込みの開始
 Imports start as soon as a selected drive connects.|选定的驱动器一连接就开始导入。|選定的磁碟一連接就開始匯入。|選択したドライブを接続するとすぐに読み込みを開始します。
 Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ

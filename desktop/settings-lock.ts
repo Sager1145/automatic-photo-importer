@@ -2,7 +2,7 @@ import { isLive, type AppState, type Preferences } from './shared';
 
 /** Settings a job reads while it runs or when it continues after a pause; changing one midway
  * could file half a job one way and half another, so they wait until every job has fully stopped. */
-export const jobPreferences:ReadonlySet<string>=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','collectProblemFiles','removeAppleDouble','autoOrganizeBackup','unknownDefault','noMetadataHandling','noMetadataFolder','conflictNaming','basePath','template','mediaLayout','videoBasePath','videoTemplate','editedFolder','maxCpuThreads','memoryLimitMB']);
+export const jobPreferences:ReadonlySet<string>=new Set(['copyMode','backupMode','verifyCopies','skipFileErrors','collectProblemFiles','removeAppleDouble','unknownDefault','noMetadataHandling','noMetadataFolder','conflictNaming','basePath','template','mediaLayout','videoBasePath','videoTemplate','editedFolder','maxCpuThreads','memoryLimitMB']);
 
 /** True while any job is running, queued or paused, a review is open or being built, a source is scanned, or Remove duplicates scans or removes. */
 export function settingsLocked(state:Pick<AppState,'jobs'>&{review?:unknown;busyReview?:unknown;scanningSources?:readonly string[];duplicates?:{status:string}}):boolean {

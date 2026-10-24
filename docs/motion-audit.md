@@ -81,7 +81,6 @@ Deliberately not animated: direct manipulation (sliders, typing in search fields
 | Review changes… / review opens | Review panel at the top of the page | `@starting-style` | `layout`: panel fades in, page content glides down |
 | Apply / Discard review | Review panel removed | None: page jumped | `layout`: panel fades out, content glides up |
 | Review table pages (Previous / Next) | Table rows | None | `crossfade` |
-| Backup folder check mode | Segmented selection, note | Colour transition | Same |
 | Misplaced files found / in order | Status line | `@starting-style` | Same |
 | Recovery list: Resume, Recheck, Refresh | Rows | Rows rise in | Same |
 | Undo / Release originals | Confirm sheet | Sheet animates in and out | Same |

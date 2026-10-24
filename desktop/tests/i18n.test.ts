@@ -590,7 +590,7 @@ test('errors are explained in plain language, grouped by drive, and keep the tec
   }
 });
 
-test('the backup folder can be organized by button, shows misplaced files, and the check can be Off, Ask or Automatic', async () => {
+test('the backup folder can be organized by button, shows misplaced files, and the check is a button, not a setting', async () => {
   const { Organization, ImportDesk } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
   const misplaced = { '/Volumes/A006': { count: 1234, bytes: 5.6e9, checkedAt: '2026-10-21T10:00:00Z' } };
@@ -602,15 +602,10 @@ test('the backup folder can be organized by button, shows misplaced files, and t
     const clean = page({ misplacedFiles: { '/Volumes/A006': { count: 0, bytes: 0, checkedAt: '2026-10-21T10:00:00Z' } } });
     assert.ok(clean.includes(t('Organize backup')) && !/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup/.test(clean), `${language}: button is available, not emphasized, when in order`);
     assert.ok(clean.includes(t('Backup folder is in order.')), `${language}: in order`);
-    assert.ok(/aria-pressed="true"[^>]*>(?:(?!<\/button>)[\s\S])*?/.test(clean) && clean.includes(t('Ask')) && clean.includes(t('Off')) && clean.includes(t('Automatic')), `${language}: three modes`);
-    assert.ok(clean.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1].includes(t('Ask')), `${language}: Ask is the default`);
+    assert.ok(!clean.includes('aria-pressed') && !clean.includes('segmented'), `${language}: no Off/Ask/Automatic modes`);
     const found = page({ misplacedFiles: misplaced });
     assert.ok(found.includes(t('{count} files outside your folder structure', { count: formatNumber(1234, language) })) && found.includes(formatBytes(5.6e9, language)), `${language}: count and size`);
     assert.ok(/<button[^>]*button-primary/.test(found), `${language}: primary when files are misplaced`);
-    const auto = page({ preferences: { ...preferences, autoOrganizeBackup: 'auto' }, misplacedFiles: misplaced });
-    assert.ok(auto.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1].includes(t('Automatic')), `${language}: auto selected`);
-    const off = page({ preferences: { ...preferences, autoOrganizeBackup: 'off' }, misplacedFiles: misplaced });
-    assert.ok(!off.includes(t('Backup folder is in order.')) && !/data-testid="misplaced-files"/.test(off) && off.includes(t('Organize backup')), `${language}: off hides findings but keeps the button`);
     const running = page({ jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }] }, true);
     assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*disabled/.test(running), `${language}: disabled while organizing`);
     const desk = render(createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
@@ -754,14 +749,14 @@ test('Settings is organized into categories with live summaries, one open panel,
     assert.ok(tab('importing').includes(t('Automatic')) && tab('importing').includes(t('{count} at once', { count: '2' })), `${language}: importing summary`);
     assert.ok(tab('destinations').includes('A006'), `${language}: destinations summary`);
     assert.ok(tab('folders').includes('2026') && tab('folders').includes('202610'), `${language}: folders summary`);
-    assert.ok(tab('organization').includes(t('Ask')), `${language}: organization summary`);
+    assert.ok(tab('organization').includes(t('Leftover files')), `${language}: organization summary`);
     assert.ok(tab('drives').includes(t('{count} remembered', { count: '1' })), `${language}: drives summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
     assert.ok(!/<section[^>]*data-testid="settings-panel-importing"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
     assert.ok(panel('importing').includes(t('Automatic import')) && panel('importing').includes('id="settings-parallel"') && panel('importing').includes(t('Verify each copy after copying')) && !panel('importing').includes(t('Enable media folder selection')), `${language}: importing controls`);
     assert.ok(panel('destinations').includes('destination-slot') && panel('destinations').includes(t('Backup folder')), `${language}: destination controls`);
     assert.ok(panel('folders').includes('data-testid="photo-path-builder"') && panel('folders').includes(t('Edited exports folder')), `${language}: folder controls`);
-    assert.ok(!panel('organization').includes(t('Remove emptied source folders')) && panel('organization').includes(t('Check the backup folder')), `${language}: organization controls`);
+    assert.ok(!panel('organization').includes(t('Remove emptied source folders')) && !panel('organization').includes('segmented'), `${language}: organization controls`);
     assert.ok(panel('drives').includes('data-testid="remembered-devices"') && panel('drives').includes('data-testid="ignored-devices"'), `${language}: drive memory`);
     assert.ok(panel('general').includes('id="app-language"') && panel('general').includes('id="text-size"'), `${language}: general controls`);
     const busy = render(state, true);

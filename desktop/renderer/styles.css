@@ -1152,7 +1152,11 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 
 /* Backup folder check */
 .backup-check{display:grid;gap:.75rem}
-.backup-check>.segmented{justify-self:start;max-width:100%}
+.backup-check-prompt{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .85rem;padding:.7rem .85rem;border:1px solid var(--accent-border);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--label)}
+.backup-check-prompt>p{flex:1 1 14rem;margin:0;font-size:var(--text-footnote);font-weight:500}
+.backup-check-actions{display:flex;flex-wrap:wrap;gap:.5rem}
+.backup-check-note,.destination-note{margin:0;font-size:var(--text-footnote);color:var(--label-secondary)}
+.destination-check{align-self:flex-start;justify-self:start}
 .misplaced-files{display:flex;align-items:flex-start;gap:.45rem;margin:0;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}
 .misplaced-files.is-clean{color:var(--success)}
 /* Static on purpose: no z-index, transform, translate or animation, so it never leaves its card's layer or rises over popovers, menus and error toasts. */

@@ -7,7 +7,7 @@ import {stableDevices} from './device-selection';
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,autoOrganizeBackup:'ask',unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -61,7 +61,6 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   skipFileErrors:flag(value.skipFileErrors,base.skipFileErrors!==false),
   removeAppleDouble:flag(value.removeAppleDouble,base.removeAppleDouble!==false),
   collectProblemFiles:value.collectProblemFiles===undefined?base.collectProblemFiles!==false:value.collectProblemFiles!==false,
-  autoOrganizeBackup:oneOf(value.autoOrganizeBackup,['off','ask','auto'] as const,base.autoOrganizeBackup??'ask'),
   unknownDefault:oneOf(value.unknownDefault,['skip','other','ask'] as const,base.unknownDefault??'skip'),
   rememberedDevices:value.rememberedDevices===undefined?{...base.rememberedDevices}:stableDevices(records<{name:string;lastSelected:string}>(value.rememberedDevices,['name','lastSelected'])),
   ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:stableDevices(records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt'])),
