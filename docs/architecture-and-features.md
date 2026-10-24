@@ -1,6 +1,6 @@
 # 实际功能、接口与架构审查
 
-审查日期：2026-10-23；第一次基线 `daaabd8`。**本文已于修复完成后按 `main@7eee02c` 更新**：第 3–7、9–11 节描述的是修复后的代码；R1–R13 的原始发现与处理结果见第 7 节。修复按 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md) 第 9 节（任务 A1–A17）执行，旧轮次的结论仍可从 Git 历史查阅。
+审查日期：2026-10-23；第一次基线 `daaabd8`。**本文已于修复完成后按 `main@6b3dcff` 更新**：第 3–7、9–11 节描述的是修复后的代码；R1–R13 的原始发现与处理结果见第 7 节。修复按 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md) 第 9 节（任务 A1–A17）执行，旧轮次的结论仍可从 Git 历史查阅。
 
 **结论：一个功能一个实现。** 修复后：任务只有一条生命周期；实际文件结果只有一个出口，去重、落位记忆和删除原件都消费它；内容摘要只归 `DestinationIndex`；目录规则、名称校验、同名处理、目录清理、日志建立、错误身份、剩余时间、元数据解释各只有一处实现。没有新增通用 manager、repository 或 event bus。
 
@@ -65,7 +65,7 @@ flowchart TD
 |---|---|---|
 | `state()` | `importer:state` | `stateChannel.snapshot(state)`，自包含的 reset 快照 |
 | `subscribe(listener)` | `importer:updated` | `emit → createStateChannel.publish`；renderer 的 `createStateReceiver` 解析引用表 |
-| `action(Action)` | `importer:action` | `main.action` 的 48 个分支 |
+| `action(Action)` | `importer:action` | `main.action` 的 50 个分支 |
 | `thumbnail(path)` | `importer:thumbnail` | `thumbnailSlots → platform/thumbnails.thumbnail` |
 | `summary(path)` | `importer:summary` | `metadata(path,{details:false})`：路由用的短标签及缓存，供摘要卡 |
 | `exif(path)` | `importer:exif` | `metadata(path)`：全部标签，供 EXIF 面板。原 `inspect` 及其无人显示的内嵌预览已删除 |
@@ -80,7 +80,7 @@ flowchart TD
 
 同一个原生可执行文件另有独立 CLI `--set-file-times created modified`，通过继承的 FD 3 调用 macOS 文件时间操作，不接收目标路径；这是文件时间 adapter，不是第三个 JSONL 命令。见 [camera-bridge.ts:62](../desktop/platform/camera-bridge.ts#L62)、[main.swift:28](../Sources/CameraBridge/main.swift#L28)、[file-timestamps.ts:46](../desktop/platform/file-timestamps.ts#L46)。
 
-## 4. Action 全量清单：48 个入口对应的实现
+## 4. Action 全量清单：50 个入口对应的实现
 
 同一功能的多个按钮汇入一个 Action；只差参数的旧 Action 已合并（`scanSource/scanSources → scan`，`clearError/clearErrorIds/clearErrors → clearErrors`，恢复列表的 4 个 Action → `recovery{op}`，`organizeFolder/organizeSourceFolder → organizeFolder`，`skipFile/skipAndContinue → skip`）。
 
@@ -90,10 +90,11 @@ flowchart TD
 | 选择来源文件夹或整盘 / 勾选 / 忘记 / 重连提示 / 置顶 | `chooseSource`、`selectSource`、`forgetDevice`、`dismissReconnected`、`moveToTop` | `resolveFolderSources`、`DeviceSelection`（只记住卷 UUID 或 `camera:` id）、`queue-order.moveToFront` |
 | 选择 / 移除目的地 | `chooseDestination`、`removeDestination` | `validateDestination` |
 | 只读扫描一个或全部已选来源 | `scan{sourceId?}` | `startScan → scan-worker → inventory/analyzeSourceCameras`；路由增量用 `beginRoutingCapture` |
-| 开始 / 暂停 / 停止 / 重试 / 跳过 | `start`、`pause`、`stop`、`retryJob`、`skip{jobId,path?,all?}` | `enqueue → pump → startJob → run → finishJob`；重试与跳过重入同一计划器 |
+| 开始 / 暂停 / 停止 / 重试 / 跳过 | `start`、`pause`、`stop{jobId?,scope?:'imports'}`、`retryJob`、`skip{jobId,path?,all?}` | `enqueue → pump → startJob → run → finishJob`；`stop-scope.ts` 决定“全部停止”与“只停导入”各停哪些工作；重试与跳过重入同一计划器 |
 | 已知问题标为已处理 / 清除错误显示 | `acknowledgeErrors`、`clearErrors{ids?,severity?}` | `acknowledgeJob`；`error-log.clearErrors` |
 | 审核导入或整理 / 改用文件日期 / 应用 / 丢弃 | `preview`、`previewOrganization`、`reviewFileDate`、`applyReview`、`discardReview` | `previewSource → prepare`；应用使用同一个 `Prepared`，审核后的整理与一键整理是同一种任务 |
 | 整理目的地 / 文件夹 / 备份目录 | `organize`、`organizeFolder{sourceId?}`、`organizeBackup` | `queueOrganization → prepare → executeReorganization → beginOrganization → recovery` |
+| 手动检查备份目录 / 停止检查 | `checkBackupFolder{destinationIndex}`、`stopBackupCheck` | 与自动检查同一个 `findMisplaced`（只读路由分支）；结果整理见 `misplaced-results.ts`；只有“全部停止”和停止检查本身会中止它 |
 | 整理范围与本次选项 / 继续 | `chooseOrganizationFolders`、`resetOrganizationFolders`、`organizeOptions`、`continueOrganization` | `takeOrganizeOptions/sourcePolicy`（本次选项是唯一权威，排队或审核时冻结并重置） |
 | 恢复列表与操作 | `refreshOrganization`、`recovery{op:'resume'\|'finalize'\|'undo'\|'delete'}`、`measureOrganizationRecovery` | `listOrganizations`；`resumeOrganizationJob(op)` |
 | 删除已备份原件 | `measureOriginals`、`deleteOriginals` | `core/originals`：登记在 `originalsControls`，可停止、退出时等待、保持唤醒；停止后已删文件照样报告 |
@@ -251,7 +252,7 @@ flowchart LR
 
 - 波次 1 集成（`f649710`）：全量测试连续两次 0 失败（1603 项）。期间发现并修复 A7 使 `process-crash` 从 9 s 变成 42 s 的回归。
 - 波次 2 与 A17 集成（`f68d3b6`）：全量测试连续两次 0 失败（1643 项）；`process-crash` 与合并前同等。
-- 与 UI 审计分支合并后的 `main@7eee02c`：typecheck 与 build 通过；全量 1651 项，在系统负载约 400 时有 2 项计时测试失败，单独运行通过，且同一心跳测试在修复前代码上同样失败。
+- 与 UI 审计分支合并后的 `main@7eee02c`：typecheck 与 build 通过；全量 1651 项，在系统负载约 400 时有 2 项计时测试失败，单独运行通过，且同一心跳测试在修复前代码上同样失败。之后 main 又合入手动备份目录检查与 Codex 的界面重组（`6b3dcff`），A13 在其上重做。
 
 未做：真实相机卡、双物理盘、Windows/Linux 实机、物理断电；Swift 桥接的一处删除未编译；IPC 体积与峰值内存没有规模化测量。
 
