@@ -94,19 +94,22 @@ test('Settings no longer has the Off, Ask, Automatic check control',async()=>{
   }
 });
 
-test('the Import desk destination slot prompts with an emphasized button, keeps Organize for misplaced files, and is quiet when clean',async()=>{
-  const {DestinationBay}=await import('../renderer/RootApp');
-  const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationBay,{state,act:()=>{}}));
+test('the Import desk destination strip prompts with an emphasized button until a result exists, then shows the result and a Library link',async()=>{
+  const {DestinationStrip}=await import('../renderer/RootApp');
+  const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationStrip,{state,act:()=>{}}));
   for(const language of languages){
     const t=createTranslator(language),actions:Action[]=[];
     const none=slot(language,stateOf()),check=button(none,'destination-check-backup-folder-0');
     assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: emphasized`);
-    find(tree(language,DestinationBay,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
+    find(tree(language,DestinationStrip,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
     assert.deepEqual(actions,[{type:'checkBackupFolder',destinationIndex:0}]);
     const found=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':result}}));
-    assert.ok(found.includes('data-testid="destination-misplaced"')&&!found.includes('destination-check-backup-folder-0'),`${language}: Organize stays`);
+    assert.ok(found.includes('data-testid="destination-misplaced"')&&!found.includes('destination-check-backup-folder-0')&&!found.includes('>'+t('Organize')+'<'),`${language}: result replaces the button`);
+    assert.ok(!found.includes(t('Open in Library')),`${language}: link only where Library can open`);
+    const linked=html(language,createElement(DestinationStrip,{state:stateOf({misplacedFiles:{'/Volumes/A006':result}}),act:()=>{},onLibrary:()=>{}}));
+    assert.ok(linked.includes(t('Open in Library')),`${language}: Open in Library`);
     const clean=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':{...result,count:0}}}));
-    assert.ok(!clean.includes('destination-check-backup-folder-0')&&!clean.includes('data-testid="destination-misplaced"'),`${language}: nothing when clean`);
+    assert.ok(!clean.includes('destination-check-backup-folder-0')&&!clean.includes('data-testid="destination-misplaced"')&&clean.includes('data-testid="destination-in-order"')&&clean.includes(t('Backup folder is in order.')),`${language}: in order when clean`);
     const running=slot(language,stateOf({misplacedProgress:{'/Volumes/A006':progress}}));
     assert.ok(!running.includes('destination-check-backup-folder-0'),`${language}: not while running`);
     const offline=slot(language,stateOf({destinationStatus:[{...online[0]!,available:false}]}));
@@ -133,29 +136,29 @@ const missing={count:0,bytes:0,checkedAt:'2026-10-23T10:00:00Z',missing:true as 
 const runningJob=[{id:'j',source:{id:'s',name:'Card',path:'/Volumes/CARD',transport:'folder'},phase:'copying',errors:[],backup:false}] as unknown as AppState['jobs'];
 
 test('a missing backup folder shows a quiet note and no prompt or check button, in the card and in the destination slot',async()=>{
-  const {Organization,DestinationBay}=await import('../renderer/RootApp');
+  const {Organization,DestinationStrip}=await import('../renderer/RootApp');
   for(const language of languages){
     const t=createTranslator(language),note=t('No backup folder yet. The first import creates it.');
     const state=stateOf({misplacedFiles:{'/Volumes/A006':missing}});
     const page=card(html(language,createElement(Organization,{state,act:()=>{},busy:false})));
     assert.ok(page.includes(note)&&!page.includes('backup-check-prompt')&&!page.includes('data-testid="check-backup-folder"')&&!page.includes('Backup folder is in order')&&!page.includes('data-testid="misplaced-files"'),`${language}: card`);
-    const slot=html(language,createElement(DestinationBay,{state,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state,act:()=>{}}));
     assert.ok(slot.includes(note)&&!slot.includes('destination-check-backup-folder-0')&&!slot.includes('data-testid="destination-misplaced"'),`${language}: slot`);
   }
 });
 
 test('while checking a Stop button dispatches stopBackupCheck, in the card and in the destination slot',async()=>{
-  const {BackupCheck,DestinationBay}=await import('../renderer/RootApp');
+  const {BackupCheck,DestinationStrip}=await import('../renderer/RootApp');
   const state=stateOf({misplacedProgress:{'/Volumes/A006':progress}});
   for(const language of languages){
     const t=createTranslator(language);
-    for(const [component,props,id] of [[BackupCheck,{busy:false,organizeBusy:false,destinationIndex:0},'stop-backup-check'],[DestinationBay,{},'destination-stop-backup-check-0']] as const){
+    for(const [component,props,id] of [[BackupCheck,{busy:false,organizeBusy:false,destinationIndex:0},'stop-backup-check'],[DestinationStrip,{},'destination-stop-backup-check-0']] as const){
       const actions:Action[]=[];
       const node=find(tree(language,component as any,{...props,state,act:(action:Action)=>actions.push(action)}),id);
       assert.ok(node,`${language}: ${id}`);node!.props.onClick();
       assert.deepEqual(actions,[{type:'stopBackupCheck'}]);
     }
-    const slot=html(language,createElement(DestinationBay,{state,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state,act:()=>{}}));
     assert.ok(slot.includes(t('Stop')),`${language}: label`);
     const running=card(html(language,createElement(BackupCheck,{state,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
     assert.ok(button(running,'check-backup-folder').includes(t('Checking…'))&&/disabled/.test(button(running,'check-backup-folder')),`${language}: Checking…`);
@@ -163,7 +166,7 @@ test('while checking a Stop button dispatches stopBackupCheck, in the card and i
 });
 
 test('the check is disabled with a one-line reason while an import runs or another destination is checking',async()=>{
-  const {BackupCheck,DestinationBay}=await import('../renderer/RootApp');
+  const {BackupCheck,DestinationStrip}=await import('../renderer/RootApp');
   const two={...preferences,destinations:['/Volumes/A006','/Volumes/B'],copyMode:'mirror' as const};
   const status=[...online,{path:'/Volumes/B',available:true,volumeId:'b',total:1,free:1}];
   for(const language of languages){
@@ -171,7 +174,7 @@ test('the check is disabled with a one-line reason while an import runs or anoth
     const importing=stateOf({jobs:runningJob});
     const a=card(html(language,createElement(BackupCheck,{state:importing,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
     assert.ok(/disabled/.test(button(a,'check-backup-folder'))&&a.includes(t('Wait for the current work to finish before checking.')),`${language}: import reason`);
-    const slot=html(language,createElement(DestinationBay,{state:importing,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state:importing,act:()=>{}}));
     assert.ok(/disabled/.test(button(slot,'destination-check-backup-folder-0'))&&slot.includes(t('Wait for the current work to finish before checking.')),`${language}: slot import`);
     const other=stateOf({preferences:two,destinationStatus:status,misplacedProgress:{'/Volumes/B':progress}});
     const b=card(html(language,createElement(BackupCheck,{state:other,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));

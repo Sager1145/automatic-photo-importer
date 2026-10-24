@@ -884,8 +884,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .section-heading h2{font-size:var(--text-title-3);font-weight:700}
 .page-toolbar{display:flex;justify-content:flex-end}
 /* Paired buttons under the destination inspector */
-.bay-actions{display:flex;flex-wrap:wrap;gap:.5rem}
-.bay-actions .button{min-width:0;padding:0 .75rem}
 
 /* ---------- Layout constraints ----------
    Guarantees that no content can push its container wider or overlap a neighbour:
@@ -961,7 +959,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 /* Fluid control sizes: buttons scale with their toolbar or card, within readable bounds. */
 .titlebar-actions{--control-height:clamp(2.15rem,1.55rem + 1.5cqi,2.6rem)}
 .source-row-actions{--control-height:clamp(2.15rem,1.7rem + 1.6cqi,2.6rem)}
-.card-actions,.bay-actions,.destination-buttons,.rule-actions{--control-height:clamp(2.2rem,1.8rem + 1cqi,2.6rem)}
+.card-actions,.destination-buttons,.rule-actions{--control-height:clamp(2.2rem,1.8rem + 1cqi,2.6rem)}
 .button,.selection-chip,.segmented button,.source-layout-switch button{transition-property:transform,background-color,box-shadow,color,opacity}
 .source-row{padding:clamp(.8rem,.5rem + 1.2cqi,1.2rem) clamp(.9rem,.55rem + 1.4cqi,1.35rem)}
 
@@ -979,14 +977,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 }
 @container source-card (min-width:60rem){.source-row-actions{gap:.45rem}}
 
-/* Desk: destinations sit beside the drives when there is room, and move below them otherwise. */
-@container desk (min-width:52rem){
-  .workbench-columns{grid-template-columns:minmax(0,1fr) clamp(16rem,25cqi,21rem)}
-}
-@container desk (max-width:52rem){
-  .destination-bay{position:static;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));align-items:start}
-  .destination-bay>.section-heading,.destination-bay>.bay-actions{grid-column:1/-1}
-}
+/* Desk: source cards take the full width; the destination strip sits below them. */
 
 
 /* Settings and Drives rows: side by side when wide, stacked when narrow. */
@@ -1487,7 +1478,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .source-disclosure>summary[hidden]{display:none}
 .desk-page .destination-slot{gap:.4rem;padding:.75rem .9rem}
 .desk-page .copy-policy{gap:.3rem;padding:.65rem .9rem}
-.desk-page .bay-actions{gap:.4rem}
 
 .nav-icon{display:inline-flex;flex:none;overflow:visible}
 .organization-column>.button,.duplicates-page>.button{align-self:flex-start;justify-self:start}
@@ -1547,3 +1537,24 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 ::view-transition-group(settings-navigation){z-index:1}
 ::view-transition-group(settings-panel){z-index:0}
 ::view-transition-group-children(settings-navigation){overflow:clip}
+
+/* Import desk destination strip: one compact line per destination. */
+.destination-strip{display:grid;gap:.75rem;min-width:0}
+.destination-strip-policy{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.4rem .75rem;padding:.6rem .9rem}
+.destination-strip-line{grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:.75rem}
+.destination-strip-line>*{min-width:0;grid-column:1/-1}
+.destination-strip-line>.destination-strip-head{grid-column:1;grid-row:1}
+.destination-strip-head{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;min-width:0}
+.destination-strip-head strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.destination-strip-free{color:var(--label-secondary);font-size:var(--text-footnote)}
+.destination-strip-line>.destination-check-actions{grid-column:2;grid-row:1;justify-self:end}
+.destination-misplaced.is-clean{color:var(--success)}
+
+/* Source card: checkbox, primary action, and an overflow menu for the rest. */
+.source-select{inline-size:1.15rem;block-size:1.15rem;accent-color:var(--accent);margin:0 .25rem;flex:none}
+.overflow-menu{position:relative}
+.overflow-menu>summary{list-style:none;cursor:pointer}
+.overflow-menu>summary::-webkit-details-marker{display:none}
+.overflow-menu-items{position:absolute;inset-inline-end:0;top:calc(100% + .25rem);z-index:5;display:grid;gap:.15rem;min-inline-size:12rem;padding:.35rem;background:var(--surface);border:1px solid var(--separator);border-radius:var(--radius-md);box-shadow:var(--shadow-2)}
+.overflow-menu-items .button{justify-content:flex-start;font-size:var(--text-footnote);width:100%}
+.source-row-actions .overflow-menu-items .button-quiet{font-size:var(--text-footnote);gap:.4rem;padding:0 .6rem;width:100%}

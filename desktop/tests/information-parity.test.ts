@@ -18,8 +18,8 @@ test('Import retains visible stage and capacity information and backup media sca
  for(const language of languages){
   const t=createTranslator(language),markup=render(language,createElement(ImportDesk,{state,mode:'files',act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
   const card=markup.split('<article data-source-id="card"')[1]?.split('</article>')[0]??'';
-  assert.match(card.split('<details')[0]??'',/data-testid="source-steps"/,'stages remain outside the disclosure');
-  const summary=card.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0]??'';
+  assert.match(card.split('<details class="source-disclosure"')[0]??'',/data-testid="source-steps"/,'stages remain outside the disclosure');
+  const summary=(card.split('<details class="source-disclosure"')[1]??'').match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0]??'';
   assert.match(summary,/data-testid="storage-capacity"/);assert.doesNotMatch(summary,/<summary[^>]*hidden/);
   for(const text of [t('Queue position {count}',{count:2}),t('Scan media'),t('Drive details'),'37%'])assert.ok(card.includes(text),`${language}: ${text}`);
   const parallel=markup.match(/<span[^>]*data-testid="parallel-summary"[^>]*>/)?.[0]??'';assert.ok(parallel.includes(escape(t('Current copies finish before a lower limit takes effect.'))),`${language}: lower-limit note`);assert.ok(markup.includes(escape(t('Drives at once: {count}/10',{count:state.preferences.parallel}))),`${language}: drives at once`);

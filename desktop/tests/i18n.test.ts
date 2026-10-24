@@ -338,8 +338,8 @@ test('new drives prompt for a choice, unselected drives are excluded on their ca
     const usbCard = desk.match(/<article data-source-id="usb"[\s\S]*?<\/article>/)?.[0] ?? '';
     const cardCard = desk.match(/<article data-source-id="card"[\s\S]*?<\/article>/)?.[0] ?? '';
     assert.ok(usbCard.includes('source-unselected') && usbCard.includes(html(t("Not selected · won't be imported"))), `${language}: excluded card is marked`);
-    assert.ok(/data-testid="source-select" aria-pressed="false"/.test(usbCard) && usbCard.includes(t('Select')), `${language}: unselected drive offers Select`);
-    assert.ok(/data-testid="source-select" aria-pressed="true"/.test(cardCard) && cardCard.includes(t('Selected')) && cardCard.includes('source-included'), `${language}: selected drive is marked`);
+    assert.ok(/<input[^>]*data-testid="source-select"/.test(usbCard) && !/<input[^>]*data-testid="source-select"[^>]*checked/.test(usbCard), `${language}: unselected drive has an unchecked box`);
+    assert.ok(/<input[^>]*data-testid="source-select"[^>]*checked/.test(cardCard) && cardCard.includes('source-included'), `${language}: selected drive is marked`);
     assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?<\/svg>[^<]*<\/button>/.test(usbCard) && (usbCard.match(/<button[^>]*disabled/g) ?? []).length >= 3, `${language}: scan, review and import are disabled`);
     const controls = render(createElement(TitlebarControls, { state, act, errorCount: 0, onErrors: () => {} }));
     assert.ok(controls.includes(t('Start all selected ({count})', { count: 1 })), `${language}: Start counts only selected drives`);

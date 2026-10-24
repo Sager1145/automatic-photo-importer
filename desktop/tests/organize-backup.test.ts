@@ -67,3 +67,23 @@ test('organization planning reports files checked and files read out of their to
   assert.ok(reading.every(item=>item.total===2));assert.deepEqual([...new Set(reading.map(item=>item.count))].sort(),[0,1,2]);
   assert.equal(reading.at(-1)!.count,2);assert.equal(reading.at(-1)!.bytes,reading.at(-1)!.totalBytes);
 });
+
+test('a backup-scope review plans only files under the backup folder, never the rest of the destination',async t=>{
+  const {root,put}=await fixture(t);
+  const destination=path.dirname(root);
+  const stray=await put('wrong place/A.JPG');
+  const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
+  // main.ts opens a 'backup' scope review on the destination with sourceFolders = the backup folder(s); the whole-destination review has none.
+  const scoped=(await plan(destination,[root],{...options,reorganize:true,sourceFolders:[path.basename(root)]},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.deepEqual(scoped,[stray]);
+  const whole=(await plan(destination,[destination],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.ok(whole.includes(outside),'the whole destination would have planned the outside file');
+});
+
+test('main.ts wires the backup-scope review: refuses outside folders, uses the backup library folders, keeps the scope for re-plans',async()=>{
+  const source=await fs.readFile(path.join(__dirname,'../main.ts'),'utf8');
+  const start=source.indexOf("case 'previewOrganization':"),block=source.slice(start,source.indexOf("case 'applyReview'",start));
+  assert.ok(block.includes("input.scope==='backup'")&&block.includes('backupLibrary(prefs)')&&block.includes("error.backupFolderOutside")&&block.includes('library.sourceFolders'),block);
+  assert.ok(/backupScope\?sourceFolders:state\.organizationFolders/.test(source),'chosen folders never leak into a backup-scope review');
+  assert.ok(source.includes("request.backupScope)state.review.scope='backup'"),'the review remembers its scope for the problem-files toggle');
+});

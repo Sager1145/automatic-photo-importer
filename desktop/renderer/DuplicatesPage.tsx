@@ -246,7 +246,7 @@ export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch 
       <LevelSelector level={level} onChange={setLevel} disabled={locked} />
       <div className="rule-actions">
         <Button kind="primary" icon={ScanSearch} data-testid="duplicates-scan" disabled={!dup.root || busy} onClick={() => act({ type: 'duplicatesScan' })}>{scanned ? t("Scan again") : t("Scan for duplicates")}</Button>
-        <Button icon={Square} data-testid="duplicates-stop" disabled={dup.status !== 'scanning'} onClick={() => act({ type: 'duplicatesStop' })}>{t("Stop")}</Button>
+        {dup.status === 'scanning' && <Button icon={Square} data-testid="duplicates-stop" onClick={() => act({ type: 'duplicatesStop' })}>{t("Stop")}</Button>}
       </div>
       {dup.status === 'scanning' && <div role="status" aria-live="polite"><OperationProgress progress={dup.progress} label={t("Duplicate scan progress")} testId="duplicates-progress" /></div>}
     </section>

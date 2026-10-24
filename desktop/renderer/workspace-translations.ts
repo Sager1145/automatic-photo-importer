@@ -17,7 +17,6 @@ Recovery & cleanup|恢复与清理|復原與清理|復元とクリーンアッ�
 Organize scope|整理范围|整理範圍|整理の対象
 Whole destination|整个目标位置|整個目的位置|保存先全体
 Chosen folders|所选文件夹|所選資料夾|選んだフォルダー
-Review is not available for the backup folder alone. Choose the whole destination or chosen folders to review first.|仅整理备份文件夹时无法预览。请选择整个目标位置或所选文件夹以先预览。|僅整理備份資料夾時無法預覽。請選擇整個目的位置或所選資料夾以先預覽。|バックアップフォルダーだけの整理ではプレビューできません。先にプレビューするには、保存先全体または選んだフォルダーを選んでください。
 No jobs yet.|尚无任务。|尚無工作。|ジョブはまだありません。
 Choose folders to back up.|选择要备份的文件夹。|選擇要備份的資料夾。|バックアップするフォルダーを選びます。
 Change destinations|更改目标位置|更改目的位置|保存先を変更
@@ -33,4 +32,6 @@ Start all selected ({count})|开始所有已选来源（{count}）|開始所有�
 Starts all selected media and folder sources. Existing jobs keep their modes.|启动所有已选媒体和文件夹来源。现有任务保留各自的模式。|啟動所有已選媒體和資料夾來源。現有工作保留各自的模式。|選択したメディアとフォルダーのソースをすべて開始します。既存のジョブのモードは変わりません。
 {name}: backup preview|{name}：备份预览|{name}：備份預覽|{name}：バックアップのプレビュー
 Backup: copy, source untouched|备份：复制，来源保持不变|備份：複製，來源保持不變|バックアップ：コピー、元のファイルはそのまま
+More actions|更多操作|更多操作|その他の操作
+More actions for {name}|{name} 的更多操作|{name} 的更多操作|{name} のその他の操作
 `;

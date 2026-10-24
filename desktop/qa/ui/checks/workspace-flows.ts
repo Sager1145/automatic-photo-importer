@@ -37,11 +37,11 @@ export const workspaceFlowChecks=():Check[]=>[
   await h.js("{const tab=document.querySelector('[data-testid=import-mode-files]');tab.focus();tab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));}");await h.settle();
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=import-mode-media]')===document.activeElement&&document.activeElement.getAttribute('aria-selected')==='true'"),true);
   for(let repeat=0;repeat<2;repeat++){
-   await h.nav('Import desk');await h.js("[...document.querySelectorAll('.bay-actions button')].find(b=>b.textContent==='Change destinations').click()");await h.settle();
+   await h.nav('Import desk');await h.js("[...document.querySelectorAll('.destination-strip-policy button')].find(b=>b.textContent==='Change').click()");await h.settle();
    assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-storage]')?.getAttribute('aria-selected')==='true'&&document.activeElement.id==='settings-tab-storage'"),true,'destination link selects and focuses Storage');
    await h.settingsTab('files');
   }
-  await h.nav('Import desk');await h.js("[...document.querySelectorAll('.bay-actions button')].find(b=>b.textContent==='Edit folder rules').click()");await h.settle();
+  await h.nav('Organization');await h.js("[...document.querySelectorAll('.organization-action button')].find(b=>b.textContent==='Edit folder rules').click()");await h.settle();
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-folders]')?.getAttribute('aria-selected')==='true'"),true);
  }},
  {id:'nav-stop-scopes',stage:'navigation',title:'Import and Activity dispatch their named Stop scopes without changing job ownership',covers:['Stop imports UI scope','Stop all UI scope','mixed jobs'],skip:async h=>h.hooks&&'beforeAction' in h.hooks?undefined:'needs QA action guard',run:async h=>{
