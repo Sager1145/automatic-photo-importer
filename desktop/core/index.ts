@@ -532,8 +532,8 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       if(unknownMode==='keep') continue;
     }
     if(unknown) {
-      const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file;
-      relative=unknownRelative(file);forcedRoot=options.layout==='video-root'&&original.kind==='Videos'?'videos':'photos';
+      // Every unknown file, videos and companions included, is filed under the photo library root, also in the video-root layout.
+      relative=unknownRelative(file);forcedRoot='photos';
     }
     else if(!folderRules) relative=file.relative;
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));

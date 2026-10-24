@@ -18,8 +18,8 @@ test('Import retains visible stage and capacity information and backup media sca
  for(const language of languages){
   const t=createTranslator(language),markup=render(language,createElement(ImportDesk,{state,mode:'files',act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
   const card=markup.split('<article data-source-id="card"')[1]?.split('</article>')[0]??'';
-  assert.match(card.split('<details')[0]??'',/data-testid="source-steps"/,'stages remain outside the disclosure');
-  const summary=card.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0]??'';
+  assert.match(card.split('<details class="source-disclosure"')[0]??'',/data-testid="source-steps"/,'stages remain outside the disclosure');
+  const summary=(card.split('<details class="source-disclosure"')[1]??'').match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0]??'';
   assert.match(summary,/data-testid="storage-capacity"/);assert.doesNotMatch(summary,/<summary[^>]*hidden/);
   for(const text of [t('Queue position {count}',{count:2}),t('Scan media'),t('Drive details'),'37%'])assert.ok(card.includes(text),`${language}: ${text}`);
   const parallel=markup.match(/<span[^>]*data-testid="parallel-summary"[^>]*>/)?.[0]??'';assert.ok(parallel.includes(escape(t('Current copies finish before a lower limit takes effect.'))),`${language}: lower-limit note`);assert.ok(markup.includes(escape(t('Drives at once: {count}/10',{count:state.preferences.parallel}))),`${language}: drives at once`);
@@ -27,11 +27,11 @@ test('Import retains visible stage and capacity information and backup media sca
  }
 });
 
-test('Activity supplies the same queue, activity, camera and inventory context as Import',()=>{
+test('The Queue lists each job compactly and leaves inventory, camera and drive details to the Import card',()=>{
  for(const language of languages){
-  const t=createTranslator(language),markup=render(language,createElement(ActivityJobs,{state,act:()=>{},inspect:()=>{}}));
-  for(const text of [t('Queue position {count}',{count:2}),'37%','Nikon Z6III','24–70 mm','PHOTO.NEF',t('Drive path')])assert.ok(markup.includes(text),`${language}: ${text}`);
-  assert.match(markup,/class="inventory-open"/);assert.match(markup,/class="file-preview-button"/);assert.match(markup,/class="inventory-panel"/);
+  const t=createTranslator(language),markup=render(language,createElement(ActivityJobs,{state,act:()=>{},onShow:()=>{}}));
+  for(const text of [t('Queue position {count}',{count:2}),'Camera card',t('Show')])assert.ok(markup.includes(escape(text)),`${language}: ${text}`);
+  assert.match(markup,/class="queue-row/);assert.doesNotMatch(markup,/class="inventory-panel"|class="source-row|source-steps/);
  }
 });
 
@@ -41,8 +41,8 @@ test('duplicate recovery displays its library path when Activity combines roots'
 });
 
 
-test('Activity job inventory remains the completed run snapshot after an independent rescan',()=>{
+test('The Import card keeps the completed run snapshot after an independent rescan',()=>{
  const newer:Inventory={...inventory,files:[{...inventory.files[0]!,path:'/card/LATER-SCAN.NEF',relative:'LATER-SCAN.NEF'}]};
- const markup=render('en',createElement(ActivityJobs,{state:{...state,sourceInventories:{card:newer}},act:()=>{},inspect:()=>{}}));
+ const markup=render('en',createElement(ImportDesk,{state:{...state,sourceInventories:{card:newer}},mode:'files',act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
  assert.match(markup,/PHOTO.NEF/);assert.doesNotMatch(markup,/LATER-SCAN.NEF/);
 });

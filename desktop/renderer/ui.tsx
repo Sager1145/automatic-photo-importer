@@ -86,3 +86,14 @@ export function nextConfirmStep(step: DeleteRecoveryStep, choice: 'open' | 'conf
   if (step === 'first') return { step: 'second', delete: false };
   return { step: 'closed', delete: step === 'second' };
 }
+
+/** Closes a <details> menu on a click outside it or on Escape (focus returns to its summary); the summary stays keyboard-operable. */
+export function useDismissableDetails(ref: RefObject<HTMLDetailsElement | null>) {
+  useEffect(() => {
+    const close = (event: Event) => { const el = ref.current; if (el?.open && !(event.target instanceof Node && el.contains(event.target))) el.open = false; };
+    const key = (event: KeyboardEvent) => { const el = ref.current; if (event.key === 'Escape' && el?.open) { el.open = false; el.querySelector('summary')?.focus(); } };
+    document.addEventListener('pointerdown', close, true);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', close, true); document.removeEventListener('keydown', key); };
+  }, [ref]);
+}

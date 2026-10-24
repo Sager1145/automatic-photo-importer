@@ -106,7 +106,7 @@ const scanControls=new Map<string,AbortController>();
 interface OrganizationLocation {root:string;destination:string;volumeId:string;folder?:boolean;}
 let organizationLocations:OrganizationLocation[]=[];
 const organizationJobIds=new Set<string>();
-interface RunRequest {prefs:Preferences;reorganize:boolean;/** Queued by an automatic import: it never waits for confirmation, it records a warning. */automatic?:boolean;/** The user already confirmed this job's unknown files. */confirmed?:boolean;/** This job only: file unknown files by file time instead of the saved choice. */useFileDate?:boolean;/** Organizing only: this run's choices (default: all on). */options?:OrganizeOptions;sourceFolders?:string[];/** Skip files that fail while planning for this job, whatever the setting. */skipErrors?:boolean;/** Source files the user chose to skip in this job. */exclude?:string[];}
+interface RunRequest {prefs:Preferences;reorganize:boolean;/** Queued by an automatic import: it never waits for confirmation, it records a warning. */automatic?:boolean;/** The user already confirmed this job's unknown files. */confirmed?:boolean;/** This job only: file unknown files by file time instead of the saved choice. */useFileDate?:boolean;/** This job only: keep or folder unknown files whatever the saved choice (request.prefs carries it too). */handling?:'keep'|'folder';/** With file dates chosen: the unknown files found before, shown so the choice can be changed back. */earlier?:NoMetadataSummary;/** Organizing only: this run's choices (default: all on). */options?:OrganizeOptions;sourceFolders?:string[];/** Organizing: this review covers only the backup folder(s), not the whole destination. */backupScope?:boolean;/** Skip files that fail while planning for this job, whatever the setting. */skipErrors?:boolean;/** Source files the user chose to skip in this job. */exclude?:string[];}
 /** Queued jobs the user asked to run again skipping one file (Skip) or every failing file (Skip all). */
 const skipRequests=new Map<string,{skipErrors?:boolean;exclude:string[]}>();
 const organizationQueue=new Map<string,RunRequest>();
@@ -164,7 +164,7 @@ const reusableScan=(source:Source)=>source.transport==='camera'?undefined:listin
 const usedBytes=(source:Source)=>source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
 /** Reserved destination plans for one source. A review holds one until applied. */
-interface Prepared {/** The job this plan was parked from: its id (log lines), and whether it was an organization, so Continue keeps it one. */origin?:{jobId:string;organization?:boolean;folders?:string[]};/** What this was planned from, to plan again with file dates. */request:RunRequest;useFileDate?:boolean;/** Unknown files planning left or filed apart (all of them; the review carries a capped list). */noMetadata?:NoMetadataSummary;/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;/** An import: files already in the backup under older folder rules (skipped there) and families copied whole because only some members were. */elsewhere?:{files:number;partialFamilies:number;skipped:{size:number;candidates:number}[]};}
+interface Prepared {/** The job this plan was parked from: its id (log lines), and whether it was an organization, so Continue keeps it one. */origin?:{jobId:string;organization?:boolean;folders?:string[]};/** What this was planned from, to plan again with file dates. */request:RunRequest;useFileDate?:boolean;handling?:'keep'|'folder';/** Unknown files planning left or filed apart (all of them; the review carries a capped list). */noMetadata?:NoMetadataSummary;/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;/** An import: files already in the backup under older folder rules (skipped there) and families copied whole because only some members were. */elsewhere?:{files:number;partialFamilies:number;skipped:{size:number;candidates:number}[]};}
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
@@ -432,7 +432,7 @@ function pump(){if(state.review||state.busyReview||organizationJobIds.size||dupl
  const organization=organizationQueue.get(job.id);if(organization&&active.size)break;
  organizationQueue.delete(job.id);if(organization)organizationRuns.set(job.id,organization);misplacedControl?.abort();residueControl?.abort();const control=startJob(job);
  const skip=skipRequests.get(job.id);skipRequests.delete(job.id);
- void settle(withJob(job.id,()=>run(job,control,organization??{prefs:snapshotPreferences(),reorganize:false,...(job.useFileDate?{useFileDate:true}:{}),...(job.unknownConfirmed?{confirmed:true}:{}),...skip}))).finally(()=>{if(job.phase==='error')job.retryable=true;finishJob(job);});
+ void settle(withJob(job.id,()=>run(job,control,organization??{prefs:jobPreferences(job),reorganize:false,...(job.useFileDate?{useFileDate:true}:{}),...(job.noMetadataHandling?{handling:job.noMetadataHandling}:{}),...(job.unknownConfirmed?{confirmed:true}:{}),...skip}))).finally(()=>{if(job.phase==='error')job.retryable=true;finishJob(job);});
  if(organization)break;
 }}
 // Nothing here may touch a drive once the work is done, so macOS can eject it at once. exiftool and the
@@ -651,6 +651,8 @@ function queueBackupOrganization(index:number){
  queueOrganization(library.source,'Backup organization',{prefs,reorganize:true,options:takeOrganizeOptions(),...(library.sourceFolders?{sourceFolders:library.sourceFolders}:{})});
 }
 /** Preferences frozen for one operation. Organization always targets one chosen destination. */
+/** The saved preferences for a job; a choice made in its review (keep or folder) replaces the unknown-files handling for this job only. */
+function jobPreferences(job:Job):Preferences{const prefs=snapshotPreferences();if(job.noMetadataHandling)prefs.noMetadataHandling=job.noMetadataHandling;return prefs;}
 function snapshotPreferences(organizationDestination?:number):Preferences{
  const prefs=structuredClone(state.preferences);prefs.unknownRules={...prefs.unknownRules,...sessionRules};
  if(organizationDestination===undefined)return prefs;
@@ -712,7 +714,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
   if(!stage)keepListing(source,record,!reorganize&&!backup);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
-  return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
+  return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(request.handling?{handling:request.handling}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(request.useFileDate?{noMetadataHandling:'fileDate' as const}:request.handling?{noMetadataHandling:request.handling}:{}),...(request.useFileDate&&request.earlier?{fileDated:{...request.earlier,files:request.earlier.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
  }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}
 }
 /** Hands a planned job over to the review screen, so unknown files are confirmed before anything runs. The job itself is dropped; Continue starts a new one from this plan. */
@@ -869,10 +871,10 @@ async function organizeFolderInPlace(folder:string,known:Source[]){
  if(prefs.mediaLayout==='video-root')throw new MessageError('error.organizeFolderVideo');
  queueOrganization(root,`Organize ${path.basename(root)}`,{prefs,reorganize:true,options:takeOrganizeOptions()});
 }
-async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean){
+async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean,sourceFolders?:string[],backupScope=false){
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);if(reorganize&&collectProblemFiles!==undefined){prefs.collectProblemFiles=collectProblemFiles;if(state.review?.options)state.organizeOptions={...state.review.options};}
- const request:RunRequest={prefs,reorganize,...(reorganize?{options:takeOrganizeOptions()}:{}),sourceFolders:reorganize?state.organizationFolders?.[source.path]?.slice():undefined};
+ const request:RunRequest={prefs,reorganize,...(reorganize?{options:takeOrganizeOptions()}:{}),sourceFolders:reorganize?(backupScope?sourceFolders:state.organizationFolders?.[source.path]?.slice()):undefined,...(backupScope?{backupScope:true}:{})};
  return openReview(source,backup,request,organizationDestination);
 }
 /** Plans `request` into a review and opens it; also how a review is planned again (with file dates). */
@@ -881,7 +883,7 @@ async function openReview(source:Source,backup:boolean,request:RunRequest,organi
  cancelAutomaticChecks();misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;state.reviewSourceId=source.id;emit();
  try{
   const reviewId=randomUUID();log('normal','job','review-start',{source:source.name,path:source.path,reorganize},reviewId);reviewed=await withJob(reviewId,()=>prepare(reviewId,source,backup,request,control.signal,(done,total)=>{state.reviewProgress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();}));
-  state.review=reviewed.review;if(reorganize)state.review.destinationIndex=organizationDestination;(state.sourceInventories??={})[source.id]=reviewed.inventory;
+  state.review=reviewed.review;if(reorganize){state.review.destinationIndex=organizationDestination;if(request.backupScope)state.review.scope='backup';}(state.sourceInventories??={})[source.id]=reviewed.inventory;
  }catch(error){if(!control.signal.aborted)throw error;}
  finally{if(reviewControl===control){state.busyReview=false;state.reviewSourceId=undefined;state.reviewProgress=undefined;reviewControl=undefined;}emit();recoveryRefresh.resume();void releaseIfIdle();}
 }
@@ -889,7 +891,7 @@ async function applyReview(){
  if(!reviewed)return;
  if(busy()||state.busyReview)throw new MessageError('error.busy');
  const prepared=reviewed;reviewed=undefined;state.review=undefined;
- const job:Job={id:randomUUID(),source:prepared.review.source,phase:'verifying',detail:message('job.revalidating'),errors:[],backup:prepared.review.backup,unknownConfirmed:true,...(prepared.useFileDate?{useFileDate:true}:{}),...(prepared.origin?.organization?{organization:true,...(prepared.origin.folders?{folders:prepared.origin.folders}:{})}:{})};state.jobs.unshift(job);if(prepared.origin?.organization)organizationRuns.set(job.id,{...prepared.request,confirmed:true});const control=startJob(job);if(prepared.review.kind==='reorganize')organizationJobIds.add(job.id);
+ const job:Job={id:randomUUID(),source:prepared.review.source,phase:'verifying',detail:message('job.revalidating'),errors:[],backup:prepared.review.backup,unknownConfirmed:true,...(prepared.useFileDate?{useFileDate:true}:{}),...(prepared.handling?{noMetadataHandling:prepared.handling}:{}),...(prepared.origin?.organization?{organization:true,...(prepared.origin.folders?{folders:prepared.origin.folders}:{})}:{})};state.jobs.unshift(job);if(prepared.origin?.organization)organizationRuns.set(job.id,{...prepared.request,confirmed:true});const control=startJob(job);if(prepared.review.kind==='reorganize')organizationJobIds.add(job.id);
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
  log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error'&&(prepared.review.kind!=='reorganize'||organizationRuns.has(job.id)))job.retryable=true;finishJob(job);});
 }
@@ -1097,12 +1099,18 @@ async function action(input:Action):Promise<void>{
   }
   case 'checkBackupFolder':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid destination');checkBackupFolder(index);break;}
   case 'organizeBackup':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');queueBackupOrganization(index);break;}
-  case 'previewOrganization':{const root=snapshotPreferences(input.destinationIndex).destinations[0];await previewSource({id:'library:'+root,path:root,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined);break;}
-  case 'reviewFileDate':{
-   // Plan the open review again with file dates for unknown files, for this job only.
+  case 'previewOrganization':{if(input.scope==='backup'){const prefs=snapshotPreferences(input.destinationIndex),library=backupLibrary(prefs);if(!within(library.root,prefs.destinations[0]!))throw new MessageError('error.backupFolderOutside');await previewSource({id:'library:'+library.source,path:library.source,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined,library.sourceFolders,true);break;}const root=snapshotPreferences(input.destinationIndex).destinations[0];await previewSource({id:'library:'+root,path:root,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined);break;}
+  case 'reviewFileDate':case 'reviewNoMetadata':{
+   // Plan the open review again with another choice for unknown files, for this job only; the saved preference never changes.
    if(!reviewed||busy()||state.busyReview)break;
+   const handling=input.type==='reviewFileDate'?'fileDate':input.handling;
+   if(handling!=='keep'&&handling!=='folder'&&handling!=='fileDate')break;
    const {request,review:{source,backup,destinationIndex}}=reviewed;
-   await openReview(source,backup,{...request,useFileDate:true,confirmed:true},destinationIndex);break;
+   const {handling:_old,earlier:_earlier,...rest}=request;
+   const next:RunRequest=handling==='fileDate'
+    ?{...rest,useFileDate:true,confirmed:true,...(reviewed.noMetadata??request.earlier?{earlier:(reviewed.noMetadata??request.earlier)!}:{})}
+    :{...rest,useFileDate:false,confirmed:true,handling,prefs:{...request.prefs,noMetadataHandling:handling}};
+   await openReview(source,backup,next,destinationIndex);break;
   }
   case 'applyReview':await applyReview();break;
   case 'discardReview':await discardReview();pump();break;
@@ -1160,7 +1168,7 @@ async function action(input:Action):Promise<void>{
    if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,exclude:undefined,skipErrors:undefined});delete failed.retryable;delete failed.skippablePath;break;}
    if(!state.sources.some(source=>source.id===failed.source.id))throw new MessageError('error.sourceDisconnected');
    if(state.jobs.some(job=>job.source.id===failed.source.id&&isLive(job)))throw new MessageError('error.busy');
-   enqueue(failed.source,failed.backup);{const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued){queued.useFileDate=failed.useFileDate;queued.unknownConfirmed=failed.unknownConfirmed;delete failed.retryable;delete failed.skippablePath;}}pump();break;
+   enqueue(failed.source,failed.backup);{const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued){queued.useFileDate=failed.useFileDate;queued.noMetadataHandling=failed.noMetadataHandling;queued.unknownConfirmed=failed.unknownConfirmed;delete failed.retryable;delete failed.skippablePath;}}pump();break;
   }
   case 'skip':{
    // Skip leaves the file that stopped the job out; Skip all also skips every other file that fails. Verified copies are recognised, not copied again.
@@ -1171,7 +1179,7 @@ async function action(input:Action):Promise<void>{
    if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,...skip});delete failed.skippablePath;break;}
    if(state.jobs.some(job=>job.source.id===failed.source.id&&isLive(job)))throw new MessageError('error.busy');
    for(const id of skipRequests.keys())if(!state.jobs.some(job=>job.id===id&&job.phase==='queued'))skipRequests.delete(id);
-   enqueue(failed.source,failed.backup);const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued){queued.useFileDate=failed.useFileDate;queued.unknownConfirmed=failed.unknownConfirmed;skipRequests.set(queued.id,skip);delete failed.skippablePath;}pump();break;
+   enqueue(failed.source,failed.backup);const queued=state.jobs.find(job=>job.source.id===failed.source.id&&job.phase==='queued');if(queued){queued.useFileDate=failed.useFileDate;queued.noMetadataHandling=failed.noMetadataHandling;queued.unknownConfirmed=failed.unknownConfirmed;skipRequests.set(queued.id,skip);delete failed.skippablePath;}pump();break;
   }
   case 'pause':{
    // Pause stops at once like Stop; verified copies stay, and Start continues with the rest.
