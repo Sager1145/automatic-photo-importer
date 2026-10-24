@@ -229,7 +229,6 @@ Media categories use scanned file sizes.|媒体分类按扫描文件大小估算
 Source layout|来源布局|來源配置|ソースのレイアウト
 List view|列表视图|清單檢視|リスト表示
 Grid view|网格视图|網格檢視|グリッド表示
-Folder organization|文件夹整理|資料夾整理|フォルダー整理
 Folder backup inventory|文件夹备份清单|資料夾備份清單|フォルダーバックアップ一覧
 Source inventory|来源文件清单|來源檔案清單|ソースのファイル一覧
 Filter inventory files|筛选清单文件|篩選清單檔案|一覧を絞り込む
@@ -432,7 +431,6 @@ No ignored drives.|没有已忽略的驱动器。|沒有已忽略的磁碟。|�
 Stop ignoring|取消忽略|取消忽略|無視をやめる
 Stop ignoring {name}|取消忽略 {name}|取消忽略 {name}|{name} の無視をやめる
 Import from {name}?|要从 {name} 导入吗？|要從 {name} 匯入嗎？|{name} から読み込みますか？
-Select|选择|選取|選択
 Don't import this drive|不导入此驱动器|不匯入此磁碟|このドライブを読み込まない
 Pause|暂停|暫停|一時停止
 Resume|继续|繼續|再開

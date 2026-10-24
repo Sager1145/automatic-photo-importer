@@ -60,7 +60,7 @@ test('Activity retains all mixed job controls and recovery actions independently
  assert.match(locked,/<button[^>]*data-testid="delete-recovery"[^>]*disabled/);
 });
 test('Activity Issues embeds the complete issue resolution view without a modal',()=>{
- const html=render(createElement(ActivityPanel,{embedded:true,state:state(),errors:[],act:()=>{},onClose:()=>{}}));
+ const html=render(createElement(ActivityPanel,{state:state(),errors:[],act:()=>{}}));
  assert.match(html,/activity-issues/);assert.doesNotMatch(html,/<dialog/);assert.match(html,/No errors to show/);assert.match(html,/No warnings to show/);
 });
 

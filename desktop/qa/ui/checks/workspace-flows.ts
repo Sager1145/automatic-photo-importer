@@ -10,7 +10,8 @@ export const workspaceFlowChecks=():Check[]=>[
   h.hooks!.addJobs(sources.map((source,index)=>({...syntheticJob('inventory-'+index,{phase:'complete',source}),backup:true,inventory:inventory(index)})));
   h.hooks!.inspect=()=>({camera:'QA Camera',date:'2026-10-23T12:00:00Z',fields:{'EXIF:Model':'QA Camera'}});
   try{
-   await h.nav('Jobs');
+   // The Queue is compact; inventories open from the Import card.
+   await h.nav('Files & folders');
    await h.click('article[data-source-id="'+sources[1]!.id+'"] [data-testid=drive-details-toggle]');await h.settle();
    await h.click('article[data-source-id="'+sources[1]!.id+'"] .inventory-open');await h.settle();
    await h.until('second job inventory selected',"document.querySelector('.inventory-panel')?.textContent.includes('payload.bin')");
@@ -51,8 +52,10 @@ export const workspaceFlowChecks=():Check[]=>[
    h.hooks!.addJobs([{...syntheticJob('scope-media',{phase:'stopped',paused:true}),backup:false},{...syntheticJob('scope-backup',{phase:'stopped',paused:true}),backup:true},syntheticJob('scope-library',{phase:'copying',organization:true})]);
    await h.nav('Import desk');await h.click('[data-testid=global-stop]');await h.waitFor('imports scope received',()=>seen.length===1);
    assert.deepEqual(seen[0],{type:'stop',scope:'imports'});
-   await h.nav('Jobs');await h.click('[data-testid=activity-stop-all]');await h.waitFor('global scope received',()=>seen.length===2);
+   await h.click('[data-testid=global-stop-menu] summary');await h.click('[data-testid=global-stop-everything]');await h.waitFor('everything scope received',()=>seen.length===2);
    assert.deepEqual(seen[1],{type:'stop'});
+   await h.nav('Jobs');await h.click('[data-testid=activity-stop-all]');await h.waitFor('queue stop all received',()=>seen.length===3);
+   assert.deepEqual(seen[2],{type:'stop'});
   }finally{h.hooks!.beforeAction=previous;}
  }},
 ];

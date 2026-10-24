@@ -17,9 +17,9 @@ export const stressChecks=():Check[]=>[
   await h.settle();
   const timings:{page:string;ms:number}[]=[];
   for(let round=0;round<2;round++)for(const page of [...pages.slice(1),pages[0]!]){timings.push({page,ms:Math.round(await h.js<number>(navTime(page)))});await h.settle();}
-  const opened=Date.now();await h.click('[data-testid=show-errors]');await h.until('errors panel with grouped rows',"document.querySelector('.activity-dialog')?.open===true&&document.querySelector('.activity-dialog [data-testid=error-group]')");
+  const opened=Date.now();await h.click('[data-testid=show-errors]');await h.until('errors panel with grouped rows',"document.querySelector('[data-testid=activity-panel] [data-testid=error-group]')");
   const panelMs=Date.now()-opened;
-  const rows=await h.js<{groups:number;nodes:number}>("({groups:document.querySelectorAll('.activity-dialog [data-testid=error-group]').length,nodes:document.querySelector('.activity-dialog').querySelectorAll('*').length})");
+  const rows=await h.js<{groups:number;nodes:number}>("({groups:document.querySelectorAll('[data-testid=activity-panel] [data-testid=error-group]').length,nodes:document.querySelector('[data-testid=activity-panel]').querySelectorAll('*').length})");
   await h.shot('stress-all-errors');
   const sorted=timings.map(item=>item.ms).sort((a,b)=>a-b),median=sorted[Math.floor(sorted.length/2)]!;
   await fs.writeFile(path.join(h.report,'stress.json'),JSON.stringify({timings,median,max:sorted.at(-1),panelMs,rows,errors:50000,jobs:running.length+errors.length},null,2));

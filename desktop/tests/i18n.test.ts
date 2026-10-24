@@ -186,7 +186,7 @@ test('global controls stay independent of pages and source error details are iso
     assert.equal((desk.match(/<article data-source-id=/g)??[]).length,2);
     assert.ok(desk.includes(`aria-label="${t('Import dashboard')}"`),'The dashboard lives on the Import desk');
     for(const error of errors)assert.ok(!desk.includes(t(error.message)));
-    const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{},onClose:()=>{}}));
+    const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{}}));
     for(const error of errors)assert.ok(panel.includes(t(error.message)));
     assert.ok(panel.includes('Card one'));
   }
@@ -213,7 +213,7 @@ test('format problems and metadata read issues are isolated in All errors; ackno
  const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
  const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
  assert.ok(!desk.includes('unknown-files-prompt'));assert.ok(!desk.includes('Invalid file format'));
- const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{},onClose:()=>{}}));
+ const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{}}));
  assert.ok(panel.includes('unknown-files-prompt'));assert.ok(panel.includes('Invalid file format'));assert.ok(panel.includes('BROKEN.NEF'));
  state.sessionUnknownRules={dat:null};assert.equal(collectErrors(state).length,1);assert.equal(state.preferences.unknownRules.dat,undefined,'Session choices must not become persistent rules');
  state.preferences.unknownRules.dat=null;assert.equal(collectErrors(state).length,1);
@@ -221,7 +221,7 @@ test('format problems and metadata read issues are isolated in All errors; ackno
 
 test('metadata disclosure does not repeat parser error messages outside the error panel',async()=>{
  const {MetadataDialog}=await import('../renderer/RootApp');
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload'}},fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}},act:()=>{},onClose:()=>{}})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload'}},fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}},onClose:()=>{},act:()=>{}})}));
  assert.ok(!markup.includes('Invalid media payload'));assert.ok(markup.includes('EXIF:Model'));
 });
 
@@ -586,7 +586,7 @@ test('errors are explained in plain language, grouped by drive, and keep the tec
   assert.ok(errors.every(error => error.kind === 'source' && error.sourceId === 'card'));
   for (const language of languages) {
     const t = createTranslator(language);
-    const panel = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ActivityPanel, { state, errors, act: () => {}, onClose: () => {}, onOpenSource: () => {} }) }));
+    const panel = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ActivityPanel, { state, errors, act: () => {}, onOpenSource: () => {} }) }));
     assert.ok(panel.includes(t('The drive reported a read or write error.')) && panel.includes(t('Free up space or choose another destination.')), `${language}: plain explanations`);
     assert.ok(panel.includes(t('{count} issues', { count: 2 })) && panel.includes(t('Show drive')), `${language}: grouped with a jump to the drive`);
     assert.ok(panel.includes('EIO: i/o error, read /card/DSC_1.NEF') && panel.includes(t('Copy all details')), `${language}: technical details kept`);

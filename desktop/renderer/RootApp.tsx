@@ -214,19 +214,21 @@ export default function RootApp() {
   const openSource = (sourceId: string) => {
     const source = state?.sources.find(source => source.id === sourceId);
     const job = state?.jobs.find(job => job.source.id === sourceId);
-    if (job?.organization) navigate('activity', () => setActivityTab('jobs')); else navigate('desk', () => setImportMode(job ? job.backup ? 'files' : 'media' : source ? sourceImportMode(source) : 'media'));
+    if (job?.organization) openOrganization(); else navigate('desk', () => setImportMode(job ? job.backup ? 'files' : 'media' : source ? sourceImportMode(source) : 'media'));
     void interfaceSettled().then(() => { const card = document.querySelector<HTMLElement>(`article.source-row[data-source-id="${CSS.escape(sourceId)}"]`); const still = reducedMotion(); card?.scrollIntoView({ behavior: still ? 'instant' : 'smooth', block: 'center' }); if (!still) card?.animate([{ boxShadow: '0 0 0 4px var(--accent-ring)' }, { boxShadow: '0 0 0 0 transparent' }], { duration: motionMs('--slow') * 3, easing: 'ease-out' }); });
   };
+  // A queue row's Show: the Import card of an import, Library › Organize for an organization.
+  const openJob = (job: Job) => openSource(job.source.id);
   // Sidebar destination rows jump to that destination's card on the Import desk.
   const openDestination = (path: string) => {
     if (page !== 'desk') navigate('desk');
     void interfaceSettled().then(() => { document.querySelector<HTMLElement>(`.destination-slot[data-destination-path="${CSS.escape(path)}"]`)?.scrollIntoView({ behavior: reducedMotion() ? 'instant' : 'smooth', block: 'center' }); });
   };
   const navigate = (next: Page, update?: () => void) => { if (next === page && !update) return; animateInterfaceChange(() => { update?.(); setPage(next); window.scrollTo({ top: 0, behavior: 'instant' }); }, next === page ? 'crossfade' : pageOrder.indexOf(next) > pageOrder.indexOf(page) ? 'forward' : 'back'); };
-  const [errorsOpen, setErrorsOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [errorsTarget, setErrorsTarget] = useState<ErrorTarget>();
-  const openErrorsFor = (target?: ErrorTarget) => { setErrorsTarget(target); setErrorsOpen(true); };
+  // Issues live in Activity: the titlebar button, sidebar badges and the toast all land there, with the drive's filter when one was clicked.
+  const openErrorsFor = (target?: ErrorTarget) => navigate('activity', () => { setErrorsTarget(target); setActivityTab('issues'); });
   // New-drive prompt: closing it does not answer; unanswered drives are marked on their cards.
   const [dismissedDrives, setDismissedDrives] = useState<string[]>([]);
   const [promptOpen, setPromptOpen] = useState(false);
@@ -273,7 +275,7 @@ export default function RootApp() {
     window.importer.action(action).then(() => setConnectionError('')).catch(error => setConnectionError(error instanceof Error ? error.message : String(error)));
   }, []);
   const act = useCallback<Dispatch>(action => {
-    if (action.type === 'cleanResidue') { setErrorsOpen(false); setCleanupOpen(true); } else rawAct(action);
+    if (action.type === 'cleanResidue') setCleanupOpen(true); else rawAct(action);
   }, [rawAct]);
   const inspect = useCallback((path: string) => {
     const request = ++previewSequence.current;
@@ -334,17 +336,16 @@ export default function RootApp() {
         </>}
         {page === 'settings' && <SettingsPage state={state} act={act} busy={busy || settingsLocked(state)} requestedCategory={settingsRequest?.category} requestKey={settingsRequest?.key} onLibrary={openOrganization} />}
         {page === 'activity' && <>
-          <WorkspaceTabs panelId="activity-workspace-panel" label={t("Activity")} value={activityTab} items={[{id:'jobs',label:t("Jobs"),testId:'activity-jobs'},{id:'history',label:t("History"),testId:'activity-history'},{id:'issues',label:t("Issues"),testId:'activity-issues'}]} onChange={setActivityTab} />
-          <section role="tabpanel" id="activity-workspace-panel" aria-labelledby={`tab-activity-${activityTab}`}>{activityTab === 'jobs' && <ActivityJobs state={state} act={act} inspect={inspect} />}
+          <WorkspaceTabs panelId="activity-workspace-panel" label={t("Activity")} value={activityTab} items={[{id:'jobs',label:t("Queue"),testId:'activity-jobs'},{id:'history',label:t("History"),testId:'activity-history'},{id:'issues',label:t("Issues"),testId:'activity-issues'}]} onChange={setActivityTab} />
+          <section role="tabpanel" id="activity-workspace-panel" aria-labelledby={`tab-activity-${activityTab}`}>{activityTab === 'jobs' && <ActivityJobs state={state} act={act} onShow={openJob} />}
           {activityTab === 'history' && <HistoryPage state={state} onDesk={() => navigate('desk')} />}
-          {activityTab === 'issues' && <ActivityPanel embedded state={state} errors={errors} target={errorsTarget} onShowAll={() => setErrorsTarget(undefined)} act={act} onClear={clearErrorItems} onClose={() => {}} onOpenSource={openSource} />}</section>
+          {activityTab === 'issues' && <ActivityPanel state={state} errors={errors} target={errorsTarget} onShowAll={() => setErrorsTarget(undefined)} act={act} onClear={clearErrorItems} onOpenSource={openSource} />}</section>
         </>}
       </main>
     </div>
 
-    {errorsOpen && <ActivityPanel state={state} errors={errors} target={errorsTarget} onShowAll={() => setErrorsTarget(undefined)} act={act} onClear={clearErrorItems} onClose={() => setErrorsOpen(false)} onOpenSource={openSource} />}
     {cleanupOpen && <CleanupConfirmation residue={state.residue} busy={busy || settingsLocked(state)} act={rawAct} onCancel={() => setCleanupOpen(false)} />}
-    <ErrorToast errors={errors} hidden={errorsOpen || (page === 'activity' && activityTab === 'issues')} onView={() => openErrorsFor()} />
+    <ErrorToast errors={errors} hidden={page === 'activity' && activityTab === 'issues'} onView={() => openErrorsFor()} />
     {promptOpen && <NewDrivePrompt state={state} act={act} skip={dismissedDrives} onDismiss={ids => { setDismissedDrives(current => [...new Set([...current, ...ids])]); setPromptOpen(false); }} onDone={() => setPromptOpen(false)} />}
     {preview && <MetadataDialog preview={preview} onClose={closePreview} act={act} />}
   </div></EtaHolds.Provider></I18nProvider>;
@@ -488,21 +489,11 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
       const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
         <SidebarDestinationStatus activity={destinationActivity(state, path)} path={path} />
-        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} />
-        <SidebarOldRecords state={state} path={path} act={act} /></li>;
+        <SidebarCapacity total={status?.total} free={status?.free} unavailable={online ? t("Reading drive capacity…") : t("Drive offline")} activity={state.driveActivity?.[path]} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("Choose a backup destination")}</p>}
-    {/* A drive that holds old records beside a library but is not a destination. */}
-    {(state.oldRecords ?? []).filter(drive => !destinations.includes(drive)).map(drive => <SidebarOldRecords key={drive} state={state} path={drive} act={act} />)}
   </section>;
 }
 
-/** The destination row when it holds records of an earlier version that this Mac wrote: nothing was changed; Acknowledge stops the notice. */
-function SidebarOldRecords({ state, path, act }: { state: AppState; path: string; act?: Dispatch }) {
-  const { t } = useTranslation();
-  if (!state.oldRecords?.includes(path)) return null;
-  const text = t("Old records from an earlier version are on {drive}. Use records-migrator-v5 to convert them; they were left untouched.", { drive: filename(path) || path });
-  return <div className="sidebar-old-records" data-testid="sidebar-old-records"><small className="sidebar-capacity-text sidebar-old-records-text" title={text}>{text}</small>{act && <Button kind="quiet" data-testid="old-records-acknowledge" aria-label={t("Acknowledge old records")} title={t("Acknowledge old records")} onClick={() => act({ type: 'acknowledgeOldRecords', drive: path })}>{t("Acknowledge old records")}</Button>}</div>;
-}
 function sourceInventories(state: AppState) {
   const sources = new Map(state.sources.map(source => [source.id, source]));
   for (const job of state.jobs) if (!job.organization && !sources.has(job.source.id)) sources.set(job.source.id, job.source);
@@ -514,7 +505,7 @@ function sourceInventories(state: AppState) {
 }
 type ErrorKind = 'app' | 'source' | 'destination' | 'organization' | 'metadata' | 'format';
 /** id: what Clear removes ('local:' ids live only in this window); at: when it appeared; drive: the volume it came from. */
-type DisplayError = {code?: string; count?: number; items?: {path: string; detail?: string}[]; id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string};
+type DisplayError = {code?: string; count?: number; items?: {path: string; detail?: string}[]; id?: string; at?: string; drive?: string; source: string; message: Message; kind: ErrorKind; severity: Severity; sourceId?: string; jobId?: string; formatSourceId?: string; /** Old records of an earlier version on this drive: the row offers Acknowledge, and Clear does not apply. */oldDrive?: string};
 /** A problem only this window saw, such as a failed request or a file it couldn't read. */
 export type LocalError = {detail: string; at?: string};
 /** A sidebar drive whose errors All errors can show on their own. */
@@ -565,6 +556,10 @@ export function collectErrors(state: AppState, extra: (string | LocalError | und
     if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
       result.push({source:source.name,drive:driveName(source.path,source.name),message:text(t("Unknown file formats")),kind:'format',severity:'warning',sourceId:source.id,formatSourceId:source.id});
     }
+  }
+  // Records of an earlier version that this Mac wrote: nothing was changed. The row's Acknowledge stops the notice.
+  for (const drive of state.oldRecords ?? []) {
+    result.push({id:'old-records:'+drive,source:filename(drive)||drive,drive:driveName(drive,drive),message:text(t("Old records from an earlier version are on {drive}. Use records-migrator-v5 to convert them; they were left untouched.",{drive:filename(drive)||drive})),kind:'destination',severity:'warning',oldDrive:drive});
   }
   return result;
 }
@@ -623,6 +618,7 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   const errorsButton = <Button icon={CircleAlert} data-testid="show-errors" title={t("All errors")} aria-label={t("All errors")} onClick={onErrors}><span className="titlebar-label">{t("All errors")}</span><span key={errorCount} className="error-count" data-count={errorCount} data-level={errorLevel} aria-label={t("{count} errors", {count:formatNumber(errorCount)})}>{formatNumber(errorCount)}</span>{warningCount > 0 && <span key={`w${warningCount}`} className="error-count warning-count" data-testid="warning-count" data-count={warningCount} aria-label={t("{count} warnings", {count:formatNumber(warningCount)})}>{formatNumber(warningCount)}</span>}</Button>;
   const scanning = !!state.scanningSources?.length;
   const canStop = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued' || job.paused));
+  const anythingToStop = scanning || !!state.review || !!state.busyReview || state.jobs.some(job => isRunning(job) || job.phase === 'queued' || job.paused);
   const configured = state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2);
   const selectedCount = state.sources.filter(sourceSelected).length;
   const running = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued'));
@@ -630,7 +626,7 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   const live = state.jobs.filter(job => isRunning(job));
   const winding = live.length > 0 && live.every(job => job.stopping) && !state.jobs.some(job => job.phase === 'queued') && !scanning && !state.review && !state.busyReview;
   const stopping = winding && live.some(job => job.stopping === 'stop');
-  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause imports")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" title={t("Starts all selected media and folder sources. Existing jobs keep their modes.")} disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start all selected ({count})", { count: formatNumber(selectedCount) }) : t("Start all selected")}</Button>}<Button icon={Square} data-testid="global-stop" title={t("Stops queued, paused and running media imports and file backups. Scans, reviews and library tools continue.")} disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop',scope:'imports'})}>{stopping ? t("Stopping…") : t("Stop imports")}</Button>{errorsButton}</div>;
+  return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause imports")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" title={t("Starts all selected media and folder sources. Existing jobs keep their modes.")} disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start all selected ({count})", { count: formatNumber(selectedCount) }) : t("Start all selected")}</Button>}<div className="split-control titlebar-stop"><Button icon={Square} data-testid="global-stop" title={t("Stops queued, paused and running media imports and file backups. Scans, reviews and library tools continue.")} disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop',scope:'imports'})}>{stopping ? t("Stopping…") : t("Stop imports")}</Button><details className="overflow-menu" data-testid="global-stop-menu"><summary className="button button-secondary button-icon-only" aria-label={t("More stop options")} title={t("More stop options")}><Icon icon={ChevronDown} size={16} /></summary><div className="overflow-menu-items"><Button kind="quiet" icon={Square} data-testid="global-stop-everything" title={t("Stops imports, scans and organizing, and discards the open review.")} disabled={!anythingToStop} onClick={event => { event.currentTarget.closest('details')!.open = false; act({type:'stop'}); }}>{t("Stop everything")}</Button></div></details></div>{errorsButton}</div>;
 }
 
 type Translate = ReturnType<typeof useTranslation>['t'];
@@ -662,7 +658,7 @@ function rowReport(row: ErrorRow<DisplayError>, t: Translate, formatNumber: (val
   return [`${row.entries[0]!.source || t("App")}: ${info.title}`, ...row.items.map(item => `  ${item.path ?? ''}${(item.detail ?? (item.entry ? t(item.entry.message) : '')) ? ' — ' + (item.detail ?? t(item.entry!.message)) : ''}`)].join('\n') + (row.count > row.items.length ? `\n  ${t("and {count} more", { count: formatNumber(row.count - row.items.length) })}` : '');
 }
 /** The latest handlers of the panel, behind a stable ref so memoized rows do not re-render when only these change. */
-type RowApi = { current: { act: Dispatch; copy: (text: string) => void; clear: (ids?: string[], severity?: Severity) => void; onOpenSource?: (sourceId: string) => void; close: () => void } };
+type RowApi = { current: { act: Dispatch; copy: (text: string) => void; clear: (ids?: string[], severity?: Severity) => void; onOpenSource?: (sourceId: string) => void } };
 const ITEM_PAGE = 200;
 /** One group row: title, count, explanation and actions. Its affected paths load only when expanded, 200 at a time. */
 const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { row: ErrorRow<DisplayError>; api: RowApi; retryable: boolean; skippable: boolean }) {
@@ -679,7 +675,7 @@ const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { 
     <div className="error-summary"><Icon icon={row.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title" data-testid="error-group-title">{info.title}</p>{info.text && <p className="error-hint">{info.text}</p>}</div></div>
     <div className="card-actions error-group-actions">
       <Button kind="quiet" icon={Copy} data-testid="error-group-copy" onClick={() => api.current.copy(rowReport(row, t, formatNumber))}>{t("Copy details")}</Button>
-      {first.sourceId && api.current.onOpenSource && <Button kind="quiet" icon={ArrowUpRight} data-testid="error-group-drive" onClick={() => { api.current.onOpenSource!(first.sourceId!); api.current.close(); }}>{t("Show drive")}</Button>}
+      {first.sourceId && api.current.onOpenSource && <Button kind="quiet" icon={ArrowUpRight} data-testid="error-group-drive" onClick={() => { api.current.onOpenSource!(first.sourceId!); }}>{t("Show drive")}</Button>}
       {retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-group-retry" onClick={() => api.current.act({ type: 'retryJob', jobId: first.jobId! })}>{t("Retry all")}</Button>}
       {row.code === 'staging-left' && <Button kind="quiet" icon={Trash2} data-testid="error-group-cleanup" onClick={() => api.current.act({ type: 'cleanResidue' })}>{t("Clean up")}</Button>}
       {skippable && <Button kind="quiet" icon={CheckCheck} data-testid="error-group-skip" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => api.current.act({ type: 'acknowledgeErrors', jobId: first.jobId!, codes: [row.code] })}>{t("Skip these")}</Button>}
@@ -702,27 +698,25 @@ const MergedRow = memo(function MergedRow({ row, api, retryable, skippable }: { 
   </li>;
 }, (a, b) => a.row.key === b.row.key && a.row.count === b.row.count && a.row.entries.length === b.row.entries.length && a.row.severity === b.row.severity && a.retryable === b.retryable && a.skippable === b.skippable && a.api === b.api);
 
-export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSource, onClear, target, onShowAll, embedded = false}: {embedded?: boolean; state: AppState; errors: DisplayError[]; act:Dispatch; onClose:()=>void; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[], severity?: Severity) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
+/** The Issues list of Activity: errors, then warnings, each grouped by source or drive. */
+export function ActivityPanel({state, errors: allErrors, act, onOpenSource, onClear, target, onShowAll}: {state: AppState; errors: DisplayError[]; act:Dispatch; onOpenSource?: (sourceId: string) => void; /** ids to clear; none clears all. */ onClear?: (ids?: string[], severity?: Severity) => void; /** Shows only this drive's errors. */ target?: ErrorTarget; onShowAll?: () => void}) {
   const { t, formatNumber, language } = useTranslation();
   const errors = useMemo(() => target ? errorsFor(allErrors, target) : allErrors, [allErrors, target]);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const close = useAnimatedClose(dialog,onClose);
-  useEffect(() => { if (embedded) return; const element = dialog.current; showSheet(element); return () => element?.close(); }, [embedded]);
   const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => {}); };
   const api = useRef<RowApi['current']>(null as unknown as RowApi['current']);
   const report = (items: DisplayError[]) => buildRows(items).map(row => row.merged ? rowReport(row, t, formatNumber) : row.entries.map(error => [error.at && formatWhen(error.at, language), error.drive, `${error.source || t("App")}: ${t(error.message)}`].filter(Boolean).join(' · ')).join('\n')).join('\n');
   const clear = onClear ?? ((ids?: string[], severity?: Severity) => act({ type: 'clearErrors', ...(ids ? { ids } : {}), ...(severity ? { severity } : {}) }));
-  api.current = { act, copy, clear, onOpenSource, close };
+  api.current = { act, copy, clear, onOpenSource };
   const section = (severity: Severity) => {
     const items = errors.filter(error => error.severity === severity), plural = severity === 'error' ? 'errors' : 'warnings', rows = buildRows(items);
     const map = new Map<string, DisplayError[]>(); for (const error of items) map.set(error.source, [...(map.get(error.source) ?? []), error]);
-    const clearable = items.some(error => error.id);
-    const clearShown = () => target ? clear(items.flatMap(error => error.id ? [error.id] : []), severity) : clear(undefined, severity);
+    const clearable = items.some(error => error.id && !error.oldDrive);
+    const clearShown = () => target ? clear(items.flatMap(error => error.id && !error.oldDrive ? [error.id] : []), severity) : clear(undefined, severity);
     const label = severity === 'error' ? (target ? t("Clear all errors for {name}", { name: target.name }) : t("Clear all errors")) : (target ? t("Clear all warnings for {name}", { name: target.name }) : t("Clear all warnings"));
     return <section className={`error-section is-${severity}`} data-testid={`${plural}-section`} data-severity={severity} aria-labelledby={`${plural}-heading`}>
       <div className="error-section-heading"><h3 id={`${plural}-heading`}>{severity === 'error' ? t("Errors") : t("Warnings")}<span className="error-section-count" data-testid={`${plural}-section-count`}>{formatNumber(rows.length)}</span></h3><div className="card-actions">{items.length > 0 && <Button kind="quiet" icon={Copy} data-testid={`${plural}-copy-all`} onClick={() => copy(report(items))}>{t("Copy all details")}</Button>}{clearable && <Button kind="quiet" icon={Trash2} data-testid={`${plural}-clear-all`} aria-label={label} onClick={clearShown}>{t("Clear all")}</Button>}</div></div>
       {items.length ? <div className="error-groups">{[...map].map(([source, list]) => <section key={source || 'app'} className="error-group">
-        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); close(); }}>{t("Show drive")}</Button>}{severity === 'error' && skippableJob(state, list) && <Button kind="quiet" icon={CheckCheck} data-testid="job-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: list.find(error => error.jobId)!.jobId! })}>{t("Skip all and mark as done")}</Button>}</div>
+        <div className="error-group-heading"><strong>{source || t("App")}</strong><span>{t("{count} issues", { count: formatNumber(list.length) })}</span>{list[0]!.sourceId && onOpenSource && !list[0]!.formatSourceId && <Button kind="quiet" icon={ArrowUpRight} onClick={() => { onOpenSource(list[0]!.sourceId!); }}>{t("Show drive")}</Button>}{severity === 'error' && skippableJob(state, list) && <Button kind="quiet" icon={CheckCheck} data-testid="job-skip-all" title={t("Skipping only changes the status. Nothing is deleted.")} onClick={() => act({ type: 'acknowledgeErrors', jobId: list.find(error => error.jobId)!.jobId! })}>{t("Skip all and mark as done")}</Button>}</div>
         <ul className="all-errors">{buildRows(list).map((row, index) => {
           if (row.merged) return <MergedRow key={row.key} row={row} api={api} skippable={row.severity === 'error' && skippableJob(state, row.entries)} retryable={row.severity === 'error' && row.entries[0]!.jobId !== undefined && state.jobs.some(job => job.id === row.entries[0]!.jobId && job.phase === 'error' && !!job.retryable)} />;
           const error = row.entries[0]!;
@@ -731,7 +725,7 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
           const shown = pathOf(error.message), retryable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.retryable);
           const skippable = error.jobId !== undefined && state.jobs.some(job => job.id === error.jobId && job.phase === 'error' && !!job.skippablePath && job.skippablePath === filePath(error.message));
           return <li key={index} className={`error-item is-${error.severity}`} data-severity={error.severity}>
-            <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{t(explained.title)}</p>{explained.hint && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.id && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
+            <div className="error-summary"><Icon icon={error.severity === 'error' ? CircleAlert : Info} size={16} /><div><p className="error-title">{error.oldDrive ? t(error.message) : t(explained.title)}</p>{explained.hint && !error.oldDrive && <p className="error-hint">{t(explained.hint)}</p>}</div>{error.oldDrive && <Button kind="quiet" data-testid="old-records-acknowledge" aria-label={t("Acknowledge old records")} title={t("Acknowledge old records")} onClick={() => act({ type: 'acknowledgeOldRecords', drive: error.oldDrive! })}>{t("Acknowledge old records")}</Button>}{error.id && !error.oldDrive && <Button kind="quiet" icon={X} data-testid="error-clear" aria-label={t("Clear error: {title}", { title: t(explained.title) })} title={t("Clear")} onClick={() => clear([error.id!], severity)}>{t("Clear")}</Button>}{shown && <RevealButton path={shown} act={act} />}{retryable && <Button kind="quiet" icon={RotateCcw} data-testid="error-retry" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: error.jobId! })}>{t("Retry")}</Button>}{skippable && <><Button kind="quiet" icon={ChevronRight} data-testid="error-skip" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: error.jobId!, path: filePath(error.message)! })}>{t("Skip")}</Button><Button kind="quiet" icon={Play} data-testid="error-skip-all" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: error.jobId! })}>{t("Skip all")}</Button></>}</div>
             {(error.drive || error.at) && <p className="error-meta">{error.drive && <span aria-label={t("Drive: {name}", { name: error.drive })}><Icon icon={HardDrive} size={13} />{error.drive}</span>}{error.at && <time dateTime={error.at}><Icon icon={Clock3} size={13} />{formatWhen(error.at, language)}</time>}</p>}
             <details className="error-details"><summary>{t("Details")}</summary><div><p>{t(error.message)}</p><Button kind="quiet" icon={Copy} onClick={() => copy(t(error.message))}>{t("Copy")}</Button></div></details>
           </li>;
@@ -740,11 +734,7 @@ export function ActivityPanel({state, errors: allErrors, act, onClose, onOpenSou
     </section>;
   };
   const contents = <>{target && <p className="error-filter" data-testid="errors-filter"><Icon icon={HardDrive} size={14} /><span>{t("Errors for {name}", { name: target.name })}</span>{onShowAll && <Button kind="quiet" onClick={onShowAll}>{t("Show all errors")}</Button>}</p>}<div className="activity-content">{section('error')}{section('warning')}</div></>;
-  if (embedded) return <section className="activity-issues" data-testid="activity-panel" aria-label={t("Issues")}>{contents}</section>;
-  return <dialog className="activity-dialog" ref={dialog} data-error-layer aria-labelledby="activity-heading" data-testid="activity-panel" onCancel={event => {event.preventDefault();close();}}>
-    <div className="dialog-heading"><h2 id="activity-heading">{t("All errors")}</h2><div className="card-actions"><Button kind="quiet" icon={X} data-testid="activity-close" aria-label={t("Close panel")} onClick={close} /></div></div>
-    {contents}
-  </dialog>;
+  return <section className="activity-issues" data-testid="activity-panel" aria-label={t("Issues")}>{contents}</section>;
 }
 
 /** The combined speed of running jobs, for the overview's Transfer speed and its Total line alike. One rule: jobs moving data (copying,
@@ -1272,6 +1262,12 @@ function importStatus(job: Job, t: ReturnType<typeof createTranslator>): string 
   if (step === 'reading') return t("Reading files");
   return t("Checking existing files");
 }
+/** An import job's status line: stopping, its place in the queue, or its phase. */
+function importJobStatus(job: Job, t: ReturnType<typeof createTranslator>, queuePosition?: number): string {
+  if (job.stopping) return job.stopping === 'pause' ? t("Pausing…") : t("Stopping…");
+  if (job.phase === 'queued') return t("Queue position {count}", { count: queuePosition ?? 0 });
+  return { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: job.progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
+}
 /** What an organization reads: "A006 › photobackup + videobackup", or the full path. */
 export function organizationPlace(job: Job, full = false): string {
   const place = full ? job.source.path : filename(job.source.path) || job.source.path;
@@ -1413,7 +1409,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
   const active = !!job && isRunning(job);
   const queued = job?.phase === 'queued';
   const progress = job?.progress;
-  const status = reviewing && !active && !queued ? t("Building review…") : !job ? backup ? t("Ready to back up") : t("Ready to import") : job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : queued ? t("Queue position {count}", { count: queuePosition ?? 0 }) : { discovering: t("Discovering files"), verifying: importStatus(job, t), copying: progress?.renames ? t("Moving files") : t("Copying files"), complete: t("Complete"), stopped: t("Stopped"), error: t("Needs attention"), queued: t("Queued") }[job.phase];
+  const status = reviewing && !active && !queued ? t("Building review…") : !job ? backup ? t("Ready to back up") : t("Ready to import") : importJobStatus(job, t, queuePosition);
   const icon = source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
   const paused = job?.phase === 'stopped' && !!job.paused;
   const already = job?.phase === 'complete' && !!job.alreadyImported;
@@ -1711,33 +1707,38 @@ export function OrganizationRecoveryPanel({ state, act, busy }: { state: AppStat
   return <><section className="organization-recovery" aria-labelledby="organization-recovery-heading"><CardHeader icon={RotateCcw} id="organization-recovery-heading" title={t("Organization recovery")}><Button icon={RefreshCw} disabled={busy} onClick={() => act({ type: 'refreshOrganization' })}>{t("Refresh list")}</Button></CardHeader>{recovery.length > 0 ? <div className="recovery-jobs">{recovery.map(job => <article className="recovery-job" key={`${job.root}-${job.id}`}><div className="recovery-job-heading"><span className={`source-status ${job.status === 'pending' ? 'queued' : 'complete'}`}><Icon icon={job.status === 'pending' ? Clock3 : CheckCircle2} size={15} />{job.missingRoot ? t("Library folder not found") : job.status === 'complete' ? t("Last completed") : job.status === 'superseded' ? t("Replaced by a later organization") : job.status === 'undone' ? t("Undone") : t("Needs recovery")}</span>{(job.status === 'complete' || job.status === 'pending') && !job.missingRoot && <Button icon={job.status === 'complete' ? RefreshCw : Play} disabled={busy} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root })}>{job.status === 'complete' ? t("Recheck") : t("Resume & recheck")}</Button>}{job.status === 'complete' && <Button kind="quiet" disabled={busy} title={t("Reads every organized file again, not only those changed since the last recheck.")} onClick={() => act({ type: 'recovery', op: 'resume', id: job.id, root: job.root, full: true })}>{t("Full recheck")}</Button>}</div><p className="recovery-root">{job.root}</p>{job.status === 'complete' || job.status === 'pending' ? <p className="recovery-count">{t("Last verified: {completed} of {total} files", { completed: formatNumber(job.completed), total: formatNumber(job.files) })}</p> : <p className="recovery-count">{t("{count} files", { count: formatNumber(job.files) })}</p>}<RetainedOriginals job={job} act={act} busy={busy} recoverySize={state.recoverySize} /></article>)}</div> : <p className="recovery-empty">{state.organizationRecoveryLoading ? t("Reading organization history…") : state.organizationRecoveryPaused ? t("Reading organization history is paused while a job uses the drive. It continues afterwards.") : t("No organization history.")}</p>}{state.organizationRecoveryLoading && <OperationProgress progress={state.organizationRecoveryProgress} label={t("Organization history progress")} testId="recovery-progress" />}</section>{duplicates.length > 0 && <RemovedDuplicates jobs={duplicates} act={act} busy={busy} />}</>;
 }
 
-export function ActivityJobs({ state, act, inspect = () => {} }: { state: AppState; act: Dispatch; inspect?: (path: string) => void }) {
+/** Activity › Queue: every job as one compact row; the full card stays on the Import desk or in Library › Organize. */
+export function ActivityJobs({ state, act, onShow }: { state: AppState; act: Dispatch; onShow?: (job: Job) => void }) {
   const { t } = useTranslation();
-  const [selectedJobId, setSelectedJobId] = useState<string>();
-  const selectedJob = state.jobs.find(job => job.id === selectedJobId && !job.organization) ?? state.jobs.find(job => job.inventory && !job.organization);
-  const selectedInventory = selectedJob && (selectedJob.inventory ?? state.sourceInventories?.[selectedJob.source.id]);
-  const reviewBusy = pageBusy(state) || state.duplicates?.status === 'scanning' || state.duplicates?.status === 'removing';
   return <div className="activity-jobs" data-testid="activity-job-list">
     <div className="rule-actions"><Button icon={Square} data-testid="activity-stop-all" title={t("Stops imports, scans and organizing, and discards the open review.")} disabled={!state.scanningSources?.length && !state.review && !state.busyReview && !state.jobs.some(job => isRunning(job) || job.phase === 'queued' || job.paused)} onClick={() => act({type:'stop'})}>{t("Stop all")}</Button></div>
-    {state.jobs.length ? state.jobs.map(job => {
-      if (job.organization) return <OrganizationCard key={job.id} job={job} act={act} />;
-      const source = job.source, position = state.sources.findIndex(item => item.id === source.id);
-      return <SourceRow key={job.id} source={source} job={job} act={act}
-        queuePosition={(state.queueOrder ?? []).indexOf(job.id) + 1}
-        selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))}
-        activity={state.driveActivity?.[source.id]} drive={driveContext(source,state.sources,state.destinationStatus)}
-        inventory={job.inventory ?? state.sourceInventories?.[source.id]} cameraInfo={state.sourceCameraInfo?.[source.id]}
-        scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]}
-        reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress}
-        containsBackup={containsBackup(source,state.preferences.destinations)} backupFolder={state.preferences.basePath}
-        canMoveUp={position > 0 && sourceSelected(source) && (job.phase === 'queued' || (job.phase === 'stopped' && !!job.paused))}
-        configured={state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2)}
-        reviewBusy={reviewBusy} startBlocked={!!state.review || !!state.busyReview}
-        originalsSize={state.originalsSize} knownRules={state.preferences.unknownRules}
-        organizeBlocked={state.preferences.mediaLayout === 'video-root'} verifyOff={state.preferences.verifyCopies === false} />;
-    }) : <p className="inline-note">{t("No jobs yet.")}</p>}
-    {selectedJob && selectedInventory && <InventoryPanel inventory={selectedInventory} sourceName={selectedJob.source.name} backup={selectedJob.backup} inspect={inspect} act={act} />}
+    {state.jobs.length ? <ul className="queue-list">{state.jobs.map(job => <QueueRow key={job.id} job={job} act={act} queuePosition={(state.queueOrder ?? []).indexOf(job.id) + 1} verifyOff={state.preferences.verifyCopies === false} onShow={onShow} />)}</ul> : <p className="inline-note">{t("No jobs yet.")}</p>}
   </div>;
+}
+/** One job in the queue: name, status, a thin progress bar with its moving counter, Pause/Stop, and Show. */
+function QueueRow({ job, act, queuePosition, verifyOff, onShow }: { job: Job; act: Dispatch; queuePosition: number; verifyOff: boolean; onShow?: (job: Job) => void }) {
+  const { t, formatNumber, formatBytes } = useTranslation();
+  const held = useHeld();
+  const organization = !!job.organization, source = job.source, progress = job.progress;
+  const active = isRunning(job), queued = job.phase === 'queued', paused = job.phase === 'stopped' && !!job.paused;
+  const name = organization ? t("Library organization") : source.name;
+  const status = organization ? organizationStatus(job, t) : paused ? t("Paused") : importJobStatus(job, t, queuePosition);
+  const icon = organization ? FolderCog : source.transport === 'camera' ? Camera : source.transport === 'folder' ? Folder : Save;
+  return <li className={`queue-row ${job.phase === 'error' ? 'is-error' : ''}`} data-source-id={source.id} data-job-id={job.id} data-testid={organization ? "organization-card" : "queue-row"} data-phase={job.phase}>
+    <div className="queue-row-head">
+      <Icon icon={icon} size={18} />
+      <div className="queue-row-name"><strong title={organization ? organizationPlace(job, true) : source.name}>{name}</strong>{organization && <small title={organizationPlace(job, true)}>{organizationPlace(job, true)}</small>}<span className={`source-status ${paused ? 'paused' : job.phase}`}><span key={status} className="source-status-text">{status}</span>{job.backup && !organization && <span className="small-tag">{t("Folder backup")}</span>}</span></div>
+      <div className="queue-row-actions">
+        {(active || queued) && <><Button icon={Pause} disabled={!!job.stopping} aria-label={t("Pause {name}", { name })} onClick={() => act({ type: 'pause', sourceId: source.id })}>{t("Pause")}</Button><Button kind="quiet" icon={Square} disabled={job.stopping === 'stop'} aria-label={t("Stop {name}", { name })} title={t("Stop")} onClick={() => act({ type: 'stop', jobId: job.id })} /></>}
+        {paused && <Button icon={Play} onClick={() => act(organization ? { type: 'continueOrganization', jobId: job.id } : { type: 'start', sourceId: source.id })}>{organization ? t("Resume") : t("Continue")}</Button>}
+        {onShow && <Button kind="quiet" icon={ArrowUpRight} aria-label={t("Show {name}", { name })} title={organization ? t("Show in Library") : t("Show on the Import desk")} onClick={() => onShow(job)}>{t("Show")}</Button>}
+      </div>
+    </div>
+    {(progress || active) && <ProgressDisplay className="queue-progress" label={t("{name} copy progress", { name })} fraction={queued ? 0 : cardFraction(job)} finished={jobFinished(job)}
+      count={job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : progress ? progressCount(progress, t, formatNumber, organization, organization || progress.step === 'comparing' ? formatBytes : undefined) : undefined}
+      speed={active && progress ? progress : undefined} {...jobTiming(job, t, held)} step={!progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job, !verifyOff)} paused={jobPaused(job)} />}
+    <SkipFileNotice job={job} act={act} />
+  </li>;
 }
 
 // Unknown file formats: the default, saved rules, and an editor for one extension's rule.

@@ -9,8 +9,8 @@ import {scanned} from './imports';
 let fresh=0;
 /** A new app error, so a new error toast opens (each toast stays 7 s). */
 const raise=(h:Harness)=>{h.hooks!.set('error',text(`QA synthetic error ${++fresh}`));return h.until('error toast in the top layer',"document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')");};
-const openPanel=async(h:Harness)=>{await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");};
-const closePanel=async(h:Harness)=>{await h.click('[data-testid=activity-close]');await h.until('errors panel closed',"document.querySelector('.activity-dialog')===null");};
+const openPanel=async(h:Harness)=>{await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");};
+const closePanel=async(h:Harness)=>{await h.nav('Import desk');await h.until('issues list closed',"document.querySelector('[data-testid=activity-panel]')===null");};
 const needsHook=async(h:Harness)=>h.hooks?undefined:'needs the QA injection hook';
 
 export const errorChecks=():Check[]=>[
@@ -20,14 +20,14 @@ export const errorChecks=():Check[]=>[
   assert.equal((await h.state()).preferences.unknownDefault??'skip','skip');
   await h.until('skipped files notice',"document.querySelector('[data-testid=skipped-files]')");
   await openPanel(h);
-  assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog [data-testid=unknown-files-prompt]')===null"),true,'Default skip mode must not report unknown files as errors');
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=activity-panel] [data-testid=unknown-files-prompt]')===null"),true,'Default skip mode must not report unknown files as errors');
   await closePanel(h);
   // Ask is a job setting: it is dropped while a scan runs, so prefs() waits for idle and confirms it took.
   try{
    await h.prefs({unknownDefault:'ask'});
    await openPanel(h);
-   await h.until('format issues in the error panel',"document.querySelector('.activity-dialog [data-testid=unknown-files-prompt]')");
-   assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog').textContent.includes('Keep unknown files excluded')"),true);
+   await h.until('format issues in the error panel',"document.querySelector('[data-testid=activity-panel] [data-testid=unknown-files-prompt]')");
+   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=activity-panel]').textContent.includes('Keep unknown files excluded')"),true);
    await h.shot('file-format-errors');
    await closePanel(h);
   }finally{await h.prefs({unknownDefault:'skip'});}
@@ -91,8 +91,8 @@ export const errorChecks=():Check[]=>[
    }
    await raise(h);await h.settle();
    await pointerClick('[data-testid=error-toast] button:not([aria-label])');
-   await h.until('View opens errors by real pointer',"document.querySelector('.activity-dialog')?.open===true");
-   await h.click('[data-testid=activity-close]');await h.until('errors sheet closed',"!document.querySelector('.activity-dialog')");
+   await h.until('View opens Activity › Issues by real pointer',"document.querySelector('[data-testid=activity-panel]')");
+   await h.nav('Import desk');await h.until('issues list closed',"!document.querySelector('[data-testid=activity-panel]')");
    await raise(h);await h.click('[data-testid=metadata-close]');
    await h.until('metadata closed with toast alive',"!document.querySelector('.metadata-dialog')&&document.querySelector('[data-testid=error-toast]')?.matches(':popover-open')");
    assert.deepEqual((await h.probe(errorLayers)).find(layer=>layer.testid==='error-toast')?.misses,[],'toast moves back to the document after modal unmount');
@@ -106,17 +106,17 @@ export const errorChecks=():Check[]=>[
    {code:'unreadable',severity:'warning' as const,count:12,items:Array.from({length:12},(_,i)=>({path:`/Volumes/QA synthetic/grouped/DCIM/IMG_${i}.HIF`}))}]};
   h.hooks!.addJobs([job]);
   await openPanel(h);
-  const row=(code:string)=>`document.querySelector('.activity-dialog [data-testid=error-group][data-code=${code}]')`;
+  const row=(code:string)=>`document.querySelector('[data-testid=activity-panel] [data-testid=error-group][data-code=${code}]')`;
   await h.until('grouped error row',`${row('copy-failed')}&&${row('unreadable')}`);
   assert.equal(await h.js<string>(`${row('copy-failed')}.dataset.count`),'350');
   assert.match(await h.js<string>(`${row('copy-failed')}.querySelector('[data-testid=error-group-title]').textContent`),/350 files could not be copied/);
   assert.equal(await h.js<boolean>(`${row('unreadable')}.closest('[data-testid=warnings-section]')!==null&&${row('copy-failed')}.closest('[data-testid=errors-section]')!==null`),true,'Warnings and errors are listed apart');
-  assert.equal(await h.js<boolean>(`!!${row('copy-failed')}.querySelector('[data-testid=error-group-skip]')&&!!document.querySelector('.activity-dialog [data-testid=job-skip-all]')&&!${row('unreadable')}.querySelector('[data-testid=error-group-skip]')`),true,'Errors have Skip these and Skip all; warnings have no skip');
-  await h.click(`.activity-dialog [data-testid=error-group][data-code=copy-failed] [data-testid=error-group-toggle]`);
+  assert.equal(await h.js<boolean>(`!!${row('copy-failed')}.querySelector('[data-testid=error-group-skip]')&&!!document.querySelector('[data-testid=activity-panel] [data-testid=job-skip-all]')&&!${row('unreadable')}.querySelector('[data-testid=error-group-skip]')`),true,'Errors have Skip these and Skip all; warnings have no skip');
+  await h.click(`[data-testid=activity-panel] [data-testid=error-group][data-code=copy-failed] [data-testid=error-group-toggle]`);
   await h.until('affected files',`${row('copy-failed')}.querySelectorAll('[data-testid=error-group-item]').length===${MAX_GROUP_ITEMS}`);
   assert.match(await h.js<string>(`${row('copy-failed')}.querySelector('[data-testid=error-group-remaining]').textContent`),/150 more/);
   await h.shot('grouped-errors');
-  await h.click(`.activity-dialog [data-testid=error-group][data-code=copy-failed] [data-testid=error-group-skip]`);
+  await h.click(`[data-testid=activity-panel] [data-testid=error-group][data-code=copy-failed] [data-testid=error-group-skip]`);
   await h.until('skipped group leaves the errors',`!${row('copy-failed')}`);
   const skipped=(await h.state()).jobs.find(item=>item.id===job.id);
   assert.deepEqual(skipped?.acknowledged?.codes,['copy-failed']);

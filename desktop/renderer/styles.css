@@ -342,7 +342,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
 /* Narrow cards: secondary actions become icon-only (their aria-labels name them) instead of wrapping */
 @container source-card (max-width:52rem){
   .source-row-actions .button-quiet{font-size:0;gap:0;padding:0;width:var(--control-height)}
-  .selection-chip{padding:0 .6rem}
   .source-row-actions .button-quiet>svg{transform:none}
   .source-compact-capacity .storage-legend span{flex:none}
 }
@@ -614,12 +613,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .remembered-devices>div{grid-template-columns:minmax(0,auto) minmax(0,1fr) auto}
 
 /* Selection: selected drives carry an accent edge and a filled chip; unselected ones are muted */
-.selection-chip{display:inline-flex;align-items:center;gap:.45rem;min-height:var(--control-height);padding:0 1.05rem;border-radius:var(--radius-capsule);font-weight:550;white-space:nowrap;transition:background-color var(--quick) var(--ease-out),color var(--quick) var(--ease-out),box-shadow var(--quick) var(--ease-out),transform var(--spring-duration) var(--spring)}
-.selection-chip:active:not(:disabled){transform:scale(.95);transition-duration:70ms}
-.selection-chip.is-on{background:var(--accent-fill);color:var(--on-accent);box-shadow:var(--button-highlight)}
-.selection-chip.is-off{background:transparent;color:var(--label-secondary);box-shadow:inset 0 0 0 1.5px var(--separator-strong)}
-.selection-chip.is-off:hover:not(:disabled){color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent-fill)}
-.selection-chip:disabled{opacity:.5}
 .source-row.source-included{border-color:var(--accent-fill);box-shadow:0 0 0 1px var(--accent-fill),var(--shadow-1)}
 .source-status.paused{color:var(--warning)}
 
@@ -960,7 +953,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .titlebar-actions{--control-height:clamp(2.15rem,1.55rem + 1.5cqi,2.6rem)}
 .source-row-actions{--control-height:clamp(2.15rem,1.7rem + 1.6cqi,2.6rem)}
 .card-actions,.destination-buttons,.rule-actions{--control-height:clamp(2.2rem,1.8rem + 1cqi,2.6rem)}
-.button,.selection-chip,.segmented button,.source-layout-switch button{transition-property:transform,background-color,box-shadow,color,opacity}
+.button,.segmented button,.source-layout-switch button{transition-property:transform,background-color,box-shadow,color,opacity}
 .source-row{padding:clamp(.8rem,.5rem + 1.2cqi,1.2rem) clamp(.9rem,.55rem + 1.4cqi,1.35rem)}
 
 /* Title bar: full labels → shorter → round icon buttons (Start keeps its label). */
@@ -1088,8 +1081,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 /* Things that change inside a card: status text fades up in place, swapped icons pop, dimmed parts crossfade */
 .source-status-text{transition:opacity var(--base) var(--ease-out),translate var(--base) var(--ease-ios)}
 @starting-style{.source-status-text{opacity:0;translate:0 3px}}
-:is([data-testid=global-start],.organization-progress .button,.source-row-actions .button,.selection-chip)>svg,.accent-button svg,.preset-radio>span{transition:transform var(--spring-duration) var(--spring),scale var(--spring-duration) var(--spring),opacity var(--quick) var(--ease-out)}
-@starting-style{:is([data-testid=global-start],.organization-progress .button,.source-row-actions .button,.selection-chip)>svg,.accent-button svg,.preset-radio>span{scale:.5;opacity:0}}
+:is([data-testid=global-start],.organization-progress .button,.source-row-actions .button)>svg,.accent-button svg,.preset-radio>span{transition:transform var(--spring-duration) var(--spring),scale var(--spring-duration) var(--spring),opacity var(--quick) var(--ease-out)}
+@starting-style{:is([data-testid=global-start],.organization-progress .button,.source-row-actions .button)>svg,.accent-button svg,.preset-radio>span{scale:.5;opacity:0}}
 .source-row{transition-property:opacity,translate,box-shadow,border-color,background-color}
 .source-row :is(.source-device,.source-identity h3,.source-disclosure){transition:opacity var(--base) var(--ease-out)}
 /* Options that appear when a setting turns on */
@@ -1431,8 +1424,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .source-same-drive{flex-wrap:wrap;justify-content:space-between}
 .source-same-drive p{display:flex;align-items:center;gap:.45rem;margin:0;flex:1 1 16rem}
 
-.sidebar-old-records{display:flex;flex-direction:column;align-items:flex-start;gap:.15rem;margin-top:.15rem;min-width:0}
-.sidebar-old-records-text{color:var(--label-secondary);white-space:normal;margin-right:.5rem}
 
 /* Task workspaces: preserve existing transition layers and modal stacking. */
 .sidebar{overflow:hidden}
@@ -1451,7 +1442,16 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .pending-review{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-bottom:1rem}
 .pending-review>span{flex:1 1 12rem}
 .activity-jobs{display:grid;gap:1rem;min-width:0}
-.activity-jobs>.source-row{width:100%}
+.queue-list{display:grid;gap:.5rem;margin:0;padding:0;list-style:none}
+.queue-row{display:grid;gap:.45rem;min-width:0;padding:.65rem 1rem;background:var(--surface);border:1px solid var(--separator);border-radius:var(--radius-md)}
+.queue-row.is-error{border-color:var(--danger)}
+.queue-row-head{display:flex;align-items:center;gap:.75rem;min-width:0}
+.queue-row-name{display:grid;flex:1 1 auto;min-width:0}
+.queue-row-name>strong,.queue-row-name>small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.queue-row-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:.3rem}
+.queue-row .progress-track{height:.3rem}
+.split-control{display:inline-flex;align-items:center;gap:.15rem}
+.split-control .overflow-menu-items{white-space:nowrap}
 .activity-issues{padding:1rem;border-radius:var(--radius-lg);background:var(--surface);min-width:0}
 .activity-issues>.activity-content{padding:0;overflow:visible;max-height:none}
 .activity-maintenance{margin-top:1rem}

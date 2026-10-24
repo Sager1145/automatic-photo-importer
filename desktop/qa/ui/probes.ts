@@ -19,7 +19,7 @@ export function wideButtons(): {text:string;cls:string;width:number;need:number}
 export function clippedControls(): Record<string,unknown>[] {
  const out:Record<string,unknown>[]=[];
  const name=(e:Element)=>(e.getAttribute('aria-label')||e.textContent||'').trim().replace(/\s+/g,' ').slice(0,40)+' <'+e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className?'.'+e.className.trim().split(/\s+/).join('.'):'')+'>';
- const controls='button,.button,input:not([type=checkbox]),select,[role=progressbar],[role=meter],.storage-track,.segmented,.source-layout-switch,.titlebar-actions,.source-steps,.mini-steps,.status-pill,.selection-chip,.parallel-source-control,.dashboard-total,.organization-progress-line,.progress-display-line';
+ const controls='button,.button,input:not([type=checkbox]),select,[role=progressbar],[role=meter],.storage-track,.segmented,.source-layout-switch,.titlebar-actions,.source-steps,.mini-steps,.status-pill,.parallel-source-control,.dashboard-total,.organization-progress-line,.progress-display-line';
  // File tables scroll sideways by design; tracks clip their fill to the rounded bar.
  const scrollers='.file-table-scroll,.review-table-scroll';
  const tracks='.progress-track,.storage-track,.sidebar-capacity';

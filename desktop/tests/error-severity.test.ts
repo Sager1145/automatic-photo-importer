@@ -76,7 +76,7 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
   assert.ok(bar.includes('data-testid="show-errors"'));
   const none=render(createElement(TitlebarControls,{state:value,act:()=>{},errorCount:3,onErrors:()=>{}}));
   assert.ok(!none.includes('warning-count'),`${language}: no warning badge without warnings`);
-  const panel=render(createElement(ActivityPanel,{state:value,errors,act:()=>{},onClose:()=>{}}));
+  const panel=render(createElement(ActivityPanel,{state:value,errors,act:()=>{}}));
   for(const id of ['errors-section','warnings-section','errors-clear-all','warnings-clear-all','errors-copy-all','warnings-copy-all'])assert.ok(panel.includes(`data-testid="${id}"`),`${language}: ${id}`);
   assert.ok(panel.includes(t('Errors'))&&panel.includes(t('Warnings')));
   const split=panel.indexOf('data-testid="warnings-section"');

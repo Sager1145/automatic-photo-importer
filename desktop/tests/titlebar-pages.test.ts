@@ -15,7 +15,7 @@ const ids=(html:string)=>[...html.matchAll(/data-testid="([^"]+)"/g)].map(match=
 const button=(html:string,id:string)=>html.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))![0];
 
 test('every page shows the same run controls, and All errors',()=>{
- for(const page of ['desk','library','activity','settings'] as const) assert.deepEqual(ids(titlebar({page})),['global-start','global-stop','show-errors'],page);
+ for(const page of ['desk','library','activity','settings'] as const) assert.deepEqual(ids(titlebar({page})),['global-start','global-stop','global-stop-menu','global-stop-everything','show-errors'],page);
  assert.doesNotMatch(titlebar({page:'settings'}),/global-automatic|titlebar-overview|refresh-button/);
  assert.match(titlebar({page:'settings'}),/class="error-count" data-count="2"/);
 });
@@ -29,7 +29,7 @@ test('the desk is the default page, and refresh lives in the sidebar Sources hea
 
 test('Library keeps execution below the destination scope and the same run controls and All errors in the top bar',()=>{
  for(const organizationDestination of [1,5]) {
-  assert.deepEqual(ids(titlebar({page:'library',organizationDestination})),['global-start','global-stop','show-errors']);
+  assert.deepEqual(ids(titlebar({page:'library',organizationDestination})),['global-start','global-stop','global-stop-menu','global-stop-everything','show-errors']);
   const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:state(),act:()=>{},busy:false,selectedDestination:organizationDestination})}));
   assert.ok(html.indexOf('data-testid="organization-execute"')>html.indexOf('organization-scope'));
   assert.equal((html.match(/>Organize now</g)??[]).length,1);

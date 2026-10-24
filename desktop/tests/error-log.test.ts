@@ -80,7 +80,7 @@ test('All errors shows each error with its time and drive, a Clear button, and C
  assert.deepEqual(errors.map(error=>error.drive),['NIKON Z F','Untitled','Untitled','A006']);
  for(const language of languages){
   const t=createTranslator(language),render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
-  const panel=render(createElement(ActivityPanel,{state:value,errors,act:()=>{},onClose:()=>{}}));
+  const panel=render(createElement(ActivityPanel,{state:value,errors,act:()=>{}}));
   assert.equal((panel.match(/data-testid="error-clear"/g)??[]).length,4,`${language}: one Clear per error`);
   assert.ok(panel.includes('data-testid="errors-clear-all"')&&panel.includes(t('Clear all')),`${language}: Clear all`);
   assert.ok(panel.includes(t('Clear')),`${language}: Clear label`);
@@ -117,7 +117,7 @@ test('sidebar sources and destinations with errors show a live count that opens 
   assert.deepEqual(badges,[['untitled',t('{count} errors',{count:2})],['folder',undefined]],`${language}: only the source with errors has a badge`);
   const destinations=render(createElement(SidebarDestinations,{state:value,errors,onErrors:()=>{}}));
   assert.ok(destinations.includes(`aria-label="${t('{count} errors',{count:2})}"`),`${language}: destination badge`);
-  const panel=render(createElement(ActivityPanel,{state:value,errors,target:{sourceId:'untitled',name:'Untitled'},act:()=>{},onClose:()=>{},onShowAll:()=>{}}));
+  const panel=render(createElement(ActivityPanel,{state:value,errors,target:{sourceId:'untitled',name:'Untitled'},act:()=>{},onShowAll:()=>{}}));
   assert.equal((panel.match(/data-testid="error-clear"/g)??[]).length,2,`${language}: filtered to the drive`);
   assert.ok(panel.includes(t('Errors for {name}',{name:'Untitled'}))&&panel.includes(t('Show all errors')),`${language}: filter is named and can be removed`);
  }

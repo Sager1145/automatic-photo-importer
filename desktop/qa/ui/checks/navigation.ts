@@ -61,9 +61,10 @@ export const navigationChecks=():Check[]=>[
   }
   await h.until('the sidebar destination status line',"[...document.querySelectorAll('[data-testid=sidebar-destination]')].every(row=>row.querySelector('[data-testid=sidebar-destination-status]')?.textContent.trim().length>0)&&document.querySelector('[data-testid=sidebar-destination-status]')");
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('h2')).some(h=>h.textContent.includes('Ready for your next shoot'))"),false);
-  assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog')===null"),true,'All errors stays closed until asked for');
-  await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");await h.shot('all-errors');
-  await h.click('[data-testid=activity-close]');await h.until('animated activity close',"document.querySelector('.activity-dialog')===null");
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=activity-panel]')===null&&document.querySelector('.activity-dialog')===null"),true,'Issues stays closed until asked for');
+  await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");await h.shot('all-errors');
+  assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Activity','the Issues button opens Activity, not a sheet');
+  await h.nav('Import desk');
  }},
  {id:'nav-motion-preference',stage:'navigation',title:'Motion follows the operating system preference and buttons retain immediate feedback',covers:['reduced motion (OS)'],run:async h=>{
   const isReduced=await reduced(h);
@@ -95,7 +96,7 @@ export const navigationChecks=():Check[]=>[
    await h.nav('Settings');await h.settingsTab('destinations');await h.settingsTab('importing');await h.nav('Import desk');
    layers=(await h.js<Layer[]>('window.qaLayers')).filter(layer=>/^(forward|back|category-)/.test(layer.kind));
    // A layout change while All errors is open must not lift the page above the sheet's backdrop.
-   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");
+   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");
    await h.prefs({sourceLayout:'grid'});await h.until('grid under the sheet',"document.querySelector('.source-ledger.source-layout-grid')");
    underSheet=await h.js('window.qaTransitions');
   }finally{await stopRecording(h);}
@@ -122,9 +123,9 @@ export const navigationChecks=():Check[]=>[
   assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Settings','the last navigation remains selected after all callbacks finish');
   await h.click('.nav-item');
   await h.click('[data-testid=show-errors]');
-  await h.until('sheet opened during navigation',"document.querySelector('.activity-dialog')?.open===true");
+  await h.until('Issues opened during navigation',"document.querySelector('[data-testid=activity-panel]')");
   await h.settle();
-  assert.equal(await h.js<boolean>("(()=>{const b=document.querySelector('[data-testid=activity-close]'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))&&!document.documentElement.dataset.transition;})()"),true,'sheet accepts clicks after interrupting navigation');
+  assert.equal(await h.js<boolean>("!document.documentElement.dataset.transition"),true,'no transition snapshot blocks clicks after interrupting navigation');
  }},
  {id:'nav-reduced-motion-emulated',stage:'navigation',title:'With reduced motion on, pages and sheets change without View Transitions or animated closes, in every run',covers:['reduced motion'],run:async h=>{
   await h.media([{name:'prefers-reduced-motion',value:'reduce'}]);
@@ -136,11 +137,10 @@ export const navigationChecks=():Check[]=>[
    const durations=await h.js<string>("getComputedStyle(document.querySelector('[data-testid=global-start]')).transitionDuration");
    assert.ok(durations.split(',').every(value=>parseFloat(value)===0),`button transitions still animate: ${durations}`);
    // The sheet closes in the same frame: nothing is left animating out.
-   await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");
+   await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");
    // Crossfades stay (the app's reduced motion keeps short fades, like the boot); nothing may move or scale.
    assert.deepEqual(await h.js<string[]>("document.getAnimations().filter(a=>a.playState==='running'&&a.effect?.getTiming().iterations!==Infinity).filter(a=>a.transitionProperty?a.transitionProperty!=='opacity':a.effect.getKeyframes().some(k=>Object.keys(k).some(p=>!['offset','easing','composite','computedOffset','opacity'].includes(p)))).map(a=>(a.animationName||a.transitionProperty||'script')+' on '+(a.effect?.target?.className||a.effect?.target?.tagName)+(a.effect?.pseudoElement??'')+' '+a.effect?.getTiming().duration+' ms')"),[],'something moves with reduced motion');
-   await h.click('[data-testid=activity-close]');await h.frames(2);
-   assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog')===null"),true,'the sheet animated its close');
+   await h.frames(2);
   }finally{await stopRecording(h);}
  }},
 ];

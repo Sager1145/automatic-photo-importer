@@ -48,3 +48,12 @@ test('a stopping source card and organization card say so and disable their butt
   assert.match(card,/<button[^>]*disabled[^>]*aria-label="[^"]*"/,`${language} organization buttons disabled`);
  }
 });
+
+test('the Stop menu adds Stop everything beside Stop imports, and it is only available while something can be stopped',()=>{
+ const running=titlebar([job(undefined)]);
+ const all=tag(running,'global-stop-everything');
+ assert.match(all[1]!,/Stop everything/);assert.doesNotMatch(all[0]!,/disabled/);
+ assert.match(all[0]!,/title="Stops imports, scans and organizing, and discards the open review."/);
+ assert.match(tag(running,'global-stop')[1]!,/>Stop imports$/);
+ assert.match(tag(titlebar([]),'global-stop-everything')[0]!,/disabled/);
+});
