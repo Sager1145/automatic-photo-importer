@@ -85,7 +85,7 @@ export const navigationChecks=():Check[]=>[
    await h.nav('Import desk');
    seen=(await h.js<string[]>('window.qaTransitions')).filter(kind=>/^(forward|back|category-)/.test(kind??''));
   }finally{await stopRecording(h);}
-  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward',...Array(6).fill('category-forward'),...Array(6).fill('category-back'),'back']);
+  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward',...Array(settingsCategories.length-1).fill('category-forward'),...Array(settingsCategories.length-1).fill('category-back'),'back']);
  }},
  {id:'nav-transition-layers',stage:'navigation',title:'Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet',covers:['animation layering during transitions','sheets suspend transitions'],run:async h=>{
   const isReduced=await reduced(h);
@@ -95,11 +95,11 @@ export const navigationChecks=():Check[]=>[
    await recordTransitions(h,true);
    await h.nav('Settings');await h.settingsTab('destinations');await h.settingsTab('importing');await h.nav('Import desk');
    layers=(await h.js<Layer[]>('window.qaLayers')).filter(layer=>/^(forward|back|category-)/.test(layer.kind));
-   // A layout change while All errors is open must not lift the page above the sheet's backdrop.
-   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");
+   // A layout change on the Import desk while a sheet is open must not lift the page above the sheet's backdrop. Issues is a page now, so a real modal dialog stands in for the sheet.
+   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.js("(()=>{const sheet=document.createElement('dialog');sheet.id='qa-sheet';sheet.textContent='Sheet';document.body.append(sheet);sheet.showModal();})()");await h.until('sheet open',"document.querySelector('#qa-sheet')?.open===true");
    await h.prefs({sourceLayout:'grid'});await h.until('grid under the sheet',"document.querySelector('.source-ledger.source-layout-grid')");
    underSheet=await h.js('window.qaTransitions');
-  }finally{await stopRecording(h);}
+  }finally{await h.js("document.querySelector('#qa-sheet')?.remove()");await stopRecording(h);}
   assert.deepEqual(underSheet,[],'No transition runs under an open sheet');
   if(isReduced){assert.deepEqual(layers,[]);return;}
   // Settings opened on its last category, so the first switch may go either way.

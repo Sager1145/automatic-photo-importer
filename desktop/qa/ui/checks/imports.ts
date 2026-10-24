@@ -75,8 +75,8 @@ export const importChecks=(ctx:Context):Check[]=>[
   await h.size(1000,760);
   for(const language of ['en','zh-Hans','zh-Hant','ja'] as const){
    await h.prefs({language});
-   const fit=await h.js<boolean>("Array.from(document.querySelectorAll('.titlebar-actions button,.titlebar-actions label,.titlebar-page-title')).every(control=>{const box=control.getBoundingClientRect(),bar=document.querySelector('.window-titlebar').getBoundingClientRect();return box.left>=104&&box.right<=bar.right&&box.bottom<=bar.bottom;})");
-   assert.equal(fit,true,language+' titlebar controls must fit 1000px at 150%');await h.shot('titlebar-1000-150-'+language);
+   const misfits=await h.js<string[]>("Array.from(document.querySelectorAll('.titlebar-actions button,.titlebar-actions label,.titlebar-actions summary,.titlebar-page-title')).filter(control=>!control.closest('.overflow-menu-items')).map(control=>{const box=control.getBoundingClientRect(),bar=document.querySelector('.window-titlebar').getBoundingClientRect();return box.left>=104&&box.right<=bar.right&&box.bottom<=bar.bottom?'':(control.getAttribute('data-testid')||control.className||control.tagName)+' '+Math.round(box.left)+'-'+Math.round(box.right)+' of '+Math.round(bar.right);}).filter(Boolean)");
+   assert.deepEqual(misfits,[],language+' titlebar controls must fit 1000px at 150%: '+misfits.join('; '));await h.shot('titlebar-1000-150-'+language);
   }
  }},
  {id:'import-storage-strips',stage:'imports',title:'Storage strips show continuous used/free segments and scanned media categories without overflow',covers:['capacity bars','bars never clip'],run:async h=>{

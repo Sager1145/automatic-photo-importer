@@ -961,7 +961,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 @container titlebar (max-width:58rem){.titlebar-label{display:none}.titlebar-actions [data-testid=show-errors]{padding:0 .7rem}}
 @container titlebar (max-width:48rem){
   .titlebar-actions{gap:.3rem}
-  .titlebar-actions :is([data-testid=global-stop],[data-testid=titlebar-review-organization]){font-size:0;gap:0;padding:0;width:var(--control-height)}
+  .titlebar-actions [data-testid=titlebar-review-organization]{font-size:0;gap:0;padding:0;width:var(--control-height)}
 }
 
 /* Drive cards: labelled actions → round icons → actions below, still sized to their labels. */
@@ -1453,6 +1453,14 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .queue-row .progress-track{height:.3rem}
 .split-control{display:inline-flex;align-items:center;gap:.15rem}
 .split-control .overflow-menu-items{white-space:nowrap}
+/* Titlebar Stop + more: one joined pill with a thin divider; the label hides with the other titlebar labels, leaving an icon with an aria-label. */
+.titlebar-stop{gap:0;border-radius:var(--radius-capsule);background:var(--surface);box-shadow:var(--highlight),0 0 0 1px var(--separator-strong),var(--shadow-1)}
+:root[data-theme=dark] .titlebar-stop{background:rgba(255,255,255,.08);box-shadow:var(--highlight),0 0 0 1px var(--separator)}
+.titlebar-stop :is(.button,summary){background:transparent;box-shadow:none}
+.titlebar-stop [data-testid=global-stop]{border-start-end-radius:0;border-end-end-radius:0;padding-inline-end:.7rem}
+.titlebar-stop .stop-more{width:auto;min-width:var(--control-height);padding:0 .5rem;border-start-start-radius:0;border-end-start-radius:0;box-shadow:inset 1px 0 0 var(--separator-strong)}
+.titlebar-stop :is(.button,summary):hover:not(:disabled){background:var(--fill-hover,rgba(127,127,127,.14));box-shadow:none}
+.titlebar-stop .stop-more:hover{box-shadow:inset 1px 0 0 var(--separator-strong)}
 .activity-issues{padding:1rem;border-radius:var(--radius-lg);background:var(--surface);min-width:0}
 .activity-issues>.activity-content{padding:0;overflow:visible;max-height:none}
 .activity-maintenance{margin-top:1rem}
@@ -1556,6 +1564,9 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .overflow-menu{position:relative}
 .overflow-menu>summary{list-style:none;cursor:pointer}
 .overflow-menu>summary::-webkit-details-marker{display:none}
-.overflow-menu-items{position:absolute;inset-inline-end:0;top:calc(100% + .25rem);z-index:5;display:grid;gap:.15rem;min-inline-size:12rem;padding:.35rem;background:var(--surface);border:1px solid var(--separator);border-radius:var(--radius-md);box-shadow:var(--shadow-2)}
+.overflow-menu-items{position:absolute;inset-inline-end:0;top:calc(100% + .25rem);z-index:5;display:grid;gap:.15rem;inline-size:max-content;max-inline-size:min(20rem,80vw);padding:.35rem;background:var(--surface);border:1px solid var(--separator);border-radius:var(--radius-md);box-shadow:var(--shadow-2)}
 .overflow-menu-items .button{justify-content:flex-start;font-size:var(--text-footnote);width:100%}
 .source-row-actions .overflow-menu-items .button-quiet{font-size:var(--text-footnote);gap:.4rem;padding:0 .6rem;width:100%}
+
+/* Cards that lay their children out in a grid or column size their buttons to the label, not the card. */
+.backup-action>.button,.copy-policy>.button{justify-self:start;align-self:start}

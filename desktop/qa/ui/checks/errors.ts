@@ -35,7 +35,7 @@ export const errorChecks=():Check[]=>[
  {id:'errors-on-top-200',stage:'errors',title:'Errors stay on top: at 200% the error toast is the topmost element everywhere on it, also on the frames after each page switch',covers:['error toasts always on top','UI scale 2','transitions suspended under errors'],run:async h=>{
   type Layer={testid:string;topLayer:boolean;misses:string[];transition:boolean};
   // Switch pages and probe two frames later, when a transition would already be drawing.
-  const go=(page:string)=>h.js<Layer[]>(`(async()=>{Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return (${errorLayers.toString()})();})()`);
+  const go=(page:string)=>h.js<Layer[]>(`(async()=>{Array.from(document.querySelectorAll('.nav-item')).find(b=>b.textContent.trim()===${JSON.stringify(page)}).click();if(${JSON.stringify(page)}==='Activity'){/* Activity reopens on the tab last used; the toast is hidden only on Issues, so land on the Queue once the page has switched. */for(let i=0;i<120&&!document.querySelector('[data-testid=activity-jobs]');i++)await new Promise(r=>requestAnimationFrame(r));document.querySelector('[data-testid=activity-jobs]')?.click();}await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return (${errorLayers.toString()})();})()`);
   await h.size(1000,720);await h.prefs({textScale:2});
   let settled:Layer[]=[];const during:Layer[][]=[];
   if(h.hooks){await raise(h);}

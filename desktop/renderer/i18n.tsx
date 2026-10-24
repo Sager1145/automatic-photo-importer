@@ -597,6 +597,7 @@ Couldn't read photo details.|无法读取照片信息。|無法讀取照片資�
 The file is still copied; its date may come from the file instead.|文件仍会被复制；日期可能改用文件本身的日期。|檔案仍會被複製；日期可能改用檔案本身的日期。|ファイルはコピーされます。日付はファイル自体の日付になる場合があります。
 App|应用|App|アプリ
 Copy all details|复制全部详情|複製全部詳細資訊|すべての詳細をコピー
+1 issue|1 个问题|1 個問題|1 件の問題
 {count} issues|{count} 个问题|{count} 個問題|{count} 件の問題
 Show drive|显示驱动器|顯示磁碟|ドライブを表示
 Dismiss|关闭|關閉|閉じる
