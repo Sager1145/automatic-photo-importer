@@ -228,7 +228,7 @@ test('a copy shows no speed until its window holds 2 s, and never the lifetime a
 });
 
 test('the verify rate is labelled "Verify read" in every language, and copy rates are not', async () => {
-  const { ProgressDisplay } = await import('../renderer/RootApp');
+  const { ProgressDisplay } = await import('../renderer/progress');
   const { createTranslator, I18nProvider, languages } = await import('../renderer/i18n');
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');

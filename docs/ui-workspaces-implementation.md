@@ -8,7 +8,7 @@ The combined branch preserves the user's original visible information. It restor
 
 ## Behavior
 
-- Primary navigation is Import, Library tools and Activity; Settings is a separate bottom anchor. Devices remain in Settings; the old exported DrivesPage is retained for compatibility but is not a primary destination.
+- Primary navigation is Import, Library tools and Activity; Settings is a separate bottom anchor. Devices remain in Settings; the old Drives page has been removed.
 - Import has Media and Files & folders tabs. Each chooses the existing engine's appropriate folder-picker mode; navigation dispatches no filesystem actions or preference changes. Published source mode describes the next run; `job.backup` and `review.backup` remain authoritative for existing work. Global Start explicitly says **Start all selected**, since its existing backend scope includes both media and backup sources.
 - Library tools has Organize and Duplicates tabs. Organization destination, affected photo/video roots, selected folders and move consequences precede one Review/Organize action area. Folder organization also states its consequences before its picker. Duplicate Scan/Stop lives only under its content scope; the titlebar no longer duplicates Library execution controls.
 - A pending review renders only in its owning Import mode or Library Organize tab. Other contexts show an Open pending review link. Review loading derives its owner from the engine's review source ID; prepared reviews derive ownership from their immutable kind/backup fields.

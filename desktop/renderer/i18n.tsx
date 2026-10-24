@@ -429,7 +429,6 @@ Sources|来源|來源|ソース
 General|通用|一般|一般
 No sources connected|未连接来源|未連接來源|接続されたソースはありません
 Drives|驱动器|磁碟|ドライブ
-Connected drives|已连接的驱动器|已連接的磁碟|接続中のドライブ
 Ignored drives|已忽略的驱动器|已忽略的磁碟|無視するドライブ
 Ignored {date}|忽略于 {date}|忽略於 {date}|{date} に無視
 No ignored drives.|没有已忽略的驱动器。|沒有已忽略的磁碟。|無視しているドライブはありません。

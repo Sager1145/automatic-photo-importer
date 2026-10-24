@@ -1,6 +1,7 @@
 import {Trash2} from 'lucide-react';
 import type {Action,ResidueStatus} from '../shared';
-import {Button,ConfirmSheet,OperationProgress} from './RootApp';
+import {Button,ConfirmSheet} from './ui';
+import {OperationProgress} from './progress';
 import {useTranslation} from './i18n';
 
 type Dispatch=(action:Action)=>void;

@@ -70,7 +70,8 @@ test('planning steps, the review and scans get a start time and a read speed', (
 });
 
 test('every progress display shows elapsed time and time left together, and the read speed', async () => {
-  const { ImportDesk, ImportDashboard, OrganizationProgress, PlanningProgress, ScanProgress, formatRemaining } = await import('../renderer/RootApp');
+  const { ImportDesk, ImportDashboard, PlanningProgress, ScanProgress } = await import('../renderer/RootApp');
+  const { OrganizationProgress, formatRemaining } = await import('../renderer/progress');
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const together = (page: string, eta: string, where: string) => {

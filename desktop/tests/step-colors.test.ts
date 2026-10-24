@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {ImportDashboard,ImportDesk,PlanningProgress,SidebarSources,stepKind} from '../renderer/RootApp';
+import {ImportDashboard,ImportDesk,PlanningProgress,SidebarSources} from '../renderer/RootApp';
+import {stepKind} from '../renderer/progress';
 import type {AppState,Job,Progress} from '../shared';
 
 const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
