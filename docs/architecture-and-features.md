@@ -1,173 +1,263 @@
 # 实际功能、接口与架构审查
 
-审查日期：2026-10-21（第三轮）。范围：当前 Electron 桌面程序（`desktop/`）及其仍在使用的 macOS ImageCaptureCore 相机 adapter（`Sources/`）。结论只依据当前代码和本轮实际运行的验证；以往报告、界面文案和计划不算作功能完成的证据。第二轮之后另有会话加入了盘到盘镜像、设备记忆、扫描记忆、备份目录错位检查、整理撤销/释放、暂停等功能，本轮把它们一并纳入。
+审查日期：2026-10-23；第一次基线 `daaabd8`。**本文已于修复完成后按 `main@7eee02c` 更新**：第 3–7、9–11 节描述的是修复后的代码；R1–R13 的原始发现与处理结果见第 7 节。修复按 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md) 第 9 节（任务 A1–A17）执行，旧轮次的结论仍可从 Git 历史查阅。
 
-## 方法
+**结论：一个功能一个实现。** 修复后：任务只有一条生命周期；实际文件结果只有一个出口，去重、落位记忆和删除原件都消费它；内容摘要只归 `DestinationIndex`；目录规则、名称校验、同名处理、目录清理、日志建立、错误身份、剩余时间、元数据解释各只有一处实现。没有新增通用 manager、repository 或 event bus。
 
-使用 Matt Pocock `codebase-design` 的词汇：**module**（有 interface 和 implementation 的任何东西）、**interface**（调用者必须知道的一切，含不变量、错误模式和性能特征）、**depth**（单位 interface 背后的行为量）、**seam**（不改该处代码即可替换行为的位置）、**adapter**（在 seam 上满足 interface 的具体实现）。判断标准：
+运行时间、吞吐和内存没有做规模化实测；文中只记录已测的回归项（见第 10 节）。
 
-- **删除测试**：删掉一个 module，若复杂度消失，它只是转发层；若复杂度在 N 个调用者处重现，它在发挥作用。
-- **一个 adapter 是假想的 seam，两个才是真的**：只有真实不同的 OS 接口或测试替身才保留 seam。
-- **一个功能一个实现**：界面可以有多个入口（一键整理、先审核再整理、整理任意文件夹），但它们必须进入同一条实现路径。
-- **数据安全冗余 ≠ 软件冗余**：校验、日志、恢复区、身份绑定是防不同故障的保护；重复实现、重复校验规则、跨层来回传同一份数据才是要删的冗余。
+## 1. 第一性原理与判定规则
 
-## 第一性原理：应用必须做的事
+应用最终只需完成四件事：发现来源与目的盘；把源文件映射为明确的目标；执行复制或整理并确认结果；把结果交给界面。一个功能只有一个权威 implementation；同一功能的不同按钮应汇入同一条实现。
 
-1. **发现**源（挂载的卡/读卡器/大容量存储相机、macOS 相机协议、手选文件夹）和目的地（带卷与物理盘身份）。
-2. **计划**：源的实际内容 → 清单 → 元数据（相机、拍摄日期、是否编辑导出）→ 每个目的地的目标路径、重名分配与空间预留。
-3. **执行**：按计划复制并验证；或在同一文件系统内整理（移动 + 签名日志），可中断后重查/继续/撤销。
-4. **呈现**：界面展示状态并发出用户操作；它不决定落盘规则，也不把数据传回核心。
+采用 Matt 的术语：module 是提供 interface 的实现集合；interface 包括类型、时序、错误和信任条件；depth 是调用者通过小 interface 得到的能力；seam 是行为替换位置；adapter 处理真实环境差异；locality 指规则和修改集中在同一处。
 
-对应的分层（依赖只向下）：
+判定不看文件长短，而看：
+
+- 删除一个 module 后，复杂度直接消失，还是重新散落到调用者？前者可以删；后者原来承担了职责。
+- 同一事实是否有两个维护者，例如同一文件的 SHA-256 在两个记录中采用不同失效规则？
+- 同一批数据是否经过序列化、复制、全表筛选后，调用者只取其中一小部分？
+- 是否为尚不存在的第二个实现设计 interface？测试替身可以留在 implementation 内部，不必变成产品选项。
+- 产品配置与重复实现分开判断。六种目录布局现在共用一个路由实现；它们不是六套复制引擎。是否删掉布局选项，需要产品选择，不能从源码自行推断用户不要某一项。
+- 校验、恢复日志与真实文件系统能力差异有明确作用；不把它们统称“兜底”后删除。相反，吞错后标记成功、重复重试、未使用的结果字段应直接收敛。
+
+未发现 `GLOSSARY.md` 或 `docs/adr/`，本轮没有新增术语体系或决策流程。
+
+## 2. 当前实际架构
 
 ```mermaid
 flowchart TD
-  UI[renderer：React，只发 Action、只读 AppState] -->|Action，返回 void| P[preload：透明桥接]
-  P --> M[main：授权、队列、偏好、生命周期 = 编排]
-  M --> PR[preferences.ts：唯一的偏好规则]
-  M -->|prepare：唯一的源→预留计划路径| C[core.plan]
-  C --> I[core/inventory：递归清单、伴随文件、未知格式规则]
-  C --> X[platform/metadata：ExifTool 路由读取]
-  C --> D[core/drive-backup：盘到盘目录归属、镜像差异]
-  M -->|Prepared：计划 + 预留| E[core/destinations.executeDestinations]
-  E --> E1[core.executeMany：一次读源 → 多目的地暂存 → 校验 → 硬链接/独占发布]
-  E --> E2[core.executeReorganization → core/recovery 签名日志]
-  M -->|只读扫描| W[scan-process → scan-worker 子进程：inventory + source-cameras]
-  M -->|StateUpdate：清单按引用去重| P
-  P --> S[renderer 唯一的 createStateReceiver]
-  M --> V[platform/volumes：单飞卷快照 + 三个 OS adapter]
-  M --> CB[platform/camera-bridge] --> NB[NativeCameraBridge：ImageCaptureCore]
+  R[React renderer] -->|Action / 详情请求| P[preload 透明桥接]
+  P --> M[main：授权、任务、偏好、生命周期]
+  M -->|prepare| C[core.plan：清单、元数据、路由、比较、分配]
+  C --> I[core.inventory]
+  C --> X[platform.metadata：ExifTool]
+  M -->|只读扫描| W[scan-process / scan-worker]
+  W --> I
+  W --> X
+  M --> D[executeDestinations]
+  D --> E[executeMany：一次读源写多盘]
+  D --> O[executeReorganization]
+  O --> J[recovery：日志、移动、重查、撤销、释放]
+  M --> Q[scanDuplicates / removeDuplicates]
+  Q --> J
+  M --> N[volumes / camera-bridge]
+  N --> S[Swift ImageCaptureCore adapter]
+  M -->|StateUpdate| P
+  P --> V[renderer 的 createStateReceiver]
 ```
 
-## 功能接口清单（一个接口 → 一个实现）
+这不是“每一层都重复传文件内容”：媒体字节在文件系统复制、哈希线程、相机暂存路径流动；renderer 接收的是清单、计划、状态和按需详情。必须区分两种成本。
 
-renderer 与 main 之间只有 `DesktopAPI` 的四个方法：`state()`、`subscribe()`、`action(Action)`、`inspect(path)`。所有写操作都是 `Action`，结果统一经订阅回到界面。
+核心链路：
 
-| 功能 | 入口（Action / API） | 唯一实现 |
+- **媒体导入**：`action → enqueue → pump → startJob → run → prepare → plan(按意图的 PlanRequest) → executeDestinations → executeMany → stageMany/publish → FileOutcome → finishJob`。
+- **预览**：`previewSource → prepare` 保存 `Prepared`；`applyReview → run` 使用同一计划，不由界面把 JSON 计划传回执行。
+- **整理**：多个入口进入 `queueOrganization → prepare → executeReorganization → beginOrganization → createJournal → recovery.run`。
+- **去重移除**：`scanDuplicates → resolveGroups → removeDuplicates → beginDuplicateRemoval → createJournal → recovery.run`。候选规则和移动执行是不同职责，共用恢复执行。
+- **相机**：Swift 下载至临时文件夹，再进入同一个导入计划器；Swift 不是第二套归档实现。
+
+## 3. 实际跨进程 interface：8 个方法
+
+全局是 `window.importer`。`DesktopAPI` 有 **8 个方法**：7 个 invoke handler 加一个推送事件。写操作统一经 `action(Action)`；完成状态从订阅读取，`action()` 的 Promise 完成不等于后台任务完成，命令失败写入 `state.error`。所有 handler 先 `trusted(event)` 检查来源帧；读文件的还经过 `allowed()` 的已选路径授权。
+
+| interface | 通道 | 唯一 implementation |
 |---|---|---|
-| 初始状态与订阅 | `state()` / `subscribe()` | `state-channel.ts`：`createStateChannel` 只发送引用变化的清单与审核；renderer 中唯一的 `createStateReceiver` 重建 `AppState` |
-| 单文件照片/EXIF | `inspect(path)` | `allowed()` 授权路径 → `platform/metadata.metadata`（完整标签 + 预览） |
-| 刷新源与目的地 | `refresh`、5 秒定时、⌘/Ctrl+R | `refresh()`：一份 `mountedVolumes()` 快照同时给 `getSources` 与 `volumeInfo` |
-| 挂载卡 / 读卡器 / 大容量存储相机 | 自动 | `platform/volumes.ts`：macOS/Windows/Linux 三个解析 adapter，`classifyVolume` 统一判定相机布局 |
-| macOS 相机协议 | 自动；导入时暂存 | `platform/camera-bridge.ts` ↔ `Sources/CameraBridge` ↔ `DeviceDiscovery`；暂存后进入同一 `plan` |
-| 选择要导入的设备、记住/忽略/遗忘 | `selectSource` / `forgetDevice` | `device-selection.ts` 的 `DeviceSelection`（按卷 UUID/相机 id，文件夹不记忆） |
-| 手选媒体文件夹 / 整盘备份 | `chooseSource {backup}` | 原生选目录；`allowFolderSource` 开关；`sourceInsideBackup` 在选择时拒绝已在备份里的源 |
-| 选择 / 移除目的地 | `chooseDestination` / `removeDestination` | `validateDestination(target,sources)`：拒绝相机卡、源内目录、可移动闪存、只读卷，并记下卷身份 |
-| 已保存目的地的身份校验 | 复制、整理、恢复前 | 同一个 `validateDestination(…,{identity})`；身份为空或不符即拒绝 |
-| 只读扫描 | `scanSource` / `scanSources` | `startScan` → utility process：`inventory` + `analyzeSourceCameras`；上次清单与元数据作为可校验的复用提示传入 |
-| 扫描记忆（跨重启） | 自动 | `platform/scan-memory.ts`：按卷 UUID 保存清单与路由元数据；使用前按目录名与文件 stat 重新校验 |
-| 已导入记忆 | 自动 | `scan-memory.rememberImported/loadImported`：stat 不变的卡文件直接用已验证的 SHA-256 |
-| 递归媒体识别、伴随文件、系统文件 | 扫描与计划共用 | `core/inventory.ts`；扩展名表唯一在 `media-formats.ts`；厂商系统文件目录在 `core/known-files.ts` |
-| 每张卡的相机/镜头 | 扫描 | `source-cameras.ts`：每个媒体读一次路由元数据；盘名/格式/布局只作提示 |
-| 偏好（外观、语言、字号、布局、并行、自动、复制策略、路径模板等） | `preferences {patch}` | **`preferences.ts` 的 `normalizePreferences`**：读盘与每次修改走同一套规则；main 只决定哪些键可在任务运行时修改 |
-| 媒体文件布局（6 种）与视频备份目录 | `preferences {mediaLayout,videoBasePath,videoTemplate}` | `core/index.ts` 的 **`folder()`** 是唯一的路由规则：模板给出相机目录，`layoutFolder()` 给出其中的 `Photos`/`Videos`/格式目录（`media-formats.formatFolder`：大写扩展名，jpg/jpe→JPEG、heic/hif→HEIF、tif→TIFF、mpg→MPEG）；伴随文件按其原件归档，NKSC_PARAM 在 NEF 旁，编辑导出始终平放，无原件的“放入相机目录”文件直接放相机目录；冲突目录始终在相机目录 `Conflicts/<内容 id>/`。`video-root` 时 `destinationRoots` 为每个目的地多返回一个 `videoRoots`，`plan` 把视频族放进同盘的嵌套 `TransferPlan.videos`；`allocation.destinationParts` 让空间计算、`executeDestinations` 与审核把它当作同一个目的地。旧的 `separateMedia` 由 `normalizePreferences` 迁移（true→`format`，false→`flat`） |
-| 文件夹路径构建器（先日期/先相机，年/月/日开关，月份数字或英文） | `preferences {template,videoTemplate}` | `folder-template.ts` 的 `buildTemplate`/`parseTemplate` 只读写模板字符串；模板仍是唯一存储形式，`folder()` 是唯一应用它的地方（新增 `{monthName}` = `10 October`、`{yearMonthName}` = `2026-10 October`，月份名始终为英文）。构建器无法原样写回的模板显示为自定义，在“高级：自定义模板”中编辑 |
-| 未知扩展名规则 | `unknownRule {extension,folder,remember}` | main 保存会话/持久规则；`inventory` 决定是否包含，`plan` 决定去向 |
-| **源 → 预留计划** | 审核、直接导入、整理 | **`main.prepare()`**：`destinationRoots`（一次卷快照）→ 相机暂存 → `core.plan` → `allocateDestinations` / `requiredOrganizationSpace` → 按卷预留空间 |
-| 审核 / 应用 / 丢弃 | `preview` · `previewOrganization` / `applyReview`（或审核打开时的 `start`）/ `discardReview` | 审核 = 保存 `prepare()` 的结果；应用 = 同一个 `Prepared` 及预留交给 `run()`；丢弃释放暂存与预留 |
-| 开始 / 停止 / 暂停 / 自动 / 1–5 并行 | `start` / `stop` / `pause` / `preferences {automatic,parallel}` | `enqueue` / `pump` / `run`；`AbortController`；暂停 = 带“可继续”标记的停止；降并发只影响后续槽位 |
-| 单盘、双份副本、先满第一盘 | `preferences {copyMode}` | `core/allocation.allocateDestinations`；双盘由 `destinationRoots` 要求不同物理盘 |
-| 多目的地执行 | `run` 内 | `core/destinations.executeDestinations`：逐盘实时校验、单盘故障隔离、合并进度与剩余预留 |
-| 内容验证复制 | `executeDestinations` 内 | `core.executeMany`：源读一次写到所有目的地暂存 → 暂存回读哈希 → 硬链接或独占复制发布 → 原件保留；中断的半写文件凭签名收据续写 |
-| 盘到盘备份（只增 / 镜像） | `preferences {backupMode}` + `chooseSource {backup:true}` | `core/drive-backup.ts`：每个源盘在目的地拥有一个带标记的目录；镜像差异只在审核后把多余文件移入 `.mirror-removed`，从不删除 |
-| **整理现有文件** | `organize`（整个目的地/所选子目录）、`organizeFolder`（任选文件夹就地）、自动备份目录整理、`previewOrganization`（先审核） | **`main.queueOrganization()`** → 同一 `prepare()` → `executeReorganization` → `core/recovery` 签名日志（rename，跨卷/空文件回退到校验复制） |
-| 整理范围 | `chooseOrganizationFolders` / `resetOrganizationFolders` | main 保存每个目的地的子目录列表，作为 `plan` 的 `sourceFolders` |
-| 备份目录错位检查 | 自动（`autoOrganizeBackup`：off/ask/auto） | `core.findMisplaced(source,root,…)` = `plan` 的只路由模式；main 的 `backupLibrary()` 给出范围：普通布局为备份目录本身，`video-root` 为目的地并以 `sourceFolders` 限定在照片/视频两个备份目录（视频目录尚不存在时跳过检查，首次导入会创建）；`auto` 时导入完成后排入 `queueOrganization`。整理日志的 `libraries` 记录同次整理的另一个备份目录，清理空目录时不会删除它 |
-| 整理恢复列表 / 重查继续 / 撤销 / 释放原件 | `refreshOrganization` / `resumeOrganization` / `undoOrganization` / `finalizeOrganization` | `core/recovery.ts`：`getOrganizationRecovery`（不重哈希）、`resumeOrganization`、`undoOrganization`、`finalizeOrganization`（全部目标重验后才释放）；main 用一个 `resumeOrganizationJob(kind)` 承载三者 |
-| 旧版本记录提示 / 确认 | `acknowledgeOldRecords` | `core/old-records.ts`：`findOldRecords`（只认本机密钥认证的旧日志、指针、回执，不读取事件、不改动、不删除）；确认后写入已封印的 `Photo Importer Data/reviewed-leftovers.json`；确认前 `refuseOldRecords` 拒绝整理与移除重复。转换器已删除，最后一个能转换的构建是标签 `records-migrator-v5` |
-| 清空的源目录清理 | 整理完成后 | `core/redundant-folders.removeRedundantFolders`（只删仅含系统服务文件的目录） |
-| 后台消息本地化 | 状态里的 `Job.detail` / `Job.errors` / `AppState.error` / `history` | **`messages.ts`**：唯一的 key → 四语言目录；`message()` / `joined()` / `text()`（原文）构造，`MessageError` 携带 key 并以英文作 `Error.message`（日志、报告），`toMessage` 把任意错误转成消息；renderer 的 `createTranslator` 直接接受消息。旧版 `settings.json` 中的字符串历史在读取时由 `savedMessage` 转为原文消息 |
-| 窗口按钮 / 在访达中显示 / 清除错误 | `window` / `reveal` / `clearError` | Electron 窗口 API（Windows/Linux 无原生框时使用）；`allowed()` 授权后 `shell.showItemInFolder` |
-| 集成测试 | `npm run codex:test` | `Scripts/codex-test.mjs` + `desktop/qa/codex-smoke.ts`，临时 fixture 与独立 userData |
-| 真实硬件导入测试（TEST-16） | `--hardware-test-a006` | `desktop/qa/a006-hardware.ts`；目标盘与卷 UUID 只在该模块定义一次 |
+| `state()` | `importer:state` | `stateChannel.snapshot(state)`，自包含的 reset 快照 |
+| `subscribe(listener)` | `importer:updated` | `emit → createStateChannel.publish`；renderer 的 `createStateReceiver` 解析引用表 |
+| `action(Action)` | `importer:action` | `main.action` 的 48 个分支 |
+| `thumbnail(path)` | `importer:thumbnail` | `thumbnailSlots → platform/thumbnails.thumbnail` |
+| `summary(path)` | `importer:summary` | `metadata(path,{details:false})`：路由用的短标签及缓存，供摘要卡 |
+| `exif(path)` | `importer:exif` | `metadata(path)`：全部标签，供 EXIF 面板。原 `inspect` 及其无人显示的内嵌预览已删除 |
+| `duplicateGroups()` | `importer:duplicates` | 当前去重分组，按 revision 获取 |
+| `errorPaths(jobId,code)` | `importer:errorPaths` | `job-issues.issuePaths`，按需取分组错误的全部路径 |
 
-## 本轮发现与修复
+定义在 `shared.ts` 的 `DesktopAPI`；桥接在 `preload.ts`；注册在 `main.ts` 末尾。
 
-| # | 问题（臭味） | 修复 | 证据 |
+### 原生辅助程序 interface
+
+`camera-bridge.request` 经 stdin/stdout JSONL 发送带 id 的请求，只有 `list` 和 `stage {cameraID,directory}` 两个命令；返回 result/error/progress。取消 stage 会关闭整个 bridge，所有 pending 请求一起失败，不是单请求取消。相机正在 stage 时来源查询读缓存，避免排队阻塞。
+
+同一个原生可执行文件另有独立 CLI `--set-file-times created modified`，通过继承的 FD 3 调用 macOS 文件时间操作，不接收目标路径；这是文件时间 adapter，不是第三个 JSONL 命令。见 [camera-bridge.ts:62](../desktop/platform/camera-bridge.ts#L62)、[main.swift:28](../Sources/CameraBridge/main.swift#L28)、[file-timestamps.ts:46](../desktop/platform/file-timestamps.ts#L46)。
+
+## 4. Action 全量清单：48 个入口对应的实现
+
+同一功能的多个按钮汇入一个 Action；只差参数的旧 Action 已合并（`scanSource/scanSources → scan`，`clearError/clearErrorIds/clearErrors → clearErrors`，恢复列表的 4 个 Action → `recovery{op}`，`organizeFolder/organizeSourceFolder → organizeFolder`，`skipFile/skipAndContinue → skip`）。
+
+| 功能 | Action | 实际 implementation |
+|---|---|---|
+| 刷新设备和目的盘 | `refresh` | `main.refresh`：每次一份卷快照（`mountedVolumes`），路径到卷只经 `volumeOf` |
+| 选择来源文件夹或整盘 / 勾选 / 忘记 / 重连提示 / 置顶 | `chooseSource`、`selectSource`、`forgetDevice`、`dismissReconnected`、`moveToTop` | `resolveFolderSources`、`DeviceSelection`（只记住卷 UUID 或 `camera:` id）、`queue-order.moveToFront` |
+| 选择 / 移除目的地 | `chooseDestination`、`removeDestination` | `validateDestination` |
+| 只读扫描一个或全部已选来源 | `scan{sourceId?}` | `startScan → scan-worker → inventory/analyzeSourceCameras`；路由增量用 `beginRoutingCapture` |
+| 开始 / 暂停 / 停止 / 重试 / 跳过 | `start`、`pause`、`stop`、`retryJob`、`skip{jobId,path?,all?}` | `enqueue → pump → startJob → run → finishJob`；重试与跳过重入同一计划器 |
+| 已知问题标为已处理 / 清除错误显示 | `acknowledgeErrors`、`clearErrors{ids?,severity?}` | `acknowledgeJob`；`error-log.clearErrors` |
+| 审核导入或整理 / 改用文件日期 / 应用 / 丢弃 | `preview`、`previewOrganization`、`reviewFileDate`、`applyReview`、`discardReview` | `previewSource → prepare`；应用使用同一个 `Prepared`，审核后的整理与一键整理是同一种任务 |
+| 整理目的地 / 文件夹 / 备份目录 | `organize`、`organizeFolder{sourceId?}`、`organizeBackup` | `queueOrganization → prepare → executeReorganization → beginOrganization → recovery` |
+| 整理范围与本次选项 / 继续 | `chooseOrganizationFolders`、`resetOrganizationFolders`、`organizeOptions`、`continueOrganization` | `takeOrganizeOptions/sourcePolicy`（本次选项是唯一权威，排队或审核时冻结并重置） |
+| 恢复列表与操作 | `refreshOrganization`、`recovery{op:'resume'\|'finalize'\|'undo'\|'delete'}`、`measureOrganizationRecovery` | `listOrganizations`；`resumeOrganizationJob(op)` |
+| 删除已备份原件 | `measureOriginals`、`deleteOriginals` | `core/originals`：登记在 `originalsControls`，可停止、退出时等待、保持唤醒；停止后已删文件照样报告 |
+| 移除重复项 | `duplicatesScope`、`duplicatesChooseFolder`、`duplicatesScan`、`duplicatesStop`、`duplicatesRemove` | `scanDuplicates`；`resolveGroups → removeDuplicates → beginDuplicateRemoval → recovery` |
+| 清理残留 / 删除旧收据 / 确认旧记录 | `cleanResidue`、`removeReceipt`、`acknowledgeOldRecords` | `findResidue/cleanResidue`；`core/old-records.ts`（确认前拒绝整理与移除重复；转换器已删除，最后能转换的构建是 `records-migrator-v5`） |
+| 设置 / 未知格式规则 | `preferences`、`unknownRule` | `acceptedPreferences(settingsLocked) → normalizePreferences → save`；目录设置保存时经 `checkFolderSettings` |
+| 诊断日志 | `logOpenFolder`、`logCopyPath`、`logExport` | `log-export.exportLogs`：只导出 zip，失败写 `state.error` |
+| 在访达中显示 / 窗口 | `reveal`、`window` | `allowed → shell.showItemInFolder`；BrowserWindow |
+
+## 5. 核心功能与规则的唯一归属
+
+### 5.1 发现、扫描、路由与复制
+
+| 功能 | 核心 interface → implementation | 数据 / 约束 |
+|---|---|---|
+| 挂载卷发现、容量与物理盘识别 | `mountedVolumes/getSources/volumeInfo/volumeOf` → `platform/volumes.ts` | 三个 OS adapter；每次刷新一份快照（种类直接来自系统描述），路径到卷只经 `volumeOf`；新进程首次查卷只描述该路径所在的挂载；稳定 id 只用卷 UUID 或 `camera:` id |
+| 文件夹来源合并及所属物理盘 | `resolveFolderSources` → `folder-sources.ts`；展示分组 → `drive-groups.ts` | 多个文件夹仍是独立 Source；共享一块盘时由路径最前的来源显示容量，不随置顶变化；同盘读并发受 device 规则控制 |
+| macOS 协议相机 | `cameraSources/prepareCamera` → `platform/camera-bridge.ts` → Swift `DeviceDiscovery` | JSONL list/stage；下载暂存后进入文件系统计划；非 macOS 无 PTP implementation |
+| 清单、系统文件、未知格式、空文件 | `inventory` → `core/inventory.ts` | `media-formats.ts` 是格式目录；`known-files.ts` 是系统文件识别。复用记录是 `Listing`（目录 key、名称、大小），不再伪造 Inventory；大小过期时只重读那个父目录 |
+| 伴随文件与 Live Photo | `inventory` 的 `companionOf` + `pairLivePhotos` → `core/index.ts` | XMP/AAE/DOP、LRF/XML/音频、NKSC、ContentIdentifier 等；family 共同分配，不能拆盘。按名字模式配对的（Sony M01.XML/R01.BIM、IMG_O….AAE、GoPro/Insta360 LRV）也接受同名规则加的 ` (n)`，只与相同编号配对 |
+| 相机/镜头汇总 | `analyzeSourceCameras` → `source-cameras.ts` | 元数据证据与盘名/目录提示分开；扫描新增路由结果回传 main |
+| 路由元数据 / 完整详情 / 内嵌图片 | `metadata` → `platform/metadata.ts`，解释只经 `metadataFromTags` | 同一个 ExifTool；路由读短标签并缓存，EXIF 面板读全部标签；瞬间转换只用 `capture-time.captureTimestamp`；快门数为数字，由界面格式化；`embeddedPreview` 只供缩略图 |
+| 日期、相机、编辑导出与目录布局 | `plan → folder/layoutFolder` → `core/index.ts`；token 与展开 → `folder-template.ts` | 六个 layout 是同一个路径函数的分支；设置预览调用同一套 token；落位与路由记忆共用 `routing-options.rulesScope`（含未知格式规则） |
+| 缺日期 / 相机、未知格式目标 | 同一 `folder` / 计划器 | 缺失信息使用明确目录；不凭空补造 EXIF；自定义未知格式规则是产品配置。目录名只经 `validateRelative/validFolderName` 一套规则，导入与“设置”共用 `checkBackupFolders`，能保存的名字就能计划 |
+| 目标已有内容比较、同名冲突 | `existingMatches/allocate/target` → `core/index.ts` | 同尺寸再确认 SHA。同名不同内容由偏好 `conflictNaming` 决定：`folder`（默认）放入 `Conflicts/<内容 id>/`，`number` 改名为 `name (n).ext`，整个 family 共用 n；已有相同内容的 ` (n)` 视为已备份 |
+| 单盘 / 双盘副本 / 顺序填盘 | `fillFirst/allocateDestinations` → `core/allocation.ts` | 按 family 分配；顺序填盘先分盘再命名，第二盘只为第一盘放不下的 family 计划；盘 1 份额一选定即预留；每块物理卷一个预留键 |
+| 容量预留与目的盘校验 | `prepare/availableFor` + `destinationRoots/validateDestination` | 卷身份、路径包含关系和并发任务预留；预览也持有预留 |
+| 复制与发布 | `executeDestinations → executeMany → stageMany/publish`，exFAT 直写 `finishDirect` → `core/index.ts` | 同一源块写多个目标；目的盘失败隔离。每个目标在最终同步后发出一次 `FileOutcome`（实际路径、published/existing/routed、content-verified 或 stream-only）；去重记录、落位记忆、可删原件都只消费这一份 |
+| 哈希 | `Hasher.update/digest/drop` → `core/hasher.ts`；文件读取 → `paths.digest` | worker 与本地计算同一 SHA 语义；复制时边读边 hash 与重新读取文件不是两套校验规则 |
+| 中断续传 | 暂存/收据操作 → `core/import-recovery.ts` | 只复用已证明归属且身份一致的临时文件；不能把任意同名文件当作续传数据 |
+| 整盘只增 / 镜像 | 目录归属、`mirrorChanges/moveMirrorRemovals` → `core/drive-backup.ts` | 普通用户文件保留目录；镜像差异需审核后移入 `.mirror-removed`，不直接传播删除 |
+| 源文件失败与跳过 | `plan` 的 failure/exclude/skipErrors | 重试共用原计划器；镜像和协议相机有不同可跳过限制 |
+
+
+### 5.2 整理、恢复、去重与清理
+
+| 功能 | 唯一 implementation | 实际行为 |
+|---|---|---|
+| 整理已有图库 | `executeReorganization → beginOrganization → createJournal → recovery.run` | 计划绑定进程内审核身份；新日志一律 rename（无 strategy 的旧日志仍按 copy 读取）；整理与去重共用一个私有 `createJournal` |
+| 异常媒体归集 | `plan` 的 problems + recovery | 空文件及其族、不可读文件按规则留原地或归入 Problem files，不混入正常照片目录 |
+| 恢复继续 / 重查 | `resumeOrganization` | 根据日志确认已完成状态，再继续；full 明确要求重新读取全部内容 |
+| 撤销 | `undoOrganization` | 把仍能证明归属的文件放回；识别后续整理的接管关系 |
+| 释放原件 | `finalizeOrganization` | 确认目标副本后释放恢复存储，不等同撤销 |
+| 恢复文件测量与删除 | `measureOrganizationRecovery/deleteOrganizationRecovery` | 结束/被取代日志、依赖关系、实际保留内容分别处理 |
+| 文件夹错位检查 | `findMisplaced → planOnce` 的只路由分支 | 无第二套路径规则；off/ask/auto 只是检查/执行策略 |
+| 去重扫描与候选分组 | `scanDuplicates` + `duplicate-rules.ts` | 摘要只经 `DestinationIndex`（可证明 stat），`DuplicateStore` 只存元数据；读取失败返回 `failures` 并显示未读数量，同次扫描每个文件只算一次摘要。级别为 1、2：自动处理只针对 SHA 相同的组，EXIF 组等用户确认 |
+| 导入后去重记录 | `recordDuplicates` 消费 `FileOutcome` | 只记录本次实际发布的结果；计划与扫描用同一成员过滤（非 Other、大于 0 字节、非伴随文件） |
+| 移除重复项与附属文件 | `removeDuplicates → beginDuplicateRemoval → recovery.run` | 审核决定保留者，确认身份/内容，处理伴随文件，保留撤销所需记录 |
+| 删除已备份来源原件 | `core/originals.deleteOriginals` | 独立显式操作，仅文件夹导入提供；资格来自实际结果，且须覆盖分配要求的全部目标（镜像两盘、顺序填盘为所分配的盘）；删除前重读各目标，源在 APFS/HFS+ 且身份未变时不重读；停止不丢已删结果 |
+| 目录清理 | `redundant-folders.removeEmptiedFolders`，由日志与删除原件调用 | 唯一实现：只删本次清空的目录，自下而上、同设备、不跟随链接；服务文件可删，`._` 仅当 `inspectAppleDouble` 判定只含记账信息；新日志签名记录清理范围 |
+| AppleDouble 清理 | `AppleDoubleCleaner/inspectAppleDouble` | 判断 `._` 内容；不确定项保留并报告警告；不是任意删除所有隐藏文件 |
+| 中断残留清理 | `findResidue/cleanResidue` | `resumable` 与 `kept` 分开计数；自动清理两者都保留；显式清理可处理更多残留 |
+
+
+### 5.3 状态、显示、资源与持久化
+
+| 功能 | implementation | 当前归属 |
+|---|---|---|
+| 偏好校验 / 默认值 / 旧设置迁移 | `preferences.normalizePreferences` | 读盘和更新共用；当前默认 parallel=5（范围 1–10）、字号 125%（范围 100–200%）、mediaLayout=video-root，以源码为准 |
+| 本次整理源动作 | `run-policy.sourcePolicy` | 导入 copy；整理 rename；本次 OrganizeOptions 决定清目录/释放重复项 |
+| 状态发送与接收 | `state-channel.createStateChannel/createStateReceiver` | 一个引用表：清单、任务错误与分组明细、问题文件、错误日志、历史、去重 earlier 列表、审核；按版本只在变化时发送 |
+| 错误聚合、显示清除与按需路径 | `job-issues/error-groups/error-log/acknowledge` | 错误写入只经 `addErrors/recordIssue`，身份在记录时确定；错误日志缓存按真实变更版本重建，等长替换也会更新 |
+| 四语言与消息 | `messages.ts` + `renderer/i18n.tsx` | 后端发 Message key/参数，前端翻译；部分原生/低层错误保留原文 |
+| 导入页、来源详情、审核、组织、设置、历史 | `renderer/RootApp.tsx` 中具体界面函数 | 同一个 React 应用；list/grid 是展示配置，不改变复制逻辑 |
+| 去重页 | `renderer/DuplicatesPage.tsx` + `renderer/duplicate-details.ts` | 详情按 root + revision 分代缓存，成功与在途分开，单项失败可显式重试；共享界面组件见 A13 |
+| 缩略图 | `platform/thumbnails.ts` | macOS 系统 decoder/视频海报，必要时提取内嵌图片；磁盘图片缓存；其它 OS 系统 decoder 返回不可用 |
+| 启动画面、品牌与动画 | `Boot/boot-controller/BrandLogo/styles.css` | 纯呈现，不参与文件计划和执行 |
+| 并发与物理盘 I/O | `pump`、`core/devices.ts`、`queue-order.ts` | 任务槽位与盘读写限制是两个不同约束；同盘目录来源不能当独立硬盘 |
+| CPU/内存设置 | `resource-limits.ts`、`threadpool.ts` | 一个已保存上限的读取供线程池和偏好共用；界面写“上限”而非实测用量；内存是软预算，非进程总量硬上限 |
+| 剩余时间 / 速率 / 历史先验 | `eta.ts/eta-model.ts/eta-priors.ts/eta-format.ts`、`rate-meter.ts` | 一个估计器 `JobModel`（列目录为显式估计总量步骤）；`job.eta` 存模型秒数；显示保持与分桶只在界面做一次（`useHeld`）；没有测量时显示不确定进度条 |
+| 目录枚举进度提示 | `listing-estimate.ts/platform/listing-memory.ts` | 只用于估算，不决定复制是否正确 |
+| 盘活动与防休眠 | `platform/drive-activity.ts/keep-awake.ts` | 主进程采样系统指标、任务期间保持唤醒 |
+| 延后恢复列表刷新 | `deferred-refresh.ts` + main | 任务忙时推迟必要读取，避免与正在进行的 I/O 竞争 |
+| 设置/历史、报告、恢复密钥 | `main.save/initializeRecoveryKey` 与各任务报告 | userData 设置/历史、operation-reports；恢复 manifest 在图库恢复目录 |
+
+## 6. 数据流与重复成本
+
+### 6.1 当前做法
+
+1. 状态通道的一个引用表覆盖清单、任务错误与分组明细、问题文件、错误日志、历史、去重 earlier 列表和审核；只有版本变化的明细随更新发送，进度消息不再重复序列化不变的大字段。`Inventory.listing` 不发给 renderer。
+2. 扫描子进程只回传本次新读到的路由条目（`beginRoutingCapture`，按秒 flush），main 按来源在 module 内筛选保存（`routingEntriesUnder`），不再整表复制后再找增量。
+3. 多目的地仍是 `stageMany` 一次读源、写多个目标；各目标独立回读校验。实际结果每个目标发出一次，主进程按来源建一个 Map，完成阶段线性消费。
+4. 单文件详情：摘要卡用 `summary` 的短标签，EXIF 面板用 `exif` 的全部标签，图片按需走 `thumbnail`；没有无人显示的预览经过 IPC。
+5. 内容摘要只有 `DestinationIndex` 一份，信任条件为完整 stat（dev/ino/size/mtime/ctime，FAT/exFAT 的 `ctime==mtime` 不可证明）。
+
+### 6.2 仍然存在、本轮有意保留的成本
+
+| 数据 | 流向 | 判断 |
+|---|---|---|
+| 相机媒体内容 | 相机 → 本机暂存 → 目的盘 | 统一文件系统核心的 adapter 成本；不新增相机专用复制引擎 |
+| 哈希块 | 主线程复制 chunk，再 transfer 给 hash worker | 换取主线程不做哈希；没有 profile 不改 |
+| 其它 StateFields | 偏好、恢复列表、设备信息仍随更新发送 | 体积小；没有 IPC 体积测量前不改成通用 patch 协议 |
+| EXIF 面板 | 第二次读取全部标签 | `RequestAll` 的必要成本；扫描不为界面读全部标签 |
+
+缓存仍按用途区分：`scan-memory` 保存可重新验证的源清单与路由；导入记录保存已校验源摘要；`placement-memory` 只证明上次规则下“位置正确”；`listing-memory` 只是进度估算；`DestinationIndex` 是唯一可信摘要；`DuplicateStore` 只存去重用的元数据。
+
+## 7. 原始发现与处理结果
+
+第一次审查（基线 `daaabd8`）的 R1–R13 均已处理。下表列出最终做法和对应任务；原始证据与行号见 Git 历史中本文件的上一版本。
+
+| 编号 | 原始问题 | 处理结果 | 任务 |
 |---|---|---|---|
-| 1 | **同一操作三份排队代码**：`organize`、`organizeFolder`、`queueBackupOrganization` 各自复制“审核中/已有整理”守卫、拼 `Job`、写 `organizationQueue`。三者本质都是“把某根目录整理到 prefs 的单一目的地/basePath” | 一个 `assertOrganizationIdle()` + 一个 `queueOrganization(root,name,request)`；三个入口只决定根目录、名称和偏好快照 | 类型检查；`organize-backup`、`redundant-folders`、`organization-rename` 测试；Electron 冒烟中的一键整理 |
-| 2 | **失效接口**：`Action {type:'organizeBackup'}` 没有任何界面或测试调用者，只有内部自动整理走同一函数 | 从 `Action` 与 `action()` 中删除；自动整理直接调用 `queueBackupOrganization` | 类型检查（无调用者） |
-| 3 | **同一规则两份实现**：`load()` 与 `preferences` 动作各自校验/修正偏好（字号、并行数、复制模式、备份模式、校验开关、未知格式默认、设备记忆…），而且不一致：读盘不校验 `copyMode`/`appearance`，修改时不过滤设备记录；默认值对象被共享引用，可能被就地修改 | 新的纯 module `desktop/preferences.ts`：`defaultPreferences` + `normalizePreferences(input, base)`，无效字段保留 `base` 的值；main 的两处都调用它，动作只保留“哪些键运行中可改”的编排判断 | 新测试 `preferences.test.ts`（先失败后通过） |
-| 4 | **检查放错范围 + 三份重复**：`destinationRoots` 对“所有已连接源”检查是否位于备份目录内——一张无关的卡或文件夹在备份目录内，就会让其他所有导入失败；同一判断还在 `sourceInsideBackup`（选择时）与 `plan`（权威、按 realpath）各有一份 | `destinationRoots(prefs,sources,importing?)` 只检查本次导入的源，并复用 `sourceInsideBackup`；整理任务不传（它的源本来就包含备份目录） | 新回归测试“另一已连接源在备份目录内不阻止本次导入”（修复前失败、修复后通过） |
-| 5 | **跨进程来回传同一份数据**：扫描时 main 把该源已有的路由元数据发给扫描子进程，子进程结束时把缓存“全部”回传（含刚收到的），main 再逐条 `structuredClone` 存回 | 子进程只回传本次新读到的条目 | 代码路径；扫描进度/扫描记忆测试 |
-| 6 | **硬件测试常量两份**：生产 `main.ts` 启动路径内硬编码 `/Volumes/A006` 与卷 UUID，`qa/a006-hardware.ts` 再定义一次 | 只在 `qa/a006-hardware.ts` 导出 `hardwareDestination`；main 在 `--hardware-test-a006` 下由它配置偏好 | 类型检查 |
-| 7 | **重复工具函数**：`statKey`（dev:ino:size:mtime:ctime）在 `core/index.ts` 与 `core/drive-backup.ts` 各一份 | 移入 `core/paths.ts` 唯一导出 | 类型检查；drive-backup / planning 测试 |
+| R1 · P1 | 删除原件绕开任务生命周期，Stop 和退出管不到 | 登记在 `originalsControls`：可停止、退出时等待、计入空闲判断、保持唤醒、受设置锁约束；停止后已删文件照样报告，预检与目录清理阶段的停止都不抛异常 | R-T01 / review-4 |
+| R2 · P1 | 去重 EXIF 读取失败被记成已读 | 只在成功时记录；失败进入 `failures` 并显示未读数量；同次扫描每个文件只算一次摘要 | A3 |
+| R3 · P2 | 导入完成阶段二次方遍历 | 按来源一次建 Map | review-4、A2 |
+| R4 · P2 | 为找扫描增量每秒复制整个路由缓存 | `beginRoutingCapture` 只记新读条目；`routingEntriesUnder` 在 module 内筛选 | A6 |
+| R5 · P2 | `inspect` 与 `exif` 重复，且生成无人显示的预览 | 删除 `inspect` 与预览；文字详情分 `summary` / `exif` 两种真实需求 | review-4、A8 |
+| R6 · P1 | 去重页“已请求”与“已有结果”状态混在一起 | `duplicate-details.ts`：按 root + revision 分代，成功与在途分开，失败可显式重试 | review-4、A11 |
+| R7 · P2 | 进度更新携带不变的大明细 | 引用表加版本，只在变化时发送；错误日志缓存按真实变更版本重建 | review-4、A9 |
+| R8 · P2 | 去重与目标索引重复拥有“文件是否可信” | 摘要只归 `DestinationIndex`；`DuplicateStore` 不再存 SHA，元数据缓存用同一 stat 谓词 | A3 |
+| R9 · P2 | 持久偏好与本次整理选项存在假入口 | 删除失效的持久偏好及 `livePreferences`；本次选项是唯一权威 | review-4、A12 |
+| R10 · P3 | 计划请求过宽 | `PlanRequest = ImportRequest \| DriveRequest \| OrganizeRequest`，另有只读的 `MisplacedRequest`；都走一个 `planOnce` | A15 |
+| R11 · P2 | 无消费者的变体与公开整理策略 | 删除 `restore`、`mode:'recorded'`、持久分组；`strategy` 不再公开，新日志固定 rename；两种日志共用 `createJournal` | A3、A4 |
+| R12 · P1 | 执行事实不集中返回，完成阶段用旧计划路径 | `onFileOutcome` 每个目标一次；去重、落位、可删原件只消费它；晚分配到 `Conflicts/` 的实际路径被如实记录；三套目录清理收为 `removeEmptiedFolders` 一套 | A2、A4 |
+| R13 · P3 | ETA 与排队的无用状态 | 删除第二估计器与无读者状态；排序直接返回任务；显示保持只在界面一处 | review-4、A10 |
 
-## 保留的复杂度（不是冗余）
+修复过程中另行发现并处理：顺序填盘第二盘把文件误放进 `Conflicts/`（A1）；`removeRedundantFolders` 的计数恒为 0（A4）；无 UUID 卷被两个任务各算一次空间（A2）；A7 新进程首次查卷做全系统扫描，使崩溃恢复测试慢 5 倍（集成时修复）；按名字模式配对的伴随文件在 ` (n)` 改名后不能再配对（A17 集成时修复）。
 
-- 源变更检查、源/目的地重叠限制、符号链接限制、物理盘身份、独占发布、签名收据、目录同步、恢复区原件：各防一种不同故障（SAFE-01–06）。
-- `sourceInsideBackup`（选择/开始前、不创建目录）与 `plan` 内的 realpath 检查：前者是早期、廉价的用户反馈，后者是对实际路径的权威判断，两者时间点不同。
-- 独占复制分支：exFAT 等不支持硬链接的文件系统，因此保留完整的目标回读。
-- 整理的 `rename` 与“校验复制 + 保留原件”两条路径：rename 是正常路径；复制路径用于跨设备（EXDEV）、空文件和旧版日志的恢复，不是第二种可选样式。
-- macOS / Windows / Linux 卷查询：三个真实 OS 接口，是真 seam。
-- 只读扫描与导入各自校验元数据：导入复用扫描的路由结果，但只在文件 stat 完全不变时。
-- 暂停与停止：同一个中止实现；区别只在任务标记为“可继续”以及停止还会关闭审核和扫描。
-- main 中宽松的 `syncDirectory`（设置文件）与 core 中严格的版本（备份目的地）：策略不同，所以两份。
+## 8. 应保留的深 module 与真实 adapter
 
-## 已识别但本轮不改
-
-- `Job.inventory` 与 `state.sourceInventories` 指向同一清单对象：状态通道按引用去重，IPC 不重复传输；合并需要改界面“最近清单”的选择规则，收益小。
-- `executeReorganization(…,{strategy})`、`getOrganizationRecovery({verifyContents})`、`execute(…,{exclusiveCopy})` 主要供测试使用，按 Matt 原则是暴露在 interface 上的内部 seam。生产总是 `rename`；把默认值改为 `rename` 需要重写大量以复制路径为前提的恢复测试，本轮不做。
-- 备份目录错位检查（默认 `ask`）在导入结束和目的地连接时对整个备份目录读取路由元数据。会话内有 stat 缓存，但应用重启后的第一次检查会对大型库运行 ExifTool。若大型库感到卡顿，可以把它的结果也纳入扫描记忆。
-- `validateDestination` 拒绝位于任何已连接源内的目的地（DST-04 的保守策略）。因此把整个备份盘（如 `/Volumes/A006`）选为“整盘备份”源时，该盘上的目的地会被拒绝。这和第 4 项修复的方向相反，属于策略取舍，本轮不改。
-- `main.ts` 仍承担编排、授权、偏好、生命周期。没有只为缩短文件而拆出转发层。
-- 仍以英文原文显示的低层消息（LOC-03 的剩余部分）：`executeDestinations` / `executeReorganization` / 恢复结果数组里的逐文件、逐目的地错误（如 `Destination 1: …`、`Staged file changed`、`Moved file changed…`）以及整理结果附带的说明（如无法写入拍摄日期的 `… moved files kept their original dates …`）；`OrganizationRecovery.error`、`SourceCameraInfo.error`、元数据读取问题；`DestinationStatus.detail`（系统错误文本与 `Read-only filesystem`）；恢复密钥、`Invalid action` 等程序错误；`inspect` 授权错误；A006 硬件测试消息；原生选择对话框标题；整理任务的源名称（`Library organization`、`Organize <文件夹>` 等）。这些在“全部错误”里仍由 `explainError` 按模式（ENOSPC、EIO、Source changed 等）给出已翻译的标题与提示，详情保留原文。文件夹名（如 `editied`）与路径只作为参数，从不翻译。
-
-## 用户需求逐项核对
-
-| 要求 | 当前状态 |
+| 对象 | 删除测试 / 保留理由 |
 |---|---|
-| 自动识别相机卡、读卡器、大容量存储相机（SRC-01/03/04） | 已实现；可见性受硬件与系统授权影响 |
-| 任何连接形态（SRC-02） | 部分：macOS 有 ImageCaptureCore 协议；Windows/Linux 没有 PTP/MTP adapter；无线/私有协议未实现 |
-| 全卡递归、Sony 视频与 XML（SRC-05/06, META-02） | 已实现 |
-| 手选文件夹/硬盘作为源，需勾选开关（SRC-07/08） | 已实现（`allowFolderSource`） |
-| 一张卡多台相机，盘名/文件/EXIF 证据分开（SRC-09/10, UI-22） | 已实现 |
-| 移除“直接 USB 相机检测”宣传文案（SRC-11, UI-33） | 已移除 |
-| 多平台前端、macOS 原生窗口按钮（PROJ-05/06/07） | 共享 React/Electron；macOS 已运行；Windows/Linux 包未实机验证 |
-| 首次选择目的地与路径；阻止相机卡作目的地（DST-01–04） | 已实现（`validateDestination`） |
-| 目录模板、预设、自动创建目录（DST-05/06, ORG-01–03）；路径构建器（ORG-22） | 已实现；无日期、无相机或无法读取的文件（未知文件）默认保留原位（设置可改为移入 `Unknown files` 文件夹或按文件日期归档），不再创建 `Unknown Camera`；预设由构建器取代，自由模板保留在“高级”中 |
-| 路径设置集中在设置页（DST-07, UI-35/36） | 已实现 |
-| 只复制照片/视频与相关伴随文件；忽略 `NIKON001.DSC` 等（FMT-01–07） | 已实现（`known-files.ts` 厂商目录） |
-| 未知格式默认排除、可指定去向/放入相机目录/记住（FMT-08–11） | 已实现 |
-| 格式问题在专门错误面板（FMT-12, UI-27/28） | 已实现 |
-| 整盘备份复制所有文件并保留目录（FMT-14, COPY-10/13） | 部分：普通与隐藏用户文件已包含；符号链接、系统服务文件、空目录、完整属性/硬链接拓扑不复制 |
-| DJI `.LRF`（FMT-15） | 已实现 |
-| 读取相机型号、时区、日期时间分开显示（META-01–06） | 已实现 |
-| 详细 EXIF、曝光摘要、默认折叠、快门数、视频无快门数（META-07–11） | 已实现；快门数只在元数据提供时显示 |
-| RAW/JPEG/HEIF/视频分目录（ORG-04）→ 六种媒体文件布局与独立视频备份目录（ORG-21） | 已实现：照片/视频再分格式、按格式、照片平放+Videos、视频平放+Photos、全部平放、独立视频备份目录（可用单独模板）；伴随文件随原件；整理可把旧布局与两个备份目录间放错的文件移到新布局 |
-| 导入时复查已存在文件、避免重复复制（ORG-05） | 已实现（目的地索引 + SHA-256；已导入记忆） |
-| 一键整理现有文件、规则变更后重新整理、修正相机目录、合并、删除空旧目录、可恢复（ORG-06–14, ORG-20） | 已实现：三个入口共用一条实现；签名日志可重查、继续、撤销；界面不自动释放原件 |
-| 编辑导出放 `editied`（可改），RAW+XMP 留原处（ORG-15–19） | 已实现 |
-| Start/Stop/Automatic 在标题栏，自动导入，1–5 源并行与排队，滑块（COPY-01–07, UI-25/30） | 已实现；重启不恢复排队 |
-| 双目的地：双份副本 / 先满第一盘（COPY-08/09） | 已实现；是文件副本，不是 RAID/奇偶校验 |
-| 盘到盘“镜像”与“只增不删”（COPY-11/12） | 已实现两种模式：只增模式保留源盘已删除的文件；镜像模式在用户审核后把多余文件移入 `.mirror-removed`，不直接删除。镜像不能与“先满第一盘”同时使用 |
-| 先复制后验证（COPY-14） | 已实现 |
-| 不丢、不坏、不误删；拔盘/断电恢复；半写文件续写（SAFE-01–06） | 有签名收据、日志、校验、同步与进程中断测试；不能宣称所有硬件的真实断电都有保证 |
-| 同名不同内容放入相机目录内的另一文件夹（SAFE-07/08） | 已实现（`Conflicts/<内容 id>/`） |
-| 文件系统创建/修改时间为拍摄时间（SAFE-12） | 已实现；macOS 由原生 helper 设置 Created；Linux/Windows 只能设置 Modified |
-| 自定义界面、大按钮、大字可调、设置页、主题色、明暗跟随系统、响应式、网格/列表（UI-01–10） | 已实现；字号默认 125%，100–150% |
-| 仪表盘统计、卡片、紧凑、折叠详情、容量条、路径、按格式计数与大小（UI-11–22） | 已实现 |
-| 去掉饼图，容量条按单个格式分色（UI-39–41） | 已实现 |
-| 标题栏标题与按钮、总进度、全部错误、按钮式自动开关、侧栏到顶（UI-24–31） | 已实现 |
-| 移除“预览照片”入口（UI-32） | 已移除；审核行内的单文件预览保留（需求第 16 节记录了是否移除所有预览尚未澄清） |
-| 动画与减弱动态效果（UI-37/38） | 已实现 |
-| 四种语言（LOC-01–03） | 已实现：界面目录完整；main 发送消息 key + 参数（任务详情、整理/释放/撤销的逐步进度、规划进度、视频备份文件夹等布局错误、进度、导入/整理/恢复结果、历史、主进程错误与常见 core/platform 错误），renderer 按所选语言翻译。少数低层错误仍显示英文原文，见“已识别但本轮不改” |
-| 图标（ICON-01–04） | Icon Composer 资产保留；本轮未改 |
-| 一个功能一个实现、无臭抽象、修复层次与重复传输（ARCH-01–13） | 本轮见上表 1–7；未改项见上一节 |
-| Codex 快速集成测试（TEST-12） | 已实现 |
+| `scan-process/scan-worker` | 隐藏进程生命周期、停止、内存设置和卡死卷隔离；删除会把复杂度和阻塞风险移回 main |
+| `executeDestinations` | 不只是转发：照片/视频归属物理目标、容量释放、进度汇总、故障隔离都在此发生 |
+| `executeMany/stageMany` | 多目标共享源读取；改成“每盘自己 copy”会失去已有 leverage |
+| `recovery` | 整理和去重已共享日志执行；签名、续作、撤销、后续接管分别对应真实状态 |
+| `sourcePolicy` | 小 interface 隐藏“导入不能被旧设置变成移动”的规则；删除会让各入口重复判断 |
+| OS 卷枚举和 ImageCaptureCore | 真实操作系统接口不同；此 seam 有真实 adapter，不是预留的假替换能力 |
+| 硬链接与独占复制 | exFAT 等文件系统能力不同；独占发布与目标回读不能凭代码短就删除 |
+| 路由 EXIF 与完整 EXIF | 扫描不应为每个文件读取完整标签/预览；精简读取和详情读取是同一 module 的不同需求 |
+| 缺失/损坏缓存视为 miss | 缓存不是用户数据的权威来源；直接重算是正常行为，不应为了“无兜底”变成无法导入 |
 
-## 本轮验证
+`execute()` 是 `executeMany([transfer])` 的便捷入口，不是第二套复制引擎；如无生产消费者可内部化，但价值低于以上问题。`main.ts`/`RootApp.tsx` 长也不自动等于架构错误；只有把完整职责和状态一起移走，才有 locality 收益。
 
-日志在 `build/architecture-review-3/`（不进 git）。
+## 9. 收敛后的形态
 
-- 环境问题：仓库位于 iCloud 同步的 `~/Documents` 下，`node_modules` 中约 5,500 个文件被换成了 iCloud 占位文件（`compressed,dataless`），读取会无限等待，修改前的基线 `tsc` 因此卡死。已用 `npm ci` 按 `package-lock.json` 重装，再运行 Electron 自带的 `install.js` 下载其二进制（npm 的 allow-scripts 策略跳过了这一步）。之后若再出现命令无输出卡住，先运行 `ls -lOR node_modules | grep -c dataless` 检查。
-- `npm run typecheck`：通过。
-- `npm test`：360/360 通过（`npm-ci.log`、`test.log`）。新增 `preferences.test.ts`（5 项，含独立审查发现的“单个坏条目不应清空整个目的地身份数组”回归测试），以及 `destination-roots.test.ts` 中的一项回归测试，两者都先失败、修复后通过。另有两项测试（`core.test.ts` 的重复项整理、`recovery.test.ts` 的释放重复项）在未修改的 core 副本上同样失败：之前的会话让 `plan` 不再把已在正确位置的文件放进计划，测试仍按旧计数断言。现已更新计数，测试保护的安全属性不变。
-- `npm run build`：通过。
-- `npm run codex:test -- --no-build`：Electron 23/23 通过（`codex-test.log`、`codex-report.json`），包括一键整理、选择任一目的地整理、源原件逐字节不变。
+两条业务主线：**导入复制**、**整理/去重的可恢复变更**。二者共享清单、路由与内容事实；renderer 只提交意图、显示结果。任务登记只有 main 的 `startJob/finishJob`；文件内容身份只有一个摘要规则；实际做了什么只有一个结果出口。
 
-未验证：本轮没有用真实相机卡、真实双盘或 Windows/Linux 机器重测，也没有做物理断电测试。
+```mermaid
+flowchart LR
+  U[界面：意图与显示] --> M[main：授权和唯一任务生命周期]
+  M --> A[导入：PlanRequest → executeMany → FileOutcome]
+  M --> B[图库变更：整理 / 去重 → createJournal → recovery]
+  A --> F[文件事实：Listing / 路由 / DestinationIndex]
+  B --> F
+  A --> P[真实文件系统 / 相机 adapter]
+  B --> P
+```
 
+没有引入的东西：任务框架、通用缓存或仓库层、卷/相机端口、按厂商的解析策略、状态 patch 协议。这些在审查中都被判定为浅 module 或无测量依据。
+
+## 10. 验证
+
+修复分两波并行开发，每波合并后做独立的合并审查、typecheck、全量 `npm test`、`npm run build`，并单独计时 `process-crash.test.ts` 以发现性能回归。
+
+- 波次 1 集成（`f649710`）：全量测试连续两次 0 失败（1603 项）。期间发现并修复 A7 使 `process-crash` 从 9 s 变成 42 s 的回归。
+- 波次 2 与 A17 集成（`f68d3b6`）：全量测试连续两次 0 失败（1643 项）；`process-crash` 与合并前同等。
+- 与 UI 审计分支合并后的 `main@7eee02c`：typecheck 与 build 通过；全量 1651 项，在系统负载约 400 时有 2 项计时测试失败，单独运行通过，且同一心跳测试在修复前代码上同样失败。
+
+未做：真实相机卡、双物理盘、Windows/Linux 实机、物理断电；Swift 桥接的一处删除未编译；IPC 体积与峰值内存没有规模化测量。
+
+## 11. 修复计划
+
+方案、利弊、迁移与验收记录在 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md)；第 9 节是合并后的任务表 A1–A17 与执行波次。同日的 [deep-interfaces](superpowers/plans/2026-10-23-deep-interfaces.md) 计划已并入其中。
 
 ## Release note: files without metadata
 
