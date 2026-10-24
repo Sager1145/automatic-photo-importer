@@ -14,9 +14,8 @@ type Dispatch = (action: Action) => void;
 export const GROUPS_PER_PAGE = 8;
 
 export const duplicateLevels = (t: Translator): { level: DuplicateLevel; label: string; detail: string }[] => [
-  { level: 1, label: t("Level 1: you decide"), detail: t("You decide every group. Nothing is removed until you choose which file to keep.") },
-  { level: 2, label: t("Level 2: identical files"), detail: t("Files that are exactly the same (same SHA-256) are removed automatically, keeping the copy in your organized folders. You decide all other groups.") },
-  { level: 3, label: t("Level 3: automatic"), detail: t("Exactly identical files (same SHA-256) are removed automatically. Files with the same EXIF are removed only after you confirm them, even when their size matches.") },
+  { level: 1, label: t("Choose every keeper"), detail: t("You decide every group. Nothing is moved until you confirm Remove.") },
+  { level: 2, label: t("Suggest keepers for identical files"), detail: t("Files with the same SHA-256 get a suggested keeper; you decide everything else. Nothing is moved until you confirm Remove.") },
 ];
 
 export function LevelSelector({ level, onChange, disabled = false }: { level: DuplicateLevel; onChange: (level: DuplicateLevel) => void; disabled?: boolean }) {
@@ -108,7 +107,7 @@ export function GroupView({ item, number, details, onRetry, onDecide, disabled =
     <div className="duplicate-group-heading">
       <strong>{number !== undefined ? t("Group {number}", { number: formatNumber(number) }) : t("Group")}</strong>
       <span className="small-tag">{strengthLabel(group.strength, t)}</span>
-      {item.auto && <span className="small-tag" data-testid="duplicate-auto">{t("Removed automatically")}</span>}
+      {item.auto && <span className="small-tag" data-testid="duplicate-auto">{t("Will be set aside")}</span>}
       {item.needsDecision && <span className="small-tag duplicate-badge-undecided" data-testid="duplicate-undecided">{t("Choose a file to keep")}</span>}
       <label className="duplicate-keep duplicate-keep-all"><input type="radio" name={`keep-${group.id}`} value="all" checked={item.keep === 'all'} disabled={disabled} data-testid="keep-all" onChange={() => onDecide(group.id, 'all')} />{t("Keep all")}</label>
     </div>
@@ -118,7 +117,7 @@ export function GroupView({ item, number, details, onRetry, onDecide, disabled =
       return <div key={file.path} className={`duplicate-file ${item.keep === file.path ? 'keeping' : ''} ${removing ? 'removing' : ''}`} data-testid="duplicate-file" data-path={file.path}>
         <Preview file={file} outcome={thumbnail} />
         <label className="duplicate-keep"><input type="radio" name={`keep-${group.id}`} value={file.path} checked={item.keep === file.path} disabled={disabled} data-testid="keep-file" onChange={() => onDecide(group.id, file.path)} /><strong>{baseName(file.path)}</strong></label>
-        <div className="duplicate-badges">{fileBadges(group, file, item.suggested, editedFolder).map(badge => <Badge key={badge} kind={badge} />)}{removing && <span className="small-tag duplicate-badge-remove" data-badge="remove">{t("Will be removed")}</span>}</div>
+        <div className="duplicate-badges">{fileBadges(group, file, item.suggested, editedFolder).map(badge => <Badge key={badge} kind={badge} />)}{removing && <span className="small-tag duplicate-badge-remove" data-badge="remove">{t("Will be set aside")}</span>}</div>
         <dl className="duplicate-basic" data-testid="basic-exif">{basicExif(file, exif && 'value' in exif ? exif.value : undefined, t, formatBytes, language).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={label === t("Path") ? 'recovery-root' : undefined}>{value}</dd></div>)}</dl>
         <FullExif outcome={exif} />
         {failed && <div className="rule-actions"><Button icon={RotateCcw} data-testid="details-retry" onClick={() => onRetry(file.path)}>{t("Retry")}</Button></div>}

@@ -103,9 +103,9 @@ export function buildGroups(files: DuplicateFile[]): DuplicateGroup[] {
 }
 
 /** Whether a level resolves a group of this strength without asking. Only identical bytes are removed without the
- * user: level 3 and level 2 both resolve SHA groups alone; an EXIF group always waits for a decision. */
+ * user: level 2 resolves SHA groups alone; an EXIF group always waits for a decision. */
 export function automatic(strength: DuplicateStrength, level: DuplicateLevel): boolean {
-  return level >= 2 && strength === 'sha';
+  return level === 2 && strength === 'sha';
 }
 export interface ResolvedGroup {
   group: DuplicateGroup; auto: boolean; suggested: string;

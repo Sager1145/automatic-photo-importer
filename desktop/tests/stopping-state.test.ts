@@ -27,13 +27,13 @@ test('after Pause the global Pause shows Pausing and Stop stays available to sto
  const html=titlebar([job('pause')]);
  const stop=tag(html,'global-stop'),pause=tag(html,'global-start');
  assert.match(pause[0]!,/disabled/);assert.match(pause[1]!,/Pausing…/);
- assert.doesNotMatch(stop[0]!,/disabled/);assert.match(stop[1]!,/>Stop$/);
+ assert.doesNotMatch(stop[0]!,/disabled/);assert.match(stop[1]!,/>Stop all$/);assert.match(stop[0]!,/title="Stops imports, scans and organizing, and discards the open review."/);
 });
 
 test('the global controls stay active while any job is still running normally or queued',()=>{
  for(const jobs of [[job('stop'),job(undefined,{id:'k',source:{...source,id:'other'}})],[job('stop'),job(undefined,{id:'q',phase:'queued',source:{...source,id:'later'}})]]) {
   const html=titlebar(jobs);
-  assert.doesNotMatch(tag(html,'global-stop')[0]!,/disabled/);assert.match(tag(html,'global-start')[1]!,/Pause/);
+  assert.doesNotMatch(tag(html,'global-stop')[0]!,/disabled/);assert.match(tag(html,'global-start')[1]!,/Pause imports/);
  }
 });
 

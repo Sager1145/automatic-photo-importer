@@ -5,11 +5,12 @@ import type {AppState,Job,Preferences} from '../shared';
 
 // A minimal browser: View Transitions record the kind they ran with; reduced motion is switchable.
 let reduce=false,sheetOpen=false;
+let skipped=0;
 const transitions:(string|undefined)[]=[];
 const root={dataset:{} as Record<string,string>};
 Object.assign(globalThis,{
  window:{matchMedia:(query:string)=>({matches:query.includes('reduce')&&reduce})},
- document:{documentElement:root,querySelector:(selector:string)=>selector.includes('dialog[open]')&&sheetOpen?{}:null,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){}};}},
+ document:{documentElement:root,querySelector:(selector:string)=>selector.includes('dialog[open]')&&sheetOpen?{}:null,startViewTransition(update:()=>void){transitions.push(root.dataset.transition);update();return {finished:Promise.resolve(),skipTransition(){skipped++;}};}},
 });
 
 test('an interface change runs as a View Transition of its kind',()=>{
@@ -33,6 +34,25 @@ test('under an open sheet or error message the change applies directly, so nothi
  animateInterfaceChange(()=>{applied++;},'layout');
  assert.deepEqual(transitions,[]);assert.equal(applied,1);
  sheetOpen=false;
+});
+
+test('a replacement transition explicitly skips the old animation',async()=>{
+ await new Promise(resolve=>setImmediate(resolve));
+ skipped=0;
+ animateInterfaceChange(()=>{},'forward');
+ animateInterfaceChange(()=>{},'back');
+ assert.equal(skipped,1,'old snapshots must stop before the replacement starts');
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(root.dataset.transition,undefined,'finished transitions remove their marker');
+});
+
+test('switching to reduced motion also interrupts an already running transition',async()=>{
+ await new Promise(resolve=>setImmediate(resolve));
+ skipped=0;
+ animateInterfaceChange(()=>{},'forward');
+ reduce=true;animateInterfaceChange(()=>{},'back');reduce=false;
+ assert.equal(skipped,1,'direct updates must not leave old snapshots on top');
+ await new Promise(resolve=>setImmediate(resolve));
 });
 
 const preferences={language:'en',appearance:'system',accent:'coral',sourceLayout:'list',showDashboard:true,copyMode:'single',destinations:['/backup']} as Preferences;

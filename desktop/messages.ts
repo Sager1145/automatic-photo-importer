@@ -99,7 +99,6 @@ export const backendMessages={
  'error.alreadyInBackup':{en:'{source} is already in your backup ({root}); there is nothing to import from it.','zh-Hans':'{source} 已在你的备份中（{root}），无需从中导入。','zh-Hant':'{source} 已在你的備份中（{root}），無需從中匯入。',ja:'{source} はすでにバックアップ内にあります（{root}）。インポートするものはありません。'},
  'error.cameraScan':{en:'This camera must download originals before its media can be inspected. Use Review.','zh-Hans':'必须先下载此相机的原始文件才能检查其媒体。请使用“审核”。','zh-Hant':'必須先下載此相機的原始檔案才能檢查其媒體。請使用「審核」。',ja:'このカメラのメディアを確認するには、先に元のファイルをダウンロードする必要があります。「確認」を使ってください。'},
  'error.selectDrive':{en:'Select this drive first.','zh-Hans':'请先选择此驱动器。','zh-Hant':'請先選擇此磁碟。',ja:'先にこのドライブを選択してください。'},
- 'error.folderSourcesOff':{en:'Enable folder sources first.','zh-Hans':'请先启用文件夹来源。','zh-Hant':'請先啟用資料夾來源。',ja:'先にフォルダーソースを有効にしてください。'},
  'error.busy':{en:'Finish transfers or discard the current review first.','zh-Hans':'请先完成传输或放弃当前审核。','zh-Hant':'請先完成傳輸或捨棄目前的審核。',ja:'先に転送を完了するか、現在の確認を破棄してください。'},
  'error.busyScan':{en:'Finish transfers or the current review before scanning.','zh-Hans':'请先完成传输或当前审核，然后再扫描。','zh-Hant':'請先完成傳輸或目前的審核，然後再掃描。',ja:'スキャンする前に、転送または現在の確認を完了してください。'},
  'error.busyReview':{en:'Wait for transfers to finish or stop them before reviewing.','zh-Hans':'请等待传输完成或将其停止，然后再审核。','zh-Hant':'請等待傳輸完成或將其停止，然後再審核。',ja:'確認する前に、転送の完了を待つか停止してください。'},

@@ -66,7 +66,7 @@ The original prompts mix English and Chinese. Requirements below are normalized 
 - **SRC-04:** Automatically detect the connected camera cards used for real testing; detection must remain correct after frontend/platform changes.
 - **SRC-05:** Recognize common camera folder layouts and find photos and videos throughout the card, rather than assuming every media file is in one picture directory.
 - **SRC-06:** Find Sony videos stored separately from still photos and detect their separate metadata/companion files.
-- **SRC-07:** Allow a hard drive or local folder to be chosen as a source, enabled through an explicit checkbox/option.
+- **SRC-07:** Allow a hard drive or local folder to be chosen as a source, enabled through an explicit checkbox/option. (Retired on 2026-10-23: choosing media folders is always available, see docs/ui-audit-2026-10-23.md.)
 - **SRC-08:** Keep manual folder/drive import and camera-card import understandable as source choices.
 - **SRC-09:** Detect the camera or cameras represented on each card using drive names, files/layouts, and EXIF metadata.
 - **SRC-10:** Support multiple camera models on a single card. Do not assume one card always represents one camera.

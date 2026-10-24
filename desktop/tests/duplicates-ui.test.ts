@@ -17,15 +17,16 @@ const organized=file('2026/202605/Nikon Z6/DSC_0001.NEF',{birth:5});
 const stray=file('Unsorted/DSC_0001 copy.NEF',{birth:9});
 const sha:DuplicateGroup={id:'g1',strength:'sha',files:[stray,organized]};
 const sized:DuplicateGroup={id:'g2',strength:'exif-size',files:[file('a/x.NEF',{sha256:'b'.repeat(64)}),file('b/x.NEF',{size:2000,sha256:'c'.repeat(64)})]};
-const item=(group:DuplicateGroup,level:1|2|3=1,decisions:Record<string,string>={})=>removalPlan([group],level,decisions).resolved[0]!;
-const view=(group:DuplicateGroup,options:{thumbs?:Record<string,Thumbnail>;exifs?:Record<string,Metadata>;level?:1|2|3;decisions?:Record<string,string>}={},language:Language='en')=>
+const item=(group:DuplicateGroup,level:1|2=1,decisions:Record<string,string>={})=>removalPlan([group],level,decisions).resolved[0]!;
+const view=(group:DuplicateGroup,options:{thumbs?:Record<string,Thumbnail>;exifs?:Record<string,Metadata>;level?:1|2;decisions?:Record<string,string>}={},language:Language='en')=>
  render(createElement(GroupView,{item:item(group,options.level,options.decisions),number:1,details:details(options.thumbs??{},options.exifs??{}),onRetry:()=>{},onDecide:()=>{}}),language);
 const details=(thumbs:Record<string,Thumbnail>,exifs:Record<string,Metadata>):Record<string,FileDetails>=>Object.fromEntries([...new Set([...Object.keys(thumbs),...Object.keys(exifs)])].map(path=>[path,{...(thumbs[path]&&{thumbnail:{value:thumbs[path]}}),...(exifs[path]&&{exif:{value:exifs[path]}})}]));
 
-test('the level selector explains three levels in plain words and marks the chosen one',()=>{
+test('the level selector explains two options in plain words and marks the chosen one',()=>{
  const html=render(createElement(LevelSelector,{level:2,onChange:()=>{}}));
- for(const level of [1,2,3])assert.match(html,new RegExp(`data-testid="duplicate-level-${level}"`));
- assert.match(html,/You decide every group/);assert.match(html,/same SHA-256\) are removed automatically/);assert.match(html,/same EXIF are removed only after you confirm/);
+ for(const level of [1,2])assert.match(html,new RegExp(`data-testid="duplicate-level-${level}"`));
+ assert.doesNotMatch(html,/duplicate-level-3/);assert.equal((html.match(/role="radio"/g)??[]).length,2);
+ assert.match(html,/Choose every keeper/);assert.match(html,/you decide every group/i);assert.match(html,/Suggest keepers for identical files/);assert.match(html,/same SHA-256 get a suggested keeper/);assert.match(html,/nothing is moved until you confirm Remove/i);assert.doesNotMatch(html,/EXIF are removed/);
  assert.equal((html.match(/aria-checked="true"/g)??[]).length,1);
  assert.match(html.match(/<button[^>]*data-testid="duplicate-level-2"[^>]*>/)![0],/aria-checked="true"/);
  assert.match(render(createElement(LevelSelector,{level:1,onChange:()=>{},disabled:true})),/disabled/);
@@ -37,13 +38,13 @@ test('the group view shows badges, keep radios with the suggestion, Keep all and
  for(const badge of ['sha','exif','organized','suggested'])assert.match(html,new RegExp(`data-badge="${badge}"`));
  assert.doesNotMatch(html,/data-badge="size"/);
  // Level 2 resolves a SHA group on its own: the organized copy is kept, the other will be removed.
- assert.match(html,/data-auto="true"/);assert.match(html,/Removed automatically/);
+ assert.match(html,/data-auto="true"/);assert.match(html,/Will be set aside/);assert.doesNotMatch(html,/Removed automatically/);
  assert.match(html.match(/<input[^>]*value="2026\/202605\/Nikon Z6\/DSC_0001.NEF"[^>]*>/)![0],/checked/);
- assert.match(html,/Will be removed/);
+ assert.match(html,/Will be set aside/);
  // Level 1 leaves it undecided until the user picks.
  const manual=view(sha,{level:1});assert.match(manual,/data-testid="duplicate-undecided"/);assert.doesNotMatch(manual,/checked/);
  const all=view(sha,{level:1,decisions:{g1:'all'}});
- assert.match(all.match(/<input[^>]*data-testid="keep-all"[^>]*>/)![0],/checked/);assert.doesNotMatch(all,/Will be removed/);
+ assert.match(all.match(/<input[^>]*data-testid="keep-all"[^>]*>/)![0],/checked/);assert.doesNotMatch(all,/Will be set aside/);
  assert.deepEqual(fileBadges(sized,sized.files[1]!,'a/x.NEF'),['exif','size']);
 });
 

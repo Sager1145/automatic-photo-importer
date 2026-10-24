@@ -13,11 +13,12 @@ const summary=(extra:Partial<NoMetadataSummary>={}):NoMetadataSummary=>({handlin
 const review=(noMetadata?:NoMetadataSummary,kind:Review['kind']='reorganize'):Pick<Review,'kind'|'source'|'noMetadata'|'destinationIndex'|'collectProblemFiles'>=>({kind,source:{id:'s',name:'Card',path:'/Volumes/Card',transport:'storage'} as Review['source'],noMetadata,destinationIndex:0});
 const render=(value:ReturnType<typeof review>,language:'en'|'zh-Hans'|'zh-Hant'|'ja'='en',open=false)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(NoMetadataNotice,{review:value,act:()=>{},defaultOpen:open})}));
 
-test('the prompt shows the count, the count per reason and its three buttons as a warning',()=>{
+test('the prompt shows the count, the count per reason and its two buttons as a warning, with no apply of its own',()=>{
   const html=render(review(summary()));
   assert.match(html,/2,324 unknown files will be left where they are\./);
   assert.match(html,/500 without a date, 1,804 without a camera, 20 unreadable/);
-  for(const label of ['Show files','Use file date instead','Continue'])assert.match(html,new RegExp(`>${label}<`));
+  for(const label of ['Show files','Use file date instead'])assert.match(html,new RegExp(`>${label}<`));
+  assert.doesNotMatch(html,/>Continue</);
   assert.match(html,/class="no-metadata-notice"/);assert.doesNotMatch(html,/error/i);
   assert.match(html,/data-testid="no-metadata-notice"/);
 });

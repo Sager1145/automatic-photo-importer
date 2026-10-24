@@ -45,11 +45,6 @@ export async function assertLive(h:Harness,counters:Record<string,string>,tick:(
  return latency;
 }
 const progressOf=(state:AppState,id:string)=>state.jobs.find(job=>job.id===id)!.progress!;
-/** Contrast problems already known and reported, so the check still catches new ones. */
-const knownContrast:{reason:string;test:(item:Record<string,unknown>)=>boolean}[]=[
- {reason:'Warning count badge: white text on the light amber warning colour in dark mode (styles.css .error-count.warning-count)',test:item=>item.appearance==='dark'&&/^[\d,]+$/.test(String(item.text))&&item.color==='rgb(255, 255, 255)'},
-];
-
 export const ruleChecks=():Check[]=>[
  {id:'rules-sweep',stage:'rules',title:'No button stretches far past its label and no bar or control is cut off, on every page, at every text size and window size',covers:['no super-wide buttons','bars shrink and never clip','UI scale 1, 1.25, 1.5, 1.6, 1.75, 2','windows 1000x720 to 1920x1200'],budgetMs:240000,run:async h=>{
   // Layout only: motion is emulated off so page switches do not wait for transitions.
@@ -170,17 +165,19 @@ export const ruleChecks=():Check[]=>[
    await h.prefs({appearance});await h.until(`theme ${appearance}`,`document.documentElement.dataset.theme===${JSON.stringify(appearance)}`);
    const background=await h.js<number>("(()=>{const m=getComputedStyle(document.body).backgroundColor.match(/[\\d.]+/g).map(Number);return (m[0]*.2126+m[1]*.7152+m[2]*.0722)/255})()");
    assert.ok(appearance==='dark'?background<.3:background>.7,`${appearance} page background luminance ${background}`);
-   // 2.5:1 flags unreadable text; quiet tertiary labels sit near 3:1 by design.
-   const take=async(name:string)=>{await h.settle();for(const item of await h.probe(lowContrast,2.5))issues.push({appearance,view:name,...item});const file=path.join(appearance,name.replace(/[^\w-]+/g,'-').toLowerCase()+'.png');await h.capture(path.join(gallery,file));index.push(file);};
+   // Normal text needs 4.5:1; the probe allows 3:1 for large text.
+   const take=async(name:string)=>{await h.settle();for(const item of await h.probe(lowContrast,4.5))issues.push({appearance,view:name,...item});const file=path.join(appearance,name.replace(/[^\w-]+/g,'-').toLowerCase()+'.png');await h.capture(path.join(gallery,file));index.push(file);};
    await eachView(h,view=>take(view));
    await h.nav('Import desk');await busyDesk(h);await take('import-desk-busy');
    h.hooks!.addJobs(groupedErrorJobs(1200,3));await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");await take('all-errors-grouped');
    await h.closeOverlays();h.hooks!.clear();
+   await h.nav('Settings');await h.settingsTab('general');
+   for(const accent of ['ocean','forest','coral'] as const){await h.prefs({accent});await take(`settings-general-${accent}`);}
   }
   await fs.writeFile(path.join(gallery,'index.html'),`<!doctype html><meta charset="utf-8"><title>QA gallery</title><style>body{font:14px system-ui;margin:16px;background:#888}figure{display:inline-block;margin:8px;width:420px}img{width:100%;border:1px solid #444}</style>${index.map(file=>`<figure><img src="${file}" loading="lazy"><figcaption>${file}</figcaption></figure>`).join('')}`);
   await fs.writeFile(path.join(h.report,'contrast.json'),JSON.stringify(issues,null,2));
   const unique=[...new Map(issues.map(item=>[`${item.appearance} ${item.text} ${item.color}`,item])).values()];
-  const open=unique.filter(item=>!knownContrast.some(known=>known.test(item)));
-  assert.deepEqual(open.slice(0,25),[],`${open.length} texts below 2.5:1 contrast (all in contrast.json)`);
+  const open=unique;
+  assert.deepEqual(open.slice(0,25),[],`${open.length} texts below their required contrast (all in contrast.json)`);
  }},
 ];

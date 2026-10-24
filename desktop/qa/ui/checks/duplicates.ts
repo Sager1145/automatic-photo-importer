@@ -15,7 +15,7 @@ export const duplicateChecks=(ctx:Context):Check[]=>[
    const scopes=(await h.state()).duplicates!.scopes;const scope=scopes.find(item=>item.root===library);assert.ok(scope,'The destination library is offered: '+JSON.stringify(scopes));
    await h.action({type:'duplicatesScope',root:scope.root});
    await h.until('scope selected',`document.querySelector('[data-testid=duplicates-scope-select]').value===${JSON.stringify(scope.root)}`);
-   for(const level of [1,2,3]){await h.click(`[data-testid=duplicate-level-${level}]`);await h.until(`level ${level}`,`document.querySelector('[data-testid=duplicate-level-${level}]').getAttribute('aria-checked')==='true'`);}
+   for(const level of [1,2]){await h.click(`[data-testid=duplicate-level-${level}]`);await h.until(`level ${level}`,`document.querySelector('[data-testid=duplicate-level-${level}]').getAttribute('aria-checked')==='true'`);}
    await h.click('[data-testid=duplicate-level-2]');
    await h.click('[data-testid=duplicates-scan]');
    await h.waitFor('duplicate scan',async()=>(await h.state()).duplicates?.status==='ready',{timeoutMs:60000});

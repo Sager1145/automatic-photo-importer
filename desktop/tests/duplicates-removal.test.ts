@@ -29,23 +29,22 @@ test('the kept copy is the one in the organized structure, then the earliest imp
   assert.equal(chooseKeeper([file('a/x.jpg', { birth: 5, ctime: 9 }), file('b/y.jpg', { birth: 5, ctime: 3 })]).path, 'b/y.jpg', 'ctime breaks a birth tie');
   assert.equal(chooseKeeper([file('long/path/x.jpg'), file('s.jpg')]).path, 's.jpg');
 });
-test('each level splits groups into automatic and manual ones; the same EXIF with another size is always manual', () => {
+test('each of the two levels splits groups into automatic and manual ones; the same EXIF with another size is always manual', () => {
   const groups = [
     group('sha', 'sha', file('a.jpg'), file('b.jpg')),
     group('exif', 'exif', file('c.jpg'), file('d.jpg')),
     group('exif-size', 'size', file('e.jpg'), file('f.jpg', { size: 2000 })),
     group('similar', 'name', file('g.jpg'), file('h.jpg')),
   ];
-  const split = (level: 1 | 2 | 3) => Object.fromEntries(resolveGroups(groups, level).map(item => [item.group.id, item.auto]));
+  const split = (level: 1 | 2) => Object.fromEntries(resolveGroups(groups, level).map(item => [item.group.id, item.auto]));
   assert.deepEqual(split(1), { sha: false, exif: false, size: false, name: false });
   assert.deepEqual(split(2), { sha: true, exif: false, size: false, name: false });
-  assert.deepEqual(split(3), { sha: true, exif: false, size: false, name: false }, 'level 3 removes only proven-identical files by itself');
-  const three = resolveGroups(groups, 3);
-  assert.deepEqual(three.filter(item => item.needsDecision).map(item => item.group.id), ['exif', 'size', 'name']);
-  assert.deepEqual(summarize(three), { groups: 1, files: 1, bytes: 1000, undecided: 3, automatic: 1, manual: 3 });
-  assert.deepEqual(three.map(item => item.decided), [false, false, false, false]);
+  const level2 = resolveGroups(groups, 2);
+  assert.deepEqual(level2.filter(item => item.needsDecision).map(item => item.group.id), ['exif', 'size', 'name']);
+  assert.deepEqual(summarize(level2), { groups: 1, files: 1, bytes: 1000, undecided: 3, automatic: 1, manual: 3 });
+  assert.deepEqual(level2.map(item => item.decided), [false, false, false, false]);
   // The user's choice wins: another keeper, or keep everything; a path outside the group is ignored.
-  const chosen = resolveGroups(groups, 3, { sha: 'b.jpg', exif: 'all', size: 'f.jpg', name: 'nowhere.jpg' });
+  const chosen = resolveGroups(groups, 2, { sha: 'b.jpg', exif: 'all', size: 'f.jpg', name: 'nowhere.jpg' });
   assert.deepEqual(chosen.map(item => [item.keep, item.remove.map(removed => removed.path)]), [['b.jpg', ['a.jpg']], ['all', []], ['f.jpg', ['e.jpg']], [undefined, []]]);
   assert.deepEqual(chosen.map(item => item.decided), [true, true, true, false]);
 });
@@ -98,14 +97,14 @@ test('a SHA duplicate is set aside into the recovery store, can be undone, and i
   assert.equal(await fs.readFile(path.join(root, '2024/202405/Nikon Z f/DSC_0001.JPG'), 'utf8'), 'the same photo', 'the kept copy is untouched');
   assert.ok((await deleteOrganizationRecovery(root, again.id!)).files >= 0);
 });
-test('level 3 leaves an EXIF group with other bytes: nothing is removed without a decision', async t => {
+test('level 2 leaves an EXIF group with other bytes: nothing is removed without a decision', async t => {
   const root = await library(t);
   await write(root, '2024/202405/Nikon Z f/DSC_0003.JPG', 'AAAAAAAAAA'); await write(root, 'Imported/DSC_0003.JPG', 'BBBBBBBBBB');
   const { groups, companions } = await scan(root, { 'DSC_0003.JPG': exif() });
   assert.equal(groups[0]!.strength, 'exif');
-  assert.equal((await removeDuplicates(root, resolveGroups(groups, 3), companions)).id, undefined);
+  assert.equal((await removeDuplicates(root, resolveGroups(groups, 2), companions)).id, undefined);
   // A group handed over as automatic (no user decision) is still proven by content before anything moves.
-  const [undecided] = resolveGroups(groups, 3, { [groups[0]!.id]: '2024/202405/Nikon Z f/DSC_0003.JPG' });
+  const [undecided] = resolveGroups(groups, 2, { [groups[0]!.id]: '2024/202405/Nikon Z f/DSC_0003.JPG' });
   const removal = await removeDuplicates(root, [{ ...undecided!, auto: true, decided: false }], companions);
   assert.equal(removal.removed, 0); assert.equal(removal.report[0]!.reason, 'it no longer matches the copy to keep');
   assert.equal(await fs.readFile(path.join(root, 'Imported/DSC_0003.JPG'), 'utf8'), 'BBBBBBBBBB');
@@ -116,7 +115,7 @@ test('an EXIF duplicate with another SHA is set aside on the user\'s decision an
   const { groups, companions } = await scan(root, { 'DSC_0003.JPG': exif() });
   assert.equal(groups[0]!.strength, 'exif');
   const keep = (list: DuplicateGroup[]) => ({ [list[0]!.id]: '2024/202405/Nikon Z f/DSC_0003.JPG' });
-  const removal = await removeDuplicates(root, resolveGroups(groups, 3, keep(groups)), companions);
+  const removal = await removeDuplicates(root, resolveGroups(groups, 2, keep(groups)), companions);
   assert.deepEqual(removal.result!.errors, []); assert.equal(removal.removed, 1);
   assert.equal(await exists(path.join(root, 'Imported/DSC_0003.JPG')), false);
   assert.equal(await fs.readFile(path.join(root, '2024/202405/Nikon Z f/DSC_0003.JPG'), 'utf8'), 'AAAAAAAAAA');
@@ -126,7 +125,7 @@ test('an EXIF duplicate with another SHA is set aside on the user\'s decision an
   assert.equal(await fs.readFile(path.join(root, 'Imported/DSC_0003.JPG'), 'utf8'), 'BBBBBBBBBB');
   dropDuplicateStores();
   const next = await scan(root, { 'DSC_0003.JPG': exif() });
-  const second = await removeDuplicates(root, resolveGroups(next.groups, 3, keep(next.groups)), next.companions);
+  const second = await removeDuplicates(root, resolveGroups(next.groups, 2, keep(next.groups)), next.companions);
   assert.equal((await finalizeOrganization(root, second.id!)).removed, 1);
 });
 test('a lost kept copy stops the removal: a duplicate is never the last copy', async t => {
@@ -188,7 +187,7 @@ test('copies on different destinations are never paired by a removal', async t =
   await write(root, '2024/202405/cam/a.JPG', 'same'); await write(other, '2024/202405/cam/a.JPG', 'same');
   const first = await scan(root), second = await scan(other);
   assert.equal(first.groups.length + second.groups.length, 0);
-  assert.equal((await removeDuplicates(root, resolveGroups(first.groups, 3), first.companions)).id, undefined);
+  assert.equal((await removeDuplicates(root, resolveGroups(first.groups, 2), first.companions)).id, undefined);
   assert.equal(await exists(path.join(other, '2024/202405/cam/a.JPG')), true);
 });
 
