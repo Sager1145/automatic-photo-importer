@@ -98,3 +98,20 @@ test('main.ts wires the backup-scope review: refuses outside folders, uses the b
   assert.ok(/backupScope\?sourceFolders:state\.organizationFolders/.test(source),'chosen folders never leak into a backup-scope review');
   assert.ok(source.includes("request.backupScope)state.review.scope='backup'"),'the review remembers its scope for the problem-files toggle');
 });
+
+test('main.ts re-plans an open review for this run only with reviewNoMetadata, and the choice survives apply, job and retry',async()=>{
+  const source=await fs.readFile(path.join(__dirname,'../main.ts'),'utf8');
+  const shared=await fs.readFile(path.join(__dirname,'../shared.ts'),'utf8');
+  assert.match(shared,/\{type:'reviewNoMetadata';handling:NoMetadataHandling\}/);
+  const start=source.indexOf("case 'reviewFileDate':case 'reviewNoMetadata':");assert.ok(start>0,'one case serves both actions');
+  const body=source.slice(start,source.indexOf("\n  }",start));
+  assert.match(body,/if\(!reviewed\|\|busy\(\)\|\|state\.busyReview\)break;/);
+  assert.match(body,/input\.type==='reviewFileDate'\?'fileDate'/);
+  assert.match(body,/useFileDate:true,confirmed:true/);
+  assert.match(body,/useFileDate:false,confirmed:true,handling,prefs:\{\.\.\.request\.prefs,noMetadataHandling:handling\}/);
+  assert.doesNotMatch(body,/state\.preferences|savePreferences|patchPreferences/);
+  assert.match(source,/noMetadataHandling:prepared\.handling/);
+  assert.match(source,/prefs\.noMetadataHandling=job\.noMetadataHandling/);
+  assert.match(source,/prefs:jobPreferences\(job\)/);
+  assert.equal(source.match(/queued\.noMetadataHandling=failed\.noMetadataHandling/g)?.length,2,'both retry paths keep it');
+});

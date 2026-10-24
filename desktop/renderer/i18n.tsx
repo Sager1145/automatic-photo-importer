@@ -779,7 +779,9 @@ No camera|无相机|無相機|カメラなし
 They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you apply the review.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你应用审核之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你套用審核之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。確認を適用するまで何も始まりません。
 Show files|显示文件|顯示檔案|ファイルを表示
 Hide files|隐藏文件|隱藏檔案|ファイルを隠す
-Use file date instead|改用文件日期|改用檔案日期|ファイルの日付を使う
+Move to {folder}|移动到 {folder}|移動到 {folder}|{folder} に移動
+What to do with these files|如何处理这些文件|如何處理這些檔案|これらのファイルの扱い
+{count} unknown files will be filed by their file date.|{count} 个未知文件将按文件日期归档。|{count} 個未知檔案將依檔案日期歸檔。|不明なファイル {count} 件はファイルの日付で整理されます。
 1 unknown file was left where it is|有 1 个未知文件保留在原位|有 1 個未知檔案保留在原位|不明なファイル 1 件をそのままの場所に残しました
 {count} unknown files were left where they are|有 {count} 个未知文件保留在原位|有 {count} 個未知檔案保留在原位|不明なファイル {count} 件をそのままの場所に残しました
 1 unknown file was filed in the unknown files folder|有 1 个未知文件被放入未知文件文件夹|有 1 個未知檔案被放入未知檔案資料夾|不明なファイル 1 件を不明ファイル用フォルダーに入れました

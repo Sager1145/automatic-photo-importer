@@ -144,3 +144,16 @@ test('a started job asks first only when nothing else holds the review, and wait
   assert.equal(unknownDecision({...ask,othersRunning:true}),'defer','another job is running: a review cannot start over it');
   assert.equal(unknownDecision({...ask,reviewOpen:true,automatic:true}),'run');
 });
+
+test('a per-run preference override changes where unknown files go: the folder under the library, or nowhere',async t=>{
+  const f=await fixture(t);
+  await f.put(f.source,'DCIM/SNAP.PNG');await f.put(f.source,'DCIM/IMG_1.JPG');
+  const meta=async(file:string):Promise<Metadata>=>file.endsWith('SNAP.PNG')?{fields:{}}:known;
+  const planWith=(noMetadataHandling:'keep'|'folder'|'fileDate',useFileDate=false)=>{const {unknownRules,unknownDefault:_d,...rules}=ruleOptions({...defaultPreferences,mediaLayout:'flat',noMetadataHandling},useFileDate);return plan(f.source,[f.library],{...rules,backup:false,unknownRules},meta);};
+  const folder=await planWith('folder');
+  assert.equal(entries(folder).find(entry=>entry.source.endsWith('SNAP.PNG'))?.destination,path.join(f.library,'Unknown files/DCIM/SNAP.PNG'));
+  const keep=await planWith('keep');
+  assert.deepEqual(names(keep),['IMG_1.JPG']);assert.equal(keep.noMetadata?.handling,'keep');
+  const dated=await planWith('keep',true);
+  assert.equal(dated.noMetadata,undefined);assert.ok(names(dated).includes('SNAP.PNG'));
+});

@@ -4,20 +4,20 @@ import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
-import {NoMetadataNotice,NoMetadataSettings,groupInfo} from '../renderer/RootApp';
+import {NoMetadataNotice,NoMetadataSettings,groupInfo,noMetadataChoiceAction} from '../renderer/RootApp';
 import {defaultPreferences} from '../preferences';
 import type {NoMetadataSummary,Review} from '../shared';
 
 const files=(count:number)=>Array.from({length:count},(_,index)=>({path:`/x/f${index}.png`,relative:`DCIM/f${index}.png`,reason:index%2?'noCamera' as const:'noDate' as const}));
 const summary=(extra:Partial<NoMetadataSummary>={}):NoMetadataSummary=>({handling:'keep',folder:'Unknown files',count:2324,counts:{noDate:500,noCamera:1804,unreadable:20},files:files(8),...extra});
-const review=(noMetadata?:NoMetadataSummary,kind:Review['kind']='reorganize'):Pick<Review,'kind'|'source'|'noMetadata'|'destinationIndex'|'collectProblemFiles'>=>({kind,source:{id:'s',name:'Card',path:'/Volumes/Card',transport:'storage'} as Review['source'],noMetadata,destinationIndex:0});
+const review=(noMetadata?:NoMetadataSummary,kind:Review['kind']='reorganize'):Pick<Review,'kind'|'source'|'noMetadata'|'destinationIndex'|'collectProblemFiles'|'noMetadataHandling'|'fileDated'>=>({kind,source:{id:'s',name:'Card',path:'/Volumes/Card',transport:'storage'} as Review['source'],noMetadata,destinationIndex:0});
 const render=(value:ReturnType<typeof review>,language:'en'|'zh-Hans'|'zh-Hant'|'ja'='en',open=false)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(NoMetadataNotice,{review:value,act:()=>{},defaultOpen:open})}));
 
 test('the prompt shows the count, the count per reason and its two buttons as a warning, with no apply of its own',()=>{
   const html=render(review(summary()));
   assert.match(html,/2,324 unknown files will be left where they are\./);
   assert.match(html,/500 without a date, 1,804 without a camera, 20 unreadable/);
-  for(const label of ['Show files','Use file date instead'])assert.match(html,new RegExp(`>${label}<`));
+  for(const label of ['Show files','Move to Unknown files','Leave where they are','Use file date'])assert.match(html,new RegExp(`>${label}<`));
   assert.doesNotMatch(html,/>Continue</);
   assert.match(html,/class="no-metadata-notice"/);assert.doesNotMatch(html,/error/i);
   assert.match(html,/data-testid="no-metadata-notice"/);
@@ -42,11 +42,11 @@ test('the file list is virtualized and capped',()=>{
 test('the prompt and the warning groups are translated in all four languages',()=>{
   for(const language of languages.filter(item=>item!=='en')){
     const html=render(review(summary()),language);
-    assert.doesNotMatch(html,/Show files|Use file date instead|without a date|unknown files will/,language);
+    assert.doesNotMatch(html,/Show files|Move to|Use file date|without a date|unknown files will/,language);
   }
   const t=(language:typeof languages[number])=>createTranslator(language);
   for(const language of languages.filter(item=>item!=='en')){
-    for(const key of ['Show files','Use file date instead','{count} without a camera','Files with unknown metadata','Unknown files folder name','Leave where they are','Move to a folder','Use file date'])assert.notEqual(t(language)(key,{count:1}),key.replace('{count}','1'),`${language}: ${key}`);
+    for(const key of ['Show files','Move to {folder}','What to do with these files','{count} unknown files will be filed by their file date.','{count} without a camera','Files with unknown metadata','Unknown files folder name','Leave where they are','Move to a folder','Use file date'])assert.notEqual(t(language)(key,{count:1}),key.replace('{count}','1'),`${language}: ${key}`);
   }
   const info=(code:string)=>groupInfo(code,3,'Card',createTranslator('ja'),String);
   assert.match(info('kept-no-metadata').title,/3/);assert.notEqual(info('kept-no-metadata').title,'3 issues need attention');
@@ -66,4 +66,16 @@ test('the prompt layers below error layers',()=>{
   const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');
   const block=css.match(/\.no-metadata-notice\{[^}]*\}/)![0];
   assert.doesNotMatch(block,/z-index|position:(fixed|absolute)/);
+});
+
+test('the notice offers three choices for this review, marks the active one and dispatches reviewNoMetadata',()=>{
+  const pressed=(html:string)=>[...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*>([^<]*)<\/button>/g)].filter(item=>/Move to|Leave where|Use file date/.test(item[2]!)).map(item=>`${item[1]}:${item[2]}`);
+  assert.deepEqual(pressed(render(review(summary({handling:'folder',folder:'Not dated'})))),['true:Move to Not dated','false:Leave where they are','false:Use file date']);
+  assert.deepEqual(pressed(render(review(summary()))),['false:Move to Unknown files','true:Leave where they are','false:Use file date']);
+  assert.deepEqual(pressed(render({...review(undefined),fileDated:summary(),noMetadataHandling:'fileDate'})),['false:Move to Unknown files','false:Leave where they are','true:Use file date']);
+  assert.match(render({...review(undefined),fileDated:summary(),noMetadataHandling:'fileDate'}),/2,324 unknown files will be filed by their file date\./);
+  assert.match(render({...review(summary(),'import'),noMetadataHandling:'folder'}),/aria-pressed="true">Move to Unknown files/);
+  for(const handling of ['folder','keep','fileDate'] as const)assert.deepEqual(noMetadataChoiceAction(handling),{type:'reviewNoMetadata',handling});
+  const source=readFileSync(new URL('../renderer/RootApp.tsx',import.meta.url),'utf8');
+  assert.match(source,/noMetadataChoiceAction\(choice\.handling\)/);assert.doesNotMatch(source,/type: 'reviewFileDate'/);
 });

@@ -14,7 +14,7 @@ import {
   Save, ScanLine, Ellipsis, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Trash2, Usb, X, ArrowUpToLine,
   type LucideIcon,
 } from 'lucide-react';
-import type { Accent, Action, AppState, Appearance, BackupMode, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
+import type { Accent, Action, AppState, Appearance, BackupMode, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, NoMetadataHandling, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
 import { isRunning } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
@@ -1873,14 +1873,20 @@ export function VirtualList<T>({ items, render, rowHeight = 28, height = 224, la
   </div>;
 }
 
+/** What choosing each option for unknown files asks the app to do (for this review only). */
+export const noMetadataChoiceAction = (handling: NoMetadataHandling): Action => ({ type: 'reviewNoMetadata', handling });
+
 /** The warning before a job that leaves or files apart unknown files (no date, no camera, or unreadable). Nothing starts until Continue. */
-export function NoMetadataNotice({ review, act, busy = false, defaultOpen = false }: { review: Pick<NonNullable<AppState['review']>, 'kind' | 'source' | 'noMetadata' | 'destinationIndex' | 'collectProblemFiles'>; act: Dispatch; busy?: boolean; defaultOpen?: boolean }) {
+export function NoMetadataNotice({ review, act, busy = false, defaultOpen = false }: { review: Pick<NonNullable<AppState['review']>, 'kind' | 'source' | 'noMetadata' | 'destinationIndex' | 'collectProblemFiles' | 'noMetadataHandling' | 'fileDated'>; act: Dispatch; busy?: boolean; defaultOpen?: boolean }) {
   const { t, formatNumber } = useTranslation();
   const [listing, setListing] = useState(defaultOpen);
-  const found = review.noMetadata;
+  const found = review.noMetadata ?? review.fileDated;
   if (!found) return null;
   const organizing = review.kind === 'reorganize', count = formatNumber(found.count);
-  const headline = found.handling === 'keep'
+  const active: NoMetadataHandling = review.noMetadataHandling ?? found.handling;
+  const headline = active === 'fileDate'
+    ? t("{count} unknown files will be filed by their file date.", { count })
+    : active === 'keep'
     ? organizing ? t("{count} unknown files will be left where they are.", { count }) : t("{count} unknown files will not be copied; they stay on the source.", { count })
     : organizing ? t("{count} unknown files will be moved to {folder}.", { count, folder: found.folder }) : t("{count} unknown files will be copied to {folder}.", { count, folder: found.folder });
   const reasons = [
@@ -1889,12 +1895,16 @@ export function NoMetadataNotice({ review, act, busy = false, defaultOpen = fals
     found.counts.unreadable > 0 && t("{count} unreadable", { count: formatNumber(found.counts.unreadable) }),
   ].filter(Boolean).join(', ');
   const reasonName = (reason: 'noDate' | 'noCamera' | 'unreadable') => reason === 'noDate' ? t("No capture date") : reason === 'noCamera' ? t("No camera") : t("Could not be read");
-  const useFileDate = () => act({ type: 'reviewFileDate' });
+  const choices: { handling: NoMetadataHandling; label: string }[] = [
+    { handling: 'folder', label: t("Move to {folder}", { folder: found.folder }) },
+    { handling: 'keep', label: t("Leave where they are") },
+    { handling: 'fileDate', label: t("Use file date") },
+  ];
   return <section className="no-metadata-notice" role="alert" data-testid="no-metadata-notice">
     <div className="no-metadata-heading"><Icon icon={CircleAlert} size={18} /><div><strong>{headline}</strong><p>{reasons}</p><p>{t("They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you apply the review.")}</p></div></div>
     <div className="no-metadata-actions">
       <Button onClick={() => setListing(open => !open)} aria-expanded={listing}>{listing ? t("Hide files") : t("Show files")}</Button>
-      <Button disabled={busy} onClick={useFileDate}>{t("Use file date instead")}</Button>
+      <div className="segmented" role="group" aria-label={t("What to do with these files")}>{choices.map(choice => <button key={choice.handling} type="button" disabled={busy} aria-pressed={active === choice.handling} onClick={() => { if (active !== choice.handling) act(noMetadataChoiceAction(choice.handling)); }}>{choice.label}</button>)}</div>
     </div>
     {listing && <div data-testid="no-metadata-files"><VirtualList label={t("Unknown files")} items={found.files} render={item => <><span className="virtual-name" title={item.relative}>{item.relative}</span><span className="virtual-reason">{reasonName(item.reason)}</span></>} />{found.count > found.files.length && <p>{t("and {count} more", { count: formatNumber(found.count - found.files.length) })}</p>}</div>}
   </section>;
