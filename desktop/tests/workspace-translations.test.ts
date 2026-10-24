@@ -9,5 +9,5 @@ test('workspace translation rows cover all four locales and retain placeholder n
   const placeholders=(value:string)=>[...value.matchAll(/\{(.*?)\}/g)].map(match=>match[1]).sort();
   for(const translated of cells.slice(1))assert.deepEqual(placeholders(translated),placeholders(cells[0]!),line);
  }
- for(const key of ['Library tools','Files & folders','Recovery','Space held for undo','Open pending review'])assert.ok(keys.has(key),key);
+ for(const key of ['Library tools','Files & folders','Recovery & cleanup','Space held for undo','Open pending review'])assert.ok(keys.has(key),key);
 });

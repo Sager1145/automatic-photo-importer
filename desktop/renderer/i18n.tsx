@@ -728,7 +728,6 @@ Photos|照片|照片|写真
 {count} files · {size}|{count} 个文件 · {size}|{count} 個檔案 · {size}|{count} ファイル · {size}
 No photos found.|未找到照片。|未找到照片。|写真が見つかりません。
 No videos found.|未找到视频。|未找到影片。|動画が見つかりません。
-Existing files, new structure|现有文件，全新结构|現有檔案，全新結構|既存ファイルを新しい構造に
 Organization destination|整理目标|整理目的地|整理する保存先
 Scan existing files in|扫描此处的现有文件|掃描此處的現有檔案|既存ファイルのスキャン先
 New structure under|新结构的根目录|新結構的根目錄|新しい構造の保存先

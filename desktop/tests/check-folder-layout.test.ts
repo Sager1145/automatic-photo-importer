@@ -54,14 +54,12 @@ test('while checking the button is disabled and reads Checking, and the live lab
   }
 });
 
-test('a result with misplaced files makes Organize primary and Check again secondary; a clean one only offers Check again',async()=>{
+test('a result with misplaced files shows the count and Check again secondary; a clean one only offers Check again',async()=>{
   const {Organization}=await import('../renderer/RootApp');
   for(const language of languages){
     const t=createTranslator(language);
     const found=card(html(language,createElement(Organization,{state:stateOf({misplacedFiles:{'/Volumes/A006':result}}),act:()=>{},busy:false})));
-    assert.ok(/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?/.test(found)&&found.includes('data-testid="misplaced-files"'),`${language}: misplaced`);
-    const organize=found.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?<\/button>/g)?.find(item=>item.includes(t('Organize backup')))??'';
-    assert.ok(/button-primary/.test(organize),`${language}: Organize backup primary`);
+    assert.ok(found.includes('data-testid="misplaced-files"')&&!found.includes(t('Organize backup')),`${language}: misplaced count, no separate Organize button in the check`);
     const again=button(found,'check-backup-folder');
     assert.ok(/button-secondary/.test(again)&&again.includes(t('Check again')),`${language}: Check again secondary`);
     assert.ok(!found.includes('data-testid="backup-check-prompt"'),`${language}: no prompt with a result`);

@@ -37,13 +37,13 @@ test('queued backup jobs stay in Files mode when the next source run is Media',(
 });
 test('organization scope, affected roots and consequences precede one execution area',()=>{
  const value=state({preferences:normalizePreferences({destinations:['/backup'],mediaLayout:'video-root'}),organizationFolders:{'/backup':['2024','2025']}});
- const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{},onRecovery:()=>{}}));
+ const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{}}));
  const execute=html.indexOf('data-testid="organization-execute"');
  assert.ok(execute>html.indexOf('<li>2025</li>'));assert.ok(execute>html.indexOf('Organize: move, source removed'));
  assert.ok(execute>html.indexOf('/backup/videobackup'));assert.equal((html.match(/>Organize now</g)??[]).length,1);
  assert.equal((html.match(/>Review changes…</g)??[]).length,1);
  assert.doesNotMatch(html,/collect-problem-files-setting/);assert.doesNotMatch(html,/organization-recovery-heading/);
- assert.match(html,/Edit folder rules/);assert.match(html,/Recovery &amp; maintenance/);
+ assert.match(html,/Edit folder rules/);assert.doesNotMatch(html,/Recovery &amp; maintenance/);
  const top=render(createElement(TitlebarControls,{state:value,act:()=>{},page:'library',errorCount:0,onErrors:()=>{}}));
  assert.doesNotMatch(top,/Organize now|Scan for duplicates|Review changes/);assert.match(top,/show-errors/);
 });

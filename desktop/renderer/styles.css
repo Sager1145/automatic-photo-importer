@@ -1136,10 +1136,18 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 @media (hover:none){.source-row:hover{box-shadow:var(--shadow-1)}}
 
 /* Backup folder check */
-.backup-check{display:grid;gap:.75rem}
+.backup-check{display:grid;gap:.75rem;padding-top:.85rem;border-top:1px solid var(--separator,var(--fill-4))}
+.backup-check .card-title h4{margin:0;font-size:var(--text-body);font-weight:600}
+.backup-check .card-title p{margin:.15rem 0 0;font-size:var(--text-footnote);color:var(--label-secondary)}
+fieldset.organization-scope{border:0;padding:0;margin:0;min-width:0}
+.organization-scope legend{padding:0;margin-bottom:.4rem;font-weight:500}
+.organization-scope-options{display:flex;flex-wrap:wrap;gap:.4rem 1.1rem}
+.organization-scope-options label{display:inline-flex;align-items:center;gap:.4rem}
 .backup-check-prompt{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .85rem;padding:.7rem .85rem;border:1px solid var(--accent-border);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--label)}
 .backup-check-prompt>p{flex:1 1 14rem;margin:0;font-size:var(--text-footnote);font-weight:500}
-.backup-check-actions{display:flex;flex-wrap:wrap;gap:.5rem}
+.backup-check-actions{display:flex;align-items:center;gap:.5rem;min-width:0;max-width:100%}
+.backup-check-actions>.button{min-width:0;white-space:normal}
+.backup-check-actions>.button-icon-only{flex:none}
 .backup-check-note,.destination-note{margin:0;font-size:var(--text-footnote);color:var(--label-secondary)}
 .destination-check{align-self:flex-start;justify-self:start}
 .misplaced-files{display:flex;align-items:flex-start;gap:.45rem;margin:0;font-size:var(--text-footnote);font-weight:500;color:var(--warning)}

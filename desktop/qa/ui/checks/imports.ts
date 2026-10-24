@@ -21,12 +21,12 @@ const cardRows=`Array.from(document.querySelectorAll('article.source-row')).map(
 
 export const importChecks=(ctx:Context):Check[]=>[
  ...capacityLayoutChecks(),
- {id:'import-destination-action-row',stage:'imports',title:'Check folder layout and Open stay on the same row in the Import destination slot at large text sizes in every locale (Settings Storage no longer has the check; it moves to Library > Organize in a later phase)',covers:['related buttons share a row','destination action grouping','large text action layout'],run:async h=>{
+ {id:'import-destination-action-row',stage:'imports',title:'Check folder layout and its neighbour stay on the same row in the Import destination slot and in Library > Organize at large text sizes in every locale (Settings Storage no longer has the check)',covers:['related buttons share a row','destination action grouping','large text action layout'],run:async h=>{
   for(const width of [1000,1440]){await h.size(width,940);
    for(const language of ['en','zh-Hans','zh-Hant','ja'] as const)for(const textScale of [1,1.5,2]){
     await h.prefs({language,textScale});
-    for(const page of ['Files & folders'] as const){await h.nav(page);
-     const rows=await h.js<{sameLine:boolean;fits:boolean}[]>("[...document.querySelectorAll('.destination-check-actions')].filter(group=>group.checkVisibility()).flatMap(group=>{const check=group.querySelector('.destination-check'),open=group.querySelector('.button-icon-only');if(!check||!open)return [];const a=check.getBoundingClientRect(),b=open.getBoundingClientRect(),parent=group.closest('.destination-slot').getBoundingClientRect();return [{sameLine:Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=1&&b.left>=a.right,fits:a.left>=parent.left&&b.right<=parent.right}]})");
+    for(const page of ['Files & folders','Organization'] as const){await h.nav(page);
+     const rows=await h.js<{sameLine:boolean;fits:boolean}[]>("[...document.querySelectorAll('.destination-check-actions,.backup-check-actions')].filter(group=>group.checkVisibility()).flatMap(group=>{const check=group.querySelector('.destination-check,[data-testid=check-backup-folder]'),open=group.querySelector('.button-icon-only');if(!check||!open)return [];const a=check.getBoundingClientRect(),b=open.getBoundingClientRect(),parent=group.closest('.destination-slot,.backup-check').getBoundingClientRect();return [{sameLine:Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=1&&b.left>=a.right,fits:a.left>=parent.left&&b.right<=parent.right}]})");
      assert.ok(rows.length&&rows.every(row=>row.sameLine&&row.fits),`${page} ${language} ${textScale} ${width}: ${JSON.stringify(rows)}`);
     }
    }

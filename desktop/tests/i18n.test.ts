@@ -123,7 +123,7 @@ test('organization shows the exact selected folder scope and retains an explicit
     assert.ok(!selected.includes('settings-fieldset'),'Organization must not duplicate the Settings configurator');
     state.organizationFolders = {};
     const whole = render();
-    assert.ok(whole.includes(t('All folders on this destination will be scanned.')));
+    assert.ok(whole.includes(t('Whole destination')) && whole.includes(t('Chosen folders')) && !whole.includes('<li>2024</li>'));
     assert.ok(!whole.includes(t('Use whole destination')));
     state.busyReview = true; state.reviewProgress = {phase:'planning', step:'checking', completed:123, total:400, bytes:0, totalBytes:0, speed:0, file:'/Volumes/A006/2024/photo.JPG'};
     const checking = renderToStaticMarkup(createElement(I18nProvider, {language, children:createElement(ReviewPanel, {state,act:()=>{},inspect:()=>{}})}));
@@ -199,10 +199,10 @@ test('Organize now can queue behind imports and the desk dashboard lists organiz
   for(const language of languages){
     const t=createTranslator(language),render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const markup=render(createElement(Organization,{state,act:()=>{},busy:true}));
-    const primary=markup.match(/<button[^>]*class="button button-primary[^>]*>[\s\S]*?<\/button>/)?.[0];assert.ok(primary?.includes(t('Organize now')));assert.ok(!primary?.includes('disabled'));
+    const primary=markup.match(/<button[^>]*button-primary[^>]*data-testid="organize-now"[^>]*>[\s\S]*?<\/button>/)?.[0];assert.ok(primary?.includes(t('Organize now')));assert.ok(!primary?.includes('disabled'));
     const job={id:'organize',source:{id:'library',name:'Existing library',path:'/backup',transport:'folder' as const},phase:'queued' as const,detail:message('job.waitingForImports'),errors:[],backup:false,organization:true};state.jobs.push(job);
     const progress=render(createElement(ImportDashboard,{state,act:()=>{}}));assert.ok(progress.includes(t('Library organization')));assert.ok(progress.includes(t('Queued')));assert.ok(progress.includes(t(job.detail)));
-    const queued=render(createElement(Organization,{state,act:()=>{},busy:true}));assert.ok(queued.match(/<button[^>]*class="button button-primary[^>]*disabled/));state.jobs.pop();
+    const queued=render(createElement(Organization,{state,act:()=>{},busy:true}));assert.ok(queued.match(/<button[^>]*button-primary[^>]*data-testid="organize-now"[^>]*disabled/));state.jobs.pop();
   }
 });
 
@@ -603,14 +603,13 @@ test('the backup folder can be organized by button, shows misplaced files, and t
     const actions: unknown[] = [];
     const page = (state: Partial<AppState>, busy = false) => card(render(createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', ...state }, act: action => actions.push(action), busy })));
     const clean = page({ misplacedFiles: { '/Volumes/A006': { count: 0, bytes: 0, checkedAt: '2026-10-21T10:00:00Z' } } });
-    assert.ok(clean.includes(t('Organize backup')) && !/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup/.test(clean), `${language}: button is available, not emphasized, when in order`);
+    assert.ok(!/button-primary/.test(clean), `${language}: nothing is emphasized when in order`);
     assert.ok(clean.includes(t('Backup folder is in order.')), `${language}: in order`);
     assert.ok(!clean.includes('aria-pressed') && !clean.includes('segmented'), `${language}: no Off/Ask/Automatic modes`);
     const found = page({ misplacedFiles: misplaced });
     assert.ok(found.includes(t('{count} files outside your folder structure', { count: formatNumber(1234, language) })) && found.includes(formatBytes(5.6e9, language)), `${language}: count and size`);
-    assert.ok(/<button[^>]*button-primary/.test(found), `${language}: primary when files are misplaced`);
-    const running = page({ jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }] }, true);
-    assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*disabled/.test(running), `${language}: disabled while organizing`);
+    const running = render(createElement(Organization, { state: { preferences, sources: [], jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }], history: [], platform: 'darwin' }, act: () => {}, busy: true }));
+    assert.ok(/<button[^>]*data-testid="organize-now"[^>]*disabled/.test(running), `${language}: disabled while organizing`);
     const desk = render(createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     assert.ok(/data-testid="destination-misplaced"/.test(desk), `${language}: destination shows misplaced files on the desk`);
   }
