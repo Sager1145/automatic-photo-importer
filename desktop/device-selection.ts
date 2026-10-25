@@ -58,6 +58,12 @@ export class DeviceSelection {
     if(selected===undefined) return;
     this.selected.delete(from);this.selected.set(to,selected);
   }
+  /** A source removed from the app (a folder, or an ejected drive) leaves every list at once. */
+  drop(id:string):void {
+    this.selected.delete(id);
+    this.newDevices=this.newDevices.filter(item=>item!==id);
+    this.reconnectedDevices=this.reconnectedDevices.filter(item=>item!==id);
+  }
   /** The user saw the reconnection notice for one device, or for all of them. */
   dismissReconnected(id?:string):void {this.reconnectedDevices=id===undefined?[]:this.reconnectedDevices.filter(item=>item!==id);}
   /** Revoke any decision: the device is treated as new on its next connection. */

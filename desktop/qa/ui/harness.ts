@@ -15,14 +15,14 @@ import {createStallWatch} from '../stall-watch';
 
 export type Page='Import desk'|'Import'|'Files & folders'|'Drives'|'Library tools'|'Organization'|'Duplicates'|'Activity'|'Jobs'|'History'|'Issues'|'Recovery'|'Settings';
 export const pages:Page[]=['Import','Files & folders','Organization','Duplicates','Jobs','History','Issues','Recovery','Settings'];
-export const pageTitle=(page:Page)=>['Import desk','Import','Files & folders'].includes(page)?'Import':['Library tools','Organization','Duplicates'].includes(page)?'Library tools':['Activity','Jobs','History','Issues','Recovery'].includes(page)?'Activity':'Settings';
-export const settingsCategories=['general','storage','folders','defaults','files','devices','performance'];
+export const pageTitle=(page:Page)=>['Import desk','Import','Files & folders'].includes(page)?'Import':['Library tools','Organization','Duplicates','Recovery'].includes(page)?'Library tools':['Activity','Jobs','History','Issues'].includes(page)?'Activity':'Settings';
+export const settingsCategories=['general','storage','folders','defaults','files','devices','performance','diagnostics'];
 export const workspaceRoute=(page:Page):{page:string;tab?:string;mode?:string}=>{
  if(page==='Drives')return {page:'settings',tab:'settings-tab-devices'};
  if(page==='Settings')return {page:'settings'};
  if(['Import desk','Import','Files & folders'].includes(page))return {page:'desk',mode:page==='Import'?'import-mode-media':'import-mode-files'};
- if(['Library tools','Organization','Duplicates'].includes(page))return {page:'library',tab:page==='Duplicates'?'library-duplicates':'library-organize'};
- return {page:'activity',tab:'activity-'+(({History:'history',Issues:'issues',Recovery:'recovery'} as Record<string,string>)[page]??'jobs')};
+ if(['Library tools','Organization','Duplicates','Recovery'].includes(page))return {page:'library',tab:page==='Duplicates'?'library-duplicates':page==='Recovery'?'library-recovery':'library-organize'};
+ return {page:'activity',tab:'activity-'+(({History:'history',Issues:'issues'} as Record<string,string>)[page]??'jobs')};
 };
 export type Stage='boot'|'navigation'|'imports'|'organization'|'duplicates'|'settings'|'errors'|'recovery'|'rules'|'stress'|'final';
 export const stages:Stage[]=['boot','navigation','imports','organization','duplicates','settings','errors','recovery','rules','stress','final'];

@@ -67,3 +67,51 @@ test('organization planning reports files checked and files read out of their to
   assert.ok(reading.every(item=>item.total===2));assert.deepEqual([...new Set(reading.map(item=>item.count))].sort(),[0,1,2]);
   assert.equal(reading.at(-1)!.count,2);assert.equal(reading.at(-1)!.bytes,reading.at(-1)!.totalBytes);
 });
+
+test('a backup-scope review plans only files under the backup folder, never the rest of the destination',async t=>{
+  const {root,put}=await fixture(t);
+  const destination=path.dirname(root);
+  const stray=await put('wrong place/A.JPG');
+  const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
+  // With a separate video root, main.ts opens a 'backup' review on the destination with sourceFolders = the backup folders; the whole-destination review has none.
+  const scoped=(await plan(destination,[root],{...options,reorganize:true,sourceFolders:[path.basename(root)]},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.deepEqual(scoped,[stray]);
+  const whole=(await plan(destination,[destination],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.ok(whole.includes(outside),'the whole destination would have planned the outside file');
+});
+
+test('with the default layout the backup library is the backup folder itself, so a review plans only files under it',async t=>{
+  const {root,put}=await fixture(t);
+  const destination=path.dirname(root);
+  const stray=await put('wrong place/A.JPG');
+  const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
+  // backupLibrary returns source=<destination>/<basePath> and no sourceFolders for this layout; that source is planned directly.
+  const planned=(await plan(root,[root],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
+  assert.deepEqual(planned,[stray]);
+  assert.ok(!planned.includes(outside));
+});
+
+test('main.ts wires the backup-scope review: refuses outside folders, uses the backup library folders, keeps the scope for re-plans',async()=>{
+  const source=await fs.readFile(path.join(__dirname,'../main.ts'),'utf8');
+  const start=source.indexOf("case 'previewOrganization':"),block=source.slice(start,source.indexOf("case 'applyReview'",start));
+  assert.ok(block.includes("input.scope==='backup'")&&block.includes('backupLibrary(prefs)')&&block.includes("error.backupFolderOutside")&&block.includes('library.sourceFolders'),block);
+  assert.ok(/backupScope\?sourceFolders:state\.organizationFolders/.test(source),'chosen folders never leak into a backup-scope review');
+  assert.ok(source.includes("request.backupScope)state.review.scope='backup'"),'the review remembers its scope for the problem-files toggle');
+});
+
+test('main.ts re-plans an open review for this run only with reviewNoMetadata, and the choice survives apply, job and retry',async()=>{
+  const source=await fs.readFile(path.join(__dirname,'../main.ts'),'utf8');
+  const shared=await fs.readFile(path.join(__dirname,'../shared.ts'),'utf8');
+  assert.match(shared,/\{type:'reviewNoMetadata';handling:NoMetadataHandling\}/);
+  const start=source.indexOf("case 'reviewFileDate':case 'reviewNoMetadata':");assert.ok(start>0,'one case serves both actions');
+  const body=source.slice(start,source.indexOf("\n  }",start));
+  assert.match(body,/if\(!reviewed\|\|busy\(\)\|\|state\.busyReview\)break;/);
+  assert.match(body,/input\.type==='reviewFileDate'\?'fileDate'/);
+  assert.match(body,/useFileDate:true,confirmed:true/);
+  assert.match(body,/useFileDate:false,confirmed:true,handling,prefs:\{\.\.\.request\.prefs,noMetadataHandling:handling\}/);
+  assert.doesNotMatch(body,/state\.preferences|savePreferences|patchPreferences/);
+  assert.match(source,/noMetadataHandling:prepared\.handling/);
+  assert.match(source,/prefs\.noMetadataHandling=job\.noMetadataHandling/);
+  assert.match(source,/prefs:jobPreferences\(job\)/);
+  assert.equal(source.match(/queued\.noMetadataHandling=failed\.noMetadataHandling/g)?.length,2,'both retry paths keep it');
+});

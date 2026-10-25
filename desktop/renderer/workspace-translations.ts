@@ -10,11 +10,12 @@ File by date and camera rules.|按日期和相机规则归档。|依日期與相
 Keep the original folder structure.|保留原始文件夹结构。|保留原始資料夾結構。|元のフォルダー構造を保ちます。
 A review is waiting in its workspace.|有一项预览正在其工作区中等待确认。|有一項預覽正在其工作區中等待確認。|ワークスペースに確認待ちのプレビューがあります。
 Open pending review|打开待确认预览|開啟待確認預覽|確認待ちのプレビューを開く
-Jobs|任务|工作|ジョブ
 Issues|问题|問題|問題
-Recovery|恢复|復原|復元
 Maintenance|维护|維護|メンテナンス
-Recovery & maintenance|恢复与维护|復原與維護|復元とメンテナンス
+Recovery & cleanup|恢复与清理|復原與清理|復元とクリーンアップ
+Organize scope|整理范围|整理範圍|整理の対象
+Whole destination|整个目标位置|整個目的位置|保存先全体
+Chosen folders|所选文件夹|所選資料夾|選んだフォルダー
 No jobs yet.|尚无任务。|尚無工作。|ジョブはまだありません。
 Choose folders to back up.|选择要备份的文件夹。|選擇要備份的資料夾。|バックアップするフォルダーを選びます。
 Change destinations|更改目标位置|更改目的位置|保存先を変更
@@ -30,4 +31,14 @@ Start all selected ({count})|开始所有已选来源（{count}）|開始所有�
 Starts all selected media and folder sources. Existing jobs keep their modes.|启动所有已选媒体和文件夹来源。现有任务保留各自的模式。|啟動所有已選媒體和資料夾來源。現有工作保留各自的模式。|選択したメディアとフォルダーのソースをすべて開始します。既存のジョブのモードは変わりません。
 {name}: backup preview|{name}：备份预览|{name}：備份預覽|{name}：バックアップのプレビュー
 Backup: copy, source untouched|备份：复制，来源保持不变|備份：複製，來源保持不變|バックアップ：コピー、元のファイルはそのまま
+More actions|更多操作|更多操作|その他の操作
+More actions for {name}|{name} 的更多操作|{name} 的更多操作|{name} のその他の操作
+Queue|队列|佇列|キュー
+Stop everything|全部停止|全部停止|すべて停止
+More stop options|更多停止选项|更多停止選項|その他の停止オプション
+Stop {name}|停止 {name}|停止 {name}|{name} を停止
+Show|显示|顯示|表示
+Show {name}|显示 {name}|顯示 {name}|{name} を表示
+Show in Library|在资料库中显示|在資料庫中顯示|ライブラリで表示
+Show on the Import desk|在导入台中显示|在匯入台中顯示|読み込みデスクで表示
 `;

@@ -123,7 +123,7 @@ test('organization shows the exact selected folder scope and retains an explicit
     assert.ok(!selected.includes('settings-fieldset'),'Organization must not duplicate the Settings configurator');
     state.organizationFolders = {};
     const whole = render();
-    assert.ok(whole.includes(t('All folders on this destination will be scanned.')));
+    assert.ok(whole.includes(t('Whole destination')) && whole.includes(t('Chosen folders')) && !whole.includes('<li>2024</li>'));
     assert.ok(!whole.includes(t('Use whole destination')));
     state.busyReview = true; state.reviewProgress = {phase:'planning', step:'checking', completed:123, total:400, bytes:0, totalBytes:0, speed:0, file:'/Volumes/A006/2024/photo.JPG'};
     const checking = renderToStaticMarkup(createElement(I18nProvider, {language, children:createElement(ReviewPanel, {state,act:()=>{},inspect:()=>{}})}));
@@ -178,14 +178,15 @@ test('global controls stay independent of pages and source error details are iso
     const t=createTranslator(language);
     const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const controls=render(createElement(TitlebarControls,{state,act:()=>{},errorCount:errors.length,onErrors:()=>{}}));
-    for(const label of ['Start all selected','Stop imports','Automatic','All errors'])assert.ok(controls.includes(t(label)));
+    for(const label of ['Start all selected','Stop imports','All errors'])assert.ok(controls.includes(t(label)));
+    assert.ok(!controls.includes('global-automatic')&&!controls.includes('titlebar-overview'));
     assert.ok(!controls.includes('show-progress'));
     assert.ok(!controls.includes('Preview photo'));
     const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
     assert.equal((desk.match(/<article data-source-id=/g)??[]).length,2);
     assert.ok(desk.includes(`aria-label="${t('Import dashboard')}"`),'The dashboard lives on the Import desk');
     for(const error of errors)assert.ok(!desk.includes(t(error.message)));
-    const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{},onClose:()=>{}}));
+    const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{}}));
     for(const error of errors)assert.ok(panel.includes(t(error.message)));
     assert.ok(panel.includes('Card one'));
   }
@@ -198,10 +199,10 @@ test('Organize now can queue behind imports and the desk dashboard lists organiz
   for(const language of languages){
     const t=createTranslator(language),render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
     const markup=render(createElement(Organization,{state,act:()=>{},busy:true}));
-    const primary=markup.match(/<button[^>]*class="button button-primary[^>]*>[\s\S]*?<\/button>/)?.[0];assert.ok(primary?.includes(t('Organize now')));assert.ok(!primary?.includes('disabled'));
+    const primary=markup.match(/<button[^>]*button-primary[^>]*data-testid="organize-now"[^>]*>[\s\S]*?<\/button>/)?.[0];assert.ok(primary?.includes(t('Organize now')));assert.ok(!primary?.includes('disabled'));
     const job={id:'organize',source:{id:'library',name:'Existing library',path:'/backup',transport:'folder' as const},phase:'queued' as const,detail:message('job.waitingForImports'),errors:[],backup:false,organization:true};state.jobs.push(job);
     const progress=render(createElement(ImportDashboard,{state,act:()=>{}}));assert.ok(progress.includes(t('Library organization')));assert.ok(progress.includes(t('Queued')));assert.ok(progress.includes(t(job.detail)));
-    const queued=render(createElement(Organization,{state,act:()=>{},busy:true}));assert.ok(queued.match(/<button[^>]*class="button button-primary[^>]*disabled/));state.jobs.pop();
+    const queued=render(createElement(Organization,{state,act:()=>{},busy:true}));assert.ok(queued.match(/<button[^>]*button-primary[^>]*data-testid="organize-now"[^>]*disabled/));state.jobs.pop();
   }
 });
 
@@ -212,7 +213,7 @@ test('format problems and metadata read issues are isolated in All errors; ackno
  const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
  const desk=render(createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
  assert.ok(!desk.includes('unknown-files-prompt'));assert.ok(!desk.includes('Invalid file format'));
- const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{},onClose:()=>{}}));
+ const panel=render(createElement(ActivityPanel,{state,errors,act:()=>{}}));
  assert.ok(panel.includes('unknown-files-prompt'));assert.ok(panel.includes('Invalid file format'));assert.ok(panel.includes('BROKEN.NEF'));
  state.sessionUnknownRules={dat:null};assert.equal(collectErrors(state).length,1);assert.equal(state.preferences.unknownRules.dat,undefined,'Session choices must not become persistent rules');
  state.preferences.unknownRules.dat=null;assert.equal(collectErrors(state).length,1);
@@ -220,7 +221,7 @@ test('format problems and metadata read issues are isolated in All errors; ackno
 
 test('metadata disclosure does not repeat parser error messages outside the error panel',async()=>{
  const {MetadataDialog}=await import('../renderer/RootApp');
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload'}},fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}},act:()=>{},onClose:()=>{}})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(MetadataDialog,{preview:{path:'/card/broken.NEF',loading:false,metadata:{fields:{'ExifTool:Error':'Invalid media payload'}},fields:{'ExifTool:Error':'Invalid media payload','EXIF:Model':'Camera'}},onClose:()=>{},act:()=>{}})}));
  assert.ok(!markup.includes('Invalid media payload'));assert.ok(markup.includes('EXIF:Model'));
 });
 
@@ -337,8 +338,8 @@ test('new drives prompt for a choice, unselected drives are excluded on their ca
     const usbCard = desk.match(/<article data-source-id="usb"[\s\S]*?<\/article>/)?.[0] ?? '';
     const cardCard = desk.match(/<article data-source-id="card"[\s\S]*?<\/article>/)?.[0] ?? '';
     assert.ok(usbCard.includes('source-unselected') && usbCard.includes(html(t("Not selected · won't be imported"))), `${language}: excluded card is marked`);
-    assert.ok(/data-testid="source-select" aria-pressed="false"/.test(usbCard) && usbCard.includes(t('Select')), `${language}: unselected drive offers Select`);
-    assert.ok(/data-testid="source-select" aria-pressed="true"/.test(cardCard) && cardCard.includes(t('Selected')) && cardCard.includes('source-included'), `${language}: selected drive is marked`);
+    assert.ok(/<input[^>]*data-testid="source-select"/.test(usbCard) && !/<input[^>]*data-testid="source-select"[^>]*checked/.test(usbCard), `${language}: unselected drive has an unchecked box`);
+    assert.ok(/<input[^>]*data-testid="source-select"[^>]*checked/.test(cardCard) && cardCard.includes('source-included'), `${language}: selected drive is marked`);
     assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?<\/svg>[^<]*<\/button>/.test(usbCard) && (usbCard.match(/<button[^>]*disabled/g) ?? []).length >= 3, `${language}: scan, review and import are disabled`);
     const controls = render(createElement(TitlebarControls, { state, act, errorCount: 0, onErrors: () => {} }));
     assert.ok(controls.includes(t('Start all selected ({count})', { count: 1 })), `${language}: Start counts only selected drives`);
@@ -585,7 +586,7 @@ test('errors are explained in plain language, grouped by drive, and keep the tec
   assert.ok(errors.every(error => error.kind === 'source' && error.sourceId === 'card'));
   for (const language of languages) {
     const t = createTranslator(language);
-    const panel = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ActivityPanel, { state, errors, act: () => {}, onClose: () => {}, onOpenSource: () => {} }) }));
+    const panel = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ActivityPanel, { state, errors, act: () => {}, onOpenSource: () => {} }) }));
     assert.ok(panel.includes(t('The drive reported a read or write error.')) && panel.includes(t('Free up space or choose another destination.')), `${language}: plain explanations`);
     assert.ok(panel.includes(t('{count} issues', { count: 2 })) && panel.includes(t('Show drive')), `${language}: grouped with a jump to the drive`);
     assert.ok(panel.includes('EIO: i/o error, read /card/DSC_1.NEF') && panel.includes(t('Copy all details')), `${language}: technical details kept`);
@@ -602,14 +603,13 @@ test('the backup folder can be organized by button, shows misplaced files, and t
     const actions: unknown[] = [];
     const page = (state: Partial<AppState>, busy = false) => card(render(createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', ...state }, act: action => actions.push(action), busy })));
     const clean = page({ misplacedFiles: { '/Volumes/A006': { count: 0, bytes: 0, checkedAt: '2026-10-21T10:00:00Z' } } });
-    assert.ok(clean.includes(t('Organize backup')) && !/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup/.test(clean), `${language}: button is available, not emphasized, when in order`);
+    assert.ok(!/button-primary/.test(clean), `${language}: nothing is emphasized when in order`);
     assert.ok(clean.includes(t('Backup folder is in order.')), `${language}: in order`);
     assert.ok(!clean.includes('aria-pressed') && !clean.includes('segmented'), `${language}: no Off/Ask/Automatic modes`);
     const found = page({ misplacedFiles: misplaced });
     assert.ok(found.includes(t('{count} files outside your folder structure', { count: formatNumber(1234, language) })) && found.includes(formatBytes(5.6e9, language)), `${language}: count and size`);
-    assert.ok(/<button[^>]*button-primary/.test(found), `${language}: primary when files are misplaced`);
-    const running = page({ jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }] }, true);
-    assert.ok(/<button[^>]*disabled[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*disabled/.test(running), `${language}: disabled while organizing`);
+    const running = render(createElement(Organization, { state: { preferences, sources: [], jobs: [{ id: 'o', source: { id: 'l', name: 'Backup organization', path: '/Volumes/A006', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false }], history: [], platform: 'darwin' }, act: () => {}, busy: true }));
+    assert.ok(/<button[^>]*data-testid="organize-now"[^>]*disabled/.test(running), `${language}: disabled while organizing`);
     const desk = render(createElement(ImportDesk, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', misplacedFiles: misplaced }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     assert.ok(/data-testid="destination-misplaced"/.test(desk), `${language}: destination shows misplaced files on the desk`);
   }
@@ -741,7 +741,7 @@ test('Settings is organized into categories with live summaries, one open panel,
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: true, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {},
     rememberedDevices: { card: { name: 'Card', lastSelected: '2026-10-20T10:00:00Z' } } };
   const state: AppState = { preferences, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [{ path: '/Volumes/A006', available: true, total: 2e12, free: 8e11 }] };
-  const order = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance'];
+  const order = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance', 'diagnostics'];
   for (const language of languages) {
     const t = createTranslator(language), render = (busy = false) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(SettingsPage, { state, act: () => {}, busy }) }));
     const markup = render();
@@ -749,18 +749,20 @@ test('Settings is organized into categories with live summaries, one open panel,
     assert.equal((markup.match(/role="tab"[^>]*aria-selected="true"|aria-selected="true"[^>]*role="tab"/g) ?? []).length, 1, `${language}: one selected category`);
     const tab = (id: string) => markup.split(`data-testid="settings-tab-${id}"`)[1]?.split('</button>')[0] ?? '';
     const panel = (html: string, id: string) => html.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0] ?? '';
-    assert.ok(tab('defaults').includes(t('Automatic')), `${language}: defaults summary`);
+    assert.ok(tab('defaults').includes(t('Automatic')) && tab('defaults').includes(t('Importing')), `${language}: defaults summary`);
+    assert.ok(tab('diagnostics').includes(t('Normal')), `${language}: diagnostics summary is the log level`);
     assert.ok(tab('performance').includes(t('{count} at once', { count: '2' })), `${language}: performance summary`);
     assert.ok(tab('storage').includes('A006'), `${language}: storage summary`);
     assert.ok(tab('folders').includes('2026') && tab('folders').includes('202610'), `${language}: folders summary`);
     assert.ok(tab('devices').includes(t('{count} remembered', { count: '1' })), `${language}: devices summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
     assert.ok(!/<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-storage"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
-    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Backup folder'], folders: ['Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying'], files: ['Collect problem files', 'Remove macOS ._ files'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once', 'Diagnostics'] };
+    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Backup folder', 'Drive backups'], folders: ['Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying'], files: ['Collect problem files', 'Remove macOS ._ files', 'Same name, different content'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once'], diagnostics: ['Diagnostics', 'Log detail'] };
     for (const [id, labels] of Object.entries(controls)) for (const label of labels) assert.ok(panel(markup, id).includes(t(label)), `${language}: ${id}: ${label}`);
     assert.ok(!markup.includes('data-testid="residue-cleanup"'), `${language}: maintenance belongs to Activity`);
     const busy = render(true);
     for (const id of ['storage', 'folders', 'defaults', 'files', 'performance']) assert.ok(/<fieldset[^>]*disabled/.test(panel(busy, id)), `${language}: ${id} policy lock`);
+    assert.ok(!/<fieldset/.test(panel(busy, 'diagnostics')), `${language}: diagnostics stay usable`);
     assert.ok(!/<fieldset[^>]*disabled/.test(panel(busy, 'general')) && !/<input[^>]*id="settings-parallel"[^>]*disabled/.test(panel(busy, 'performance')), `${language}: general and live controls stay usable`);
   }
 });
@@ -780,18 +782,17 @@ test('queue positions follow the published start order, so a drive moved to the 
   }
 });
 
-test('the Import overview can be hidden from the desk and turned back on in Settings', async () => {
+test('the Import overview collapses to a slim header on the desk and no longer has a Settings switch', async () => {
   const { ImportDesk, SettingsPage } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const desk = (showDashboard?: boolean) => render(createElement(ImportDesk, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     assert.ok(desk().includes('class="import-dashboard"') && desk().includes(`aria-label="${t('Hide the import overview')}"`), `${language}: shown by default with a hide button`);
-    assert.ok(!desk(false).includes('class="import-dashboard"'), `${language}: can be hidden`);
-    assert.ok(desk(false).includes(`aria-label="${t('Show the import overview')}"`) && !desk().includes('data-testid="show-dashboard-desk"'), `${language}: the desk offers to show it again only while hidden`);
-    const settings = (showDashboard?: boolean) => render(createElement(SettingsPage, { state: { preferences: { ...preferences, showDashboard }, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: true })).match(/data-testid="show-dashboard"[\s\S]*?<\/label>/)?.[0] ?? '';
-    assert.ok(settings().includes(t('Show the import overview')) && /checked=""/.test(settings()) && !/disabled/.test(settings()), `${language}: Settings switch, on by default, usable while importing`);
-    assert.ok(!/checked=""/.test(settings(false)), `${language}: off when hidden`);
+    assert.ok(!desk(false).includes('dashboard-metrics') && desk(false).includes('import-dashboard-collapsed'), `${language}: collapsed to a slim header`);
+    assert.ok(desk(false).includes(`aria-label="${t('Show the import overview')}"`) && !desk().includes('data-testid="show-dashboard-desk"') && !desk(false).includes('data-testid="show-dashboard-desk"'), `${language}: the same header toggle reopens it`);
+    const settings = render(createElement(SettingsPage, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin' }, act: () => {}, busy: true }));
+    assert.ok(!settings.includes('data-testid="show-dashboard"'), `${language}: no Settings switch for the overview`);
   }
 });
 

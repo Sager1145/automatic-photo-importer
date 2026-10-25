@@ -71,7 +71,7 @@ test('the All errors panel renders at most 250 rows for 100,000 errors',async()=
  for(let index=0;index<100_000;index++)recordIssue(job,index%3===0?leftover(index):index%3===1?{code:'copy-failed',severity:'error',path:`/a/${index}.NEF`}:{code:'unreadable',severity:'warning',path:`/b/${index}.NEF`});
  const value=state([job]);value.errorLog=new ErrorLog().update(gatherErrors(value));
  const errors=collectErrors(value);
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ActivityPanel,{state:value,errors,act:()=>{},onClose:()=>{}})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ActivityPanel,{state:value,errors,act:()=>{}})}));
  const rows=(markup.match(/<li /g)??[]).length;
  assert.ok(rows<=250,`${rows} rows`);assert.equal((markup.match(/data-testid="error-group"/g)??[]).length,3);
  assert.ok(markup.includes('33,334 temporary copies were left on'),'plain-language title');

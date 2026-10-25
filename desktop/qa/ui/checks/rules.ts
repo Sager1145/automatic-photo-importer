@@ -99,7 +99,7 @@ export const ruleChecks=():Check[]=>[
  }},
  {id:'rules-stage-colours',stage:'rules',title:'Each step colours its bar with its own stage colour, in light and dark, and the passed steps stay layered beneath it',covers:['per-step colours','stage-coloured layered bars','light and dark mode'],skip:needsHook,run:async h=>{
   // An organization runs through every stage (an import card shows only scan, copy and verify), so its card is stepped through them.
-  const organizing=(await busyDesk(h))[3]!;await h.nav('Jobs');const orgCard=`article.source-row[data-source-id=${JSON.stringify(organizing.source.id)}]`;
+  const organizing=(await busyDesk(h))[3]!;await h.nav('Jobs');const orgCard=`li.queue-row[data-source-id=${JSON.stringify(organizing.source.id)}]`;
   const steps:[Progress['phase'],Progress['step']|undefined,string][]=[['planning','listing','scan'],['planning','checking','read'],['planning','comparing','compare'],['copying','moving','move'],['copying',undefined,'copy'],['verifying',undefined,'verify'],['copying','tidying','tidy'],['copying','deleting','delete']];
   for(const appearance of ['light','dark'] as const){
    await h.prefs({appearance});
@@ -171,7 +171,7 @@ export const ruleChecks=():Check[]=>[
    const take=async(name:string)=>{await h.settle();for(const item of await h.probe(lowContrast,4.5))issues.push({appearance,view:name,...item});const file=path.join(appearance,name.replace(/[^\w-]+/g,'-').toLowerCase()+'.png');await h.capture(path.join(gallery,file));index.push(file);};
    await eachView(h,view=>take(view));
    await h.nav('Import desk');await busyDesk(h);await take('import-desk-busy');
-   h.hooks!.addJobs(groupedErrorJobs(1200,3));await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");await take('all-errors-grouped');
+   h.hooks!.addJobs(groupedErrorJobs(1200,3));await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");await take('all-errors-grouped');
    await h.closeOverlays();h.hooks!.clear();
    await h.nav('Settings');await h.settingsTab('general');
    for(const accent of ['ocean','forest','coral'] as const){await h.prefs({accent});await take(`settings-general-${accent}`);}

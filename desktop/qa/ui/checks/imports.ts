@@ -21,29 +21,29 @@ const cardRows=`Array.from(document.querySelectorAll('article.source-row')).map(
 
 export const importChecks=(ctx:Context):Check[]=>[
  ...capacityLayoutChecks(),
- {id:'import-destination-action-row',stage:'imports',title:'Check folder layout and Open stay on the same row in Import and Settings at large text sizes in every locale',covers:['related buttons share a row','destination action grouping','large text action layout'],run:async h=>{
+ {id:'import-destination-action-row',stage:'imports',title:'Check folder layout and its neighbour stay on the same row in the Import destination slot and in Library > Organize at large text sizes in every locale (Settings Storage no longer has the check)',covers:['related buttons share a row','destination action grouping','large text action layout'],run:async h=>{
   for(const width of [1000,1440]){await h.size(width,940);
    for(const language of ['en','zh-Hans','zh-Hant','ja'] as const)for(const textScale of [1,1.5,2]){
     await h.prefs({language,textScale});
-    for(const page of ['Files & folders','Settings'] as const){await h.nav(page);if(page==='Settings')await h.settingsTab('storage');
-     const rows=await h.js<{sameLine:boolean;fits:boolean}[]>("[...document.querySelectorAll('.destination-check-actions')].filter(group=>group.checkVisibility()).flatMap(group=>{const check=group.querySelector('.destination-check'),open=group.querySelector('.button-icon-only');if(!check||!open)return [];const a=check.getBoundingClientRect(),b=open.getBoundingClientRect(),parent=group.closest('.destination-slot').getBoundingClientRect();return [{sameLine:Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=1&&b.left>=a.right,fits:a.left>=parent.left&&b.right<=parent.right}]})");
+    for(const page of ['Files & folders','Organization'] as const){await h.nav(page);
+     const rows=await h.js<{sameLine:boolean;fits:boolean}[]>("[...document.querySelectorAll('.destination-check-actions,.backup-check-actions')].filter(group=>group.checkVisibility()).flatMap(group=>{const check=group.querySelector('.destination-check,[data-testid=check-backup-folder]'),open=group.querySelector('.button-icon-only');if(!check||!open)return [];const a=check.getBoundingClientRect(),b=open.getBoundingClientRect(),parent=group.closest('.destination-slot,.backup-check').getBoundingClientRect();return [{sameLine:Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=1&&b.left>=a.right,fits:a.left>=parent.left&&b.right<=parent.right}]})");
      assert.ok(rows.length&&rows.every(row=>row.sameLine&&row.fits),`${page} ${language} ${textScale} ${width}: ${JSON.stringify(rows)}`);
     }
    }
   }
  }},
- {id:'import-compact-layout',stage:'imports',title:'Import uses a horizontal header and destination rail; source cards retain capacity and stage information in a compact layout',covers:['compact Import spacing','horizontal space','full-width capacity analysis','source density'],run:async h=>{
+ {id:'import-compact-layout',stage:'imports',title:'Import uses a horizontal header and a destination strip below full-width source cards; source cards retain capacity and stage information in a compact layout',covers:['compact Import spacing','horizontal space','full-width capacity analysis','source density'],run:async h=>{
   await h.size(1440,940);await h.prefs({textScale:1.25,sourceLayout:'list',showDashboard:true});await h.nav('Import');await h.nav('Files & folders');
   await h.js("document.querySelectorAll('details.workspace-details').forEach(details=>details.open=false)");await h.settle();
-  const layout=await h.js<{top:number;height:number;sideBySide:boolean;capacityVisible:boolean;stagesVisible:boolean}>("(()=>{const card=document.querySelector('article.source-row'),r=card.getBoundingClientRect(),sources=document.querySelector('.source-workspace').getBoundingClientRect(),destination=document.querySelector('.destination-bay').getBoundingClientRect();return {top:r.top,height:r.height,sideBySide:destination.left>=sources.right+8,capacityVisible:card.querySelector('[data-testid=storage-capacity]').checkVisibility(),stagesVisible:card.querySelector('[data-testid=source-steps]').checkVisibility()}})()");
+  const layout=await h.js<{top:number;height:number;fullWidth:boolean;stripBelow:boolean;capacityVisible:boolean;stagesVisible:boolean}>("(()=>{const card=document.querySelector('article.source-row'),r=card.getBoundingClientRect(),sources=document.querySelector('.source-workspace').getBoundingClientRect(),destination=document.querySelector('.destination-strip').getBoundingClientRect();return {top:r.top,height:r.height,fullWidth:r.width>=sources.width-2,stripBelow:destination.top>=sources.bottom-1,capacityVisible:card.querySelector('[data-testid=storage-capacity]').checkVisibility(),stagesVisible:card.querySelector('[data-testid=source-steps]').checkVisibility()}})()");
   await fs.writeFile(path.join(h.report,'import-density.json'),JSON.stringify(layout,null,2));
-  assert.ok(layout.top<360,`source list starts too low: ${JSON.stringify(layout)}`);assert.ok(layout.height<260,`idle source card is too tall: ${JSON.stringify(layout)}`);
+  assert.ok(layout.fullWidth&&layout.stripBelow,`source cards take the full width and the destination strip sits below: ${JSON.stringify(layout)}`);assert.ok(layout.top<360,`source list starts too low: ${JSON.stringify(layout)}`);assert.ok(layout.height<260,`idle source card is too tall: ${JSON.stringify(layout)}`);
   assert.equal(await h.js<boolean>("document.querySelector('.import-dashboard')?.checkVisibility()&&document.querySelector('[data-testid=parallel-summary]')?.checkVisibility()"),true,'overview and parallel limit remain visible');
   const capacityWidths=await h.js<boolean>("[...document.querySelectorAll('article.source-row .storage-track')].every(track=>{const card=track.closest('article.source-row'),r=track.getBoundingClientRect(),c=card.getBoundingClientRect(),style=getComputedStyle(card);return Math.abs(r.left-(c.left+parseFloat(style.borderLeftWidth)+parseFloat(style.paddingLeft)))<2&&Math.abs(r.right-(c.right-parseFloat(style.borderRightWidth)-parseFloat(style.paddingRight)))<2;})");
   assert.equal(capacityWidths,true,'capacity analysis spans the full card content width');
   const summaryInline=await h.js<boolean>("[...document.querySelectorAll('article.source-row .storage-summary')].every(summary=>{const heading=summary.querySelector('.storage-heading').getBoundingClientRect(),legend=summary.querySelector('.storage-legend').getBoundingClientRect();return Math.abs(heading.top-legend.top)<5&&legend.left>=heading.right&&summary.scrollWidth<=summary.clientWidth+1;})");
   assert.equal(summaryInline,true,'capacity numbers and complete legend share one row when space permits');
-  assert.equal(layout.sideBySide,true,'the destination uses the available right rail');assert.equal(layout.capacityVisible,true,'capacity remains visible');assert.equal(layout.stagesVisible,true,'all stages remain visible');await h.shot('import-compact-layout');
+  assert.equal(layout.capacityVisible,true,'capacity remains visible');assert.equal(layout.stagesVisible,true,'all stages remain visible');await h.shot('import-compact-layout');
  }},
  {id:'import-scan',stage:'imports',title:'Read-only drive scanning exposes media formats without copying files, and drive cards expand and collapse in place',covers:['scan flow','card disclosure','cancel and rescan'],run:async h=>{
   await h.until('source card disclosures',"document.querySelectorAll('details.source-disclosure').length===6");
@@ -75,8 +75,8 @@ export const importChecks=(ctx:Context):Check[]=>[
   await h.size(1000,760);
   for(const language of ['en','zh-Hans','zh-Hant','ja'] as const){
    await h.prefs({language});
-   const fit=await h.js<boolean>("Array.from(document.querySelectorAll('.titlebar-actions button,.titlebar-actions label,.titlebar-page-title')).every(control=>{const box=control.getBoundingClientRect(),bar=document.querySelector('.window-titlebar').getBoundingClientRect();return box.left>=104&&box.right<=bar.right&&box.bottom<=bar.bottom;})");
-   assert.equal(fit,true,language+' titlebar controls must fit 1000px at 150%');await h.shot('titlebar-1000-150-'+language);
+   const misfits=await h.js<string[]>("Array.from(document.querySelectorAll('.titlebar-actions button,.titlebar-actions label,.titlebar-actions summary,.titlebar-page-title')).filter(control=>!control.closest('.overflow-menu-items')).map(control=>{const box=control.getBoundingClientRect(),bar=document.querySelector('.window-titlebar').getBoundingClientRect();return box.left>=104&&box.right<=bar.right&&box.bottom<=bar.bottom?'':(control.getAttribute('data-testid')||control.className||control.tagName)+' '+Math.round(box.left)+'-'+Math.round(box.right)+' of '+Math.round(bar.right);}).filter(Boolean)");
+   assert.deepEqual(misfits,[],language+' titlebar controls must fit 1000px at 150%: '+misfits.join('; '));await h.shot('titlebar-1000-150-'+language);
   }
  }},
  {id:'import-storage-strips',stage:'imports',title:'Storage strips show continuous used/free segments and scanned media categories without overflow',covers:['capacity bars','bars never clip'],run:async h=>{

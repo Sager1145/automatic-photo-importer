@@ -33,7 +33,7 @@ async function guarded(h:Harness,run:(cleanups:Action[])=>Promise<void>){
 const nav=(h:Harness,page:'Recovery'|'Issues')=>h.nav(page as Parameters<Harness['nav']>[0]);
 
 export const workspaceSafetyChecks=():Check[]=>[
- {id:'recovery-cleanup-confirmation',stage:'recovery',title:'Activity maintenance previews cleanup consequences; opening or cancelling never dispatches cleanup',covers:['cleanup consequence preview','manual cleanup confirmation','receipt-only cleanup keeps named files','recoverable copies retained','Cancel focused'],skip:needsGuard,run:async h=>{
+ {id:'recovery-cleanup-confirmation',stage:'recovery',title:'Library maintenance previews cleanup consequences; opening or cancelling never dispatches cleanup',covers:['cleanup consequence preview','manual cleanup confirmation','receipt-only cleanup keeps named files','recoverable copies retained','Cancel focused'],skip:needsGuard,run:async h=>{
   await h.idle();
   await guarded(h,async cleanups=>{
    h.hooks!.set('residue',fixture());await nav(h,'Recovery');

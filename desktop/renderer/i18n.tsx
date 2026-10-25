@@ -84,7 +84,6 @@ Last verified: {completed} of {total} files|上次校验：{completed}/{total} �
 Photo Importer|照片导入器|照片匯入器|写真インポーター
 Automatic Photo Importer|自动照片导入器|自動照片匯入器|自動写真インポーター
 Opening your camera workbench…|正在打开相机工作台…|正在開啟相機工作台…|カメラワークベンチを開いています…
-Import desk|导入工作台|匯入工作台|インポート
 Organization|整理|整理|整理
 History|历史记录|歷史記錄|履歴
 Settings|设置|設定|設定
@@ -119,8 +118,6 @@ Ocean accent|海洋蓝|海洋藍|オーシャン
 Forest accent|森林绿|森林綠|フォレスト
 Import dashboard|导入仪表板|匯入儀表板|インポートダッシュボード
 Import overview|导入概览|匯入概覽|インポート概要
-Overview|概览|概覽|概要
-Show or hide the import overview|显示或隐藏导入概览|顯示或隱藏匯入概覽|インポート概要の表示/非表示
 Transfers running|正在传输|正在傳輸|転送中
 Review pending|等待审核|等待審核|確認待ち
 Idle|空闲|閒置|待機中
@@ -232,7 +229,6 @@ Media categories use scanned file sizes.|媒体分类按扫描文件大小估算
 Source layout|来源布局|來源配置|ソースのレイアウト
 List view|列表视图|清單檢視|リスト表示
 Grid view|网格视图|網格檢視|グリッド表示
-Folder organization|文件夹整理|資料夾整理|フォルダー整理
 Folder backup inventory|文件夹备份清单|資料夾備份清單|フォルダーバックアップ一覧
 Source inventory|来源文件清单|來源檔案清單|ソースのファイル一覧
 Filter inventory files|筛选清单文件|篩選清單檔案|一覧を絞り込む
@@ -435,7 +431,6 @@ No ignored drives.|没有已忽略的驱动器。|沒有已忽略的磁碟。|�
 Stop ignoring|取消忽略|取消忽略|無視をやめる
 Stop ignoring {name}|取消忽略 {name}|取消忽略 {name}|{name} の無視をやめる
 Import from {name}?|要从 {name} 导入吗？|要從 {name} 匯入嗎？|{name} から読み込みますか？
-Select|选择|選取|選択
 Don't import this drive|不导入此驱动器|不匯入此磁碟|このドライブを読み込まない
 Pause|暂停|暫停|一時停止
 Resume|继续|繼續|再開
@@ -481,7 +476,7 @@ Apply or discard the review.|请应用或放弃此审核。|請套用或放棄�
 Backup matches the drive. Removed files are moved aside, not deleted.|备份与驱动器保持一致。已删除的文件会被移开，不会被删除。|備份與磁碟保持一致。已刪除的檔案會被移開，不會被刪除。|バックアップをドライブと一致させます。削除されたファイルは移動され、消去されません。
 Camera folders (DCIM) found.|找到相机文件夹（DCIM）。|找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）があります。
 Connected as a camera over USB.|已作为相机通过 USB 连接。|已作為相機透過 USB 連接。|USBでカメラとして接続されています。
-Change this any time in Drives.|可随时在“驱动器”中更改。|可隨時在「磁碟」中變更。|「ドライブ」でいつでも変更できます。
+Change this any time in Settings › Devices.|可随时在“设置 › 设备”中更改。|可隨時在「設定 › 裝置」中變更。|「設定 › デバイス」でいつでも変更できます。
 Checking files. Nothing is copied yet.|正在检查文件，尚未复制任何内容。|正在檢查檔案，尚未複製任何內容。|ファイルを確認中です。まだ何もコピーしていません。
 Connect a memory card or camera to start.|连接存储卡或相机即可开始。|連接記憶卡或相機即可開始。|メモリーカードかカメラを接続して開始します。
 Copied to an Other files folder.|复制到“其他文件”文件夹。|複製到「其他檔案」資料夾。|「その他のファイル」フォルダーにコピーします。
@@ -602,6 +597,7 @@ Couldn't read photo details.|无法读取照片信息。|無法讀取照片資�
 The file is still copied; its date may come from the file instead.|文件仍会被复制；日期可能改用文件本身的日期。|檔案仍會被複製；日期可能改用檔案本身的日期。|ファイルはコピーされます。日付はファイル自体の日付になる場合があります。
 App|应用|App|アプリ
 Copy all details|复制全部详情|複製全部詳細資訊|すべての詳細をコピー
+1 issue|1 个问题|1 個問題|1 件の問題
 {count} issues|{count} 个问题|{count} 個問題|{count} 件の問題
 Show drive|显示驱动器|顯示磁碟|ドライブを表示
 Dismiss|关闭|關閉|閉じる
@@ -691,9 +687,7 @@ Imports start as soon as a selected drive connects.|选定的驱动器一连接�
 Drives at once|同时处理的驱动器|同時處理的磁碟|同時に処理するドライブ
 Drives at once: {count}/10|同时处理的驱动器：{count}/10|同時處理的磁碟：{count}/10|同時に処理するドライブ：{count}/10
 Settings categories|设置类别|設定類別|設定のカテゴリ
-Totals, speed and progress at the top of the Import desk.|在导入台顶部显示总数、速度和进度。|在匯入台頂部顯示總數、速度和進度。|読み込みデスクの上部に合計、速度、進行状況を表示します。
 1 file outside your folder structure|1 个文件不在文件夹结构中|1 個檔案不在資料夾結構中|フォルダー構成の外に 1 個のファイル
-Limit: {count} simultaneous|上限：同时 {count} 个|上限：同時 {count} 個|同時処理上限：{count}
 of {size} planned|计划共 {size}|計畫共 {size}|予定 {size} 中
 {complete} sources complete · {errors} need attention|{complete} 个来源完成 · {errors} 个需处理|{complete} 個來源完成 · {errors} 個需處理|{complete} 件完了 · {errors} 件要確認
 {size} free across destinations|目标合计剩余 {size}|目的地合計剩餘 {size}|保存先の空き容量 {size}
@@ -720,9 +714,7 @@ Files {start}–{end} of {total}|文件 {start}–{end}，共 {total} 个|檔案
 {count} sources connected. Choose two backup destinations to enable imports.|已连接 {count} 个来源。选择两个备份目标以启用导入。|已連接 {count} 個來源。選擇兩個備份目的地以啟用匯入。|{count} 件接続中です。2つのバックアップ先を選ぶとインポートできます。
 
 Import controls|导入控制|匯入控制|インポート操作
-Drive controls|驱动器控制|磁碟控制|ドライブ操作
 Organization controls|整理控制|整理控制|整理操作
-Refresh drives|刷新驱动器|重新整理磁碟|ドライブを更新
 Scan all|扫描全部|掃描全部|すべてスキャン
 Scanning…|正在扫描…|正在掃描…|スキャン中…
 Scan to see formats and counts|扫描以查看格式和数量|掃描以檢視格式與數量|スキャンで形式と件数を表示
@@ -735,7 +727,6 @@ Photos|照片|照片|写真
 {count} files · {size}|{count} 个文件 · {size}|{count} 個檔案 · {size}|{count} ファイル · {size}
 No photos found.|未找到照片。|未找到照片。|写真が見つかりません。
 No videos found.|未找到视频。|未找到影片。|動画が見つかりません。
-Existing files, new structure|现有文件，全新结构|現有檔案，全新結構|既存ファイルを新しい構造に
 Organization destination|整理目标|整理目的地|整理する保存先
 Scan existing files in|扫描此处的现有文件|掃描此處的現有檔案|既存ファイルのスキャン先
 New structure under|新结构的根目录|新結構的根目錄|新しい構造の保存先
@@ -788,13 +779,14 @@ No camera|无相机|無相機|カメラなし
 They have no capture date, no camera or known origin, or could not be read, such as screenshots, edited exports and files from messaging apps. Nothing starts until you apply the review.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取，例如截图、编辑后导出的文件和来自通讯应用的文件。在你应用审核之前不会开始任何操作。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取，例如螢幕截圖、編輯後匯出的檔案和來自通訊 App 的檔案。在你套用審核之前不會開始任何操作。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです（スクリーンショット、編集後の書き出し、メッセージアプリのファイルなど）。確認を適用するまで何も始まりません。
 Show files|显示文件|顯示檔案|ファイルを表示
 Hide files|隐藏文件|隱藏檔案|ファイルを隠す
-Use file date instead|改用文件日期|改用檔案日期|ファイルの日付を使う
+Move to {folder}|移动到 {folder}|移動到 {folder}|{folder} に移動
+What to do with these files|如何处理这些文件|如何處理這些檔案|これらのファイルの扱い
+{count} unknown files will be filed by their file date.|{count} 个未知文件将按文件日期归档。|{count} 個未知檔案將依檔案日期歸檔。|不明なファイル {count} 件はファイルの日付で整理されます。
 1 unknown file was left where it is|有 1 个未知文件保留在原位|有 1 個未知檔案保留在原位|不明なファイル 1 件をそのままの場所に残しました
 {count} unknown files were left where they are|有 {count} 个未知文件保留在原位|有 {count} 個未知檔案保留在原位|不明なファイル {count} 件をそのままの場所に残しました
 1 unknown file was filed in the unknown files folder|有 1 个未知文件被放入未知文件文件夹|有 1 個未知檔案被放入未知檔案資料夾|不明なファイル 1 件を不明ファイル用フォルダーに入れました
 {count} unknown files were filed in the unknown files folder|有 {count} 个未知文件被放入未知文件文件夹|有 {count} 個未知檔案被放入未知檔案資料夾|不明なファイル {count} 件を不明ファイル用フォルダーに入れました
 They have no capture date, no camera or known origin, or could not be read. You can change this in Settings.|这些文件没有拍摄日期、没有相机或已知来源，或无法读取。你可以在“设置”中更改。|這些檔案沒有拍攝日期、沒有相機或已知來源，或無法讀取。你可以在「設定」中變更。|撮影日がない、カメラや既知の取得元がない、または読み取れないファイルです。設定で変更できます。
-Files without metadata|无元数据的文件|無中繼資料的檔案|メタデータのないファイル
 Files with unknown metadata|元数据未知的文件|中繼資料未知的檔案|メタデータが不明なファイル
 Leave where they are|保留在原位|保留在原位|そのままにする
 Not moved or copied, and Delete originals never removes them. You are warned before a job starts.|不移动也不复制，“删除原件”也绝不会删除它们。任务开始前会提醒你。|不移動也不複製，「刪除原始檔」也絕不會刪除它們。工作開始前會提醒你。|移動もコピーもされず、「元ファイルを削除」でも削除されません。ジョブの開始前に警告します。

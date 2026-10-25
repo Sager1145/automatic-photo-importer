@@ -12,7 +12,7 @@ export const navigationChecks=():Check[]=>[
   await h.nav('Settings');await h.settingsTab('general');
   await h.js(`(()=>{window.qaCategoryPaint=[];const start=window.qaStartViewTransition??=document.startViewTransition;document.startViewTransition=function(update){const t=start.call(document,update);t.ready.then(()=>{const root=document.documentElement;window.qaCategoryPaint.push({kind:root.dataset.transition,navigation:getComputedStyle(root,'::view-transition-group(settings-navigation)').zIndex,panel:getComputedStyle(root,'::view-transition-group(settings-panel)').zIndex,contain:getComputedStyle(document.querySelector('.settings-nav')).viewTransitionGroup,indicator:getComputedStyle(root,'::view-transition-group(settings-indicator)').zIndex,labels:${JSON.stringify(settingsCategories)}.flatMap(id=>['text','icon'].map(part=>({name:'settings-'+id+'-'+part,z:getComputedStyle(root,'::view-transition-group(settings-'+id+'-'+part+')').zIndex})))})}).catch(()=>{});return t;};})()`);
   try{
-   await h.settingsTab('performance');for(const id of settingsCategories.slice(0,-1).reverse())await h.settingsTab(id);
+   await h.settingsTab('diagnostics');for(const id of settingsCategories.slice(0,-1).reverse())await h.settingsTab(id);
    const frames=await h.js<{kind:string;navigation:string;panel:string;contain:string;indicator:string;labels:{name:string;z:string}[]}[]>('window.qaCategoryPaint');assert.ok(frames.filter(frame=>frame.kind==='category-back').length>=6);
    for(const frame of frames){assert.equal(frame.contain,'contain');assert.ok(Number(frame.navigation)>Number(frame.panel));for(const label of frame.labels)assert.ok(Number(label.z)>Number(frame.indicator),`${label.name}: ${JSON.stringify(frame)}`);}
   }finally{await stopRecording(h);await h.js('delete window.qaCategoryPaint');}
@@ -40,13 +40,18 @@ export const navigationChecks=():Check[]=>[
   await h.nav('Import desk');
   assert.equal(await h.js<boolean>("document.querySelector('.sidebar').getBoundingClientRect().top===0&&Math.abs(document.querySelector('.window-titlebar').getBoundingClientRect().left-document.querySelector('.sidebar').getBoundingClientRect().right)<1"),true);
  }},
- {id:'nav-desk-dashboard',stage:'navigation',title:'The desk shows the import dashboard with live metrics and drive activity, Automatic toggles, and errors open only on request',covers:['import dashboard','drive activity meters','Automatic button'],run:async h=>{
+ {id:'nav-desk-dashboard',stage:'navigation',title:'The desk shows the import dashboard with live metrics and drive activity, Automatic toggles in Settings, and errors open only on request',covers:['import dashboard','drive activity meters','Automatic switch in Settings'],run:async h=>{
   await h.js("document.querySelectorAll('details.workspace-details').forEach(details=>details.open=true)");
   assert.equal(await h.js<boolean>("document.querySelector('[aria-label=\"Import dashboard\"]')!==null"),true);
-  await h.click('[data-testid=global-automatic]');await h.waitFor('automatic on',async()=>(await h.state()).preferences.automatic);
-  await h.until('automatic button pressed',"document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='true'");
-  await h.click('[data-testid=global-automatic]');await h.waitFor('automatic off',async()=>!(await h.state()).preferences.automatic);
-  await h.until('automatic button unpressed',"document.querySelector('[data-testid=global-automatic]').getAttribute('aria-pressed')==='false'");
+  // Automatic lives in Settings > Importing; the Import empty state's line opens it, and the titlebar no longer has the button.
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=global-automatic]')===null&&document.querySelector('[data-testid=titlebar-overview]')===null"),true,'no Automatic or Overview button in the titlebar');
+  const automatic="[data-testid=settings-panel-defaults] input[type=checkbox]";
+  await h.nav('Settings');await h.settingsTab('defaults');
+  await h.click(automatic);await h.waitFor('automatic on',async()=>(await h.state()).preferences.automatic);
+  await h.until('automatic switch on',`document.querySelector('${automatic}').checked===true`);
+  await h.click(automatic);await h.waitFor('automatic off',async()=>!(await h.state()).preferences.automatic);
+  await h.until('automatic switch off',`document.querySelector('${automatic}').checked===false`);
+  await h.nav('Import desk');
   assert.equal(await h.js<string>("document.querySelector('.import-dashboard [data-metric=sources]').textContent"),'6');
   assert.equal(await h.js<string>("document.querySelector('.import-dashboard [data-metric=destinations]').textContent"),'1 / 1');
   // Fixture folders live on the internal disk, so utilization of that disk appears for the destination and in the UI.
@@ -56,9 +61,10 @@ export const navigationChecks=():Check[]=>[
   }
   await h.until('the sidebar destination status line',"[...document.querySelectorAll('[data-testid=sidebar-destination]')].every(row=>row.querySelector('[data-testid=sidebar-destination-status]')?.textContent.trim().length>0)&&document.querySelector('[data-testid=sidebar-destination-status]')");
   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('h2')).some(h=>h.textContent.includes('Ready for your next shoot'))"),false);
-  assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog')===null"),true,'All errors stays closed until asked for');
-  await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");await h.shot('all-errors');
-  await h.click('[data-testid=activity-close]');await h.until('animated activity close',"document.querySelector('.activity-dialog')===null");
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=activity-panel]')===null&&document.querySelector('.activity-dialog')===null"),true,'Issues stays closed until asked for');
+  await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");await h.shot('all-errors');
+  assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Activity','the Issues button opens Activity, not a sheet');
+  await h.nav('Import desk');
  }},
  {id:'nav-motion-preference',stage:'navigation',title:'Motion follows the operating system preference and buttons retain immediate feedback',covers:['reduced motion (OS)'],run:async h=>{
   const isReduced=await reduced(h);
@@ -79,7 +85,7 @@ export const navigationChecks=():Check[]=>[
    await h.nav('Import desk');
    seen=(await h.js<string[]>('window.qaTransitions')).filter(kind=>/^(forward|back|category-)/.test(kind??''));
   }finally{await stopRecording(h);}
-  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward',...Array(6).fill('category-forward'),...Array(6).fill('category-back'),'back']);
+  assert.deepEqual(seen,isReduced?[]:['forward','forward','forward',...Array(settingsCategories.length-1).fill('category-forward'),...Array(settingsCategories.length-1).fill('category-back'),'back']);
  }},
  {id:'nav-transition-layers',stage:'navigation',title:'Transitions keep each layer in place: labels above selection capsules, an opaque titlebar, nothing under an open sheet',covers:['animation layering during transitions','sheets suspend transitions'],run:async h=>{
   const isReduced=await reduced(h);
@@ -89,11 +95,11 @@ export const navigationChecks=():Check[]=>[
    await recordTransitions(h,true);
    await h.nav('Settings');await h.settingsTab('destinations');await h.settingsTab('importing');await h.nav('Import desk');
    layers=(await h.js<Layer[]>('window.qaLayers')).filter(layer=>/^(forward|back|category-)/.test(layer.kind));
-   // A layout change while All errors is open must not lift the page above the sheet's backdrop.
-   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");
+   // A layout change on the Import desk while a sheet is open must not lift the page above the sheet's backdrop. Issues is a page now, so a real modal dialog stands in for the sheet.
+   await h.js('window.qaLayers=[];window.qaTransitions=[]');await h.js("(()=>{const sheet=document.createElement('dialog');sheet.id='qa-sheet';sheet.textContent='Sheet';document.body.append(sheet);sheet.showModal();})()");await h.until('sheet open',"document.querySelector('#qa-sheet')?.open===true");
    await h.prefs({sourceLayout:'grid'});await h.until('grid under the sheet',"document.querySelector('.source-ledger.source-layout-grid')");
    underSheet=await h.js('window.qaTransitions');
-  }finally{await stopRecording(h);}
+  }finally{await h.js("document.querySelector('#qa-sheet')?.remove()");await stopRecording(h);}
   assert.deepEqual(underSheet,[],'No transition runs under an open sheet');
   if(isReduced){assert.deepEqual(layers,[]);return;}
   // Settings opened on its last category, so the first switch may go either way.
@@ -117,9 +123,9 @@ export const navigationChecks=():Check[]=>[
   assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Settings','the last navigation remains selected after all callbacks finish');
   await h.click('.nav-item');
   await h.click('[data-testid=show-errors]');
-  await h.until('sheet opened during navigation',"document.querySelector('.activity-dialog')?.open===true");
+  await h.until('Issues opened during navigation',"document.querySelector('[data-testid=activity-panel]')");
   await h.settle();
-  assert.equal(await h.js<boolean>("(()=>{const b=document.querySelector('[data-testid=activity-close]'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))&&!document.documentElement.dataset.transition;})()"),true,'sheet accepts clicks after interrupting navigation');
+  assert.equal(await h.js<boolean>("!document.documentElement.dataset.transition"),true,'no transition snapshot blocks clicks after interrupting navigation');
  }},
  {id:'nav-reduced-motion-emulated',stage:'navigation',title:'With reduced motion on, pages and sheets change without View Transitions or animated closes, in every run',covers:['reduced motion'],run:async h=>{
   await h.media([{name:'prefers-reduced-motion',value:'reduce'}]);
@@ -131,11 +137,10 @@ export const navigationChecks=():Check[]=>[
    const durations=await h.js<string>("getComputedStyle(document.querySelector('[data-testid=global-start]')).transitionDuration");
    assert.ok(durations.split(',').every(value=>parseFloat(value)===0),`button transitions still animate: ${durations}`);
    // The sheet closes in the same frame: nothing is left animating out.
-   await h.click('[data-testid=show-errors]');await h.until('errors panel',"document.querySelector('.activity-dialog')?.open===true");
+   await h.click('[data-testid=show-errors]');await h.until('issues list',"document.querySelector('[data-testid=activity-panel]')");
    // Crossfades stay (the app's reduced motion keeps short fades, like the boot); nothing may move or scale.
    assert.deepEqual(await h.js<string[]>("document.getAnimations().filter(a=>a.playState==='running'&&a.effect?.getTiming().iterations!==Infinity).filter(a=>a.transitionProperty?a.transitionProperty!=='opacity':a.effect.getKeyframes().some(k=>Object.keys(k).some(p=>!['offset','easing','composite','computedOffset','opacity'].includes(p)))).map(a=>(a.animationName||a.transitionProperty||'script')+' on '+(a.effect?.target?.className||a.effect?.target?.tagName)+(a.effect?.pseudoElement??'')+' '+a.effect?.getTiming().duration+' ms')"),[],'something moves with reduced motion');
-   await h.click('[data-testid=activity-close]');await h.frames(2);
-   assert.equal(await h.js<boolean>("document.querySelector('.activity-dialog')===null"),true,'the sheet animated its close');
+   await h.frames(2);
   }finally{await stopRecording(h);}
  }},
 ];

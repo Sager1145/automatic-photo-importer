@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,executeReorganization,findMisplaced,configureOrganizationRecovery} from '../core/index';
 import {validNoMetadataFolder} from '../no-metadata';
+import {ruleOptions} from '../routing-options';
+import {defaultPreferences} from '../preferences';
 import {safeComponent} from '../folder-template';
 import type {Metadata} from '../shared';
 
@@ -75,10 +77,10 @@ test('import folder files unknown files under the default name, and under the vi
   const f=await fixture(t);
   await f.put(f.source,'DCIM/SNAP_1.PNG','screenshot');await f.put(f.source,'DCIM/SNAP_2.MP4','clip');await f.put(f.source,'DCIM/NOCAM_3.JPG','no camera');await f.put(f.source,'DCIM/IMG_4.JPG','dated');
   const found=await plan(f.source,[f.library],{...base,layout:'video-root' as const,videoRoots:[f.videos],noMetadata:'folder'},metadata);
-  const photo=found.plans[0]!.entries.find(entry=>entry.source.endsWith('SNAP_1.PNG'))!,video=found.plans[0]!.videos!.entries.find(entry=>entry.source.endsWith('SNAP_2.MP4'))!,nocam=found.plans[0]!.entries.find(entry=>entry.source.endsWith('NOCAM_3.JPG'))!;
+  const photo=found.plans[0]!.entries.find(entry=>entry.source.endsWith('SNAP_1.PNG'))!,video=found.plans[0]!.entries.find(entry=>entry.source.endsWith('SNAP_2.MP4'))!,nocam=found.plans[0]!.entries.find(entry=>entry.source.endsWith('NOCAM_3.JPG'))!;
   assert.equal(photo.destination,path.join(f.library,'Unknown files/DCIM/SNAP_1.PNG'));
   assert.equal(nocam.destination,path.join(f.library,'Unknown files/DCIM/NOCAM_3.JPG'));
-  assert.equal(video.destination,path.join(f.videos,'Unknown files/DCIM/SNAP_2.MP4'));
+  assert.equal(video.destination,path.join(f.library,'Unknown files/DCIM/SNAP_2.MP4'),'unknown videos go under the photo root too');
   assert.equal(found.noMetadata?.count,3);assert.equal(found.noMetadata?.folder,'Unknown files');
   const result=await execute(found.plans[0]!,undefined,undefined,{verify:true});
   assert.deepEqual(result.errors,[]);
@@ -126,4 +128,48 @@ test('the folder name must be one safe folder name',async t=>{
   assert.equal(validNoMetadataFolder('Unknown files'),true);assert.equal(validNoMetadataFolder('Ohne Datum'),true);
   // A name is only checked when it is used.
   await plan(f.source,[f.library],{...base,noMetadata:'keep',noMetadataFolder:'..'},metadata);
+});
+
+test('rules from preferences that omit the handling file unknown files in a folder by default',()=>{
+  const {noMetadataHandling,...rest}=defaultPreferences;void noMetadataHandling;
+  assert.equal(ruleOptions(rest).noMetadata,'folder');
+  assert.equal(ruleOptions({...rest,noMetadataHandling:'keep'}).noMetadata,'keep');
+});
+
+test('video-root: an unknown video and its sidecar go under the photo root, none under the video root',async t=>{
+  const f=await fixture(t);
+  await f.put(f.source,'DCIM/SNAP_2.MP4','clip');await f.put(f.source,'DCIM/SNAP_2.xmp','side');await f.put(f.source,'DCIM/IMG_4.MP4','known');
+  const found=await plan(f.source,[f.library],{...base,layout:'video-root' as const,videoRoots:[f.videos],noMetadata:'folder'},metadata);
+  const plan0=found.plans[0]!;
+  assert.deepEqual(plan0.entries.map(entry=>entry.destination).sort(),[path.join(f.library,'Unknown files/DCIM/SNAP_2.MP4'),path.join(f.library,'Unknown files/DCIM/SNAP_2.xmp')]);
+  assert.deepEqual(plan0.videos!.entries.map(entry=>path.basename(entry.source)),['IMG_4.MP4']);
+});
+
+test('organize moves unknown videos out of the video root and Unknown Camera, then the layout check accepts them',async t=>{
+  const f=await fixture(t);
+  await f.put(f.videos,'2024/202408/Unknown Camera/SNAP_x.mp4','clip');await f.put(f.library,'2024/202408/Unknown Camera/SNAP_y.png','pic');
+  const options={...base,layout:'video-root' as const,videoRoots:[f.videos],reorganize:true as const,noMetadata:'folder' as const};
+  const found=await plan(f.root,[f.library],{...options,sourceFolders:['library','videos']},metadata);
+  const all=[...found.plans[0]!.entries,...found.plans[0]!.videos?.entries??[]];
+  const video=all.find(entry=>entry.source.endsWith('SNAP_x.mp4'))!;
+  assert.equal(video.destination,path.join(f.library,'Unknown files/2024/202408/SNAP_x.mp4'));
+  for(const entry of all)assert.ok(!/unknown camera/i.test(entry.destination),entry.destination);
+  assert.equal(all.find(entry=>entry.source.endsWith('SNAP_y.png'))!.destination,path.join(f.library,'Unknown files/2024/202408/SNAP_y.png'));
+});
+
+test('keep leaves unknown files in the video root untouched',async t=>{
+  const f=await fixture(t);
+  await f.put(f.videos,'2024/202408/Unknown Camera/SNAP_x.mp4','clip');
+  const found=await plan(f.root,[f.library],{...base,sourceFolders:['library','videos'],layout:'video-root' as const,videoRoots:[f.videos],reorganize:true as const,noMetadata:'keep'},metadata);
+  assert.deepEqual(sources(found),[]);
+});
+
+test('layout check: unknown files filed in the folder are in place, those in date folders are misplaced under folder handling',async t=>{
+  const f=await fixture(t);
+  await f.put(f.library,'Unknown files/2024/202408/SNAP_a.png','ok');await f.put(f.library,'2024/202408/Cam/SNAP_b.png','date folder');await f.put(f.library,'2024/202408/Unknown Camera/SNAP_c.png','legacy');
+  const rules={template:base.template,layout:base.layout,noMetadata:'folder' as const};
+  const found=await findMisplaced(f.library,f.library,rules,metadata);
+  assert.deepEqual(found.files.map(file=>path.basename(file)).sort(),['SNAP_b.png','SNAP_c.png']);
+  const kept=await findMisplaced(f.library,f.library,{...rules,noMetadata:'keep'},metadata);
+  assert.equal(kept.count,0);
 });

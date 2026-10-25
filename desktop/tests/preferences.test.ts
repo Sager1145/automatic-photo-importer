@@ -78,3 +78,22 @@ test('the log level defaults to normal, persists, rejects unknown values, and is
  assert.deepEqual(lockedPreferenceKeys({logLevel:'trace'}),[]);
  assert.deepEqual(acceptedPreferences({logLevel:'trace'},true),{logLevel:'trace'},'applies while jobs run');
 });
+
+test('unknown files default to a folder; a saved keep or fileDate stays, an invalid value falls back',()=>{
+ assert.equal(defaultPreferences.noMetadataHandling,'folder');
+ const bare={...defaultPreferences} as Record<string,unknown>;delete bare.noMetadataHandling;
+ assert.equal(normalizePreferences({},bare as never).noMetadataHandling,'folder');
+ assert.equal(normalizePreferences({noMetadataHandling:'bogus'},bare as never).noMetadataHandling,'folder');
+ for(const mode of ['keep','fileDate'] as const)assert.equal(normalizePreferences({noMetadataHandling:mode},defaultPreferences).noMetadataHandling,mode);
+});
+
+test('eject and delete-original settings default safely and ignore invalid values',()=>{
+ assert.equal(defaultPreferences.autoEject,false);assert.equal(defaultPreferences.deleteOriginalsFolders,true);assert.equal(defaultPreferences.deleteOriginalsCards,false);
+ const loaded=normalizePreferences({autoEject:'yes',deleteOriginalsFolders:0,deleteOriginalsCards:1});
+ assert.deepEqual([loaded.autoEject,loaded.deleteOriginalsFolders,loaded.deleteOriginalsCards],[false,true,false]);
+ const set=normalizePreferences({autoEject:true,deleteOriginalsFolders:false,deleteOriginalsCards:true});
+ assert.deepEqual([set.autoEject,set.deleteOriginalsFolders,set.deleteOriginalsCards],[true,false,true]);
+ assert.equal(normalizePreferences({autoEject:'x'},set).autoEject,true,'an invalid value keeps the current one');
+ const patch={autoEject:true,deleteOriginalsCards:true,deleteOriginalsFolders:false};
+ assert.deepEqual(acceptedPreferences(patch,true),patch,'these apply even while jobs run');
+});

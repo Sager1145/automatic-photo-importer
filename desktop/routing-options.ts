@@ -13,13 +13,13 @@ type Rules=Pick<Preferences,'template'|'mediaLayout'|'videoTemplate'|'editedFold
 export function ruleOptions(prefs:Rules,useFileDate=false){
  return {
   template:prefs.template,layout:prefs.mediaLayout,videoTemplate:prefs.videoTemplate,editedFolder:prefs.editedFolder,
-  noMetadata:(useFileDate?'fileDate':prefs.noMetadataHandling??'keep') as NoMetadataHandling,
+  noMetadata:(useFileDate?'fileDate':prefs.noMetadataHandling??'folder') as NoMetadataHandling,
   noMetadataFolder:prefs.noMetadataFolder??UNKNOWN_FILES_FOLDER,
   unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,
  };
 }
 /** Bumped when the app itself changes which folder a file is filed in. */
-const RULES_VERSION=2;
+const RULES_VERSION=3;
 /** The scope the routing and placement memories are valid for: every rule in `ruleOptions`. A record made under
  * another scope (or another RULES_VERSION) is not trusted. */
 export function rulesScope(rules:ReturnType<typeof ruleOptions>):string {

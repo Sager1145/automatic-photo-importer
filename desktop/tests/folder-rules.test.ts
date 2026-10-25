@@ -21,7 +21,7 @@ async function temporary(t:test.TestContext){const base=await fs.realpath(await 
 test('one rules scope: every rule that decides a folder changes it, folders a layout does not use do not',()=>{
   const scope=rulesScope(ruleOptions(prefs));
   assert.equal(rulesScope(ruleOptions({...prefs})),scope);
-  for(const changed of [{template:'{camera}'},{mediaLayout:'flat' as const},{videoTemplate:'{year}'},{editedFolder:'Finished'},{noMetadataHandling:'folder' as const},{noMetadataFolder:'Other'},{unknownRules:{dat:'other' as const}},{unknownDefault:'other' as const}])
+  for(const changed of [{template:'{camera}'},{mediaLayout:'flat' as const},{videoTemplate:'{year}'},{editedFolder:'Finished'},{noMetadataHandling:'keep' as const},{noMetadataFolder:'Other'},{unknownRules:{dat:'other' as const}},{unknownDefault:'other' as const}])
     assert.notEqual(rulesScope(ruleOptions({...prefs,...changed})),scope,JSON.stringify(changed));
   assert.notEqual(rulesScope(ruleOptions(prefs,true)),scope);
   const elsewhere:Preferences={...prefs,mediaLayout:'format',videoBasePath:'elsewhere'};

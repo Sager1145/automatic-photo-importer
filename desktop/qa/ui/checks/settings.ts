@@ -35,6 +35,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   await h.nav('Settings');
   await h.settingsTab('storage');
   assert.equal(await h.js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Storage');
+  assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=backup-mode]')!==null&&document.querySelector('.settings-page .destination-check-actions .destination-check')===null"),true,'Drive backup mode lives in Settings → Storage, which no longer runs the folder check');
   await h.settingsTab('folders');
   assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings]')!==null"),true,'Folder paths live in Settings → Folders');
   await h.settingsTab('general');
@@ -73,9 +74,9 @@ export const settingsChecks=(ctx:Context):Check[]=>[
    // The UI bridge reports action failures in AppState.error rather than rejecting its promise.
    const rejected=await h.action({type:'preferences',patch:{editedFolder:'../escape'}});
    assert.equal(rejected.preferences.editedFolder,'Finished');assert.match(english(rejected.error),/safe folder name/i);
-   assert.equal(await h.js<boolean>("document.querySelector('.error-banner,.job-errors,.source-camera-error,.recovery-error')===null&&document.querySelector('.activity-dialog')===null"),true,'Errors stay out of the main workspace');
+   assert.equal(await h.js<boolean>("document.querySelector('.error-banner,.job-errors,.source-camera-error,.recovery-error')===null&&document.querySelector('[data-testid=activity-panel]')===null"),true,'Errors stay out of the main workspace');
    await h.click('[data-testid=show-errors]');await h.until('error appears in dedicated panel',"document.querySelector('.all-errors')?.textContent.includes('safe folder name')");await h.shot('all-errors-with-detail');
-   await h.click('[data-testid=activity-close]');await h.until('animated activity close',"document.querySelector('.activity-dialog')===null");
+   await h.nav('Settings');await h.until('issues list closed',"document.querySelector('[data-testid=activity-panel]')===null");
    assert.equal((await savedPreferences(ctx.root)).editedFolder,'Finished','An invalid folder must not be persisted');
   }finally{
    await h.action({type:'clearErrors'});await h.prefs({editedFolder:'editied'});
@@ -114,8 +115,8 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   assert.equal(after.error,undefined,'Changing a locked setting raised an error');
   assert.equal(await h.js<boolean>("!document.querySelector('[data-testid=error-toast]')"),true,'Changing a locked setting showed an error toast');
  }},
- {id:'settings-detailed-logging',stage:'settings',title:'Diagnostics log detail stays live and persists in Settings Performance',covers:['Diagnostics log-level selector','live logging preference','persisted logging preference'],run:async h=>{
-  await h.nav('Settings');await h.settingsTab('performance');
+ {id:'settings-detailed-logging',stage:'settings',title:'Diagnostics log detail stays live and persists in Settings Diagnostics',covers:['Diagnostics log-level selector','live logging preference','persisted logging preference'],run:async h=>{
+  await h.nav('Settings');await h.settingsTab('diagnostics');
   const initial=(await h.state()).preferences.logLevel;
   try{for(const level of ['detailed','off'] as const){
    await h.js(`{const select=document.querySelector('#settings-log-level');select.value=${JSON.stringify(level)};select.dispatchEvent(new Event('change',{bubbles:true}));}`);

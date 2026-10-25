@@ -12,7 +12,7 @@ export const recoveryChecks=():Check[]=>[
   await h.waitFor('recovery list loaded',async()=>!(await h.state()).organizationRecoveryLoading);
   const recovery=(await h.state()).organizationRecovery?.find(job=>job.status==='complete');
   if(!recovery)throw new SkipCheck('no finished organization in this run');
-  await h.nav('Recovery');await h.until('recovery list in Activity',"document.querySelector('.organization-recovery')");
+  await h.nav('Recovery');await h.until('recovery list in Library',"document.querySelector('.organization-recovery')");
   const before=new Set((await h.state()).jobs.map(job=>job.id));
   const resume=JSON.stringify({type:'recovery',op:'resume',id:recovery.id,root:recovery.root});
   await h.js(`Promise.all([window.importer.action(${resume}),window.importer.action(${resume})])`);

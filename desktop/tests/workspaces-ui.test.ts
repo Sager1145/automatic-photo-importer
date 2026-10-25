@@ -24,7 +24,7 @@ test('Media and Files & folders expose the appropriate registered sources and pi
  assert.match(f,/data-source-id="files"/);assert.doesNotMatch(f,/data-source-id="card"/);
  assert.match(m,/Choose media folders…/);assert.match(f,/Back up drives or folders…/);
  assert.ok(m.indexOf('Choose media folders…') < m.indexOf('data-testid="source-cards"'));
- assert.doesNotMatch(m,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode"/);
+ assert.doesNotMatch(m,/data-testid="backup-mode-summary"/);assert.doesNotMatch(f,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
  assert.match(f,/Back up<\/button>/);assert.match(f,/Scan media/);
 });
 test('queued backup jobs stay in Files mode when the next source run is Media',()=>{
@@ -37,13 +37,13 @@ test('queued backup jobs stay in Files mode when the next source run is Media',(
 });
 test('organization scope, affected roots and consequences precede one execution area',()=>{
  const value=state({preferences:normalizePreferences({destinations:['/backup'],mediaLayout:'video-root'}),organizationFolders:{'/backup':['2024','2025']}});
- const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{},onRecovery:()=>{}}));
+ const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{}}));
  const execute=html.indexOf('data-testid="organization-execute"');
  assert.ok(execute>html.indexOf('<li>2025</li>'));assert.ok(execute>html.indexOf('Organize: move, source removed'));
  assert.ok(execute>html.indexOf('/backup/videobackup'));assert.equal((html.match(/>Organize now</g)??[]).length,1);
  assert.equal((html.match(/>Review changes…</g)??[]).length,1);
  assert.doesNotMatch(html,/collect-problem-files-setting/);assert.doesNotMatch(html,/organization-recovery-heading/);
- assert.match(html,/Edit folder rules/);assert.match(html,/Recovery &amp; maintenance/);
+ assert.match(html,/Edit folder rules/);assert.doesNotMatch(html,/Recovery &amp; maintenance/);
  const top=render(createElement(TitlebarControls,{state:value,act:()=>{},page:'library',errorCount:0,onErrors:()=>{}}));
  assert.doesNotMatch(top,/Organize now|Scan for duplicates|Review changes/);assert.match(top,/show-errors/);
 });
@@ -60,7 +60,7 @@ test('Activity retains all mixed job controls and recovery actions independently
  assert.match(locked,/<button[^>]*data-testid="delete-recovery"[^>]*disabled/);
 });
 test('Activity Issues embeds the complete issue resolution view without a modal',()=>{
- const html=render(createElement(ActivityPanel,{embedded:true,state:state(),errors:[],act:()=>{},onClose:()=>{}}));
+ const html=render(createElement(ActivityPanel,{state:state(),errors:[],act:()=>{}}));
  assert.match(html,/activity-issues/);assert.doesNotMatch(html,/<dialog/);assert.match(html,/No errors to show/);assert.match(html,/No warnings to show/);
 });
 
