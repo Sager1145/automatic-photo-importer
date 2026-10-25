@@ -59,3 +59,21 @@ test('an organization reads the files it has moved, not a job share held at 99% 
   progress:{phase:'copying',step:'moving',renames:true,completed:687,total:799,bytes:0,totalBytes:0,speed:0,file:'_R6_6678.CR3'}};
  assert.equal(agree(job,'moving'),'687 of 799 files moved');
 });
+
+test('the overview percent describes the counter it shows, also beside a finished job of another source',async()=>{
+ const {createElement}=await import('react');
+ const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider}=await import('../renderer/i18n');
+ const {ImportDashboard}=await import('../renderer/RootApp');
+ // 21:13: every file already in the backup, so nothing is transferred in bytes; another source's job finished a moment before.
+ const other={id:'other',name:'Other',path:'/Volumes/Other',transport:'folder' as const,selected:true};
+ const finished:Job={id:'933056a2',source:other,phase:'complete',errors:[],backup:false,progress:{phase:'verifying',step:'existing',completed:0,total:0,bytes:0,totalBytes:0,speed:0,file:''}};
+ const running:Job={id:'4bc25cb7',source:folder,phase:'copying',errors:[],backup:false,startedAt:new Date().toISOString(),
+  progress:{phase:'copying',completed:866,total:6759,bytes:0,totalBytes:0,speed:0,file:'_R6_1.jpg',work:{files:866,bytes:0,totalFiles:6759,totalBytes:0,direct:{files:6759,bytes:0,present:6759}}}};
+ const state:AppState={...stateOf(running),sources:[folder,other],jobs:[running,finished]};
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state,act:()=>{}})}));
+ const total=markup.match(/data-testid="total-progress"[\s\S]*?progress-display-line[\s\S]*?<\/div>/)![0];
+ assert.match(total,/866 of 6,759 files copied or confirmed/);
+ assert.match(total,/>12%</,'the running job\'s 866 of 6,759, not an average with the finished job (56%)');
+ assert.match(total,/aria-valuenow="13"/);
+});

@@ -669,7 +669,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
  const {prefs,reorganize,sourceFolders}=request;
  const {roots,videoRoots,infos,volumes}=await destinationRoots(prefs,state.sources,reorganize?undefined:source);
  const eta={source:etaDrive(volumes,source.path,source.transport),destinations:infos.map(info=>etaDrive(volumes,info.path,'storage'))};
- etaTracker.plan(owner,{kind:reorganize?'organization':'import',...eta});
+ etaTracker.plan(owner,{kind:reorganize?'organization':'import',...eta,...(reorganize?{}:{publish:etaTracker.predictPublish(eta.destinations),direct:etaTracker.predictDirect(eta.destinations)})});
  const mirror=backup&&prefs.backupMode==='mirror';
  if(mirror&&prefs.copyMode==='sequential')throw new MessageError('error.mirrorSequential');
  const drive=backup?{name:source.name,mirror,...await backupDriveIdentity(source.path,volumes)}:undefined;
@@ -785,7 +785,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('context.json',{producer:'desktop-app',started:new Date().toISOString(),preferences:prefs,source:job.source});
   const reserved=reservations.get(job.id)!;
   touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
-  etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{totals:etaTotals(plans)})});
+  etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{direct:etaTracker.predictDirect(prepared.eta.destinations),totals:etaTotals(plans)})});
   job.phase='copying';
   // What each file actually came to at each destination: the one record duplicates, placement, the source checksums and Delete originals use.
   const outcomes:Outcomes=new Map(),volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);

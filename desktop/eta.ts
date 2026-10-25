@@ -12,10 +12,19 @@ export interface EtaInput {phase?:string;step?:string;share?:number;completed:nu
 export interface EtaContext {kind:JobKind;destinations:number;verify:boolean;shared?:boolean;}
 export interface JobEta {step?:number;job?:number;/** The low and high end of `job` while the estimate is still wide. */low?:number;high?:number;}
 /** What a job is, told by the code that starts it: its kind (never guessed from step names), the drives it reads and writes, and what it will do. */
-export interface EtaPlan {kind:JobKind;source?:DriveInfo;destinations?:DriveInfo[];verify?:boolean;publish?:'link'|'copy';totals?:Record<string,StepTotal>;/** Backup copies a Delete originals run re-reads besides the source. */backups?:number;estimated?:boolean;}
+export interface EtaPlan {kind:JobKind;source?:DriveInfo;destinations?:DriveInfo[];verify?:boolean;publish?:'link'|'copy';totals?:Record<string,StepTotal>;/** Backup copies a Delete originals run re-reads besides the source. */backups?:number;estimated?:boolean;/** Destinations expected to be written directly (each file checked in place as it is copied): no verify step is planned for them. */direct?:number;}
 /** Where a job stands as a whole in the time-left model (logged with its progress; rows show their step's share). */
 export interface JobView {fraction?:number;}
 
+/** The share of an import's verify work still planned once the destinations written directly are left out. */
+const verifyShare=(plan:EtaPlan)=>{const count=plan.destinations?.length??0;return count>0?Math.max(0,count-Math.min(count,plan.direct??0))/count:1;};
+/** A plan's totals with the verify step's shrunk to the destinations that verify after copying. */
+function plannedTotals(plan:EtaPlan):Record<string,StepTotal>|undefined{
+ const verifying=plan.totals?.verifying,share=verifyShare(plan);
+ return verifying&&share<1?{...plan.totals,verifying:{...verifying,files:verifying.files*share,bytes:verifying.bytes*share}}:plan.totals;
+}
+/** Files compared before their share found identical is trusted to stand for the rest. */
+const COMPARED_SAMPLE=20;
 /** Seconds: a listing never shows more time left than this. */
 const MAX_LISTING_ETA=24*3600;
 const stageKey=(progress:EtaInput)=>`${progress.phase??''}:${progress.step??''}`;
@@ -40,6 +49,7 @@ interface JobState {
  plan:EtaPlan;model:JobModel;book:PriorBook;context?:PriorContext;known:Known;fixed:Set<string>;
  first?:number;last?:number;key?:string;fractions:FractionHold;
  shared:Map<string,{shared:number;total:number}>;view:JobView;current?:string;
+ /** The later steps' totals assume every file checked is copied: comparing has not yet measured how many are new, so the job's time is not claimed. */assumed?:boolean;
 }
 
 /** Per-job estimates. What each finished step measured is remembered for later jobs of this app session (and, with a store, across restarts). */
@@ -74,7 +84,7 @@ export class EtaTracker {
    state.book=this.bookOf(merged,state.context);
    state.model.setBook(state.book);
   }
-  if(state){if(plan.publish)state.model.setPublish(plan.publish);for(const [step,total] of Object.entries(plan.totals??{})){state.model.setTotal(step,total);state.fixed.add(state.model.resolve(step));}}
+  if(state){if(plan.publish)state.model.setPublish(plan.publish);for(const [step,total] of Object.entries(plannedTotals(merged)??{}))if(plan.totals?.[step]){state.model.setTotal(step,total);state.fixed.add(state.model.resolve(step));}if(plan.totals?.copying)state.assumed=false;}
  }
  kind(id:string):JobKind|undefined{return this.plans.get(id)?.kind;}
  /** The destination drive ids a job writes to (from its plan). */
@@ -96,29 +106,41 @@ export class EtaTracker {
   const slow=new Set(['exfat','msdos','fat32','vfat','ntfs','fat']);
   return destinations.some(item=>(item.id&&this.copyPublishing.has(item.id))||slow.has((item.fsType??'').toLowerCase()))?'copy':'link';
  }
+ /** How many of these destinations an import writes directly (exFAT on macOS, as the copy decides): each file is checked in place, with no verify step after. */
+ predictDirect(destinations:DriveInfo[],platform:string=process.platform):number{
+  return platform==='darwin'?destinations.filter(item=>(item.fsType??'').toLowerCase()==='exfat').length:0;
+ }
  private create(id:string,context:EtaContext):JobState{
   const plan=this.plans.get(id)??{kind:context.kind};
   const prior=this.contextOf(plan),book=this.bookOf(plan,prior);
-  const model=new JobModel({kind:plan.kind,book,totals:plan.totals,verify:plan.verify??context.verify,publish:plan.publish,estimated:plan.estimated});
+  const model=new JobModel({kind:plan.kind,book,totals:plannedTotals(plan),verify:plan.verify??context.verify,publish:plan.publish,estimated:plan.estimated});
   const state:JobState={plan,model,book,context:prior,known:{},fixed:new Set(Object.keys(plan.totals??{}).map(step=>model.resolve(step))),fractions:new FractionHold(),shared:new Map(),view:{}};
   this.jobs.set(id,state);
   return state;
  }
  /** The totals of the steps still ahead, from what the job has shown so far, for any the plan did not set. */
  private learn(state:JobState,step:string,total:{files:number;bytes:number},context:EtaContext,progress?:EtaInput){
-  const {model,fixed}=state,copies=Math.max(1,context.destinations),set=(name:string,value:StepTotal)=>{if(!fixed.has(model.resolve(name)))model.setTotal(name,value);};
+  const {model,fixed}=state,copies=Math.max(1,context.destinations),verify=verifyShare(state.plan),set=(name:string,value:StepTotal)=>{if(!fixed.has(model.resolve(name)))model.setTotal(name,value);};
   switch(state.plan.kind){
    case 'import':
     if(step==='checking'){
      state.known.files=total.files;state.known.bytes=total.bytes;
      set('comparing',{files:total.files*copies,bytes:total.bytes*copies,bytesKnown:false});set('existing',{files:total.files*copies,bytes:0});
-     set('copying',{files:total.files*copies,bytes:total.bytes*copies});set('verifying',{files:total.files*copies,bytes:total.bytes*copies});
+     set('copying',{files:total.files*copies,bytes:total.bytes*copies});set('verifying',{files:total.files*copies*verify,bytes:total.bytes*copies*verify});
+     if(!fixed.has(model.resolve('copying')))state.assumed=true;
     }
-    // Files that turned out identical at the destination are not copied or verified: the later steps shrink as they are found.
+    // Files that turned out identical at the destination are not copied or verified: the later steps shrink as they are found. Once enough
+    // are compared, the share found identical stands for the files still to compare, and the job's time can be claimed.
     if(step==='comparing'&&progress?.matched!==undefined&&state.known.files!==undefined){
-     const files=Math.max(0,state.known.files*copies-progress.matched),bytes=Math.max(0,(state.known.bytes??0)*copies-(progress.matchedBytes??0));
-     set('copying',{files,bytes});set('verifying',{files,bytes});
+     const knownFiles=state.known.files*copies,knownBytes=(state.known.bytes??0)*copies,matched=progress.matched,matchedBytes=progress.matchedBytes??0;
+     const measured=progress.completed>=COMPARED_SAMPLE||progress.total>0&&progress.completed>=progress.total;
+     const fileShare=progress.total>0?Math.min(1,progress.completed/progress.total):1,byteShare=progress.totalBytes>0&&progress.bytes>0?Math.min(1,progress.bytes/progress.totalBytes):fileShare;
+     const projected=measured&&fileShare>0?Math.min(knownFiles,matched/fileShare):matched,projectedBytes=measured&&byteShare>0?Math.min(knownBytes,matchedBytes/byteShare):matchedBytes;
+     const files=Math.max(0,knownFiles-projected),bytes=Math.max(0,knownBytes-projectedBytes);
+     set('copying',{files,bytes});set('verifying',{files:files*verify,bytes:bytes*verify});
+     if(measured)state.assumed=false;
     }
+    if(step==='existing'||step==='copying'||step==='verifying')state.assumed=false;
     if(step==='copying'){
      // Files copied directly are checked in place as they copy: only the rest are verified afterwards, and with none left there is no verify step.
      const direct=progress?.work?.direct,planned=state.plan.totals?.verifying??total;
@@ -165,7 +187,7 @@ export class EtaTracker {
   state.view={fraction:state.fractions.next(snapshot.cost.total>0?snapshot.fraction:undefined)};
   if(!trusted||guessed&&(snapshot.step??0)>MAX_LISTING_ETA)return {};
   // The job's first seconds are spent estimating.
-  const job=now-state.first>=10000?snapshot.job:undefined;
+  const job=now-state.first>=10000&&!state.assumed?snapshot.job:undefined;
   return {...(snapshot.step===undefined?{}:{step:snapshot.step}),...(job===undefined?{}:{job}),...(job&&snapshot.low!==undefined&&snapshot.high!==undefined?{low:snapshot.low,high:snapshot.high}:{})};
  }
  /** A finished step's fit joins the session's history, and the saved one when it is long and unshared enough. */

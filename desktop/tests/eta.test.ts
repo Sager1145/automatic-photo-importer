@@ -72,17 +72,23 @@ test('every step is estimated by the model: a listing is an estimated-total step
   assert.ok(locating.step! > 20 && locating.step! < 45, `locating ${locating.step}`);
 });
 
-test('the job estimate adds the steps still ahead and stays defined across a step change', () => {
+test('the job estimate waits until comparing has measured how many files are new, then adds the steps still ahead and stays', () => {
   const tracker = new EtaTracker();
   const checking = (t: number): EtaInput => ({ phase: 'planning', step: 'checking', completed: t * 40, total: 4000, bytes: t * 40 * 25 * MB, totalBytes: 100e9 });
   const two = { ...context, destinations: 2 };
   let eta = tracker.observe('j', checking(0), two, 0);
   for (let t = 1; t <= 20; t++) eta = tracker.observe('j', checking(t), two, t * 1000);
   assert.ok(eta.step! > 70 && eta.step! < 90, `checking ${eta.step}`);
+  assert.equal(eta.job, undefined, 'copying every file checked is only an assumption: the job\'s time is not claimed');
+  // Comparing: none of the first files is on the destinations, so every file checked will be copied and verified.
+  const comparing = (t: number): EtaInput => ({ phase: 'planning', step: 'comparing', completed: t * 80, total: 8000, bytes: t * 2e9, totalBytes: 200e9, matched: 0, matchedBytes: 0 });
+  eta = tracker.observe('j', comparing(0), two, 101000);
+  assert.equal(eta.job, undefined, 'nothing compared yet');
+  for (let t = 1; t <= 10; t++) eta = tracker.observe('j', comparing(t), two, (101 + t) * 1000);
   assert.ok(eta.job! > eta.step! + 3000, `job includes copying and verifying: ${eta.job}`);
-  const comparing = tracker.observe('j', { phase: 'planning', step: 'comparing', completed: 0, total: 8000, bytes: 0, totalBytes: 200e9 }, two, 101000);
-  assert.equal(comparing.step, undefined, 'a new step is estimating');
-  assert.ok(comparing.job! > 3000, 'the job estimate stays');
+  const existing = tracker.observe('j', { phase: 'planning', step: 'existing', completed: 0, total: 8000, bytes: 0, totalBytes: 0 }, two, 112000);
+  assert.equal(existing.step, undefined, 'a new step is estimating');
+  assert.ok(existing.job! > 3000, 'the job estimate stays');
   tracker.forget([]);
   assert.deepEqual(tracker.observe('j', checking(0), two, 0), {}, 'forgotten jobs start fresh');
 });
