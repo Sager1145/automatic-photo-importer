@@ -20,6 +20,7 @@ After an import, offers to delete only the files verified by checksum in the bac
 After an import, offers to delete only the files verified by checksum in the backup, with a two-step confirmation. Off by default.|导入后，仅提供删除已在备份中通过校验和验证的文件，并需两步确认。默认关闭。|匯入後，僅提供刪除已在備份中通過校驗碼驗證的檔案，並需兩步確認。預設為關閉。|インポート後、バックアップでチェックサム検証済みのファイルだけを、2段階の確認のうえ削除できます。初期設定ではオフです。
 Eject|推出|退出|取り出す
 Remove from app|从应用中移除|從 App 中移除|アプリから削除
+Ejecting…|正在推出…|正在退出…|取り出し中…
 Eject {name}?|要推出 {name} 吗？|要退出 {name} 嗎？|{name} を取り出しますか？
 Remove {name} from the app?|要将 {name} 从应用中移除吗？|要將 {name} 從 App 中移除嗎？|{name} をアプリから削除しますか？
 The folder and its files stay where they are.|文件夹及其文件保持原样。|資料夾及其檔案保持原樣。|フォルダーとファイルはそのまま残ります。

@@ -1148,13 +1148,14 @@ async function action(input:Action):Promise<void>{
    // onto its own drive, or a folder chosen here. Camera cards and removable flash are refused.
    assertOrganizationIdle();
    if(input.sourceId!==undefined){
-    const source=state.sources.find(item=>item.id===input.sourceId&&item.transport==='folder');if(!source)throw new MessageError('error.selectDrive');
+    const source=state.sources.find(item=>item.id===input.sourceId&&item.transport==='folder');if(!source)throw new MessageError('error.selectDrive');assertNotEjecting(source);
     if(state.jobs.some(job=>!job.organization&&job.source.id===source.id&&isLive(job)))throw new MessageError('error.busy');
     if(state.review?.source.id===source.id)await discardReview();else if(state.review||state.busyReview)throw new MessageError('error.busy');
     await organizeFolderInPlace(source.path,state.sources.filter(item=>item.id!==source.id));pump();break;
    }
    const result=await dialog.showOpenDialog(window!,{title:'Choose a folder to organize in place',properties:['openDirectory']});
    if(result.canceled||!result.filePaths[0])break;
+   assertNotEjecting({path:result.filePaths[0]});
    await organizeFolderInPlace(result.filePaths[0],state.sources);break;
   }
   case 'checkBackupFolder':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid destination');checkBackupFolder(index);break;}
@@ -1237,7 +1238,7 @@ async function action(input:Action):Promise<void>{
   }
   case 'retryJob':{
    // Runs a job that ended with errors again, files it skipped included. Verified copies are recognised, not copied again.
-   const failed=state.jobs.find(job=>job.id===input.jobId&&job.retryable&&job.phase==='error'&&!active.has(job.id));if(!failed)break;
+   const failed=state.jobs.find(job=>job.id===input.jobId&&job.retryable&&job.phase==='error'&&!active.has(job.id));if(!failed)break;assertNotEjecting(failed.source);
    if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,exclude:undefined,skipErrors:undefined});delete failed.retryable;delete failed.skippablePath;break;}
    if(!state.sources.some(source=>source.id===failed.source.id))throw new MessageError('error.sourceDisconnected');
    if(state.jobs.some(job=>job.source.id===failed.source.id&&isLive(job)))throw new MessageError('error.busy');
@@ -1245,7 +1246,7 @@ async function action(input:Action):Promise<void>{
   }
   case 'skip':{
    // Skip leaves the file that stopped the job out; Skip all also skips every other file that fails. Verified copies are recognised, not copied again.
-   const failed=state.jobs.find(job=>job.id===input.jobId&&job.skippablePath&&(job.phase==='error'||job.phase==='stopped')&&!active.has(job.id));if(!failed)break;
+   const failed=state.jobs.find(job=>job.id===input.jobId&&job.skippablePath&&(job.phase==='error'||job.phase==='stopped')&&!active.has(job.id));if(!failed)break;assertNotEjecting(failed.source);
    if(input.path!==undefined&&input.path!==failed.skippablePath)break;
    const skip={exclude:[...new Set([...(failed.excluded??[]),failed.skippablePath!])],...(input.all===true?{skipErrors:true}:{})};
    // The buttons go away only once the rerun is queued; a refusal leaves them to try again.
