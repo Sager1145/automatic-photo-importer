@@ -111,3 +111,28 @@ test('progress emits stay at 4 a second while copying, and the error log is rebu
  clearErrors(log,value);cache.refresh(value);
  assert.equal(cache.builds,3,'a clear rebuilds once');
 });
+
+test('unknown files an organization left or filed become one titled warning group with the breakdown by reason, in every language',async()=>{
+ const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider}=await import('../renderer/i18n');const {ActivityPanel,collectErrors,groupInfo}=await import('../renderer/RootApp');
+ const {noMetadataIssues}=await import('../job-issues');
+ const files=[...Array.from({length:2_500},(_,index)=>({path:`/Volumes/A006/photobackup/Screens/${index}.PNG`,relative:`Screens/${index}.PNG`,reason:'noDate' as const})),...Array.from({length:5},(_,index)=>({path:`/Volumes/A006/photobackup/x/${index}.JPG`,relative:`x/${index}.JPG`,reason:'noCamera' as const})),{path:'/Volumes/A006/photobackup/y/a.HEIC',relative:'y/a.HEIC',reason:'unreadable' as const},{path:'/Volumes/A006/photobackup/y/b.HEIC',relative:'y/b.HEIC',reason:'unreadable' as const}];
+ for(const handling of ['keep','folder'] as const){
+  const job=newJob({organization:true,source:{id:'library:/Volumes/A006',name:'Existing library',path:'/Volumes/A006',transport:'folder'}});
+  for(const issue of noMetadataIssues({handling,folder:'Unknown files',count:files.length,counts:{noDate:2_500,noCamera:5,unreadable:2},files}))recordIssue(job,issue);
+  assert.deepEqual(job.groups![0]!.reasons,{noDate:2_500,noCamera:5,unreadable:2},'the group counts every reason, not only the listed sample');
+  const value=state([job]);value.errorLog=new ErrorLog().update(gatherErrors(value));
+  const rows=buildRows(collectErrors(value));
+  assert.equal(rows.length,1);assert.equal(rows[0]!.merged,true,'a recorded group is a group row even outside groupedCodes');assert.deepEqual(rows[0]!.reasons,{noDate:2_500,noCamera:5,unreadable:2});
+  const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ActivityPanel,{state:value,errors:collectErrors(value),act:()=>{}})}));
+  assert.ok(!markup.includes('items need attention'),'never the placeholder message');
+  assert.ok(markup.includes(handling==='keep'?'2,507 unknown files were left where they are':'2,507 unknown files were filed in the unknown files folder'));
+  assert.ok(markup.includes('2,500 without a date')&&markup.includes('5 without a camera')&&markup.includes('2 unreadable'),'the breakdown');
+  assert.ok(markup.includes('data-testid="error-group-copy"'),'the affected files can be listed and copied');
+  for(const language of languages){
+   const t=createTranslator(language),info=groupInfo(rows[0]!.code,rows[0]!.count,'A006',t,String,rows[0]!.reasons);
+   assert.ok(info.breakdown?.includes('2500')&&info.breakdown.includes('5')&&info.breakdown.includes('2'),`${language}: ${info.breakdown}`);
+   if(language!=='en')assert.notEqual(info.breakdown,'2500 without a date · 5 without a camera · 2 unreadable',language);
+  }
+ }
+});

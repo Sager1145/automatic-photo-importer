@@ -110,7 +110,8 @@ test('main.ts re-plans an open review for this run only with reviewNoMetadata, a
   assert.match(body,/useFileDate:true,confirmed:true/);
   assert.match(body,/useFileDate:false,confirmed:true,handling,prefs:\{\.\.\.request\.prefs,noMetadataHandling:handling\}/);
   assert.doesNotMatch(body,/state\.preferences|savePreferences|patchPreferences/);
-  assert.match(source,/noMetadataHandling:prepared\.handling/);
+  assert.match(await fs.readFile(path.join(__dirname,'../review-job.ts'),'utf8'),/noMetadataHandling:prepared\.handling/);
+  assert.match(body,/const origin=reviewed\.origin;await openReview\(source,backup,next,destinationIndex\);if\(origin&&reviewed\)reviewed\.origin=origin;/,'a re-plan keeps the job it was parked from');
   assert.match(source,/prefs\.noMetadataHandling=job\.noMetadataHandling/);
   assert.match(source,/prefs:jobPreferences\(job\)/);
   assert.equal(source.match(/queued\.noMetadataHandling=failed\.noMetadataHandling/g)?.length,2,'both retry paths keep it');

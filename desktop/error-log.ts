@@ -22,7 +22,7 @@ export function pathOf(value:Message):string|undefined{const own=value.params?.p
 /** Codes shown as one row per job however many entries there are. Other entries keep a row each. */
 export const groupedCodes=new Set<string>(['staging-left','unreadable','zero-byte','copy-failed','file-skipped']);
 /** One problem shown in All errors. id is stable while the problem lasts; source groups it, drive names the volume it came from. */
-export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
+export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];/** A group's problems per reason. */reasons?:Record<string,number>;id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
 /** When each shown error first appeared (ISO), and the ids the user cleared while they last. */
 export interface ErrorLogState {at:Record<string,string>;cleared:string[];}
 
@@ -67,7 +67,7 @@ export function gatherErrors(state:AppState):LoggedError[]{
   for(const group of job.groups??[]){
    if(isAcknowledged(job,group.code))continue;
    const groupId=entryId(job,group);if(seen.has(groupId))continue;seen.add(groupId);
-   result.push({id:groupId,code:group.code,source:name,drive:driveName(path,name),message:makeMessage('issue.group',{code:group.code,count:group.count}),kind,severity:group.severity,count:group.count,items:group.items,...(id?{sourceId:id}:{}),jobId:job.id});
+   result.push({id:groupId,code:group.code,source:name,drive:driveName(path,name),message:makeMessage('issue.group',{code:group.code,count:group.count}),kind,severity:group.severity,count:group.count,items:group.items,...(group.reasons?{reasons:group.reasons}:{}),...(id?{sourceId:id}:{}),jobId:job.id});
   }
   if(job.phase==='error'&&!job.errors.length&&!job.acknowledged&&!(job.groups??[]).some(group=>group.severity==='error'))add('job:'+job.id,name,path,job.detail,kind,id);
  }

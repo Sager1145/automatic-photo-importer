@@ -95,13 +95,13 @@ export const isRunning=(job:Pick<Job,'phase'>)=>ACTIVE_PHASES.includes(job.phase
 /** A job waiting in the queue or running. */
 export const isLive=(job:Pick<Job,'phase'>)=>job.phase==='queued'||isRunning(job);
 /** A problem the copy step reports in structured form. `code` is stable ('staging-left', ...); warnings left the data safe. */
-export interface ExecutionIssue {code:string;severity:'error'|'warning';path:string;detail?:string;/** 1-based destination it happened on. */destination?:number;}
+export interface ExecutionIssue {code:string;severity:'error'|'warning';path:string;detail?:string;/** Why, as a fixed key its group counts (unknown files: NoMetadataReason). */reason?:string;/** 1-based destination it happened on. */destination?:number;}
 /** The most paths one issue group carries in the state; the rest are fetched on demand. */
 export const MAX_GROUP_ITEMS=200;
 /** The problems the user skipped for a job. Skipping changes only the status: the error lists, reports and files stay as they were. */
 export interface Acknowledged {at:string;/** Every problem was skipped and the job ended as complete. */all:boolean;codes:string[];groups:{code:string;severity:'error'|'warning';count:number}[];errorCount:number;}
 /** Many like problems of one job, kept as a count and the first paths instead of one entry each. The operation report keeps every one. */
-export interface JobIssueGroup {code:string;severity:'error'|'warning';count:number;items:{path:string;detail?:string}[];}
+export interface JobIssueGroup {code:string;severity:'error'|'warning';count:number;items:{path:string;detail?:string}[];/** Issues per reason, over all of them (items is only a sample). */reasons?:Record<string,number>;}
 export interface HistoryEntry {id:string;date:string;title:Message;detail:Message;}
 export interface DestinationStatus {path:string;total?:number;free?:number;available:boolean;detail?:string;volumeId?:string;physicalId?:string;}
 /** Per-run choices for organizing a folder; both default to on every time, whatever saved preferences say. */

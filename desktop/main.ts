@@ -67,6 +67,7 @@ import {deferredRefresh} from './deferred-refresh';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
 import {PhaseLog,TopologyLog,ActivityLog,logProgress} from './job-log';
 import {exportLogs} from './log-export';
+import {appliedReviewJob} from './review-job';
 
 const qa=process.argv.includes('--qa')||process.execPath.includes(' QA.app/');
 /** Synthetic state and the import gate for the automated QA; only an unpackaged --codex-test launch has them. */
@@ -78,8 +79,9 @@ const state:AppState={preferences:normalizePreferences(undefined),sources:[],job
 /** The source files each finished folder import copied and verified (by job), for Delete originals already in the backup. Only in memory. */
 /** `volumeId` is the volume the source was on when the job ran; a different volume at the same mount is never offered this deletion. */
 const importedOriginals=new Map<string,{root:string;files:VerifiedOriginal[];volumeId?:string}>();
-/** Organizing a folder starts every run with these on; only an explicit choice for the run changes them, and the run uses them up. */
-function takeOrganizeOptions():OrganizeOptions{const options={...(state.organizeOptions??freshOrganizeOptions())};state.organizeOptions=freshOrganizeOptions();return options;}
+/** Organizing a folder starts every run with these on; only an explicit choice for the run changes them. The switches keep
+ * showing that choice while its review is built or open and while the run is queued or running; the run ending (finishJob) puts them back to on. */
+function takeOrganizeOptions():OrganizeOptions{return {...(state.organizeOptions??freshOrganizeOptions())};}
 let window:BrowserWindow|undefined;
 let timer:NodeJS.Timeout|undefined;
 // Live drive utilization (macOS IOKit statistics): every second while the window is visible or work runs; stopped while hidden and idle.
@@ -426,6 +428,8 @@ function startJob(job:Job):AbortController{
 function finishJob(job:Job){
  void duplicatesStale(touchedLibraries.get(job.id)??[]);forgetMisplaced(touchedMisplaced(state.misplacedFiles,touchedLibraries.get(job.id)??[]));touchedLibraries.delete(job.id);
  delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);
+ // A job parked for its review, or queued again to ask later, is not over: it runs with the same choices.
+ if(job.organization&&organizationRuns.has(job.id)&&job.phase!=='queued'&&!reviewed&&!state.busyReview)state.organizeOptions=freshOrganizeOptions();
  emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();
  void maybeAutoEject(job);
 }
@@ -684,6 +688,7 @@ function assertOrganizationIdle(){
 function queueOrganization(root:string,name:string,request:RunRequest){
  assertOrganizationIdle();
  const job:Job={id:randomUUID(),source:{id:'library:'+root,path:root,name,transport:'folder'},organization:true,...(request.sourceFolders?.length?{folders:request.sourceFolders}:{}),phase:'queued',detail:message('job.waitingForImports'),errors:[],backup:false};
+ if(request.options)state.organizeOptions={...request.options};
  organizationQueue.set(job.id,request);state.jobs.unshift(job);emit();pump();
 }
 /** One destination's backup as a library: its backup folder, organized in place. In the video-root
@@ -940,9 +945,9 @@ async function applyReview(){
  if(!reviewed)return;
  if(busy()||state.busyReview)throw new MessageError('error.busy');
  const prepared=reviewed;reviewed=undefined;state.review=undefined;
- const job:Job={id:randomUUID(),source:prepared.review.source,phase:'verifying',detail:message('job.revalidating'),errors:[],backup:prepared.review.backup,unknownConfirmed:true,...(prepared.useFileDate?{useFileDate:true}:{}),...(prepared.handling?{noMetadataHandling:prepared.handling}:{}),...(prepared.origin?.organization?{organization:true,...(prepared.origin.folders?{folders:prepared.origin.folders}:{})}:{})};state.jobs.unshift(job);if(prepared.origin?.organization)organizationRuns.set(job.id,{...prepared.request,confirmed:true});const control=startJob(job);if(prepared.review.kind==='reorganize')organizationJobIds.add(job.id);
+ const {job,organization}=appliedReviewJob(randomUUID(),prepared);state.jobs.unshift(job);if(organization){organizationRuns.set(job.id,organization);state.organizeOptions={...prepared.options};}const control=startJob(job);
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
- log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error'&&(prepared.review.kind!=='reorganize'||organizationRuns.has(job.id)))job.retryable=true;finishJob(job);});
+ log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error')job.retryable=true;finishJob(job);});
 }
 // ---- Remove duplicates: scan one library, review, set the chosen copies aside (recovery store, with undo).
 let duplicateGroups:DuplicateGroup[]=[],duplicateCompanions=new Map<string,string[]>(),duplicateControl:AbortController|undefined;
@@ -1171,7 +1176,7 @@ async function action(input:Action):Promise<void>{
    const next:RunRequest=handling==='fileDate'
     ?{...rest,useFileDate:true,confirmed:true,...(reviewed.noMetadata??request.earlier?{earlier:(reviewed.noMetadata??request.earlier)!}:{})}
     :{...rest,useFileDate:false,confirmed:true,handling,prefs:{...request.prefs,noMetadataHandling:handling}};
-   await openReview(source,backup,next,destinationIndex);break;
+   const origin=reviewed.origin;await openReview(source,backup,next,destinationIndex);if(origin&&reviewed)reviewed.origin=origin;break;
   }
   case 'applyReview':await applyReview();break;
   case 'discardReview':await discardReview();pump();break;

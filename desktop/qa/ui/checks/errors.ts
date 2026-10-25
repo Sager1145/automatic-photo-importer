@@ -25,12 +25,17 @@ export const errorChecks=():Check[]=>[
   // Ask is a job setting: it is dropped while a scan runs, so prefs() waits for idle and confirms it took.
   try{
    await h.prefs({unknownDefault:'ask'});
+   // Ask applies to media imports. The checks before this one imported every fixture card as a files backup, and an
+   // organization is never an import, so a finished media import of card 1 is what reports its unknown formats.
+   const card=(await h.state()).sources.find(source=>source.id==='fixture:1');
+   if(h.hooks&&card)h.hooks.addJobs([{...syntheticJob('media-import-card-1',{phase:'complete',source:card}),backup:false}]);
    await openPanel(h);
    await h.until('format issues in the error panel',"document.querySelector('[data-testid=activity-panel] [data-testid=unknown-files-prompt]')");
    assert.equal(await h.js<boolean>("document.querySelector('[data-testid=activity-panel]').textContent.includes('Keep unknown files excluded')"),true);
+   assert.equal(await h.js<boolean>("Array.from(document.querySelectorAll('[data-testid=activity-panel] [data-testid=unknown-files-prompt]')).some(prompt=>prompt.textContent.includes('Existing library'))"),false,'an organization never asks about unknown import formats');
    await h.shot('file-format-errors');
    await closePanel(h);
-  }finally{await h.prefs({unknownDefault:'skip'});}
+  }finally{h.hooks?.clear();await h.prefs({unknownDefault:'skip'});}
  }},
  {id:'errors-on-top-200',stage:'errors',title:'Errors stay on top: at 200% the error toast is the topmost element everywhere on it, also on the frames after each page switch',covers:['error toasts always on top','UI scale 2','transitions suspended under errors'],run:async h=>{
   type Layer={testid:string;topLayer:boolean;misses:string[];transition:boolean};

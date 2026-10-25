@@ -557,6 +557,31 @@ test('organizing removes emptied source folders by default, and a run can turn i
   }
 });
 
+test('while an organize review is building or open, the switches show the options that review will run with', async () => {
+  const { Organization } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/Volumes/A006'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} };
+  const toggle = (markup: string, id: string) => markup.match(new RegExp(`data-testid="${id}"[\\s\\S]*?</label>`))?.[0] ?? '';
+  const off = { removeEmptyFolders: false, releaseDuplicates: false };
+  const review: NonNullable<AppState['review']> = { id: 'r', kind: 'reorganize', source: { id: 'library:/Volumes/A006', path: '/Volumes/A006', name: 'Existing library', transport: 'folder' }, plans: [], backup: false, options: off };
+  const render = (state: Partial<AppState>) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(Organization, { state: { preferences, sources: [], jobs: [], history: [], platform: 'darwin', organizeOptions: { removeEmptyFolders: true, releaseDuplicates: true }, ...state }, act: () => {}, busy: true }) }));
+  const open = render({ review });
+  assert.ok(!/checked=""/.test(toggle(open, 'remove-empty-folders')) && !/checked=""/.test(toggle(open, 'release-duplicates')), 'an open review shows its own options, not fresh defaults');
+  const imports = render({ review: { ...review, kind: 'import', options: undefined } });
+  assert.ok(/checked=""/.test(toggle(imports, 'remove-empty-folders')), 'an import review leaves the switches alone');
+});
+
+test('main.ts keeps the chosen organize options until the run that uses them ends, so the card never shows defaults mid-run', async () => {
+  const source = readFileSync(new URL('../main.ts', import.meta.url), 'utf8');
+  const take = source.slice(source.indexOf('function takeOrganizeOptions'), source.indexOf('\n', source.indexOf('function takeOrganizeOptions')));
+  assert.ok(take && !take.includes('state.organizeOptions=freshOrganizeOptions()'), 'starting a review or a run no longer resets the switches');
+  const finish = source.slice(source.indexOf('function finishJob'), source.indexOf('\nfunction pump'));
+  assert.match(finish, /if\(job\.organization&&organizationRuns\.has\(job\.id\)&&job\.phase!=='queued'&&!reviewed&&!state\.busyReview\)state\.organizeOptions=freshOrganizeOptions\(\);/, 'the run ending puts them back to on, unless it was parked for a review');
+  const queue = source.slice(source.indexOf('function queueOrganization'), source.indexOf('\n}', source.indexOf('function queueOrganization')));
+  assert.match(queue, /if\(request\.options\)state\.organizeOptions=\{\.\.\.request\.options\};/, 'a queued run (Retry, Continue too) shows its own options');
+  const apply = source.slice(source.indexOf('async function applyReview'), source.indexOf('\n}', source.indexOf('async function applyReview')));
+  assert.match(apply, /if\(organization\)\{organizationRuns\.set\(job\.id,organization\);state\.organizeOptions=\{\.\.\.prepared\.options\};\}/, 'an applied organize review shows the options it runs with');
+});
+
 test('scans show a percentage of used space, organizations show n of x with %, and unanswered new drives are marked', async () => {
   const { ScanProgress, ImportDesk } = await import('../renderer/RootApp');
   const { OrganizationProgress } = await import('../renderer/progress');
