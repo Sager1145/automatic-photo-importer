@@ -201,3 +201,12 @@ test('a different volume at the same mount is never offered the old job\'s delet
  assert.equal(originalsVolumeChanged('uuid-1',undefined),true,'not mounted any more');
  assert.equal(originalsVolumeChanged(undefined,'uuid-2'),false,'nothing was recorded to compare');
 });
+
+test('paths overlap only on whole folder names, with either separator', () => {
+ assert.equal(overlaps('/Volumes/SD/DCIM','/Volumes/SD'),true);
+ assert.equal(overlaps('/Volumes/SD','/Volumes/SD/'),true);
+ assert.equal(overlaps('/Volumes/SD2','/Volumes/SD'),false,'a sibling drive with a longer name is not inside');
+ assert.equal(overlaps('E:\\DCIM\\100CANON','E:\\'),true);
+ assert.equal(overlaps('E:\\DCIM','F:\\DCIM'),false);
+ assert.equal(overlaps(undefined,'/Volumes/SD'),false);
+});

@@ -1,8 +1,14 @@
 import {isLive} from './shared';
 import type {AppState,Job,Preferences,Source} from './shared';
 import {errorTotal} from './job-issues';
-import {within} from './core/paths';
 import {MessageError,type Message} from './messages';
+
+/** `child` is `root` or inside it. Plain string work, so the window can import this module (core/paths needs Node). */
+function within(child:string,root:string):boolean {
+ const tidy=(value:string)=>value.replace(/\\/g,'/').replace(/\/+$/,'')||'/';
+ const inner=tidy(child),outer=tidy(root);
+ return inner===outer||inner.startsWith(outer==='/'?'/':`${outer}/`);
+}
 
 /** What ejecting needs to know about the app: no Electron, no file system. */
 export type EjectView=Pick<AppState,'sources'|'jobs'>&{review?:AppState['review'];busyReview?:boolean;reviewSourceId?:string;scanningSources?:readonly string[];
