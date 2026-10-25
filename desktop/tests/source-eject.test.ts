@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
-import {autoEjectDecision,doneSources,ejectDone,ejectSource,offersOriginals,sourceInUse,type EjectDeps,type EjectView} from '../source-eject';
+import {autoEjectDecision,doneSources,ejectDone,ejectSource,ejectingSource,offersOriginals,originalsBlocked,originalsVolumeChanged,overlaps,sourceInUse,type EjectDeps,type EjectView} from '../source-eject';
 import {deleteOriginals,type VerifiedOriginal} from '../core/originals';
 import {defaultPreferences} from '../preferences';
 import {MessageError} from '../messages';
@@ -27,7 +27,7 @@ test('a source in use is a live, queued or paused job, a scan, a review or a run
 });
 
 test('Eject all done picks clean finished drives and folders that nothing uses',()=>{
- const other:Source={...card,id:'other',name:'Other'},failed:Source={...card,id:'failed',name:'Failed'},backupDrive:Source={...card,id:'backup',name:'Backup',path:'/Volumes/BACKUP'};
+ const other:Source={...card,id:'other',name:'Other',path:'/Volumes/OTHER'},failed:Source={...card,id:'failed',name:'Failed',path:'/Volumes/FAILED'},backupDrive:Source={...card,id:'backup',name:'Backup',path:'/Volumes/BACKUP'};
  const jobs=[job(card),job(folder),job(camera),job(other,{phase:'copying'}),job(failed,{phase:'error'}),job(backupDrive)];
  const found=doneSources(view([card,folder,camera,other,failed,backupDrive],jobs),source=>source.id==='backup');
  assert.deepEqual(found.map(item=>item.id),['card','folder'],'no camera, no running, no failed, no drive holding the backup');
@@ -126,14 +126,78 @@ test('auto-eject decision: only clean, verified card imports, and it waits for D
  assert.equal(decide({},job(card,{phase:'error'})),'no');
  assert.equal(decide({},job(card,{failedFiles:1} as Partial<Job>)),'no');
  assert.equal(autoEjectDecision(view([folder],[job(card)]),job(card),undefined,prefs),'no','a drive already unplugged');
- assert.equal(decide({},job(card),card,{review:{source:card} as never}),'no','an open review');
+ assert.equal(decide({},job(card),card,{review:{source:card} as never}),'busy','an open review');
  assert.equal(decide({verifyCopies:false}),'no','copies were not read back');
  assert.equal(decide({verifyCopies:false},job(card,{alreadyImported:true})),'eject','everything was already verified in the backup');
  assert.equal(decide({},job(card),card,{},()=>true),'no','a drive that holds the backup');
  assert.equal(decide({deleteOriginalsCards:true},job(card,{verifiedOriginals:12})),'wait','deletable originals are waiting');
  assert.equal(decide({deleteOriginalsCards:true},job(card,{verifiedOriginals:12,deletingOriginals:{completed:1,total:12}})),'wait');
- assert.equal(decide({deleteOriginalsCards:true},job(card,{verifiedOriginals:2,originalsDeleted:{files:10,bytes:1,kept:2}})),'eject','after Delete originals finished');
+ assert.equal(decide({deleteOriginalsCards:true},job(card,{verifiedOriginals:2,originalsDeleted:{files:10,bytes:1,kept:2}})),'wait','originals remain: the user decides');
+ assert.equal(decide({deleteOriginalsCards:true},job(card,{originalsDeleted:{files:10,bytes:1,kept:0,stopped:true}})),'wait','a stopped Delete originals run');
+ assert.equal(decide({deleteOriginalsCards:true},job(card,{originalsDeleted:{files:12,bytes:1,kept:0}})),'eject','after Delete originals finished with nothing left');
+ assert.equal(decide({},job(card),card,{busyPaths:['/Volumes/CARD/DCIM']}),'busy','in use: not ejected, and the user is told');
+ assert.equal(decide({},job(card),card,{ejecting:['card']}),'busy','already being ejected');
  assert.equal(decide({deleteOriginalsCards:false},job(card,{verifiedOriginals:12})),'eject','nothing waits when cards do not offer deletion');
  const older=job(card,{id:'older'}),newer=job(card,{id:'newer',phase:'copying'});
  assert.equal(autoEjectDecision(view([card],[newer,older]),older,card,prefs),'no','a newer import is running');
+});
+
+const inner:Source={id:'inner',name:'Inner',path:'/Volumes/CARD/DCIM/100',transport:'folder'};
+test('a source is in use when any work has a path inside it or holding it, not only the same source id',()=>{
+ assert.equal(overlaps('/Volumes/CARD/DCIM','/Volumes/CARD'),true);assert.equal(overlaps('/Volumes/CARD','/Volumes/CARD/DCIM'),true);
+ assert.equal(overlaps('/Volumes/CARD2','/Volumes/CARD'),false);assert.equal(overlaps('','/Volumes/CARD'),false);
+ const both=[card,inner];
+ assert.equal(sourceInUse(view(both,[job(inner,{phase:'copying'})]),card),true,'a folder inside the card is importing');
+ assert.equal(sourceInUse(view(both,[job(card,{phase:'copying'})]),inner),true,'the card holding the folder is importing');
+ assert.equal(sourceInUse(view(both,[job(inner,{phase:'queued'})]),card),true);
+ assert.equal(sourceInUse(view(both,[job(inner,{organization:true,phase:'copying'} as Partial<Job>)]),card),true,'an organization job');
+ assert.equal(sourceInUse(view(both,[job(inner,{phase:'stopped',paused:true})]),card),true);
+ assert.equal(sourceInUse(view(both,[job(inner,{deletingOriginals:{completed:0,total:1}})]),card),true);
+ assert.equal(sourceInUse(view(both,[job(inner)]),card),false,'a finished job is not use');
+ assert.equal(sourceInUse(view(both,[],{scanningSources:['inner']}),card),true,'a scan of a folder on the card');
+ assert.equal(sourceInUse(view(both,[],{review:{source:inner} as never}),card),true,'an open review on a folder within the card');
+ assert.equal(sourceInUse(view(both,[],{busyReview:true,reviewSourceId:'inner'}),card),true,'a review being built');
+ assert.equal(sourceInUse(view(both,[],{duplicates:{root:'/Volumes/CARD/Photos',status:'scanning'}}),card),true,'a duplicates scan on the card');
+ assert.equal(sourceInUse(view(both,[],{duplicates:{root:'/Volumes/CARD/Photos',status:'removing'}}),card),true);
+ assert.equal(sourceInUse(view(both,[],{duplicates:{root:'/Volumes/CARD/Photos',status:'ready'}}),card),false,'a finished duplicates scan');
+ assert.equal(sourceInUse(view(both,[],{duplicates:{root:'/Volumes/OTHER',status:'scanning'}}),card),false);
+ assert.equal(sourceInUse(view(both,[],{busyPaths:['/Volumes/CARD/Backup']}),card),true,'a folder check or residue cleanup on the card');
+ assert.equal(sourceInUse(view(both,[],{busyPaths:['/Volumes/OTHER']}),card),false);
+});
+
+test('a drive being ejected is marked first, refuses new work while it ejects, and is cleared on success and failure',async t=>{
+ const {state,deps}=await harness(t);
+ const marks:string[]=[];
+ let seen:string[]|undefined,during:Source|undefined;
+ const ejecting:string[]=[];
+ const wired:EjectDeps={...deps,view:()=>({...state,ejecting}),setEjecting:(source,on)=>{marks.push(`${source.id}:${on}`);if(on)ejecting.push(source.id);else ejecting.splice(ejecting.indexOf(source.id),1);},
+  ejectVolume:async()=>{seen=[...ejecting];during=ejectingSource({sources:state.sources,ejecting},{path:'/Volumes/CARD/DCIM'});}};
+ await ejectSource(wired,card);
+ assert.deepEqual(seen,['card'],'marked before the platform command');
+ assert.equal(during?.id,'card','a path inside the ejecting drive is refused');
+ assert.equal(ejectingSource({sources:state.sources,ejecting},{path:'/Volumes/CARD/DCIM'}),undefined,'cleared afterwards');
+ assert.deepEqual(marks,['card:true','card:false']);
+ state.sources=[card,camera];
+ await assert.rejects(ejectSource({...wired,ejectVolume:async()=>{throw new MessageError('error.ejectBusy');}},card),(error:MessageError)=>error.key==='error.ejectBusy');
+ assert.deepEqual(marks.slice(2),['card:true','card:false'],'cleared on failure');
+ assert.ok(state.sources.some(item=>item.id==='card'),'a failed eject keeps the drive');
+ ejecting.push('card');
+ await assert.rejects(ejectSource(wired,card),(error:MessageError)=>error.key==='error.ejectInUse','a second eject of the same drive is refused');
+ assert.deepEqual(doneSources({...state,ejecting}).map(item=>item.id),['folder'].filter(()=>false),'an ejecting drive is not offered again');
+});
+
+test('Delete originals is blocked by live work or scans inside the source root, by path',()=>{
+ const finished=job(card,{id:'finished'});
+ const both=[card,inner];
+ assert.equal(originalsBlocked(view(both,[finished]),finished,card.path),false);
+ assert.equal(originalsBlocked(view(both,[job(inner,{phase:'copying'}),finished]),finished,card.path),true,'a folder import inside the card');
+ assert.equal(originalsBlocked(view(both,[job(card,{id:'other',phase:'queued'}),finished]),finished,card.path),true);
+ assert.equal(originalsBlocked(view(both,[finished],{scanningSources:['inner']}),finished,card.path),true,'a scan inside the card');
+ assert.equal(originalsBlocked(view(both,[job(folder,{phase:'copying'}),finished]),finished,card.path),false,'work elsewhere does not matter');
+});
+test('a different volume at the same mount is never offered the old job\'s deletion',()=>{
+ assert.equal(originalsVolumeChanged('uuid-1','uuid-1'),false);
+ assert.equal(originalsVolumeChanged('uuid-1','uuid-2'),true);
+ assert.equal(originalsVolumeChanged('uuid-1',undefined),true,'not mounted any more');
+ assert.equal(originalsVolumeChanged(undefined,'uuid-2'),false,'nothing was recorded to compare');
 });
