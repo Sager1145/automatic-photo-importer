@@ -52,6 +52,17 @@ test('a placement memory written under the earlier scope formula misses once',as
   assert.equal(await loadPlacement(store,id,rulesScope(r)),undefined);
 });
 
+test('memories from before edited-folder ancestry classification are checked again',async t=>{
+  const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);await fs.writeFile(path.join(root,'A.JPG'),'bytes');
+  const {createHash}=await import('node:crypto'),r=ruleOptions(prefs);
+  const old=createHash('sha256').update(JSON.stringify([3,r.template,r.layout,r.videoTemplate??'',r.editedFolder??'',r.noMetadata,r.noMetadataFolder,Object.entries(r.unknownRules??{}).sort(([a],[b])=>a.localeCompare(b)),r.unknownDefault??''])).digest('hex').slice(0,32);
+  await rememberRouting(store,['a'],old);
+  const id=placementId('volume',root);await rememberEntries(store,id,old,root,[root],[{destination:path.join(root,'A.JPG'),size:5}]);
+  const current=rulesScope(r);
+  assert.equal(await routingChanged(store,['a'],current),true);
+  assert.equal(await loadPlacement(store,id,current),undefined);
+});
+
 test('remembered entries count only files beneath a library root, not the root itself',async t=>{
   const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);
   await fs.writeFile(path.join(root,'A.JPG'),'bytes');await fs.writeFile(path.join(store,'B.JPG'),'bytes');

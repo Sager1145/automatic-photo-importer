@@ -517,11 +517,14 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     if(sub[0]?.toLowerCase()===unknownFolder.toLowerCase())sub.shift();
     return path.join(unknownFolder,...sub.filter(part=>part.toLowerCase()!==LEGACY_UNKNOWN_CAMERA_FOLDER.toLowerCase()),path.basename(file.path));
   };
+  // An existing edited folder records the user's classification even when an export lost its editor tags.
+  // Source folder names do not classify new imports; companions use their original's classification below.
+  const isEdited=(file:InventoryFile)=>infos.get(file.path)?.edited===true||options.reorganize===true&&file.relative.split(path.sep).slice(0,-1).includes(options.editedFolder??'editied');
   for(const file of files) {
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
     const inherit=primary.path!==file.path && (file.companionOf || (file.kind!=='Other' && rawMembers.length===1));
-    const live=liveRoot.has(file.path),info:Metadata={fields:{},origin:own.origin||(inherit?paired.origin:undefined),camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&paired.edited:file.kind!=='RAW'&&own.edited};
+    const live=liveRoot.has(file.path),info:Metadata={fields:{},origin:own.origin||(inherit?paired.origin:undefined),camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&isEdited(primary):file.kind!=='RAW'&&isEdited(file)};
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let relative:string,place:ReturnType<typeof folder>|undefined,forcedRoot:'photos'|'videos'|undefined;
@@ -1176,12 +1179,18 @@ const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=
 interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;/** This run created the name with O_EXCL: only then may it ever remove the file. */created:boolean;}
 async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,signal:AbortSignal|undefined,hooks:{bytes:(count:number)=>void;done:(entry:PlanEntry)=>void}):Promise<'done'|'staged'> {
   const {transfer,recovery,result}=run,index=run.index!,root=transfer.root,sums=new Map<string,string>(),members:DirectMember[]=[];
+  const sourceUnchanged=async(entry:PlanEntry)=>{
+    const stat=await fs.lstat(entry.source,{bigint:true});
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(entry.size)||(entry.sourceIdentity!==undefined&&statKey(stat)!==entry.sourceIdentity)) throw sourceChanged(entry);
+  };
   const resolve:Resolve=async entry=>{
+    // A reviewed checksum describes the source at planning time, not any later replacement at its path.
+    await sourceUnchanged(entry);
     if(entry.digest) return entry.digest;
     let value=sums.get(entry.id);
     if(value===undefined) {
       value=await digest(entry.source,signal);
-      if(entry.sourceIdentity!==undefined&&statKey(await fs.lstat(entry.source,{bigint:true}))!==entry.sourceIdentity) throw sourceChanged(entry);
+      await sourceUnchanged(entry);
       sums.set(entry.id,value);
     }
     return value;
@@ -1195,7 +1204,11 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   const present=async(entry:PlanEntry,destination:string)=>{
     const sha=await resolve(entry);
     // Reported once the stale stage is gone too: one hard-linked to this file moves its change time.
-    const settled=async()=>run.emit(outcomeOf(run,entry,destination,sha,entry.routed!==undefined?'routed':'existing','content-verified',await vouched(index,destination,sha)));
+    const settled=async()=>{
+      const finalIdentity=await vouched(index,destination,sha);
+      await sourceUnchanged(entry);
+      run.emit(outcomeOf(run,entry,destination,sha,entry.routed!==undefined?'routed':'existing','content-verified',finalIdentity));
+    };
     const finished=await finishDirect(entry,destination,sha,transfer,recovery,signal);
     if(!finished) {
       await syncFile(destination);await syncParents(destination,root);

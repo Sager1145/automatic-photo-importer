@@ -5,6 +5,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
+import {exclusiveRename} from '../platform/exclusive-rename';
+import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,type RecoveryIndex} from './import-recovery';
 import { streams, STREAMS } from './devices';
 import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
 import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
@@ -64,7 +66,7 @@ const scopeOf=(m:Manifest)=>where(m).scope;
 /** One lock per journal, by library and id, wherever its records are. */
 const lockKey=(root:string,id:string)=>{if(!uuid.test(id))throw new Error('Invalid recovery identifier');return `${root}\0${id}`;};
 interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
- renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
+ renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoCopy:Set<number>;undoReady:Map<number,FileIdentity>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
  /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;}
 /** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
 interface HandOff {successor:string;successorRoot:string;destination:string;}
@@ -83,15 +85,15 @@ async function logMark(handle:fs.FileHandle,offset:number):Promise<LogMark>{
  return {ino:stat.ino,offset,size:stat.size,mtime:stat.mtimeNs,head,tail};
 }
 const finishedJournals=new Map<string,JournalCache>();
-function emptyState():JournalState{return {slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoComplete:false,handedOff:new Map(),migrationComplete:false};}
+function emptyState():JournalState{return {slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoCopy:new Set(),undoReady:new Map(),undoComplete:false,handedOff:new Map(),migrationComplete:false};}
 /** Fully undone, superseded, or complete with every finalize finished and nothing undone. Only these
  * are cached. Anything the app records later (a successor, a hand-off, a finalize or an undo) is an
  * append, which changes the stamp; the app never rewrites events in place. */
-const finished=(state:JournalState)=>state.undoComplete||!!state.superseded||state.complete&&state.finalizing.size===state.finalized.size&&state.undone.size===0;
+const finished=(state:JournalState)=>state.undoComplete||!!state.superseded||state.complete&&state.finalizing.size===state.finalized.size&&state.undone.size===0&&state.undoCopy.size===0;
 function copyState(state:JournalState):JournalState{
  return {...state,slots:new Map([...state.slots].map(([index,slots])=>[index,[...slots]])),exclusive:new Map([...state.exclusive].map(([index,stats])=>[index,[...stats]])),
   finalizing:new Set(state.finalizing),finalized:new Set(state.finalized),renameIntent:new Set(state.renameIntent),renamed:new Map(state.renamed),
-  dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),handedOff:new Map(state.handedOff)};
+  dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),undoCopy:new Set(state.undoCopy),undoReady:new Map(state.undoReady),handedOff:new Map(state.handedOff)};
 }
 /** Applies one authenticated event of journal `m` to `state` (a line is counted once: that is the reader's job). */
 function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=>void {
@@ -117,6 +119,8 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
   if(record.event==='rename-fallback')state.fallback.add(index);
   if(record.event==='published')state.published.add(index);
   if(record.event==='undone')state.undone.add(index);
+  if(record.event==='undo-copy-intent')state.undoCopy.add(index);
+  if(record.event==='undo-copy-ready'){const stat=record.stat as FileIdentity;if(!state.undoCopy.has(index)||!stat||['dev','ino','size','mtime','ctime'].some(key=>typeof (stat as unknown as Record<string,unknown>)[key]!=='string'))throw new Error('Invalid restored copy identity');state.undoReady.set(index,stat);}
   if(record.event==='handed-off'){
    const handOff={successor:record.successor,successorRoot:record.successorRoot,destination:record.destination};
    const canonical=(value:unknown)=>typeof value==='string'&&path.resolve(value)===value;
@@ -458,7 +462,7 @@ async function laterMoves(m:Manifest,onLater?:(done:number,total:number,file:str
   // Only a finished, never undone journal can have taken a file over for good.
   const later=await readManifest(folder,id).catch(()=>undefined);if(!later)continue;
   const state=await readEvents(later,undefined,undefined,false,signal).catch(error=>{if(isAbort(error))throw error;return undefined;});
-  if(!state?.complete||state.undone.size||state.undoComplete)continue;
+  if(!state?.complete||state.undone.size||state.undoCopy.size||state.undoComplete)continue;
   for(const [index,entry] of later.entries.entries())if(entry.move&&state.renamed.has(index))moves.set(pathKey(entry.source),{root:folder,m:later,state,index});
  }
  onLater?.(candidates.length,candidates.length,'');
@@ -657,7 +661,7 @@ async function unfinishedAfterCaseRename(real:string,recorded:string):Promise<st
 }
 /** Work a journal still owns: not finished, a finalize not completed, or an undo stopped part-way.
  * A fully undone journal owns nothing: its files are back where it found them. */
-const unfinished=(state:JournalState)=>!state.undoComplete&&(!state.complete||state.finalizing.size!==state.finalized.size||state.undone.size>0);
+const unfinished=(state:JournalState)=>!state.undoComplete&&(!state.complete||state.finalizing.size!==state.finalized.size||state.undone.size>0||state.undoCopy.size>0);
 /** Publish successor links before touching media. Repeating this preflight after
  * a crash finishes any links not yet written alongside the durable new manifest.
  */
@@ -795,12 +799,13 @@ export const sameHardLink=(a:Pick<BigIntStats,'dev'|'ino'|'nlink'>,b:Pick<BigInt
  * the original inode becomes the organized file. The destination is never overwritten.
  * Returns 'moved', or 'copy' when the caller must use the verified copy path instead
  * (another filesystem, or a destination that already holds something). */
-async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void,signal?:AbortSignal):Promise<'moved'|'copy'> {
+async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void,signal?:AbortSignal,verifyContents=true,proofs?:Proofs):Promise<'moved'|'copy'> {
  await contained(entry.source,m.source);await contained(entry.destination,m.root);
  if(state.renamed.has(index)){
   const target=await maybeStat(entry.destination);
   if(await maybeStat(entry.source))throw new Error(`Original path reappeared after it was moved: ${entry.source}`);
   if(!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error(`Moved file changed or is missing; no copy was kept: ${entry.destination}`);
+  if(verifyContents&&await (proofs?proofs.digest(entry.destination,signal):digest(entry.destination,signal))!==entry.digest)throw new Error(`Moved file contents changed: ${entry.destination}`);
   return 'moved';
  }
  let source=await maybeStat(entry.source),target=await maybeStat(entry.destination);
@@ -831,10 +836,10 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
   if(code(error)==='EEXIST')throw appeared();
   if(code(error)==='EXDEV'){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}
   if(!unsupportedLink.includes(code(error)??''))throw error;
-  // exFAT and FAT have no hard links: check, then rename(2) in the same breath.
+  // Filesystems without hard links still require an atomic no-replace rename.
   if(await maybeStat(entry.destination))throw appeared();
-  try{await fs.rename(entry.source,entry.destination);}
-  catch(failure){if(code(failure)==='EXDEV'){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}throw failure;}
+  try{await exclusiveRename(entry.source,entry.destination);}
+  catch(failure){if(code(failure)==='EEXIST')throw appeared();if(code(failure)==='EXDEV'||unsupportedLink.includes(code(failure)??'')){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}throw failure;}
  }
  await finishMove(entry,index,m,state,note);
  return 'moved';
@@ -847,7 +852,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  const state=await readEvents(m,undefined,(completed,total,name)=>onProgress?.({phase:'verifying',step:'history',completed,total,bytes:0,totalBytes:0,speed:0,file:name??m.id}),true,signal);
  if(state.halfConverted)throw new MessageError('error.oldRecords',{drive:driveName(m.root)});
  if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
- if(state.undoComplete||state.undone.size)throw new Error(`Organization ${m.id} was undone`);
+ if(state.undoComplete||state.undone.size||state.undoCopy.size)throw new Error(`Organization ${m.id} was undone`);
  // A recheck reads file contents again only for entries that changed since they were last verified in
  // this session (or for every entry when a full recheck is asked for); sizes and identities are always checked.
  const passKey=`${m.root}\0${m.id}\0${mountDevices.get(m)??''}`,verified=options.full?new Map<number,string>():verifiedPasses.get(passKey)??new Map<number,string>(),passed=new Map<number,string>();
@@ -892,7 +897,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
     if(!await targetMatches(entry,m,signal,await deep(index,entry),proofs))throw new Error('Finalized destination unavailable');
     if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;
    }
-   if(m.strategy==='rename'&&entry.move&&!state.fallback.has(index)&&!state.slots.get(index)?.length&&!state.finalizing.has(index)&&await relocate(entry,index,m,state,message=>undated.push(message),signal)==='moved'){result.moved++;await tidyMoved(entry,index);completed++;progress(path.basename(entry.source));continue;}
+   if(m.strategy==='rename'&&entry.move&&!state.fallback.has(index)&&!state.slots.get(index)?.length&&!state.finalizing.has(index)&&await relocate(entry,index,m,state,message=>undated.push(message),signal,state.renamed.has(index)?await deep(index,entry):false,proofs)==='moved'){result.moved++;await tidyMoved(entry,index);completed++;progress(path.basename(entry.source));continue;}
    const saved=await savedOriginal(m,index,state);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
    const source=await maybeStat(entry.source),stash=saved?await maybeStat(saved):undefined;
    if(state.finalizing.has(index)){
@@ -1105,7 +1110,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
   const job:OrganizationRecovery={id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false};
   try{const m=await readManifest(root,id);job.files=m.entries.length;if(m.kind)job.kind=m.kind;if(m.libraries?.length)job.libraries=[...m.libraries];let all=true;const state=await readEvents(m,undefined,(read,total,name)=>report(position,.5*read/Math.max(1,total),name??id,{read,total}),true,signal);if(state.superseded||state.undoComplete){if(options.includeEnded){job.status=state.superseded?'superseded':'undone';jobs.push(job);}continue;}
    const released=state.finalizing.size>0||state.finalized.size>0;
-   if(state.undone.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
+   if(state.undone.size||state.undoCopy.size){job.completed=state.undone.size;job.undoable=!released;jobs.push(job);continue;}
    job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
     looked++;checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);
@@ -1177,7 +1182,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   const upFront=async(file:string)=>{const stat=await maybeStat(file);return !!stat&&provable(stat);};
   for(const [index,entry]of m.entries.entries()){
    checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
-   if(state.undone.size)throw new Error('This organization was undone');
+   if(state.undone.size||state.undoCopy.size)throw new Error('This organization was undone');
    // A later organization took this file over: its kept original, if any, is kept, not released
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
@@ -1248,7 +1253,57 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   // A file a later organization took over stays with it: undoing that one brings it back first.
   const handedOff=async(index:number)=>{const handOff=state.handedOff.get(index);return !!handOff&&!await maybeStat(m.entries[index]!.destination)&&!!await maybeStat(handOff.destination);};
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
-  const restore=async(from:string,to:string)=>{
+  const receipts:RecoveryIndex=new Map();
+  const reverse=async(from:string,index:number,entry:Entry)=>{
+   const source=within(from,m.source)?m.source:scopeOf(m),item={id:String(index),family:String(index),source:from,destination:entry.source,size:entry.size,digest:entry.digest,kind:'Other' as const,skip:false};
+   return {item,transfer:{source,root:m.source,rootIdentity:m.sourceIdentity,entries:[item]}};
+  };
+  // A copied restoration has a new inode. Only this journal's undo intent permits that identity;
+  // contents are always checked, including a completed copy left before its source was removed.
+  const restored=async(entry:Entry)=>{
+   await contained(entry.source,m.source);const stat=await maybeStat(entry.source);
+   return !!stat?.isFile()&&stat.size===BigInt(entry.size)&&await proofs.digest(entry.source,signal)===entry.digest;
+  };
+  const checkRestoration=async(from:string,index:number,entry:Entry)=>{
+   if(!await maybeStat(entry.source)||await restored(entry))return;
+   const {item}=await reverse(from,index,entry),partial=await findPartial('publication',item,m.source,receipts,signal);
+   if(!partial||partial.absent)throw occupied(entry.source);
+  };
+  const restoreCopy=async(from:string,index:number,entry:Entry)=>{
+   if(!state.undoCopy.has(index)){await checkpoint(m,'undo-copy-intent',index);state.undoCopy.add(index);}
+   const {item,transfer}=await reverse(from,index,entry),before=await fs.lstat(from,{bigint:true});
+   if(!await restored(entry)){
+    const prior=await findPartial('publication',item,m.source,receipts,signal);
+    if(await maybeStat(entry.source)&&(!prior||prior.absent))throw occupied(entry.source);
+    if(!prior||prior.absent)await recordCreation(entry.source,item,transfer,receipts);
+    const output=prior&&!prior.absent?await openPartial(prior,m.source):await fs.open(entry.source,'wx',0o600);
+    try{
+     await recordPartial('publication',entry.source,await output.stat({bigint:true}),item,transfer,receipts);
+     const initial=Number((await output.stat({bigint:true})).size);
+     await streams.run([from,entry.source],async()=>{
+      const input=await regularHandle(from),hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);let position=0;
+      try{
+       if(!sameStat(before,await input.stat({bigint:true})))throw new Error('Undo source changed before copying');
+       for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));let offset=Math.max(0,Math.min(bytesRead,initial-position));
+        while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to restore original');offset+=bytesWritten;}position+=bytesRead;tick();}
+       if(position!==entry.size||hash.digest('hex')!==entry.digest||!sameStat(before,await input.stat({bigint:true}))||!sameStat(before,await fs.lstat(from,{bigint:true})))throw new Error('Undo source changed while copying');
+       await applyFileTimestamps(output,before);await output.sync();
+      }finally{await input.close();}
+     },signal);
+    }finally{await output.close();}
+   }
+   if(!await restored(entry)||await proofs.digest(from,signal)!==entry.digest)throw new Error('Undo copy verification failed');
+   await syncFile(entry.source);await syncParents(entry.source,m.source);
+   const placed=await fs.lstat(entry.source,{bigint:true});
+   await checkpoint(m,'undo-copy-ready',index,{stat:snapshot(placed)});state.undoReady.set(index,snapshot(placed));
+   await releaseCreations(item,m.source,receipts);
+   checkAbort(signal);await roots(m);await contained(from,transfer.source);await contained(entry.source,m.source);
+   if(!sameStat(before,await fs.lstat(from,{bigint:true}))||!sameStat(placed,await fs.lstat(entry.source,{bigint:true})))throw new Error('A verified Undo copy changed before removal');
+   await fs.unlink(from);logDeletion('undo',from,'original restored by verified exclusive copy on a linkless filesystem',`SHA-256 ${entry.digest} checked at both paths; restored file and parents synchronized, undo-copy-ready journaled before removal`,{restoredTo:entry.source,bytes:entry.size});
+   await syncDirectory(path.dirname(from));
+  };
+  const restore=async(from:string,to:string,index:number,entry:Entry)=>{
+   if(state.undoCopy.has(index)){await restoreCopy(from,index,entry);return;}
    // A proof of `from` follows it to `to` when nothing but the change time (moved by the link or rename) differs.
    const moving=await fs.lstat(from,{bigint:true}),held=proofs.held(from,moving);
    await makeParent(to,m.source,m.sourceIdentity);
@@ -1257,7 +1312,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     if(code(error)==='EEXIST')throw occupied(to);
     if(!unsupportedLink.includes(code(error)??''))throw error;
     if(await maybeStat(to))throw occupied(to);
-    await fs.rename(from,to);
+    try{await exclusiveRename(from,to);}catch(failure){if(code(failure)==='EEXIST')throw occupied(to);if(!unsupportedLink.includes(code(failure)??'')&&code(failure)!=='EXDEV')throw failure;await restoreCopy(from,index,entry);return;}
    }
    await syncParents(to,m.source);await syncDirectory(path.dirname(from));
    const there=held?await maybeStat(to):undefined;
@@ -1266,6 +1321,10 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   /** Where a moved entry is now: 'back' (already at its original path), 'moved' (still at the destination), or 'none'. */
   const movedState=async(index:number,entry:Entry):Promise<'back'|'moved'|'none'|'pair'>=>{
    const source=await maybeStat(entry.source),target=await maybeStat(entry.destination),dated=state.dated.get(index);
+   if(state.undoCopy.has(index)&&source){
+    if(!target){if(!state.undoReady.has(index)||!await restored(entry))throw occupied(entry.source);return 'back';}
+    await checkRestoration(entry.destination,index,entry);return 'moved';
+   }
    if(source&&target&&sameHardLink(source,target))return 'pair';
    if(source&&target&&source.dev===target.dev&&source.ino===target.ino&&entry.size>0)throw new Error(`Two names point at one file entry without a hard link; nothing was changed. Check the drive: ${entry.source}`);
    // The original is in place and something else appeared at the destination: nothing to undo here.
@@ -1288,7 +1347,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    if(await handedOff(index))continue;tick();
    if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
    const saved=await savedOriginal(m,index,state);tick();
-   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
+   if(saved){if(await maybeStat(entry.source)){if(!state.undoCopy.has(index))throw occupied(entry.source);await checkRestoration(saved,index,entry);}await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
   }
   if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
   for(const [step,index] of [...m.entries.keys()].reverse().entries()){
@@ -1299,7 +1358,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    else if(moved(index)){
     const where=await movedState(index,entry);
     if(where==='pair'){await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'organized name removed while undoing a move','the original path and this name are two hard links of one inode',{restoredTo:entry.source});await syncParents(entry.destination,m.root);}
-    else if(where==='moved')await restore(entry.destination,entry.source);
+    else if(where==='moved')await restore(entry.destination,entry.source,index,entry);
     if(where!=='none'){
      // Restore the reviewed Modified date; the bytes were never changed.
      const handle=await fs.open(entry.source,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
@@ -1312,12 +1371,12 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     }
    } else {
     const saved=await savedOriginal(m,index,state);
-    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;tick();}
+    if(saved){if(await maybeStat(entry.source)&&!state.undoCopy.has(index))throw occupied(entry.source);await restore(saved,entry.source,index,entry);result.restored++;tick();}
     // Only a copy this organization published is removed, and only once the reviewed
     // original is verified at its own path, so the copy is never the last one.
     if(state.published.has(index)&&await maybeStat(entry.destination)&&await maybeStat(entry.source)){
      // Restoring a kept original moves its change time; its contents are still hashed.
-     await validateOriginal(entry.source,entry,m.source,true,signal,true,proofs);tick();
+     if(state.undoCopy.has(index)){if(!state.undoReady.has(index)||!await restored(entry))throw new Error('Restored original changed');}else await validateOriginal(entry.source,entry,m.source,true,signal,true,proofs);tick();
      if(await targetMatches(entry,m,signal,true,proofs)){tick();await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'copy this organization published, removed by Undo',`the original was restored and verified at ${entry.source} (SHA-256 ${entry.digest}) and this copy still matched the journal`,{bytes:entry.size});await syncParents(entry.destination,m.root);result.removed++;}
     }
    }

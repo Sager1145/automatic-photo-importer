@@ -19,7 +19,7 @@ export function ruleOptions(prefs:Rules,useFileDate=false){
  };
 }
 /** Bumped when the app itself changes which folder a file is filed in. */
-const RULES_VERSION=3;
+const RULES_VERSION=4;
 /** The scope the routing and placement memories are valid for: every rule in `ruleOptions`. A record made under
  * another scope (or another RULES_VERSION) is not trusted. */
 export function rulesScope(rules:ReturnType<typeof ruleOptions>):string {
