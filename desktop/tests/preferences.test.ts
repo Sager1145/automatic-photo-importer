@@ -86,3 +86,14 @@ test('unknown files default to a folder; a saved keep or fileDate stays, an inva
  assert.equal(normalizePreferences({noMetadataHandling:'bogus'},bare as never).noMetadataHandling,'folder');
  for(const mode of ['keep','fileDate'] as const)assert.equal(normalizePreferences({noMetadataHandling:mode},defaultPreferences).noMetadataHandling,mode);
 });
+
+test('eject and delete-original settings default safely and ignore invalid values',()=>{
+ assert.equal(defaultPreferences.autoEject,false);assert.equal(defaultPreferences.deleteOriginalsFolders,true);assert.equal(defaultPreferences.deleteOriginalsCards,false);
+ const loaded=normalizePreferences({autoEject:'yes',deleteOriginalsFolders:0,deleteOriginalsCards:1});
+ assert.deepEqual([loaded.autoEject,loaded.deleteOriginalsFolders,loaded.deleteOriginalsCards],[false,true,false]);
+ const set=normalizePreferences({autoEject:true,deleteOriginalsFolders:false,deleteOriginalsCards:true});
+ assert.deepEqual([set.autoEject,set.deleteOriginalsFolders,set.deleteOriginalsCards],[true,false,true]);
+ assert.equal(normalizePreferences({autoEject:'x'},set).autoEject,true,'an invalid value keeps the current one');
+ const patch={autoEject:true,deleteOriginalsCards:true,deleteOriginalsFolders:false};
+ assert.deepEqual(acceptedPreferences(patch,true),patch,'these apply even while jobs run');
+});

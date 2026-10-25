@@ -62,7 +62,7 @@ export function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose
   },[element,onClose]);
 }
 /** The skeleton every confirmation shares: a sheet with a title, a body and Cancel / danger buttons. A 'second' step opens with Cancel focused, so Return never confirms by accident. */
-export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
+export function ConfirmSheet({ step, title, confirmLabel, confirmIcon = Trash2, confirmKind = 'danger', confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmIcon?: LucideIcon; confirmKind?: 'primary' | 'danger'; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null), heading = useId();
   const close = useAnimatedClose(dialog, onCancel);
@@ -70,7 +70,7 @@ export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testI
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby={heading} data-testid={testId} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id={heading}>{title}</h2></div>
     <div className="activity-content">{children}</div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind={confirmKind} icon={confirmIcon} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
   </dialog>;
 }
 export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {

@@ -311,6 +311,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .source-workspace{display:grid;gap:1.5rem;min-width:0}
 .source-section{min-width:0;container:sources/inline-size}
 .source-heading-actions{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
+.source-heading-actions .button{flex:none;white-space:nowrap}
+.eject-list{margin:.5rem 0 0;padding-left:1.25rem;max-height:12rem;overflow:auto}
 .parallel-source-control{display:inline-flex;align-items:center;gap:.6rem;min-height:var(--control-height);padding:0 .9rem;border-radius:var(--radius-capsule);background:var(--surface);box-shadow:0 0 0 1px var(--separator),var(--shadow-1)}
 :root[data-theme=dark] .parallel-source-control{background:rgba(255,255,255,.05)}
 .parallel-source-label{font-size:var(--text-footnote);color:var(--label-secondary);font-weight:500;white-space:nowrap}
