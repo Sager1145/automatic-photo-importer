@@ -357,12 +357,14 @@ test('the import overview shows total progress and sizes keep their decimals', a
   assert.equal(formatBytes(2_000_000_000, 'ja'), '2.0 GB');
   const source = { id: 'card', name: 'Card', path: '/card', transport: 'storage' as const };
   const state: AppState = { preferences: { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}/{yyyymm}/{camera}', mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'', allowFolderSource: false, unknownRules: {} }, sources: [source],
-    jobs: [{ id: 'job', source, phase: 'copying', errors: [], backup: false, fraction: .375, progress: { phase: 'copying', completed: 10, total: 40, bytes: 1_250_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'a.NEF' } }], history: [], platform: 'darwin' };
+    jobs: [{ id: 'job', source, phase: 'copying', errors: [], backup: false, fraction: .375, progress: { phase: 'copying', completed: 10, total: 40, bytes: 1_250_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'a.NEF' } },
+      { id: 'other', source: { ...source, id: 'other', name: 'Other', path: '/other' }, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 20, total: 40, bytes: 2_500_000_000, totalBytes: 5_000_000_000, speed: 100_000_000, file: 'b.NEF' } }], history: [], platform: 'darwin' };
   for (const language of languages) {
     const t = createTranslator(language);
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state, act: () => {} }) }));
     assert.ok(markup.includes('data-testid="total-progress"') && markup.includes(t('Total progress')) && markup.includes('37%'), `${language}: total progress`);
-    assert.ok(markup.includes(t('of {size} planned', { size: formatBytes(5_000_000_000, language) })) && markup.includes('aria-valuenow="38"'));
+    // Two sources: each at its own copy counter (25% and 50% of their bytes), weighted by size.
+    assert.ok(markup.includes(t('of {size} planned', { size: formatBytes(10_000_000_000, language) })) && markup.includes('aria-valuenow="38"'));
   }
 });
 

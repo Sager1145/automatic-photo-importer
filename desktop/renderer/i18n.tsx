@@ -456,6 +456,7 @@ Cancel|取消|取消|キャンセル
 Verify each copy after copying|复制后校验每个副本|複製後驗證每個副本|コピー後に各コピーを検証
 Verification after copy is off|复制后校验已关闭|複製後驗證已關閉|コピー後の検証はオフです
 {completed} of {total} files copied|已复制 {completed}/{total} 个文件|已複製 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピー済み
+{completed} of {total} files copied or confirmed|已复制或确认 {completed}/{total} 个文件|已複製或確認 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピーまたは確認済み
 {count} failed|{count} 个失败|{count} 個失敗|{count} 件失敗
 Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン

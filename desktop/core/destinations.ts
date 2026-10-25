@@ -39,10 +39,12 @@ export async function executeDestinations(plans:TransferPlan[],options:{
   const sum=(key:'bytes'|'completed')=>key==='completed'?done():latest.reduce((value,item)=>value+item[key],0),index=slots[slot].index,own=slots.flatMap((item,other)=>item.index===index?[other]:[]);
   const grown=own.some(other=>pending[other]>initialPending[other]);
   works[slot]=value.work;
+  // Pieces copied directly are checked as they are copied: the estimate plans no verify step for them.
+  const direct=()=>{const pieces=works.flatMap(item=>item?.direct?[item.direct]:[]);return pieces.length?{direct:{files:pieces.reduce((a,b)=>a+b.files,0),bytes:pieces.reduce((a,b)=>a+b.bytes,0),present:pieces.reduce((a,b)=>a+b.present,0)}}:{};};
   // The same rule for the estimate's own counts: while verifying, a waiting piece counts nothing and a finished one all it staged.
   const stagedBytes=latest.reduce((count,item,other)=>count+(verifying&&(finished.has(other)||phases[other]==='verifying')?works[other]?.totalBytes??item.bytes:item.bytes),0);
   const verifiedBytes=latest.reduce((count,item,other)=>count+(finished.has(other)?works[other]?.totalBytes??item.bytes:phases[other]==='verifying'?works[other]?.bytes??0:0),0);
-  const work=verifying?{files:sum('completed'),bytes:verifiedBytes,totalFiles:total,totalBytes:stagedBytes,...(works.some(item=>item?.publishCopy)?{publishCopy:true}:{})}:{files:sum('completed'),bytes:sum('bytes'),totalFiles:total,totalBytes:pending.reduce((a,b)=>a+b,0)};
+  const work=verifying?{files:sum('completed'),bytes:verifiedBytes,totalFiles:total,totalBytes:stagedBytes,...(works.some(item=>item?.publishCopy)?{publishCopy:true}:{})}:{files:sum('completed'),bytes:sum('bytes'),totalFiles:total,totalBytes:pending.reduce((a,b)=>a+b,0),...direct()};
   options.progress(index,{...value,total,totalBytes:pending.reduce((a,b)=>a+b,0),bytes:sum('bytes'),completed:sum('completed'),work},own.reduce((rest,other)=>rest+Math.max(0,pending[other]-latest[other].bytes),0)+(grown?fullWorkspace[index]:workspace[index]));
  };
  const failed=(index:number,error:unknown)=>result.errors.push(`Destination ${index+1}: ${error instanceof Error?error.message:String(error)}`);

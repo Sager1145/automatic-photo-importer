@@ -36,22 +36,20 @@ test('job fraction is the cost of the work done over the cost of all the work',(
  assert.ok(nearly.cost.done<=nearly.cost.total);
 });
 
-test('the card bar and the overview use the same number',async()=>{
+test('the card bar and the overview read the step the counter counts, not the whole-job share',async()=>{
  const {overviewFraction}=await import('../renderer/RootApp');
  const {cardFraction}=await import('../renderer/progress');
- const verifying=job({phase:'verifying',fraction:0.35,cost:{done:35,total:100},progress:{phase:'verifying',completed:34863,total:43539,bytes:0,totalBytes:167e9,speed:0,file:''}});
- assert.equal(cardFraction(verifying),0.35,'not the 98% the old weighting gave');
+ const verifying=job({phase:'verifying',fraction:0.35,progress:{phase:'verifying',completed:34863,total:43539,bytes:0,totalBytes:167e9,speed:0,file:''}});
+ assert.equal(cardFraction(verifying),34863/43539,'files verified, as its counter says');
  assert.equal(overviewFraction([verifying]),cardFraction(verifying));
 });
 
-test('the overview adds model seconds; a finished job keeps its final cost',async()=>{
+test('the overview weights each job by its size; finished jobs are full',async()=>{
  const {overviewFraction}=await import('../renderer/RootApp');
- const running=job({fraction:0.5,cost:{done:500,total:1000},progress:{phase:'copying',completed:1,total:2,bytes:1,totalBytes:2,speed:0,file:''}}),finished=job({id:'k',phase:'complete',cost:{done:3000,total:3000}});
- assert.equal(overviewFraction([running,finished]),(500+3000)/(1000+3000));
+ const running=job({fraction:0.9,progress:{phase:'copying',completed:1,total:2,bytes:1e9,totalBytes:4e9,speed:0,file:''}}),finished=job({id:'k',phase:'complete'});
  assert.equal(overviewFraction([finished]),1);
- const bigger=job({id:'m',cost:{done:10,total:9000},fraction:0.001});
- assert.ok(Math.abs(overviewFraction([running,bigger])!-510/10000)<1e-9,'weighted by cost, not by the number of jobs');
- const unmeasured=job({id:'n',progress:{phase:'planning',step:'listing',completed:1,total:0,bytes:0,totalBytes:0,speed:0,file:''}});
- assert.ok(overviewFraction([running,unmeasured])!==undefined,'a job without a cost yet falls back to the size weighting');
+ const other=job({id:'m',progress:{phase:'copying',completed:3,total:4,bytes:9e9,totalBytes:12e9,speed:0,file:''}});
+ assert.ok(Math.abs(overviewFraction([running,other])!-(0.25*4+0.75*12)/16)<1e-9,'weighted by bytes, each at its own counter');
+ assert.ok(overviewFraction([running,finished])!>0.25,'a finished job counts as done');
  assert.equal(overviewFraction([]),undefined);
 });
