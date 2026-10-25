@@ -1429,7 +1429,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 /* Task workspaces: preserve existing transition layers and modal stacking. */
 .sidebar{overflow:hidden}
 .sidebar>.brand,.sidebar>nav{flex-shrink:0}
-.sidebar-devices{display:flex;flex-direction:column;gap:1.1rem;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden}
+.sidebar-devices{display:flex;flex-direction:column;gap:1.1rem;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-app-region:no-drag}
 .sidebar>.settings-navigation{order:4;flex-shrink:0;padding-top:.75rem;border-top:1px solid var(--separator)}
 .workspace-tabs{align-self:flex-start;max-width:100%;flex-wrap:wrap;margin-bottom:1rem}
 .workspace-tabs>[role=tab]{flex:1 1 auto;min-height:2.5rem;white-space:normal}
