@@ -20,9 +20,9 @@ test('each saved policy and live control is grouped under its intended category'
   const markup = render();
   const contents: Record<SettingsCategory, string[]> = {
     general: ['App language', 'Text size', 'Appearance'],
-    storage: ['Backup location', 'Backup folder', 'Drive backups'],
-    folders: ['Folder structure', 'Edited exports folder'],
-    defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue'],
+    storage: ['Backup location', 'Copy policy'],
+    folders: ['Backup folders', 'Backup folder', 'Folder structure', 'Edited exports folder'],
+    defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Drive backups', 'After an import', 'Offer for folders', 'Eject drives automatically after a clean import'],
     files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Remove macOS ._ files', 'Collect problem files'],
     devices: ['Remembered drives', 'Ignored drives'],
     performance: ['Drives at once', 'CPU threads', 'Memory limit'],
@@ -58,4 +58,13 @@ test('locked work keeps automation, parallelism and diagnostics live while prote
   }
   assert.ok(panel(markup, 'diagnostics').includes('settings-log-level') && !panel(markup, 'diagnostics').includes('<fieldset'), 'Diagnostics sits in its own category, outside every lock');
   assert.ok(!panel(markup, 'performance').includes('Diagnostics'));
+});
+
+test('each category reads in the order the work happens: where, then how files are laid out, then an import from start to finish', () => {
+  const markup = render();
+  const order = (category: SettingsCategory, labels: string[]) => { const text = panel(markup, category), at = labels.map(label => text.indexOf(label)); assert.ok(at.every(index => index >= 0), `${category}: ${labels.join(', ')}`); assert.deepEqual([...at].sort((a, b) => a - b), at, `${category} order`); };
+  order('folders', ['Backup folders', 'Folder structure', 'Edited exports folder']);
+  order('defaults', ['Starting imports', 'Copying', 'Drive backups', 'After an import']);
+  order('defaults', ['Offer for folders', 'Offer for SD cards and drives', 'Eject drives automatically after a clean import']);
+  assert.ok(!panel(markup, 'storage').includes('Drive backups') && !panel(markup, 'storage').includes('placeholder="photobackup"'), 'storage holds only where backups go');
 });

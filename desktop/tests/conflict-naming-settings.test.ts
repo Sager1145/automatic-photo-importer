@@ -30,5 +30,5 @@ test('Same name, different content sits in Settings File handling, not Folders',
  const panel=(id:string)=>markup.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0]??'';
  assert.ok(panel('files').includes('data-testid="conflict-naming-settings"')&&!panel('folders').includes('conflict-naming-settings'));
  assert.ok(panel('files').includes('Files without date or camera')&&panel('files').includes('Unrecognized file types'));
- assert.ok(panel('storage').includes('data-testid="backup-mode"')&&!panel('defaults').includes('data-testid="backup-mode"'));
+ assert.ok(panel('defaults').includes('data-testid="backup-mode"')&&!panel('storage').includes('data-testid="backup-mode"'),'Drive backups mode lives in Importing');
 });

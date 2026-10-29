@@ -1,5 +1,9 @@
 // Append these rows to the existing four-locale catalog during integration.
 export const settingsTranslationRows = `
+CPU and memory|CPU 和内存|CPU 與記憶體|CPU とメモリ
+1 session|1 次会话|1 次工作階段|1 セッション
+Backup folders|备份文件夹|備份資料夾|バックアップフォルダー
+After an import|导入之后|匯入之後|読み込みのあと
 Storage|存储|儲存|保存先
 File handling|文件处理|檔案處理|ファイルの扱い
 Metadata and file rules|元数据与文件规则|中繼資料與檔案規則|メタデータとファイルのルール

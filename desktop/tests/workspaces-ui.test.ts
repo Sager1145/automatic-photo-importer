@@ -34,7 +34,7 @@ test('Media and Files & folders expose the appropriate registered sources and pi
  assert.match(f,/data-source-id="files"/);assert.doesNotMatch(f,/data-source-id="card"/);
  assert.match(m,/Choose media folders…/);assert.match(f,/Back up drives or folders…/);
  assert.ok(m.indexOf('Choose media folders…') < m.indexOf('data-testid="source-cards"'));
- assert.doesNotMatch(m,/data-testid="backup-mode-summary"/);assert.doesNotMatch(f,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
+ assert.doesNotMatch(f,/data-testid="backup-mode"/);
  assert.match(f,/Back up<\/button>/);assert.match(f,/Scan media/);
 });
 test('queued backup jobs stay in Files mode when the next source run is Media',()=>{
@@ -53,7 +53,7 @@ test('organization scope, affected roots and consequences precede one execution 
  assert.ok(execute>html.indexOf('/backup/videobackup'));assert.equal((html.match(/>Organize now</g)??[]).length,1);
  assert.equal((html.match(/>Review changes…</g)??[]).length,1);
  assert.doesNotMatch(html,/collect-problem-files-setting/);assert.doesNotMatch(html,/organization-recovery-heading/);
- assert.match(html,/Edit folder rules/);assert.doesNotMatch(html,/Recovery &amp; maintenance/);
+ assert.match(html,/data-testid="organization-execute"><button[^>]*organization-rules[^>]*>.*?Edit folder rules<\/button><button[^>]*data-testid="review-changes"/);assert.doesNotMatch(html,/Recovery &amp; maintenance/);
  const top=render(createElement(TitlebarControls,{state:value,act:()=>{},page:'library',errorCount:0,onErrors:()=>{}}));
  assert.doesNotMatch(top,/Organize now|Scan for duplicates|Review changes/);assert.match(top,/show-errors/);
 });
@@ -86,4 +86,10 @@ test('Review stays disabled in both modes while any transfer, organization or du
    for(const review of reviews) assert.match(review,/disabled/,`${mode}: review locked across workspaces`);
   }
  }
+});
+
+test('the drive backup mode sits in the Files & folders header, with Change',async()=>{
+ const {BackupModeLine}=await import('../renderer/RootApp');
+ const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(BackupModeLine,{mode:'additive',onChange:()=>{}})}));
+ assert.match(html,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
 });

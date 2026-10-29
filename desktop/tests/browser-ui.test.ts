@@ -86,3 +86,11 @@ test('selection chips use photographic units for exact values and ranges',()=>{
  assert.equal(selectionValueLabel(aperture,{kind:'range',field:'fNumber',min:2,max:4,maxInclusive:true},'en'),'≥ f/2 – ≤ f/4');
  assert.equal(selectionValueLabel(camera,{kind:'values',field:'camera',values:['QA Camera Alpha']},'en'),'QA Camera Alpha');
 });
+test('sort and column width live in the toolbar; the selection bar shows only when something is selected',()=>{
+ const html=render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration:defaultConfiguration(),onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
+ const toolbar=html.match(/<div class="browser-toolbar">([\s\S]*?)<div class="browser-status"/)?.[1]??'';
+ assert.ok(toolbar.includes('Newest capture first'),'sort in the toolbar');
+ assert.ok(toolbar.includes('browser-column-width'),'column width in the toolbar');
+ assert.ok(!html.includes('browser-selection-bar'),'no empty selection row');
+ const rows=toolbar.split('browser-toolbar-break');assert.equal(rows.length,2);assert.ok(rows[0]!.includes('Browser mode')&&rows[1]!.includes('Placement')&&rows[1]!.includes('Search names')&&rows[1]!.includes('Newest capture first'),'navigation first, then what is shown');
+});

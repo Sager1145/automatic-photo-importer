@@ -60,3 +60,13 @@ test('the import overview has one toggle that follows showDashboard and collapse
  assert.match(collapsed,/Import overview/);
  assert.doesNotMatch(collapsed,/dashboard-metrics|parallel-summary/);
 });
+
+test('every overview metric note carries its full text as a tooltip, so a clamped note loses nothing',()=>{
+ const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:state({destinationStatus:[{path:'/Volumes/A',available:true,total:2e12,free:427.1e9}]}),act:()=>{}})}));
+ const notes=[...html.matchAll(/<small([^>]*)>([\s\S]*?)<\/small>/g)];
+ assert.ok(notes.length>=4);
+ for(const [,attributes,inner] of notes){
+  const text=inner!.replace(/<[^>]+>/g,'');
+  assert.ok(attributes!.includes(`title="${text}"`)||attributes!.includes('title="Whole disk'),`tooltip for "${text}"`);
+ }
+});

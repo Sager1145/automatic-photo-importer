@@ -34,10 +34,11 @@ export const settingsChecks=(ctx:Context):Check[]=>[
  {id:'settings-text-size',stage:'settings',title:'Settings provides live, persistent text sizing with a readable default, and each category holds its settings',covers:['text size slider','settings categories'],run:async h=>{
   await h.nav('Settings');
   await h.settingsTab('storage');
-  assert.equal(await h.js<boolean>("document.querySelector('.settings-page input[placeholder=photobackup]')!==null&&document.querySelector('.settings-page #copy-policy')!==null"),true,'Backup folder and copy policy live in Settings → Storage');
-  assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=backup-mode]')!==null&&document.querySelector('.settings-page .destination-check-actions .destination-check')===null"),true,'Drive backup mode lives in Settings → Storage, which no longer runs the folder check');
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-storage] #copy-policy')!==null&&document.querySelector('[data-testid=settings-panel-storage] .destination-check-actions .destination-check')===null"),true,'Copy policy lives in Settings → Storage, which does not run the folder check');
   await h.settingsTab('folders');
-  assert.equal(await h.js<boolean>("document.querySelector('.settings-page [data-testid=folder-settings]')!==null"),true,'Folder paths live in Settings → Folders');
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-folders] input[placeholder=photobackup]')!==null&&document.querySelector('[data-testid=settings-panel-folders] [data-testid=folder-settings]')!==null"),true,'The backup folder name and folder paths live in Settings → Folders');
+  await h.settingsTab('defaults');
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-defaults] [data-testid=backup-mode]')!==null"),true,'Drive backup mode lives in Settings → Importing');
   await h.settingsTab('general');
   await h.until('text size in Settings → General',"document.querySelector('input[aria-label=\"Text size\"]')");
   assert.equal((await h.state()).preferences.textScale,1.25);

@@ -56,3 +56,21 @@ test('Recovery & cleanup is a Library tab and Activity no longer has a Recovery 
   assert.match(source,/testId:'library-recovery'/);
   assert.doesNotMatch(source,/activity-recovery/);
 });
+
+test('the organize destination selector names drives, and shows the chosen path beneath it',async()=>{
+  const {Organization}=await import('../renderer/RootApp');
+  const state=stateOf({destinations:['/Volumes/A006/photobackup','/Users/me/Pictures/backup']},{destinationStatus:[{path:'/Volumes/A006/photobackup',available:true,volumeId:'a',total:2e12,free:1e12},{path:'/Users/me/Pictures/backup',available:true,volumeId:'b',total:1e12,free:5e11}]});
+  const markup=html('en',createElement(Organization,{state,act:()=>{},busy:false,selectedDestination:1}));
+  assert.match(markup,/<option value="0">A006 › photobackup<\/option>/);
+  assert.match(markup,/<option value="1"[^>]*>backup<\/option>/);
+  assert.match(markup,/class="select-wrap"><select aria-label="Organization destination"/);
+  assert.match(markup,/class="organization-destination-path"[^>]*title="\/Users\/me\/Pictures\/backup"/);
+});
+
+test('two destinations that would read the same show their full paths',async()=>{
+  const {Organization}=await import('../renderer/RootApp');
+  const paths=['/Users/me/a/backup','/Users/me/b/backup'];
+  const state=stateOf({destinations:paths},{destinationStatus:paths.map((p,i)=>({path:p,available:true,volumeId:String(i),total:1e12,free:5e11}))});
+  const markup=html('en',createElement(Organization,{state,act:()=>{},busy:false}));
+  for(const path of paths)assert.ok(markup.includes(`>${path}</option>`),path);
+});
