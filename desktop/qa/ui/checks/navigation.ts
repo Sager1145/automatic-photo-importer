@@ -28,7 +28,7 @@ export const navigationChecks=():Check[]=>[
   }finally{await stopRecording(h);await h.js('delete window.qaNavPaint');}
  }},
  {id:'nav-titlebar-buttons',stage:'navigation',title:'Task navigation has Import, Library tools and Activity with anchored Settings; workflow actions are not duplicated in the titlebar',covers:['navigation of every page','per-page title-bar actions','four primary navigation items','workflow action ownership'],run:async h=>{
-  assert.deepEqual(await h.js<string[]>("[...document.querySelectorAll('.sidebar .nav-item')].map(e=>e.textContent.trim())"),['Import','Library tools','Activity','Settings']);
+  assert.deepEqual(await h.js<string[]>("[...document.querySelectorAll('.sidebar .nav-item')].map(e=>e.textContent.trim())"),['Import','Library browser','Library tools','Activity','Settings']);
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=show-progress]')===null&&document.querySelector('.command-bar')===null"),true);
   for(const page of pages){
    await h.nav(page);
@@ -117,8 +117,9 @@ export const navigationChecks=():Check[]=>[
   }finally{await stopRecording(h);await h.js('delete window.qaContainment');}
  }},
  {id:'nav-rapid-timing',stage:'navigation',title:'Rapid navigation and opening a sheet mid-transition leave the last page selected and no click-blocking snapshots',covers:['animation interruption','rapid navigation timing','sheet during transition'],run:async h=>{
-  await h.js("for(const index of [1,2,3])document.querySelectorAll('.nav-item')[index].click()");
-  await h.until('last navigation wins',"document.querySelectorAll('.nav-item')[3].getAttribute('aria-current')==='page'");
+  // The last three items, ending with the anchored Settings.
+  await h.js("{const items=document.querySelectorAll('.nav-item');for(const index of [items.length-3,items.length-2,items.length-1])items[index].click()}");
+  await h.until('last navigation wins',"[...document.querySelectorAll('.nav-item')].at(-1).getAttribute('aria-current')==='page'");
   await h.settle();
   assert.equal(await h.js<string>("document.querySelector('.window-titlebar h1').textContent"),'Settings','the last navigation remains selected after all callbacks finish');
   await h.click('.nav-item');
