@@ -12,6 +12,16 @@ const organization:Job={id:'organize',source:{id:'library:/backup',name:'Existin
 const state=(extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],showDashboard:false}),sources:[media,files],jobs:[],history:[],platform:'darwin',...extra});
 const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
 const desk=(value:AppState,mode:'media'|'files')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode}));
+test('an empty mode says where the other mode\'s connected sources are and switches to it',()=>{
+ const only=(...sources:Source[])=>state({sources});
+ const hint=(value:AppState,mode:'media'|'files',onOtherMode?:()=>void)=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode,onOtherMode}));
+ assert.match(hint(only(files),'media',()=>{}),/1 connected source is in Files &amp; folders\./);
+ assert.match(hint(only(media),'files',()=>{}),/1 connected source is in Media\./);
+ assert.match(hint(only(files,{...files,id:'files-2'}),'media',()=>{}),/2 connected sources are in Files &amp; folders\./);
+ assert.doesNotMatch(hint(only(media),'media',()=>{}),/other-mode-sources/,'not shown when this mode has sources');
+ assert.doesNotMatch(hint(only(files),'media'),/other-mode-sources/,'not shown without a way to switch');
+ assert.doesNotMatch(hint(state({sources:[]}),'media',()=>{}),/other-mode-sources/,'not shown when nothing is connected');
+});
 test('browser and task destinations with a separate Settings anchor replace six primary pages',()=>{
  const html=render(createElement(WorkspaceNavigation,{page:'library',onNavigate:()=>{}}));
  assert.deepEqual([...html.matchAll(/data-page="(.*?)"/g)].map(match=>match[1]),['desk','browser','library','activity','settings']);

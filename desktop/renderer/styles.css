@@ -22,7 +22,7 @@
 
   /* Spacing, radii, sizes */
   --radius-sm:.45rem;--radius-md:.7rem;--radius-lg:.95rem;--radius-xl:1.2rem;--radius-capsule:999px;
-  --control-height:2.5rem;--toolbar-control-height:var(--control-height);
+  --control-height:2.5rem;--control-height-sm:2rem;--toolbar-control-height:var(--control-height);
   /* One card and tile rhythm for every screen */
   --card-pad-y:1rem;--card-pad-x:1.15rem;--card-gap:.85rem;--dialog-pad-x:1.35rem;--dialog-pad-y:1rem;--tile-pad:.75rem .9rem;
   --sidebar-width:clamp(190px,15rem,min(300px,24vw));
@@ -99,7 +99,9 @@
 
 /* ---------- Base ---------- */
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;background:var(--window)}
+/* The scrollbar track is always reserved, so the fixed title bar and its controls sit in the same place on every page.
+   Anything scrolled into view (keyboard focus, scrollIntoView) stops below the fixed title bar instead of under it. */
+html{-webkit-text-size-adjust:100%;background:var(--window);overflow-y:scroll;scroll-padding-top:calc(var(--titlebar-height) + .75rem)}
 body{margin:0;min-width:760px;background:var(--window);color:var(--label);font-family:var(--font-sans);font-size:var(--text-body);line-height:1.38;font-optical-sizing:auto;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 h1,h2,h3,h4{margin:0;font-weight:600;color:var(--label)}
 h2{font-size:var(--text-title);letter-spacing:var(--tracking-snug);line-height:1.2}
@@ -463,13 +465,17 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .inventory-open svg{flex:none}
 
 /* Empty ledger and footer */
-.source-empty{display:grid;justify-items:center;gap:.6rem;padding:2.75rem 1.5rem;text-align:center;border-radius:var(--radius-xl);border:1.5px dashed var(--separator-strong);background:var(--surface-raised)}
+.source-empty{display:grid;justify-items:center;gap:.6rem;padding:1.75rem 1.5rem;text-align:center;border-radius:var(--radius-xl);border:1.5px dashed var(--separator-strong);background:var(--surface-raised)}
 :root[data-theme=dark] .source-empty{background:rgba(255,255,255,.02)}
 .empty-device-line{display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;color:var(--label-secondary)}
 .empty-device-line>svg:first-child,.empty-device-line>svg:last-child{color:var(--accent)}
 .empty-device-line>span{width:2.5rem;border-top:2px dashed var(--separator-strong)}
 .source-empty h3{font-size:var(--text-title-3)}
 .source-empty p{max-width:34rem;color:var(--label-secondary)}
+.source-empty-other{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:.25rem .5rem;font-size:var(--text-footnote);color:var(--label-secondary)}
+/* Activity: Stop all shares its row with the empty-state line. */
+.activity-jobs-bar{justify-content:space-between}
+.activity-jobs-bar>.inline-note{flex:1 1 auto}
 .source-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem 1rem;padding:.8rem 1rem;border-radius:var(--radius-xl);border:1px dashed var(--separator-strong)}
 .source-footer .switch-row{flex:1 1 16rem}
 
@@ -616,7 +622,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .remembered-devices>div{grid-template-columns:minmax(0,auto) minmax(0,1fr) auto}
 
 /* Selection: selected drives carry an accent edge and a filled chip; unselected ones are muted */
-.source-row.source-included{border-color:var(--accent-fill);box-shadow:0 0 0 1px var(--accent-fill),var(--shadow-1)}
+/* The checkbox shows inclusion; the border only tints, so a page of included cards stays calm. */
+.source-row.source-included{border-color:var(--accent-border)}
 .source-status.paused{color:var(--warning)}
 
 /* Skipped camera system and unknown files: informational, not an error */
@@ -952,10 +959,10 @@ button.sidebar-item:hover{background:var(--fill-3)}
    controls grow and shrink fluidly, secondary buttons collapse from labelled capsules to round
    icon buttons, and layouts reflow from rows to stacks as room runs out. */
 
-/* Fluid control sizes: buttons scale with their toolbar or card, within readable bounds. */
-.titlebar-actions{--control-height:clamp(2.15rem,1.55rem + 1.5cqi,2.6rem)}
-.source-row-actions{--control-height:clamp(2.15rem,1.7rem + 1.6cqi,2.6rem)}
-.card-actions,.destination-buttons,.rule-actions{--control-height:clamp(2.2rem,1.8rem + 1cqi,2.6rem)}
+/* Controls share one height (--control-height) and one compact height (--control-height-sm) on every page;
+   narrow containers collapse labels to icons instead of shrinking controls. */
+/* Sidebar row buttons are compact, so a source name keeps the row's width. */
+.sidebar-row .button-icon-only{--control-height:var(--control-height-sm);flex:none}
 .button,.segmented button,.source-layout-switch button{transition-property:transform,background-color,box-shadow,color,opacity}
 .source-row{padding:clamp(.8rem,.5rem + 1.2cqi,1.2rem) clamp(.9rem,.55rem + 1.4cqi,1.35rem)}
 
@@ -1212,7 +1219,7 @@ fieldset.organization-scope{border:0;padding:0;margin:0;min-width:0}
 
 /* Hide / show the import overview */
 .dashboard-title{display:flex;align-items:center;gap:.4rem;min-width:0}
-.dashboard-hide.button-icon-only{--control-height:1.75rem;min-height:1.75rem}
+.dashboard-hide.button-icon-only{--control-height:var(--control-height-sm);min-height:var(--control-height-sm)}
 .dashboard-hide>svg{width:14px;height:14px}
 
 /* Sidebar drive status: the running step flashes. Reduced motion keeps a steady filled dot. */
@@ -1512,7 +1519,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 ::view-transition-group-children(sidebar-devices){overflow:clip}
 
 .sidebar-heading{display:flex;align-items:center;justify-content:space-between;gap:.25rem;padding-right:.25rem}
-.sidebar-heading .button-icon-only{--control-height:1.6rem;min-height:1.6rem}
+.sidebar-heading .button-icon-only{--control-height:var(--control-height-sm);min-height:var(--control-height-sm)}
 .import-dashboard-collapsed{padding-block:.35rem}
 
 /* No summary data disappears to obtain density: wrap into available width. */
@@ -1577,18 +1584,20 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-page{display:grid;gap:.8rem;min-width:0}
 .browser-heading,.browser-toolbar,.browser-selection-bar,.browser-block-heading,.browser-preview>header{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
 .browser-heading{justify-content:space-between;align-items:flex-start}
-.browser-heading h2{font-size:var(--text-title-2)}
+/* The title bar names the page; the heading stays for assistive technology. */
+.browser-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .browser-heading p{margin-top:.25rem;max-width:50rem;font-size:var(--text-footnote)}
 .browser-index-actions,.browser-history,.browser-preview-actions{display:flex;gap:.4rem;flex-wrap:wrap}
 .browser-toolbar label,.browser-selection-bar label,.browser-block-options label,.browser-preset-save label,.browser-insertion label,.browser-range label{display:grid;gap:.25rem;font-size:var(--text-caption);color:var(--label-secondary)}
-.browser-toolbar select,.browser-toolbar input,.browser-block-options input,.browser-block-options select,.browser-preset-save input,.browser-user-preset input,.browser-selection-bar select,.browser-insertion input,.browser-range input{min-height:44px;max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-sm);color:var(--label);font:inherit;font-size:var(--text-footnote)}
+.browser-toolbar select,.browser-toolbar input,.browser-block-options input,.browser-block-options select,.browser-preset-save input,.browser-user-preset input,.browser-selection-bar select,.browser-insertion input,.browser-range input{min-height:var(--control-height);max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-md);color:var(--label);font:inherit;font-size:var(--text-footnote)}
 .browser-search{flex:1;min-width:10rem}.browser-search input{width:100%}
 .browser-status{min-height:1.5rem;color:var(--label-secondary);font-size:var(--text-footnote);display:flex;gap:1rem;flex-wrap:wrap}
 .browser-editor{border-block:1px solid var(--separator);padding:.6rem 0}
 .browser-editor>summary{cursor:pointer;display:flex;align-items:baseline;gap:.8rem;font-weight:600;padding:.3rem 0}
+.browser-editor-path{font-weight:500;color:var(--label-secondary);font-size:var(--text-footnote)}
 .browser-editor>summary small{font-size:var(--text-caption);color:var(--label-secondary);font-weight:400}
 .browser-palette{display:flex;gap:.3rem;flex-wrap:wrap;margin:.7rem 0}
-.browser-palette button{min-height:44px;padding:.4rem .65rem;background:var(--fill-4);border:1px solid transparent;border-radius:var(--radius-sm);font-size:var(--text-footnote)}
+.browser-palette button{min-height:var(--control-height-sm);padding:0 .85rem;background:var(--fill-3);border:1px solid transparent;border-radius:var(--radius-capsule);font-size:var(--text-footnote);font-weight:550}
 .browser-palette button:hover{background:var(--fill-2)}
 .browser-insertion{display:flex;align-items:center;flex-wrap:wrap;gap:.75rem;margin-bottom:.5rem;font-size:var(--text-caption)}
 .browser-insertion label{display:flex;align-items:center}.browser-insertion input{width:4.5rem}
@@ -1597,15 +1606,15 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-block-path{padding:.2rem 0 .6rem}
 .browser-path-slot{height:48px;padding:2px 8px 2px 12px;border-left:2px dotted var(--separator-strong);display:flex;align-items:center}
 .browser-path-slot:has(:hover){border-left-color:var(--accent)}
-.browser-path-slot button{width:100%;min-height:44px;text-align:left;padding:.5rem .6rem;border-radius:var(--radius-sm);background:var(--fill-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-footnote)}
+.browser-path-slot button{width:100%;min-height:var(--control-height);text-align:left;padding:.5rem .6rem;border-radius:var(--radius-sm);background:var(--fill-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-footnote)}
 .browser-path-slot button[aria-pressed=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .browser-files-leaf{font-weight:600;font-size:var(--text-footnote)}
 .browser-block-inspector{padding:.5rem .7rem;background:var(--fill-4);border-radius:var(--radius-md);margin-top:.25rem}
-.browser-block-heading{justify-content:space-between}.browser-block-heading>div{display:flex;gap:.3rem}.browser-block-heading .button{min-width:44px;min-height:44px}
+.browser-block-heading{justify-content:space-between}.browser-block-heading>div{display:flex;gap:.3rem}.browser-block-heading .button{min-width:var(--control-height);min-height:var(--control-height)}
 .browser-block-options{display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap;margin-top:.4rem}
 .browser-block-options>label{flex:1;min-width:10rem}.browser-block-options form{display:flex;gap:.6rem;align-items:center;flex:2;min-width:14rem}.browser-block-options form label{flex:1}
 .browser-block-options small{font-size:var(--text-caption)}.browser-block-options p{font-size:var(--text-footnote)}
-.browser-selection-bar{font-size:var(--text-footnote);min-height:44px}.browser-selection-bar>button:not(.button){padding:.4rem .6rem;border-radius:var(--radius-sm);background:var(--accent-soft);min-height:44px;overflow-wrap:anywhere}.browser-selection-bar label:first-of-type{margin-left:auto}
+.browser-selection-bar{font-size:var(--text-footnote);min-height:var(--control-height)}.browser-selection-bar>button:not(.button){padding:.4rem .6rem;border-radius:var(--radius-sm);background:var(--accent-soft);min-height:var(--control-height);overflow-wrap:anywhere}.browser-selection-bar label:first-of-type{margin-left:auto}
 .browser-column-width{max-width:9rem}.browser-column-width input{min-height:24px;width:100%}
 .browser-content{display:flex;min-width:0;align-items:stretch;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface)}
 .browser-columns{flex:1;min-width:180px}.browser-column{min-width:180px;border-right:1px solid var(--separator);height:100%;min-height:420px}
@@ -1617,7 +1626,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.browser-row small{color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;flex:none}
 .browser-row:hover{background:var(--fill-4)}.browser-row[aria-selected=true]{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent-fill)}.browser-virtual-list:focus-visible .browser-row.is-active{outline:2px solid var(--accent-fill);outline-offset:-2px}
 .browser-list-empty,.browser-column-error{padding:.7rem;color:var(--label-secondary);font-size:var(--text-footnote)}
-.browser-column-error details{overflow-wrap:anywhere}.browser-load-more{margin:.4rem;min-height:44px}
+.browser-column-error details{overflow-wrap:anywhere}.browser-load-more{margin:.4rem;min-height:var(--control-height)}
 .browser-range{padding:.5rem .6rem;font-size:var(--text-footnote)}.browser-range>summary{cursor:pointer;min-height:30px}.browser-range form{display:grid;gap:.4rem}.browser-range input{width:100%}
 .browser-preview{width:clamp(240px,28%,360px);flex:none;min-width:240px;border-left:1px solid var(--separator);padding:.8rem;max-height:650px;overflow:auto}
 .browser-preview>header{justify-content:space-between;flex-wrap:nowrap;margin-bottom:.5rem}.browser-preview h3{overflow-wrap:anywhere;font-size:var(--text-footnote)}
@@ -1627,10 +1636,11 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-full-exif{font-size:var(--text-caption);max-height:300px;overflow:auto}.browser-full-exif dl{display:grid;gap:.5rem}.browser-full-exif dt{color:var(--label-secondary)}.browser-full-exif dd{overflow-wrap:anywhere;user-select:text}
 .browser-keyboard-note{font-size:var(--text-caption);color:var(--label-secondary)}
 .browser-empty{display:grid;justify-items:center;gap:.6rem;padding:3rem 1rem;text-align:center;color:var(--label-secondary)}
-.browser-presets{flex:none;border-bottom:1px solid var(--separator);padding:.35rem .55rem;font-size:var(--text-footnote)}
-.browser-presets>summary{display:flex;align-items:center;gap:.4rem;min-height:44px;cursor:pointer;color:var(--label-secondary);list-style:none}.browser-presets>summary::after{content:'⌄';margin-left:auto}.browser-presets[open]>summary::after{content:'⌃'}
-.browser-preset-list{max-height:12rem;overflow:auto;display:grid;gap:.15rem}.browser-preset-list>button,.browser-user-preset>button{min-height:44px;text-align:left;border-radius:var(--radius-sm);padding:.4rem .5rem;overflow-wrap:anywhere}.browser-preset-list button:hover{background:var(--fill-3)}.browser-preset-list button[aria-pressed=true]{background:var(--accent-soft);font-weight:600}
-.browser-user-preset{display:flex;align-items:center}.browser-user-preset>button:first-child{flex:1}.browser-user-preset>button:not(:first-child){width:30px;flex:none}.browser-user-preset form{display:flex;gap:.2rem}.browser-user-preset input{width:100%;min-width:0}.browser-preset-save{display:grid;gap:.4rem;margin:.5rem 0}.browser-restore{font-size:var(--text-caption);color:var(--label-secondary);min-height:44px}
+.browser-presets{border-top:1px solid var(--separator);padding:.35rem 0;font-size:var(--text-footnote)}
+.browser-presets>summary{display:flex;align-items:center;gap:.4rem;min-height:var(--control-height);cursor:pointer;color:var(--label-secondary);list-style:none}.browser-presets>summary::after{content:'⌄';margin-left:auto}.browser-presets[open]>summary::after{content:'⌃'}
+/* Presets are chips sized to their names. */
+.browser-preset-list{display:flex;flex-wrap:wrap;gap:.4rem;padding:.3rem 0}.browser-preset-list>button,.browser-user-preset>button{min-height:var(--control-height-sm);text-align:left;border-radius:var(--radius-capsule);padding:0 .85rem;background:var(--fill-4);overflow-wrap:anywhere}.browser-preset-list button:hover{background:var(--fill-3)}.browser-preset-list button[aria-pressed=true]{background:var(--accent-soft);font-weight:600}
+.browser-user-preset{display:flex;align-items:center;gap:.15rem}.browser-user-preset>button:not(:first-child){width:30px;flex:none}.browser-user-preset form{display:flex;gap:.2rem}.browser-user-preset input{width:100%;min-width:0}.browser-preset-save{display:grid;gap:.4rem;margin:.5rem 0}.browser-restore{font-size:var(--text-caption);color:var(--label-secondary);min-height:var(--control-height)}
 @media(max-width:1100px){.browser-content{flex-direction:column}.browser-preview{width:100%;min-width:0;border-left:0;border-top:1px solid var(--separator);max-height:440px;display:grid;grid-template-columns:minmax(160px,1fr) minmax(180px,1fr);gap:.6rem}.browser-preview>header{grid-column:1/-1}.browser-photo{max-height:260px}.browser-file-details{margin:0}.browser-preview-actions,.browser-placement,.browser-full-exif{grid-column:1/-1}.browser-column-width{display:none}}
 @media(max-width:650px){.browser-toolbar{align-items:stretch}.browser-toolbar>label{width:100%}.browser-preview{display:block}.browser-palette{gap:.2rem}.browser-block-options>label,.browser-block-options form{min-width:100%}.browser-heading{display:block}.browser-index-actions{margin-top:.5rem}}
 
@@ -1642,6 +1652,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 
 .browser-exif-scroll{height:288px;overflow:auto}.browser-exif-scroll dl{display:block}.browser-exif-scroll dl>div{padding:.3rem 0;border-bottom:1px solid var(--separator);overflow:hidden}.browser-exif-scroll dt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.browser-exif-scroll dd{max-height:44px;overflow:auto}
 
-.browser-presets,.browser-presets *{-webkit-app-region:no-drag}.browser-presets[open]{max-height:45vh;overflow:auto}.browser-presets[open] .browser-preset-list{max-height:11rem}.browser-column-width input{accent-color:var(--accent-fill)}
+.browser-presets,.browser-presets *{-webkit-app-region:no-drag}.browser-column-width input{accent-color:var(--accent-fill)}
 
-.browser-presets[open]{flex:0 1 auto;min-height:44px;max-height:30vh}.sidebar:has(.browser-presets[open]) .sidebar-devices{min-height:64px}.browser-presets[open]>summary{position:sticky;top:0;background:var(--sidebar);z-index:1}
+

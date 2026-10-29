@@ -22,7 +22,7 @@ async function fixtureTree(root:string){
 async function enter(h:Harness){
  assert.ok(await h.click('.nav-item[data-page="browser"]'),'Library browser navigation exists');
  await h.until('Library browser page',"document.querySelector('[data-testid=library-browser]')");await h.settle();
- await h.js("document.querySelector('[data-testid=browser-presets]').open=true");
+ await h.js("document.querySelector('[data-testid=browser-presets]').open=true;document.querySelector('[data-testid=hierarchy-editor]').open=true");
 }
 async function choosePreset(h:Harness,id:string){assert.ok(await h.click(`[data-preset-id="${id}"]`));await h.frames();await h.until('preset applied',`document.querySelector('[data-preset-id="${id}"]')?.getAttribute('aria-pressed')==='true'`);}
 async function setField(h:Harness,label:string,value:string){

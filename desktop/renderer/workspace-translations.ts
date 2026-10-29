@@ -20,6 +20,10 @@ No jobs yet.|尚无任务。|尚無工作。|ジョブはまだありません�
 Choose folders to back up.|选择要备份的文件夹。|選擇要備份的資料夾。|バックアップするフォルダーを選びます。
 Change destinations|更改目标位置|更改目的位置|保存先を変更
 Edit folder rules|编辑文件夹规则|編輯資料夾規則|フォルダーのルールを編集
+1 connected source is in Files & folders.|1 个已连接的来源在“文件和文件夹”中。|1 個已連接的來源在「檔案與資料夾」中。|接続中のソース 1 件は「ファイルとフォルダー」にあります。
+1 connected source is in Media.|1 个已连接的来源在“媒体”中。|1 個已連接的來源在「媒體」中。|接続中のソース 1 件は「メディア」にあります。
+{count} connected sources are in Files & folders.|{count} 个已连接的来源在“文件和文件夹”中。|{count} 個已連接的來源在「檔案與資料夾」中。|接続中のソース {count} 件は「ファイルとフォルダー」にあります。
+{count} connected sources are in Media.|{count} 个已连接的来源在“媒体”中。|{count} 個已連接的來源在「媒體」中。|接続中のソース {count} 件は「メディア」にあります。
 View all jobs in Activity|在活动中查看所有任务|在活動中檢視所有工作|アクティビティですべてのジョブを表示
 Finished operations appear here.|已完成的操作会显示在此处。|已完成的操作會顯示在這裡。|完了した操作がここに表示されます。
 Go to Import|前往导入|前往匯入|読み込みへ

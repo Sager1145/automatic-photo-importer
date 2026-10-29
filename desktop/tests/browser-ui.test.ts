@@ -33,6 +33,11 @@ test('numeric bucket selections OR selected ranges within one block, preserve ex
  const filter=selectionFromRows(block,[rows[0]!,rows[1]!]);assert.deepEqual(filter,{kind:'ranges',field:'fNumber',blockId:block.id,ranges:[{max:2.8,maxInclusive:false},{min:2.8,max:4,maxInclusive:false}]});
  assert.deepEqual(selectionFromRows(block,[{key:'missing',label:'Missing',count:2,missing:true}]),{kind:'missing',field:'fNumber',blockId:block.id});
 });
+test('the preview labels exposure like the columns do: shutter fractions, f-numbers and millimetres',()=>{
+ const row:CatalogRow={fileId:'f',libraryId:'l',relativePath:'a.jpg',parentPath:'',name:'a.jpg',mediaKind:'JPEG',extension:'jpg',size:'10',metadataStatus:'ready',values:{metadataStatus:'ready',exposureSeconds:0.008,fNumber:2.8,focalLengthMm:35},placement:{status:'inPlace',actualRelativePath:'a.jpg',rulesScope:'r'},companionCount:0};
+ const html=render(createElement(PreviewPanel,{row,online:false,api,onOrganization:()=>{},onReveal:()=>{},onClose:()=>{}}));
+ assert.match(html,/1\/125 s/);assert.doesNotMatch(html,/0\.008 s/);assert.match(html,/f\/2\.8/);assert.match(html,/35 mm/);
+});
 test('date display keeps grouping keys intact and preview paths remain relative with separate organize navigation',()=>{
  const date={...createBlock('date'),datePattern:'MM / YYYY'};assert.equal(displayFacetValue(date,'2025-01','en'),'01 / 2025');assert.equal(displayFacetValue(date,'2026-01','en'),'01 / 2026');
  const row:CatalogRow={fileId:'f',libraryId:'l',relativePath:'Unsorted/a.nef',parentPath:'Unsorted',name:'a.nef',mediaKind:'RAW',extension:'nef',size:'10',metadataStatus:'ready',values:{metadataStatus:'ready',camera:'Nikon'},placement:{status:'misplaced',actualRelativePath:'Unsorted/a.nef',expectedRoute:{role:'photos',relativePath:'2026/a.nef'},rulesScope:'r'},companionCount:0};

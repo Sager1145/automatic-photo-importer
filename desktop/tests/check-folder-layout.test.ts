@@ -34,7 +34,7 @@ test('with no result the backup card prompts for the check and the button dispat
     const page=card(html(language,createElement(Organization,{state:stateOf(),act:()=>{},busy:false})));
     assert.ok(page.includes('data-testid="backup-check-prompt"')&&page.includes(t('Check whether every file in this backup is in the folder your rules give it.')),`${language}: prompt`);
     const check=button(page,'check-backup-folder');
-    assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: primary, enabled`);
+    assert.ok(/button-secondary/.test(check)&&!/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: secondary (Organize now is the card's primary action), enabled`);
     assert.ok(!page.includes('segmented')&&!page.includes('aria-pressed')&&page.includes(t('The folder layout is checked only when you click Check folder layout.')),`${language}: no mode control`);
     const node=find(tree(language,BackupCheck,{state:stateOf(),act:(action:Action)=>actions.push(action),busy:false,organizeBusy:false,destinationIndex:0}),'check-backup-folder');
     assert.ok(node,`${language}: button found`);node!.props.onClick();
@@ -94,13 +94,13 @@ test('Settings no longer has the Off, Ask, Automatic check control',async()=>{
   }
 });
 
-test('the Import desk destination strip prompts with an emphasized button until a result exists, then shows the result and a Library link',async()=>{
+test('the Import desk destination strip prompts with a secondary button (Start stays the only primary action on the page) until a result exists, then shows the result and a Library link',async()=>{
   const {DestinationStrip}=await import('../renderer/RootApp');
   const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationStrip,{state,act:()=>{}}));
   for(const language of languages){
     const t=createTranslator(language),actions:Action[]=[];
     const none=slot(language,stateOf()),check=button(none,'destination-check-backup-folder-0');
-    assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: emphasized`);
+    assert.ok(/button-secondary/.test(check)&&!/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: secondary`);
     find(tree(language,DestinationStrip,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
     assert.deepEqual(actions,[{type:'checkBackupFolder',destinationIndex:0}]);
     const found=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':result}}));
