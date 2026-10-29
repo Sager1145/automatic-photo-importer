@@ -1,3 +1,4 @@
+import { browserTranslationRows } from './browser/translations';
 import { workspaceTranslationRows } from './workspace-translations';
 import { safetyTranslationRows } from './safety-translations';
 import { settingsTranslationRows } from './settings-translations';
@@ -1024,7 +1025,7 @@ Log size: {size}|日志大小：{size}|記錄檔大小：{size}|ログのサイ�
 Logs stay on this Mac. They never include file contents or recovery keys.|日志只保存在这台 Mac 上，不含文件内容或恢复密钥。|記錄檔只保存在這台 Mac 上，不含檔案內容或復原金鑰。|ログはこの Mac にのみ保存され、ファイルの内容や復元キーは含まれません。
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
-for (const row of [rows, settingsTranslationRows, safetyTranslationRows, workspaceTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
+for (const row of [rows, settingsTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
   const [english, simplified, traditional, japanese] = row.split('|');
   translationCatalogs['zh-Hans'][english] = simplified;
   translationCatalogs['zh-Hant'][english] = traditional;

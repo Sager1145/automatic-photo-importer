@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {ExifTool} from 'exiftool-vendored';
-import {metadata,closeMetadata,routingEntriesUnder,primeRouting} from '../platform/metadata';
+import {metadata,metadataFromTags,closeMetadata,routingEntriesUnder,primeRouting} from '../platform/metadata';
 
 async function scratch(t:test.TestContext){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'routing-metadata-'));
@@ -92,4 +92,29 @@ test('the routing read alone carries everything the summary card shows',async t=
  });
  for(const tag of ['-FocalLength','-ImageCount','-ExifToolVersion'])assert.ok(args[0]!.includes(tag),`the summary reads ${tag} with the routing tags`);
  assert.ok(args.every(list=>!list.includes('RequestAll=3')),'the summary never reads all tags');
+});
+
+test('real EXIF high ISO uses the declared extended sensitivity instead of the 16-bit saturation marker',async t=>{
+ const root=await scratch(t),file=path.join(root,'high-iso.PNG');
+ await fs.copyFile(path.resolve('Assets/AppIcon-preview.png'),file);
+ const writer=new ExifTool({maxProcs:1});
+ try{await writer.write(file,{ISO:65535,SensitivityType:3,ISOSpeed:102400});}finally{await writer.end();}
+ assert.equal((await metadata(file,{details:false})).exposure?.iso,102400);
+ assert.equal((await metadata(file)).exposure?.iso,102400);
+});
+
+
+test('high ISO fallback honors SensitivityType and never invents a value from the saturation marker',()=>{
+ const iso=(tags:Record<string,unknown>)=>metadataFromTags(tags,{details:false}).exposure?.iso;
+ assert.equal(iso({'ExifIFD:ISO':65535}),undefined);
+ assert.equal(iso({'ExifIFD:ISO':800,'ExifIFD:ISOSpeed':102400}),800);
+ assert.equal(iso({'ExifIFD:ISO':65535,'ExifIFD:SensitivityType':2,'ExifIFD:RecommendedExposureIndex':204800,'ExifIFD:ISOSpeed':102400}),204800);
+ assert.equal(iso({'ExifIFD:ISO':65535,'ExifIFD:SensitivityType':1,'ExifIFD:StandardOutputSensitivity':128000}),128000);
+ assert.equal(iso({'ExifIFD:ISO':65535,'ExifIFD:SensitivityType':3,'ExifIFD:RecommendedExposureIndex':204800}),undefined);
+ assert.equal(iso({'ExifIFD:ISO':65535,'ExifIFD:SensitivityType':7,'ExifIFD:ISOSpeed':102400,'ExifIFD:RecommendedExposureIndex':204800,'ExifIFD:StandardOutputSensitivity':128000}),102400);
+});
+
+test('65535 remains a valid physical value in a declared 32-bit ISO speed tag',()=>{
+ const metadata=metadataFromTags({'ExifIFD:ISO':65535,'ExifIFD:SensitivityType':3,'ExifIFD:ISOSpeed':65535},{details:false});
+ assert.equal(metadata.exposure?.iso,65535);
 });

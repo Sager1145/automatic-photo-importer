@@ -207,3 +207,20 @@ test('Settings Storage destinations have no check, Organize or Stop buttons, but
     assert.ok(!bay({misplacedFiles:{'/Volumes/A006':result}}).includes(t('Open in Library')),`${language}: link only where Library can open`);
   }
 });
+
+
+test('shared catalog placement agrees with the read-only check for a custom template and owned directories',async t=>{
+  const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+  const {findMisplaced,inventory}=await import('../core/index'),{evaluateRoutes,classifyPlacement}=await import('../core/folder-rules');
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'catalog-layout-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const names=['Trips/Camera/2024/02 February/A (2).JPG','wrong/B.JPG','Trips/Camera/Conflicts/content/C.JPG','Problem files/Empty/D.JPG'];
+  for(const name of names){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),'image');}
+  const options={template:'Trips/{camera}/{year}/{monthName}',layout:'flat' as const},metadata=async()=>({camera:'Camera',date:'2024-02-03T12:00:00',fields:{}});
+  const checked=await findMisplaced(root,root,options,metadata);
+  assert.deepEqual(checked.files,['wrong/B.JPG']);
+  const listing=await inventory(root),infos=new Map(),mtimes=new Map();
+  for(const file of listing.files){infos.set(file.path,await metadata());mtimes.set(file.path,(await fs.stat(file.path)).mtime);}
+  const routes=evaluateRoutes({sourceRoot:root,files:listing.files,scanned:listing.files,metadata:infos,mtimes,roots:[{root,role:'photos'}],options:{...options,reorganize:true}});
+  const misplaced=routes.filter(route=>classifyPlacement({route,actual:{root:'photos',relativePath:route.file.relative},rulesScope:'current'}).status==='misplaced');
+  assert.deepEqual(misplaced.map(route=>route.file.relative),checked.files);
+});

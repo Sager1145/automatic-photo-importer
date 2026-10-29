@@ -64,6 +64,8 @@ Keep the app open and insert a card, or connect a camera over USB. With **Automa
 
 ### More than imports
 
+**Browse your library.** Open **Library browser** to browse real folders or compose virtual date, camera, format and exposure columns. Save custom views without changing originals or organization rules. See [Library browser](docs/library-browser.md).
+
 **Back up whole drives.** **Back up drives or folders…** copies every file with its original folders under `Drive backups/`, without sorting by camera or date. **Mirror** mode moves files that disappeared from the source into `Drive backups/.mirror-removed/`; it never deletes.
 
 **Use two disks.** **Copy to both destinations** writes a verified copy to each of two physical disks. **Fill first, then second** moves on to the second disk when the first is full.
@@ -161,6 +163,8 @@ npm run native:mac
 - 「扫描媒体」只读取存储卡而不复制：显示总数、格式，以及拍摄它们的相机。
 
 ### 不只是导入
+
+**浏览资料库。** 从侧栏打开「分类预览」，按真实文件夹或自由组合的日期、相机、格式、曝光参数分栏浏览。自定义视图不会改变原文件或整理规则。详见[浏览指南](docs/library-browser.md)。
 
 **备份整个磁盘。** 「备份磁盘或文件夹…」会把每个文件连同原有文件夹复制到 `Drive backups/` 下，不按相机或日期整理。「镜像」模式会把来源上已消失的文件移到 `Drive backups/.mirror-removed/`；它从不删除文件。
 
@@ -260,6 +264,8 @@ npm run native:mac
 
 ### 不只是匯入
 
+**瀏覽資料庫。** 從側欄開啟「分類預覽」，依真實資料夾或自由組合的日期、相機、格式與曝光參數分欄瀏覽。自訂檢視不會更動原始檔或整理規則。請見[瀏覽指南](docs/library-browser.md)。
+
 **備份整顆磁碟。** 「備份磁碟或資料夾…」會把每個檔案連同原有資料夾複製到 `Drive backups/` 下，不依相機或日期整理。「鏡像」模式會把來源上已消失的檔案移到 `Drive backups/.mirror-removed/`；它從不刪除檔案。
 
 **使用兩顆磁碟。** 「複製到兩個目的地」會在兩顆實體磁碟上各寫入一份經過校驗的副本。「先存滿第一顆再用第二顆」會在第一顆磁碟滿了之後改用第二顆。
@@ -357,6 +363,8 @@ npm run native:mac
 - 「メディアをスキャン」はコピーせずにカードを読み取り、総数、フォーマット、撮影したカメラを表示します。
 
 ### インポートだけではありません
+
+**ライブラリを閲覧。** サイドバーのライブラリブラウザーで実際のフォルダーや、日付・カメラ・形式・露出の列を組み合わせて表示できます。カスタム表示は元ファイルや整理ルールを変更しません。[閲覧ガイド](docs/library-browser.md)をご覧ください。
 
 **ドライブを丸ごとバックアップ。** 「ドライブやフォルダーをバックアップ…」は、カメラや日付で並べ替えずに、すべてのファイルを元のフォルダーごと `Drive backups/` の下にコピーします。「ミラー」モードでは、ソースから消えたファイルを `Drive backups/.mirror-removed/` に移します。削除はしません。
 

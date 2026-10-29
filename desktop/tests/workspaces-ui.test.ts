@@ -12,9 +12,9 @@ const organization:Job={id:'organize',source:{id:'library:/backup',name:'Existin
 const state=(extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],showDashboard:false}),sources:[media,files],jobs:[],history:[],platform:'darwin',...extra});
 const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
 const desk=(value:AppState,mode:'media'|'files')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode}));
-test('three task destinations and a separate Settings anchor replace six primary pages',()=>{
+test('browser and task destinations with a separate Settings anchor replace six primary pages',()=>{
  const html=render(createElement(WorkspaceNavigation,{page:'library',onNavigate:()=>{}}));
- assert.deepEqual([...html.matchAll(/data-page="(.*?)"/g)].map(match=>match[1]),['desk','library','activity','settings']);
+ assert.deepEqual([...html.matchAll(/data-page="(.*?)"/g)].map(match=>match[1]),['desk','browser','library','activity','settings']);
  assert.match(html,/settings-navigation/);assert.match(html,/Library tools/);assert.doesNotMatch(html,/data-page="drives"/);
  assert.match(html,/<button[^>]*data-page="library"[^>]*aria-current="page"/);
 });

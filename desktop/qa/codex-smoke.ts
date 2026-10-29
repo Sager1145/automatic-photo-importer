@@ -10,6 +10,7 @@ import {Harness,markdownReport,stages,type Check} from './ui/harness';
 import {digest,type Context} from './ui/checks/context';
 import {bootChecks} from './ui/checks/boot';
 import {navigationChecks} from './ui/checks/navigation';
+import {browserChecks} from './ui/checks/browser';
 import {importChecks} from './ui/checks/imports';
 import {organizationChecks} from './ui/checks/organization';
 import {duplicateChecks} from './ui/checks/duplicates';
@@ -25,7 +26,7 @@ import {finalChecks} from './ui/checks/final';
 export interface SmokeOptions {uiOnly:boolean;organizationOnly:boolean;/** Runs only checks whose id matches this pattern (final checks always run). */only?:string;/** When the run must have written its report (epoch ms). */deadline?:number}
 
 export function allChecks(ctx:Context):Check[]{
- const checks=[...bootChecks(ctx),...navigationChecks(),...workspaceFlowChecks(),...importChecks(ctx),...organizationChecks(ctx),...duplicateChecks(ctx),...settingsChecks(ctx),...errorChecks(),...recoveryChecks(),...workspaceSafetyChecks(),...ruleChecks(),...stressChecks(),...finalChecks(ctx)];
+ const checks=[...bootChecks(ctx),...navigationChecks(),...browserChecks(),...workspaceFlowChecks(),...importChecks(ctx),...organizationChecks(ctx),...duplicateChecks(ctx),...settingsChecks(ctx),...errorChecks(),...recoveryChecks(),...workspaceSafetyChecks(),...ruleChecks(),...stressChecks(),...finalChecks(ctx)];
  // Stable sort: the stages run in their order, checks within a stage in the order written.
  return checks.sort((a,b)=>stages.indexOf(a.stage)-stages.indexOf(b.stage));
 }

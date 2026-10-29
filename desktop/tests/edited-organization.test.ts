@@ -79,3 +79,13 @@ test('selected folder scope rejects symbolic-link aliases instead of widening it
  const{source,target,put}=await fixture(t);await put('2024/A.ARW');await put('untouched/B.ARW');await fs.symlink(source,path.join(source,'alias'),'dir');
  await assert.rejects(plan(source,[target],{...options,reorganize:true,sourceFolders:['alias']},metadata),/symbolic link/i);
 });
+
+
+test('catalog classification and the read-only check agree for edited exports without editor metadata',async t=>{
+ const{source,target,put}=await fixture(t),relative='2025/202506/editied/ILCE-7M5/A.JPG',file=await put(`photobackup/${relative}`);
+ const {evaluateRoutes,classifyPlacement}=await import('../core/folder-rules'),{findMisplaced}=await import('../core/index');
+ const stat=await fs.stat(file),info=await originalMetadata(),entry={path:file,relative:path.relative(source,file),size:stat.size,kind:'JPEG' as const,included:true};
+ const [route]=evaluateRoutes({sourceRoot:source,files:[entry],metadata:new Map([[file,info]]),mtimes:new Map([[file,stat.mtime]]),roots:[{root:target,role:'photos'}],options:{...options,reorganize:true}});
+ assert.equal(classifyPlacement({route,actual:{root:'photos',relativePath:relative},rulesScope:'current'}).status,'inPlace');
+ assert.equal((await findMisplaced(source,target,options,originalMetadata)).count,0);
+});

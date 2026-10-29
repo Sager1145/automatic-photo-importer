@@ -33,17 +33,19 @@ import { BrandLogo } from './BrandLogo';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
 
+import { BrowserPage, PresetSidebar } from './browser/BrowserPage';
+import { useBrowserConfiguration } from './browser/use-configuration';
 import { reviewWorkspace, sourceImportMode, type ImportMode, type WorkspacePage } from './workspace-state';
 
 type Page = WorkspacePage;
-const pageOrder: Page[] = ['desk', 'library', 'activity', 'settings'];
+const pageOrder: Page[] = ['desk', 'browser', 'library', 'activity', 'settings'];
 type LibraryTool = 'organize' | 'duplicates' | 'recovery';
 type ActivityTab = 'jobs' | 'history' | 'issues';
 
 export function WorkspaceNavigation({ page, onNavigate }: { page: Page; onNavigate: (page: Page) => void }) {
   const { t } = useTranslation();
   const item = (id: Page, label: string, icon: LucideIcon) => <button key={id} type="button" data-page={id} className={`nav-item ${page === id ? 'selected' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => onNavigate(id)}><span className="nav-icon" style={{viewTransitionName:`nav-${id}-icon`}}><Icon icon={icon} /></span><span style={{viewTransitionName:`nav-${id}-text`}}>{label}</span>{page === id && <span className="nav-indicator" aria-hidden="true" />}</button>;
-  return <><nav aria-label={t("Main navigation")}>{item('desk', t("Import"), ArrowDownToLine)}{item('library', t("Library tools"), FolderCog)}{item('activity', t("Activity"), Activity)}</nav><nav className="settings-navigation" aria-label={t("Settings")}>{item('settings', t("Settings"), Settings2)}</nav></>;
+  return <><nav aria-label={t("Main navigation")}>{item('desk', t("Import"), ArrowDownToLine)}{item('browser', t("Library browser"), Layers3)}{item('library', t("Library tools"), FolderCog)}{item('activity', t("Activity"), Activity)}</nav><nav className="settings-navigation" aria-label={t("Settings")}>{item('settings', t("Settings"), Settings2)}</nav></>;
 }
 
 export function WorkspaceTabs<T extends string>({ label, value, items, onChange, panelId }: { panelId?: string; label: string; value: T; items: readonly { id: T; label: string; testId: string }[]; onChange: (value: T) => void }) {
@@ -202,6 +204,8 @@ export default function RootApp() {
   const localErrorTimes = useRef(new Map<string, string>());
   const holds = useRef(new Map<string, DisplayHold>()).current;
   const [page, setPage] = useState<Page>('desk');
+  const browserConfiguration = useBrowserConfiguration();
+  const [browserLibraryRequest, setBrowserLibraryRequest] = useState<string>();
   const [importMode, setImportMode] = useState<ImportMode>('media');
   const [libraryTool, setLibraryTool] = useState<LibraryTool>('organize');
   const [activityTab, setActivityTab] = useState<ActivityTab>('jobs');
@@ -219,10 +223,11 @@ export default function RootApp() {
   };
   // A queue row's Show: the Import card of an import, Library › Organize for an organization.
   const openJob = (job: Job) => openSource(job.source.id);
-  // Sidebar destination rows jump to that destination's card on the Import desk.
+  // Destination links open their indexed library; organization stays a separate workspace.
   const openDestination = (path: string) => {
-    if (page !== 'desk') navigate('desk');
-    void interfaceSettled().then(() => { document.querySelector<HTMLElement>(`.destination-slot[data-destination-path="${CSS.escape(path)}"]`)?.scrollIntoView({ behavior: reducedMotion() ? 'instant' : 'smooth', block: 'center' }); });
+    const index = state?.preferences.destinations.indexOf(path);
+    const library = state?.catalogLibraries?.find(item => item.destinationIndex === index && item.role === 'photos');
+    navigate('browser', () => setBrowserLibraryRequest(library?.libraryId));
   };
   const navigate = (next: Page, update?: () => void) => { if (next === page && !update) return; animateInterfaceChange(() => { update?.(); setPage(next); window.scrollTo({ top: 0, behavior: 'instant' }); }, next === page ? 'crossfade' : pageOrder.indexOf(next) > pageOrder.indexOf(page) ? 'forward' : 'back'); };
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -309,10 +314,11 @@ export default function RootApp() {
     if (!ids) act({ type: 'clearErrors', ...(severity ? { severity } : {}) }); else { const real = ids.filter(id => !id.startsWith('local:')); if (real.length) act({ type: 'clearErrors', ids: real, ...(severity ? { severity } : {}) }); }
   };
   return <I18nProvider language={language}><EtaHolds.Provider value={holds}><div className="app-shell">
-    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import") : page === 'library' ? t("Library tools") : page === 'activity' ? t("Activity") : t("Settings")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
+    <div className={`window-titlebar ${state.platform === 'darwin' ? 'native-mac-titlebar' : ''}`}><h1 className="titlebar-page-title">{page === 'desk' ? t("Import") : page === 'library' ? t("Library tools") : page === 'browser' ? t("Library browser") : page === 'activity' ? t("Activity") : t("Settings")}</h1><TitlebarControls state={state} act={act} page={page} organizationDestination={organizationDestination} errorCount={badge.errors} warningCount={badge.warnings} onErrors={() => openErrorsFor()} />{state.platform !== 'darwin' && <div className="window-controls" aria-label={t("Window controls")}><button type="button" aria-label={t("Minimize window")} title={t("Minimize")} onClick={() => act({ type: 'window', command: 'minimize' })}><Icon icon={Minus} size={15} /></button><button type="button" aria-label={t("Maximize or restore window")} title={t("Maximize or restore")} onClick={() => act({ type: 'window', command: 'maximize' })}><Icon icon={Maximize2} size={13} /></button><button type="button" className="window-close" aria-label={t("Close window")} title={t("Close")} onClick={() => act({ type: 'window', command: 'close' })}><Icon icon={X} size={16} /></button></div>}</div>
     <aside className="sidebar" ref={sidebarRef}>
       <div className="brand"><BrandLogo className="brand-logo" /><strong>{t("Photo Importer")}</strong></div>
       <WorkspaceNavigation page={page} onNavigate={navigate} />
+      <PresetSidebar configuration={browserConfiguration.configuration} onChange={browserConfiguration.setConfiguration} onOpen={() => navigate('browser')} />
       <div className="sidebar-devices"><SidebarSources state={state} onOpen={openSource} errors={errors} onErrors={openErrorsFor} act={act} />
       <SidebarDestinations state={state} errors={errors} onErrors={openErrorsFor} act={act} onOpen={openDestination} /></div>
     </aside>
@@ -330,6 +336,7 @@ export default function RootApp() {
           {reviewOwner?.page === 'desk' && reviewOwner.mode === importMode && <ReviewPanel state={state} act={act} inspect={inspect} />}
           <ImportDesk state={state} act={act} mode={importMode} needsChoice={dismissedDrives} inspect={inspect} onOrganization={openOrganization} onSettings={() => openSettings('storage')} onFolderRules={() => openSettings('folders')} onAutomatic={() => openSettings('defaults')} onActivity={() => navigate('activity', () => setActivityTab('jobs'))} /></section>
         </>}
+        {page === 'browser' && <BrowserPage requestedLibraryId={browserLibraryRequest} libraries={state.catalogLibraries ?? []} statuses={state.catalogStatuses ?? {}} configuration={browserConfiguration.configuration} onConfiguration={browserConfiguration.setConfiguration} storageError={browserConfiguration.storageError} api={window.importer} onRefresh={libraryId => act({type:'catalogRefresh', libraryId})} onStop={libraryId => act({type:'catalogStop', libraryId})} onReveal={path => act({type:'reveal',path})} onOrganization={destinationIndex => navigate('library', () => { setLibraryTool('organize'); if (destinationIndex !== undefined) setOrganizationDestination(destinationIndex); })} />}
         {page === 'library' && <>
           <WorkspaceTabs panelId="library-workspace-panel" label={t("Library tools")} value={libraryTool} items={[{id:'organize',label:t("Organize"),testId:'library-organize'},{id:'duplicates',label:t("Duplicates"),testId:'library-duplicates'},{id:'recovery',label:t("Recovery & cleanup"),testId:'library-recovery'}]} onChange={setLibraryTool} />
           <section role="tabpanel" id="library-workspace-panel" aria-labelledby={`tab-library-${libraryTool}`}>{libraryTool === 'organize' ? <>{reviewOwner?.page === 'library' && <ReviewPanel state={state} act={act} inspect={inspect} />}<Organization state={state} act={act} busy={busy} selectedDestination={organizationDestination} onSelectDestination={setOrganizationDestination} onFolderRules={() => openSettings('folders')} /></> : libraryTool === 'duplicates' ? <DuplicatesPage state={state} act={act} /> : <><OrganizationRecoveryPanel state={state} act={act} busy={busy || settingsLocked(state)} /><section className="organization-action activity-maintenance"><CardHeader icon={Trash2} title={t("Maintenance")} /><LeftoverFiles state={state} act={act} busy={busy || settingsLocked(state)} /></section></>}</section>

@@ -3,17 +3,15 @@ import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ConflictNaming, DuplicateFile, ExecutionIssue, Inventory, InventoryFile, Listing, MediaLayout, Metadata, NoMetadataFile, NoMetadataHandling, NoMetadataReason, NoMetadataSummary, PlanEntry, ProblemFile, Progress, TransferPlan, UnknownDefault, UnknownFileRule } from '../shared';
-import { LEGACY_UNKNOWN_CAMERA_FOLDER, PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
+import { PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from '../shared';
 import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
-import { inventory, extension, stem, rules, nkscEdit, captureOneEdit, unknownRule, type RuleDefaults } from './inventory';
+import { inventory, extension, stem, rules, type RuleDefaults } from './inventory';
 import { destinationIndex, flushIndex, provable, type DestinationIndex, type Digests } from './destination-index';
 import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
 import {applyFileTimestamps} from '../platform/file-timestamps';
-import {captureTimestamp,parseCapture} from '../capture-time';
-import { formatFolder, layoutFolders } from '../media-formats';
+import {captureTimestamp} from '../capture-time';
 import { destinationParts } from './allocation';
-import { editedTemplate, expandTemplate, safeComponent, templateValues, validateRelative, validFolderName } from '../folder-template';
 import { beneath, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, sameBirth, sameStat, statKey, unreliableIno, syncDirectory, syncParents, syncFile } from './paths';
 export { inventory } from './inventory';
 import { streams, CHECK_CONCURRENCY } from './devices';
@@ -25,6 +23,9 @@ export type { AppleDoubleReport } from './appledouble';
 import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,directReceiptExists,openPartial,clearPartialRecord,stagingFolder,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {constants} from 'node:fs';
 import {MessageError,toMessage} from '../messages';
+import {expectedFolder as folder,evaluateRoutes,placementExemption,type FolderRules} from './folder-rules';
+export {pairLivePhotos} from './folder-rules';
+export type {FolderRules} from './folder-rules';
 import type {PlacedFile} from '../platform/placement-memory';
 import { log, logDeletion } from '../logger';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
@@ -46,13 +47,6 @@ async function pool<T>(items:T[],limit:number,work:(item:T)=>Promise<void>):Prom
     while(failure===undefined && next<items.length) {const item=items[next++]!;try { await work(item); } catch(error) { failure??=error; }}
   }));
   if(failure!==undefined) throw failure;
-}
-/** The folder rules of a library: where each media file goes under its backup folder. */
-export interface FolderRules {
-  template:string;layout:MediaLayout;/** video-root: the video folder template (empty or absent: `template`). */videoTemplate?:string;
-  /** video-root: each root's video backup folder on the same destination, by position. */videoRoots?:string[];editedFolder?:string;
-  /** Files with no capture date, no camera and no known origin, or unreadable metadata: keep (stay where they are, an import does not copy them), folder (filed under `noMetadataFolder` in each library root) or fileDate (filed by file time). Unset: fileDate. */noMetadata?:NoMetadataHandling;
-  /** The folder for `noMetadata: 'folder'`; default "Unknown files". */noMetadataFolder?:string;
 }
 /** How the source is listed. */
 interface ListingOptions {
@@ -100,30 +94,6 @@ const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>
 // Mirror moves are likewise limited to removals found by plan() for that plan.
 const mirrorReviews=new WeakMap<TransferPlan,ReviewedRemoval[]>();
 const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[];/** The chosen source folders, absolute. */folders?:string[]}>();
-/** The media a file is filed as: its own, or for a companion its original's. Absent for a file
- * with neither, which stays directly in the camera folder. */
-interface Media {video:boolean;format:string;}
-/** `camera`: the templated folder (a family's conflict folder lives there); `sub`: the layout's
- * folders inside it; `root`: which backup folder, the video one only in the video-root layout. */
-function folder(info:Metadata,mtime:Date,media:Media|undefined,options:FolderRules):{root:'photos'|'videos';camera:string;sub:string} {
-  // Capture dates describe the camera's calendar day. Converting an EXIF
-  // offset to UTC can move a midnight photo into the previous folder.
-  const day=parseCapture(info.date)?.day;
-  // Without a capture date, the file's modified time is read on this Mac's calendar, as
-  // the camera's clock would have shown it, not in UTC.
-  const capture=day?new Date(day+'T00:00:00Z'):new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
-  const values=templateValues(capture,safeComponent(info.camera?.trim()||info.origin||options.noMetadataFolder?.trim()||UNKNOWN_FILES_FOLDER));
-  const editedFolder=options.editedFolder??'editied';
-  if(!validFolderName(editedFolder))throw new MessageError('error.editedFolderName');
-  const video=options.layout==='video-root'&&!!media?.video;
-  const template=info.edited?editedTemplate(editedFolder):video&&options.videoTemplate?options.videoTemplate:options.template;
-  // The template is checked, not the result: a camera name may itself contain braces.
-  if(/[{}]/u.test(template.replace(/\{([^{}]+)\}/g,(token,key:string)=>Object.hasOwn(values,key)?'':token))) throw new MessageError('error.invalidTemplate',{template});
-  const result=expandTemplate(template,values);
-  validateRelative(result);
-  // Edited exports stay directly in their edited camera folder.
-  return {root:video?'videos':'photos',camera:result,sub:media&&!info.edited?path.join(...layoutFolders(options.layout,media.video,media.format)):''};
-}
 function groups(entries:PlanEntry[]):PlanEntry[][] {
   const families=new Map<string,PlanEntry[]>();
   for(const entry of entries) {const family=families.get(entry.family)??[]; family.push(entry); families.set(entry.family,family);}
@@ -186,45 +156,10 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
     if(!conflict) { for(const [key,value] of proposed) reservations.set(key,value); return allocation; }
   }
 }
-function contradicts(a:Metadata,b:Metadata):boolean {
-  if(a.camera?.trim() && b.camera?.trim() && a.camera.trim().toLowerCase()!==b.camera.trim().toLowerCase()) return true;
-  const left=parseCapture(a.date),right=parseCapture(b.date);
-  if(!left?.clock || !right?.clock || !!left.zone!==!!right.zone) return false;
-  // Missing offsets describe a wall clock, so the host timezone must never
-  // supply an instant. Compare explicit offsets only when both are known.
-  if(left.zone && right.zone) {
-    if(captureTimestamp(left.clock+left.zone)!==captureTimestamp(right.clock+right.zone)) return true;
-  } else if(left.clock!==right.clock) return true;
-  // Absent fractional digits are unknown precision rather than recorded zeros.
-  const precision=Math.min(left.fraction.length,right.fraction.length);
-  return left.fraction.slice(0,precision)!==right.fraction.slice(0,precision);
-}
 /** What an import found already in the backup outside the folders the rules now choose: files (skipped there), and families copied whole because only some members were found. */
 export interface Elsewhere {files:number;partialFamilies:number;/** Same-size groups not searched because they held too many candidates to read. */skipped:{size:number;candidates:number}[];}
 /** A source file left out of a plan because of `error`; nothing was written for it. */
 export interface PlanFailure {path:string;error:Error;}
-/** Live Photos: pairs each .mov with the same-stem still (HEIC/HEIF/JPG) whose ContentIdentifier agrees, or, when
- * either lacks one, whose make is Apple, and sets `companionOf` on it. Indexed once by stem, so the cost is linear in
- * the number of files. `dropped` holds Apple videos whose same-stem still is empty and so never imported. */
-export function pairLivePhotos(files:InventoryFile[],scanned:InventoryFile[],infos:Map<string,Metadata>,hooks:{signal?:AbortSignal;stemOf?:(file:string)=>string}={}):{paired:Set<string>;dropped:Set<string>} {
-  const stemOf=hooks.stemOf??stem,stillExtensions=['heic','heif','jpg','jpeg'],apple=(info?:Metadata)=>/^apple\b/i.test(info?.make??'');
-  const stillsByStem=new Map<string,InventoryFile[]>(),emptyStems=new Set<string>(),paired=new Set<string>(),dropped=new Set<string>();
-  for(const f of scanned) if(stillExtensions.includes(extension(f.path))) {
-    if(f.size===0) emptyStems.add(stemOf(f.path));
-  }
-  for(const f of files) if(stillExtensions.includes(extension(f.path))) {const key=stemOf(f.path);const list=stillsByStem.get(key);if(list)list.push(f);else stillsByStem.set(key,[f]);}
-  for(const list of stillsByStem.values()) list.sort((a,b)=>stillExtensions.indexOf(extension(a.path))-stillExtensions.indexOf(extension(b.path)));
-  for(const mov of files) {
-    checkAbort(hooks.signal);
-    if(mov.kind!=='Videos'||extension(mov.path)!=='mov'||mov.companionOf) continue;
-    const own=infos.get(mov.path),key=stemOf(mov.path);
-    const still=(stillsByStem.get(key)??[]).find(f=>{const info=infos.get(f.path);return info?.contentId&&own?.contentId?info.contentId===own.contentId:apple(info);});
-    if(still) {mov.companionOf=still.path;paired.add(mov.path);}
-    // An empty still is never imported, so an Apple video that shares its stem stays beside it.
-    else if(apple(own)&&emptyStems.has(key)) dropped.add(mov.path);
-  }
-  return {paired,dropped};
-}
 /** `listing`: the record a later listing of this source reuses; only for a whole source (no sourceFolders). */
 export async function plan(source:string,roots:string[],options:PlanRequest,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;listing?:Listing;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   return planOnce(source,roots,options,metadata,signal,onProgress);
@@ -279,7 +214,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
   // The Problem files folder is the app's own, like Drive backups: never organized again, never misplaced.
   if(options.reorganize) excludedRoots.push(...allRoots.flatMap(({root})=>[path.join(root,DRIVE_BACKUPS),path.join(root,PROBLEM_FILES_FOLDER)]));
-  const organizationOwned=(file:string)=>options.reorganize===true&&allRoots.some(({root})=>beneath(file,root)&&path.relative(root,path.dirname(file)).split(path.sep).includes('Conflicts'));
+  const organizationOwned=(file:string)=>options.reorganize===true&&placementExemption(file,allRoots)!==undefined;
   // With skipErrors a failing file is left out and reported; otherwise it fails the plan. A mirror
   // never skips: a file left out of it would read as removed from the drive and its copy moved away.
   // An organization always skips: leaving a file where it is is safe, and one bad file must not stop the rest.
@@ -375,71 +310,20 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   if(failure!==undefined) throw failure;
   for(const found of issues) if(found.length) (scan.issues??=[]).push(...found);
   if(trusted.size) {trustedFiles=files.filter(file=>trusted.has(file.path));files=files.filter(file=>!trusted.has(file.path));}
-  // Live Photos: a .mov beside a same-stem HEIC/HEIF/JPG is that still's companion when their ContentIdentifiers
-  // agree. When either lacks one, the stem alone decides, but only for an Apple still. This needs the metadata
-  // just read, so it runs here rather than in the inventory.
-  const livePaired=new Set<string>(),liveRoot=new Map<string,InventoryFile>();
-  if(!options.backup) {
-    const {paired,dropped}=pairLivePhotos(files,scan.files,infos,{signal});
-    for(const mov of paired) livePaired.add(mov);
-    if(dropped.size) {
-      const listed=new Map(files.map(f=>[f.path,f]));
-      const rootedInDropped=(file:InventoryFile)=>{for(let cur:InventoryFile|undefined=file,hops=0;cur&&hops<16;cur=cur.companionOf?listed.get(cur.companionOf):undefined,hops++)if(dropped.has(cur.path))return true;return false;};
-      files=files.filter(file=>{
-        if(!rootedInDropped(file)) return true;
-        file.included=false;file.companionOf=undefined;
-        (scan.skipped??=[]).push({path:file.path,reason:'emptyPrimary'});
-        problems.push({path:file.path,relative:path.relative(sourceRoot,file.path),reason:'emptyPrimary',group:'empty',collected:false});
-        return false;
-      });
-    }
-    // Companions of a live MOV (its .xmp, .LRV) follow the still: resolve each chain to its root once.
-    const listed=new Map(files.map(f=>[f.path,f]));
-    for(const file of files) {
-      if(!file.companionOf) continue;
-      let cur:InventoryFile|undefined=file,viaLive=false;
-      for(let hops=0;cur?.companionOf&&hops<16;hops++) {if(livePaired.has(cur.path))viaLive=true;cur=listed.get(cur.companionOf);}
-      if(viaLive&&cur) liveRoot.set(file.path,cur);
-    }
-    scan.companions=scan.files.filter(f=>!!f.companionOf).length;
-  }
-  const stems=new Map<string,InventoryFile[]>();
-  for(const file of files) {const key=stem(file.path); stems.set(key,[...(stems.get(key)??[]),file]);}
-  const primaryFor=new Map<string,InventoryFile>(), familyFor=new Map<string,string>();
-  for(const [key,members] of stems) {
-    const stills=members.filter(f=>f.kind!=='Other' && f.kind!=='Videos'), raws=stills.filter(f=>f.kind==='RAW');
-    const primary=raws[0]??stills[0];
-    const conflict=stills.some((a,index)=>stills.slice(index+1).some(b=>contradicts(infos.get(a.path)??{fields:{}},infos.get(b.path)??{fields:{}})));
-    for(const file of members) {
-      if(options.backup) {primaryFor.set(file.path,file);familyFor.set(file.path,file.path);}
-      else if(file.kind==='Videos') {primaryFor.set(file.path,file);familyFor.set(file.path,'video:'+file.path);}
-      else if(primary && !conflict && (file.kind!=='Other' || file.companionOf)) {primaryFor.set(file.path,primary);familyFor.set(file.path,'still:'+key);}
-      else {primaryFor.set(file.path,file);familyFor.set(file.path,file.path);}
+  const routes=evaluateRoutes({sourceRoot,files,scanned:scan.files,metadata:infos,mtimes,unreadableMetadata:unreadableMeta,failed:new Set(failures.keys()),roots:allRoots.map(part=>({root:part.root,role:destinations.some(destination=>destination.videos===part)?'videos' as const:'photos' as const})),options,signal});
+  const familyFor=new Map(routes.map(route=>[route.file.path,route.family]));
+  skipFamilies(files,file=>file.path,file=>familyFor.get(file.path));
+  for(const route of routes) {
+    const original=scanned.get(route.file.path);
+    if(original)original.companionOf=route.file.companionOf;
+    if(route.reason==='emptyPrimary') {
+      if(original){original.included=false;original.companionOf=undefined;}
+      (scan.skipped??=[]).push({path:route.file.path,reason:'emptyPrimary'});
+      problems.push({path:route.file.path,relative:route.file.relative,reason:'emptyPrimary',group:'empty',collected:false});
     }
   }
-  const byPath=new Map(files.map(file=>[file.path,file]));
-  for(const file of files) if(!options.backup && file.companionOf) {
-    // Video companions, <name>.<ext>.xmp and NKSC_PARAM edits travel in their original's family.
-    const primary=liveRoot.get(file.path)??byPath.get(file.companionOf);
-    if(primary && (primary.kind==='Videos' || liveRoot.has(file.path) || stem(primary.path)!==stem(file.path))) {primaryFor.set(file.path,primary);familyFor.set(file.path,familyFor.get(primary.path)!);}
-  }
-  // GoPro splits a long recording into chapters GXzzxxxx/GHzzxxxx (zz the chapter, xxxx the
-  // video). They form one family filed by the first chapter, so a recording that crosses
-  // midnight or a month stays in one folder; their proxies follow their chapter.
-  const chapterLead=new Map<string,InventoryFile>();
-  if(!options.backup) {
-    const recordings=new Map<string,InventoryFile[]>();
-    for(const file of files) {
-      const match=/^G([XH])(\d{2})(\d{4})\.mp4$/i.exec(path.basename(file.path));
-      if(match&&file.kind==='Videos') {const key=pathKey(path.join(path.dirname(file.path),`G${match[1]!.toUpperCase()}${match[3]}`));recordings.set(key,[...(recordings.get(key)??[]),file]);}
-    }
-    for(const [key,chapters] of recordings) if(chapters.length>1) {
-      const lead=chapters.reduce((first,chapter)=>path.basename(chapter.path).toUpperCase()<path.basename(first.path).toUpperCase()?chapter:first);
-      for(const chapter of chapters) {chapterLead.set(chapter.path,lead);familyFor.set(chapter.path,'gopro:'+key);}
-    }
-    for(const file of files) if(file.companionOf&&chapterLead.has(file.companionOf)) {chapterLead.set(file.path,chapterLead.get(file.companionOf)!);familyFor.set(file.path,familyFor.get(file.companionOf)!);}
-  }
-  if(failures.size) {skipFamilies(files,file=>file.path,file=>familyFor.get(file.path));files=files.filter(file=>!failures.has(file.path));}
+  scan.companions=scan.files.filter(file=>!!file.companionOf).length;
+  files=routes.filter(route=>route.reason==='route'||route.reason==='keep').map(route=>route.file);
   // Duplicate detection, stage 1: files with the same name or EXIF identity are hashed now to confirm or
   // reject them. The hashes are reused below, so the plan never reads those files twice. Only recorded.
   const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
@@ -463,96 +347,13 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     for(const item of items) if(item.sha256) early.set(item.path,item.sha256);
     duplicates={files:items};
   }
-  // Each ancestor describes only media within its own subtree. Stop at the
-  // nearest evidence, including mixed-camera evidence, rather than guessing
-  // from another camera elsewhere on the card.
-  const contexts=new Map<string,Map<string,{camera:string;dates:Set<string>}>>();
-  for(const file of files) {
-    if(file.kind==='Other') continue;
-    const info=infos.get(file.path),camera=info?.camera?.trim();
-    if(!camera) continue;
-    const date=parseCapture(info?.date)?.day;
-    for(let ancestor=path.dirname(file.path);;ancestor=path.dirname(ancestor)) {
-      const context=contexts.get(ancestor)??new Map<string,{camera:string;dates:Set<string>}>(),key=camera.toLowerCase();
-      const known=context.get(key)??{camera,dates:new Set<string>()};
-      if(date) known.dates.add(date);
-      context.set(key,known);contexts.set(ancestor,context);
-      if(ancestor===sourceRoot) break;
-    }
-  }
-  function unknownContext(file:InventoryFile):Metadata {
-    for(let ancestor=path.dirname(file.path);;ancestor=path.dirname(ancestor)) {
-      const context=contexts.get(ancestor);
-      if(context) {
-        if(context.size!==1) return {fields:{}};
-        const known=context.values().next().value!,dates=[...known.dates].sort();
-        // A shared month supports the normal monthly layout. For day-based
-        // templates select the nearest capture day, with a stable tie break.
-        const uniqueMonth=new Set(dates.map(date=>date.slice(0,7))).size===1;
-        const mtime=mtimes.get(file.path)!.getTime();
-        const closest=uniqueMonth?dates.sort((a,b)=>Math.abs(Date.parse(a+'T00:00:00Z')-mtime)-Math.abs(Date.parse(b+'T00:00:00Z')-mtime)||a.localeCompare(b))[0]:undefined;
-        return {fields:{},camera:known.camera,date:closest};
-      }
-      if(ancestor===sourceRoot) return {fields:{}};
-    }
-  }
-  // `camera`: the family's conflict folder relative to the root, when the layout chose it.
-  const prepared:{entry:Omit<PlanEntry,'destination'>;relative:string;root:'photos'|'videos';camera?:string}[]=[];
-  // Unknown files: no capture date, no camera and no known origin, or metadata that could not be read. A family is
-  // decided by its primary, so it is kept or filed apart whole.
   const unknownFiles:NoMetadataFile[]=[],unknownCounts:Record<NoMetadataReason,number>={noDate:0,noCamera:0,unreadable:0};
-  const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean,context?:Metadata):NoMetadataReason|undefined=>{
-    if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf&&!cameraRule))return undefined;
-    const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=cameraRule?context:infos.get(root.path);
-    if(root.kind==='Other'&&!cameraRule)return undefined;
-    if(unreadableMeta.has(root.path))return 'unreadable';
-    if(!parseCapture(info?.date))return 'noDate';
-    return !info?.camera?.trim()&&!info?.origin?'noCamera':undefined;
-  };
-  const libraryParts=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
-  /** Where an unknown file goes under the folder: its subfolders as they are (below the library root when it is in one), minus the folder itself and the legacy Unknown Camera folders. */
-  const unknownRelative=(file:InventoryFile)=>{
-    const owner=options.reorganize?libraryParts.find(part=>beneath(file.path,part.root)):undefined;
-    const sub=(owner?path.relative(owner.root,path.dirname(file.path)):path.dirname(file.relative)).split(path.sep).filter(part=>part&&part!=='.');
-    if(sub[0]?.toLowerCase()===unknownFolder.toLowerCase())sub.shift();
-    return path.join(unknownFolder,...sub.filter(part=>part.toLowerCase()!==LEGACY_UNKNOWN_CAMERA_FOLDER.toLowerCase()),path.basename(file.path));
-  };
-  // An existing edited folder records the user's classification even when an export lost its editor tags.
-  // Source folder names do not classify new imports; companions use their original's classification below.
-  const isEdited=(file:InventoryFile)=>infos.get(file.path)?.edited===true||options.reorganize===true&&file.relative.split(path.sep).slice(0,-1).includes(options.editedFolder??'editied');
-  for(const file of files) {
-    const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
-    const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
-    const inherit=primary.path!==file.path && (file.companionOf || (file.kind!=='Other' && rawMembers.length===1));
-    const live=liveRoot.has(file.path),info:Metadata={fields:{},origin:own.origin||(inherit?paired.origin:undefined),camera:(live?paired.camera?.trim():undefined) || own.camera?.trim() || (inherit?paired.camera:undefined),date:(live?paired.date:undefined) || own.date || (inherit?paired.date:undefined),edited:file.kind==='Other'?primary.kind!=='RAW'&&isEdited(primary):file.kind!=='RAW'&&isEdited(file)};
-    const rule=unknownRule(extension(file.path),custom,defaults);
-    if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
-    let relative:string,place:ReturnType<typeof folder>|undefined,forcedRoot:'photos'|'videos'|undefined;
-    const unknown=unknownReason(file,primary,file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera',info);
-    if(unknown) {
-      unknownFiles.push({path:file.path,relative:file.relative,reason:unknown});unknownCounts[unknown]++;
-      log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(unknownMode==='folder'?{destination:unknownRelative(file)}:{})});
-      if(unknownMode==='keep') continue;
-    }
-    if(unknown) {
-      // Every unknown file, videos and companions included, is filed under the photo library root, also in the video-root layout.
-      relative=unknownRelative(file);forcedRoot='photos';
-    }
-    else if(!folderRules) relative=file.relative;
-    else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
-    else {
-      // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
-      const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
-      const lead=chapterLead.get(file.path),route:Metadata=lead?{...info,date:infos.get(lead.path)?.date}:info;
-      // An empty companion has no capture metadata of its own. Its primary also
-      // supplies the fallback date, so differing mtimes cannot split the family.
-      const dated=lead??(nksc||captureOne||live || file.size===0&&file.companionOf?primary:file);
-      place=folder(route,mtimes.get(dated.path)!,original.kind==='Other'?undefined:{video:original.kind==='Videos',format:formatFolder(original.path)},folderRules);
-      // NX Studio reads NKSC_PARAM beside the original.
-      relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':captureOne??'',path.basename(file.path));
-    }
-    log('trace','plan','route',()=>({source:file.path,destination:relative,camera:place?.camera??info.camera,date:info.date,kind:file.kind,companionOf:file.companionOf,reason:options.backup?'drive backup keeps the source layout':file.kind==='Other'&&!file.companionOf&&typeof rule==='string'?`rule for .${extension(file.path)}: folder ${rule}`:place?info.camera&&info.date?'camera and capture date from metadata':info.date?'capture date from metadata, no camera name':info.camera?'camera from metadata, date from the file modification time':'no metadata: file modification time':'filed with its original',origin:info.origin}));
-    prepared.push({relative,root:forcedRoot??place?.root??'photos',camera:place?.camera,entry:{captureTimeMs:options.backup?undefined:captureTimestamp(info.date),id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:(info.edited?'edited:':'')+familyFor.get(file.path)!}});
+  const prepared:{entry:Omit<PlanEntry,'destination'>;relative:string;root:'photos'|'videos';camera?:string}[]=[];
+  for(const route of routes) {
+    const {file}=route;
+    if(route.noMetadataReason){unknownFiles.push({path:file.path,relative:file.relative,reason:route.noMetadataReason});unknownCounts[route.noMetadataReason]++;}
+    if(route.reason!=='route'||route.relative===undefined)continue;
+    prepared.push({relative:route.relative,root:route.root,camera:route.camera,entry:{captureTimeMs:route.captureTimeMs,id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:statKey(sourceStats.get(file.path)!),skip:false,family:route.family}});
   }
   const collecting=options.reorganize===true&&options.collectProblems===true&&!options.misplacedOnly;
   if(collecting) for(const item of problems) {

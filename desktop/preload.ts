@@ -1,3 +1,4 @@
+import type {CatalogQuery,CategoryField} from './catalog/types';
 import {contextBridge,ipcRenderer} from 'electron';
 import type {Action,DuplicateGroup,Metadata,Thumbnail} from './shared';
 import type {StateUpdate} from './state-channel';
@@ -5,6 +6,11 @@ import type {StateUpdate} from './state-channel';
 // Keep the bridge transparent: reconstructing AppState here would copy every
 // inventory back across the isolated-world bridge on each progress callback.
 contextBridge.exposeInMainWorld('importer',{
+ catalogQuery:(query:CatalogQuery)=>ipcRenderer.invoke('importer:catalogQuery',query),
+ catalogDirectories:(query:CatalogQuery)=>ipcRenderer.invoke('importer:catalogDirectories',query),
+ catalogFacets:(query:CatalogQuery,field:CategoryField)=>ipcRenderer.invoke('importer:catalogFacets',query,field),
+ catalogStatus:(libraryId:string)=>ipcRenderer.invoke('importer:catalogStatus',libraryId),
+ catalogResolve:(libraryId:string,fileId:string)=>ipcRenderer.invoke('importer:catalogResolve',libraryId,fileId),
  state:():Promise<StateUpdate>=>ipcRenderer.invoke('importer:state'),
  action:async(action:Action):Promise<void>=>{await ipcRenderer.invoke('importer:action',action);},
  subscribe:(listener:(update:StateUpdate)=>void)=>{

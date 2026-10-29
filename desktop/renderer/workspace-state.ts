@@ -1,6 +1,6 @@
 import type { AppState, Source } from '../shared';
 export type ImportMode = 'media' | 'files';
-export type WorkspacePage = 'desk' | 'library' | 'activity' | 'settings';
+export type WorkspacePage = 'desk' | 'library' | 'browser' | 'activity' | 'settings';
 export type ReviewWorkspace = { page: 'desk'; mode: ImportMode } | { page: 'library'; tool: 'organize' };
 /** Published source mode describes the next run. A job/review owns its own immutable mode. */
 export function sourceImportMode(source: Source & { backup?: boolean }): ImportMode { return source.backup ? 'files' : 'media'; }
