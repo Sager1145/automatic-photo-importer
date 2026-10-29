@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {createCatalogClient} from '../catalog/process';
+import {library} from './catalog-fixtures';
+class Child extends EventEmitter {sent:any[]=[];postMessage(message:any){this.sent.push(message);}kill(){this.emit('exit',0);return true;}}
+test('worker client correlates replies and rejects every in-flight request after crash without restarting',async()=>{const child=new Child();let crashes=0;const c=createCatalogClient(child,{onError:()=>crashes++});const configuration=c.configure([library]);const sent=child.sent[0];child.emit('message',{id:sent.id,ok:true,result:undefined});await configuration;const first=c.status(library.libraryId);const second=c.records(library.libraryId,['a.NEF']);child.emit('exit',9);await assert.rejects(first,/exited/);await assert.rejects(second,/exited/);await assert.rejects(c.query({libraryId:library.libraryId,filters:[],sort:{field:'name',direction:'asc'},limit:20}),/exited/);assert.equal(crashes,1);assert.equal(child.sent.length,3);const status=await c.status(library.libraryId);assert.equal(status.dirty,true);assert.equal(status.state,'error');await c.close();});
+test('worker errors preserve stable query error codes and close waits for acknowledgment',async()=>{const child=new Child();const c=createCatalogClient(child);const pending=c.status('bad');child.emit('message',{id:child.sent[0].id,ok:false,error:{message:'Unknown library.',code:'unknownLibrary'}});await assert.rejects(pending,{code:'unknownLibrary'});const closing=c.close();child.emit('message',{id:child.sent[1].id,ok:true});await closing;});

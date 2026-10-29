@@ -417,6 +417,7 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
  const kept=same?await maybeStat(entry.destination):undefined;
  if(kept&&kept.dev===stage!.dev&&kept.ino===stage!.ino&&kept.size===stage!.size&&kept.mtimeNs===stage!.mtimeNs)proofs?.seed(entry.destination,kept,entry.digest);
  await checkpoint(m,'published',index);
+ await observePath(entry.source,entry.stat,entry.destination,m.kind==='duplicates'?'duplicateRemoval':'organize');
 }
 /** Only reviewed obsolete source parents can be removed, and only by nonrecursive rmdir.
  * Stashed originals are independent of these paths, so recovery remains usable.
@@ -756,11 +757,19 @@ const earliestStorableDate=new Date(1980,0,2).getTime();
  * Created/Modified, as copies get. The bytes, and so the EXIF data, are never rewritten.
  * A date the filesystem cannot store (exFAT before 1980, a file with other hard links)
  * leaves the file with its original dates instead of failing a move already made. */
-/** Told after a file was moved by rename: where it was (path and reviewed identity), where it is, and its final identity.
- * Lets a cache keyed by path and stat follow the file (same bytes, so same metadata) instead of reading it again. */
-export type MoveObserver=(from:string,reviewed:FileIdentity,to:string,now:BigIntStats)=>void;
+/** Observes successful, verified publication, rename, stash and restore results, including recovery replay.
+ * The source may still exist for a publication; observers reconcile actual paths independently. */
+export type MoveAction='organize'|'restore'|'undo'|'duplicateRemoval';
+export type MoveObserver=(from:string,reviewed:FileIdentity,to:string,now:BigIntStats,action?:MoveAction)=>void|Promise<void>;
 let moveObserver:MoveObserver|undefined;
 export function setMoveObserver(observer:MoveObserver|undefined):void{moveObserver=observer;}
+/** Cache observation is independent of successful media work, including asynchronous failures. */
+function observedMove(from:string,reviewed:FileIdentity,to:string,now:BigIntStats,action:MoveAction):void{
+ try{void Promise.resolve(moveObserver?.(from,reviewed,to,now,action)).catch(()=>{});}catch{/* A cache hint never fails a move. */}
+}
+async function observePath(from:string,reviewed:FileIdentity,to:string,action:MoveAction):Promise<void>{
+ if(!moveObserver)return;try{const now=await maybeStat(to);if(now)observedMove(from,reviewed,to,now,action);}catch{/* Observation never fails completed media work. */}
+}
 async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void):Promise<void> {
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
@@ -785,8 +794,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    if(!state.dated.get(index)?.has(String(now.mtimeNs)))await remember('timed',now);
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
- } finally { await handle.close(); }
- if(final){try{moveObserver?.(entry.source,entry.stat,entry.destination,final);}catch{/* A cache hint never fails a move. */}}
+ } finally { await handle.close();if(final)observedMove(entry.source,entry.stat,entry.destination,final,m.kind==='duplicates'?'duplicateRemoval':'organize'); }
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */
@@ -801,6 +809,7 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
   const target=await maybeStat(entry.destination);
   if(await maybeStat(entry.source))throw new Error(`Original path reappeared after it was moved: ${entry.source}`);
   if(!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error(`Moved file changed or is missing; no copy was kept: ${entry.destination}`);
+  observedMove(entry.source,entry.stat,entry.destination,target,m.kind==='duplicates'?'duplicateRemoval':'organize');
   return 'moved';
  }
  let source=await maybeStat(entry.source),target=await maybeStat(entry.destination);
@@ -910,7 +919,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    let present:boolean;try{present=await targetMatches(entry,m,signal,contents,proofs);}catch(error){if(!await preserveIncomplete(entry,index,m,stash?saved!:entry.source,state,signal))throw error;present=false;}
    if(!present&&entry.kept)throw new Error(`The copy to keep is missing; the duplicate stays where it is: ${entry.destination}`);
    if(present&&!stash)await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);
-   if(!present){await copy(entry,index,m,stash?saved!:entry.source,signal,count=>{bytes+=count;progress(path.basename(entry.source));},proofs);result.copied++;}else result.skipped++;
+   if(!present){await copy(entry,index,m,stash?saved!:entry.source,signal,count=>{bytes+=count;progress(path.basename(entry.source));},proofs);result.copied++;}else{result.skipped++;await observePath(entry.source,entry.stat,entry.destination,m.kind==='duplicates'?'duplicateRemoval':'organize');}
    await tidyCopied(entry);completed++;progress(path.basename(entry.source));
   }
   // Setting aside the originals that were moved is its own step: it can take minutes on a slow drive.
@@ -921,7 +930,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   for(const [index,entry]of m.entries.entries()) {
    checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index))continue;await roots(m);stashed++;stashedBytes+=entry.size;stash_(path.basename(entry.source));let saved=await savedOriginal(m,index,state);
    // Unchanged since its last verified pass (decided in the loop above): sizes and identities only.
-   if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,scopeOf(m),true,signal,contents,proofs);if(await maybeStat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents,proofs))throw new Error('Destination unavailable');continue;}
+   if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,scopeOf(m),true,signal,contents,proofs);if(await maybeStat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents,proofs))throw new Error('Destination unavailable');await observePath(entry.source,entry.stat,saved!,m.kind==='duplicates'?'duplicateRemoval':'organize');continue;}
    await parents(entry,m);
    // What was read here, by stat: unchanged when the original is set aside, neither is read again.
    const sourceProof=await proven(entry.source,()=>validateOriginal(entry.source,entry,m.source,false,signal,true,proofs));
@@ -943,6 +952,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await fs.rename(entry.source,saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
    // Renamed by this process just after the check above: its identity (all but the change time) is the proof.
    await validateOriginal(saved,entry,scopeOf(m),true,signal,false);await checkpoint(m,'stashed',index);result.moved++;
+   await observePath(entry.source,entry.stat,saved,m.kind==='duplicates'?'duplicateRemoval':'organize');
    await sidecars?.besideGone(entry.source,m.source);
   }
   // Closing the journal, then the emptied folders: each counted, the journal last.
@@ -1262,6 +1272,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    await syncParents(to,m.source);await syncDirectory(path.dirname(from));
    const there=held?await maybeStat(to):undefined;
    if(there&&there.dev===moving.dev&&there.ino===moving.ino&&there.size===moving.size&&there.mtimeNs===moving.mtimeNs&&there.birthtimeNs===moving.birthtimeNs)proofs.seed(to,there,held!);
+   await observePath(from,snapshot(moving),to,'restore');
   };
   /** Where a moved entry is now: 'back' (already at its original path), 'moved' (still at the destination), or 'none'. */
   const movedState=async(index:number,entry:Entry):Promise<'back'|'moved'|'none'|'pair'>=>{
@@ -1321,6 +1332,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
      if(await targetMatches(entry,m,signal,true,proofs)){tick();await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'copy this organization published, removed by Undo',`the original was restored and verified at ${entry.source} (SHA-256 ${entry.digest}) and this copy still matched the journal`,{bytes:entry.size});await syncParents(entry.destination,m.root);result.removed++;}
     }
    }
+   if(!handed)await observePath(entry.destination,entry.stat,entry.source,'undo');
    tick();log('trace','undo','entry-undone',{index,source:entry.source,destination:entry.destination});await checkpoint(m,'undone',index);state.undone.add(index);
   }
   await checkpoint(m,'undo-complete');await removeSiblingPointers(m);

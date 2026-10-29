@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {plan} from '../core/index';
+import {expectedFolder} from '../core/folder-rules';
 import {checkFolderSettings,ruleOptions,rulesScope} from '../routing-options';
 import {validFolderName} from '../folder-template';
 import {validNoMetadataFolder} from '../no-metadata';
@@ -52,6 +53,17 @@ test('a placement memory written under the earlier scope formula misses once',as
   assert.equal(await loadPlacement(store,id,rulesScope(r)),undefined);
 });
 
+test('memories from before edited-folder ancestry classification are checked again',async t=>{
+  const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);await fs.writeFile(path.join(root,'A.JPG'),'bytes');
+  const {createHash}=await import('node:crypto'),r=ruleOptions(prefs);
+  const old=createHash('sha256').update(JSON.stringify([2,r.template,r.layout,r.videoTemplate??'',r.editedFolder??'',r.noMetadata,r.noMetadataFolder,Object.entries(r.unknownRules??{}).sort(([a],[b])=>a.localeCompare(b)),r.unknownDefault??''])).digest('hex').slice(0,32);
+  await rememberRouting(store,['a'],old);
+  const id=placementId('volume',root);await rememberEntries(store,id,old,root,[root],[{destination:path.join(root,'A.JPG'),size:5}]);
+  const current=rulesScope(r);
+  assert.equal(await routingChanged(store,['a'],current),true);
+  assert.equal(await loadPlacement(store,id,current),undefined);
+});
+
 test('remembered entries count only files beneath a library root, not the root itself',async t=>{
   const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);
   await fs.writeFile(path.join(root,'A.JPG'),'bytes');await fs.writeFile(path.join(store,'B.JPG'),'bytes');
@@ -91,4 +103,11 @@ test('the planner refuses an unsafe edited folder with the same message the sett
   await fs.mkdir(source);await fs.mkdir(root);await fs.writeFile(path.join(source,'A.JPG'),'bytes');
   const metadata=async():Promise<Metadata>=>({camera:'Cam',date:'2024-02-03T12:00:00Z',fields:{}});
   await assert.rejects(plan(source,[root],{backup:false as const,template:'{year}/{camera}',layout:'flat',unknownRules:{},editedFolder:'CON'},metadata),(error:unknown)=>error instanceof MessageError&&error.key==='error.editedFolderName');
+});
+
+
+test('shared expected folders preserve camera-first calendar tokens, static prefixes and independent video layouts',()=>{
+  const info:Metadata={camera:'Camera',date:'2024-03-01T00:01:00+14:00',fields:{}},mtime=new Date(2025,5,20);
+  assert.deepEqual(expectedFolder(info,mtime,{video:false,format:'NEF'},{template:'Trips/{camera}/{yearMonthName}/{yyyyMMdd}',layout:'type-format'}),{root:'photos',camera:'Trips/Camera/2024-03 March/20240301',sub:'Photos/NEF'});
+  assert.deepEqual(expectedFolder(info,mtime,{video:true,format:'MOV'},{template:'{year}/{camera}',videoTemplate:'Clips/{camera}/{month}/{day}',layout:'video-root'}),{root:'videos',camera:'Clips/Camera/03/01',sub:'.'});
 });
