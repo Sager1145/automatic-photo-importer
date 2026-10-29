@@ -69,7 +69,9 @@ test('planning steps, the review and scans get a start time and a read speed', (
   assert.equal(state.reviewProgress.startedAt, new Date(1_200_000).toISOString(), 'a new review starts its own clock');
 });
 
-test('every progress display shows elapsed time and time left together, and the read speed', async () => {
+test('every progress display shows elapsed time and time left together, and the read speed', async context => {
+  // Elapsed time is read from the clock at render: frozen, a busy machine cannot push 12:03 past 12:04.
+  context.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const { ImportDesk, ImportDashboard, PlanningProgress, ScanProgress } = await import('../renderer/RootApp');
   const { OrganizationProgress, formatRemaining } = await import('../renderer/progress');
   for (const language of languages) {

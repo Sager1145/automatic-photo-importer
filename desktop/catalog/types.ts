@@ -144,7 +144,8 @@ export interface Catalog {
   configure(libraries:CatalogLibrary[]):Promise<void>;
   /** Internal bounded lookup (maximum 500 relative paths); never exposed wholesale to renderer. */
   records(libraryId:string,relativePaths:string[]):Promise<CatalogRecord[]>;
-  file(libraryId:string,fileId:string):Promise<CatalogRecord|undefined>;
+  /** includeMissing: also a row marked missing, which keeps its last record (a moved primary's name, for its companions). */
+  file(libraryId:string,fileId:string,options?:{includeMissing?:boolean}):Promise<CatalogRecord|undefined>;
   beginScan(libraryId:string,scope:string[]):Promise<string>;
   ingest(runId:string,records:CatalogRecord[]):Promise<void>;
   endScan(runId:string,result:ScanResult):Promise<void>;

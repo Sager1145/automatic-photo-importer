@@ -11,14 +11,15 @@ core.configureOrganizationRecovery('catalog-mutations-fixture-secret-32bytes');
 const options={backup:false as const,reorganize:true as const,template:'{year}/{camera}',layout:'flat' as const};
 const metadata=async()=>({camera:'Canon',date:'2024-02-03',fields:{}});
 const query=(libraryId:string):CatalogQuery=>({libraryId,filters:[],sort:{field:'name',direction:'asc'},limit:200});
-async function fixture(t:test.TestContext,names=['old/A.JPG','old/A.xmp']){
+/** eager: each move is applied as soon as it is observed, before the next file operation (the order a busy flush timer gives). */
+async function fixture(t:test.TestContext,names=['old/A.JPG','old/A.xmp'],eager=false){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'catalog-mutations-'))),c=openCatalog(':memory:');
  for(const name of names){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),name.endsWith('.xmp')?'sidecar':'same bytes');}
  const binding=await bindLibrary({root,mountPath:root,volumeId:root,name:'Photos',role:'photos',rulesScope:'r',online:true});
  const coordinator=new CatalogCoordinator(c,{metadata,options:()=>options});await coordinator.configure([binding]);await coordinator.refresh(binding.library.libraryId,new AbortController().signal);
  t.after(async()=>{core.setMoveObserver(undefined);await coordinator.settled();await c.close();await fs.rm(root,{recursive:true,force:true});});
  const events:CatalogMoveEvent[]=[];
- core.setMoveObserver((from,_reviewed,to,now,action)=>{const event={action:action??'organize',libraryId:binding.library.libraryId,oldRoot:root,oldRelativePath:path.relative(root,from),newRoot:root,newRelativePath:path.relative(root,to),stat:catalogStat(now),reviewedStat:{dev:_reviewed.dev,ino:_reviewed.ino,size:_reviewed.size,mtimeNs:_reviewed.mtime,ctimeNs:_reviewed.ctime}} satisfies CatalogMoveObservation;events.push(event);return coordinator.observeMove(event);});
+ core.setMoveObserver((from,_reviewed,to,now,action)=>{const event={action:action??'organize',libraryId:binding.library.libraryId,oldRoot:root,oldRelativePath:path.relative(root,from),newRoot:root,newRelativePath:path.relative(root,to),stat:catalogStat(now),reviewedStat:{dev:_reviewed.dev,ino:_reviewed.ino,size:_reviewed.size,mtimeNs:_reviewed.mtime,ctimeNs:_reviewed.ctime}} satisfies CatalogMoveObservation;events.push(event);const applied=coordinator.observeMove(event);if(eager)void coordinator.flush();return applied;});
  return {root,c,binding,coordinator,events};
 }
 test('actual organization and undo preserve IDs and companion relations through a later refresh',async t=>{
@@ -131,4 +132,13 @@ test('removed libraries no longer exclude their former subtree from a parent lib
  await f.coordinator.configure([f.binding]);await f.coordinator.refresh(id,new AbortController().signal);
  assert.deepEqual((await f.c.query(query(id))).rows.map(row=>row.relativePath).sort(),['Archive/B.JPG','C.JPG']);
  assert.ok((await f.c.status(child.library.libraryId)));
+});
+
+test('a carried companion stays linked to its keeper when the primary\'s publication is applied before its stash',async t=>{
+ const f=await fixture(t,['keep/A.JPG','old/A.JPG','old/A.xmp'],true),id=f.binding.library.libraryId;
+ const {removeDuplicates}=await import('../core/duplicate-removal'),{digest}=await import('../core/paths');
+ const files=await Promise.all(['keep/A.JPG','old/A.JPG'].map(async relative=>{const stat=await fs.stat(path.join(f.root,relative),{bigint:true});return {path:relative,size:Number(stat.size),kind:'JPEG' as const,edited:false,birth:Number(stat.birthtimeMs),ctime:Number(stat.ctimeMs),sha256:await digest(path.join(f.root,relative))};}));
+ const removal=await removeDuplicates(f.root,[{group:{id:'group',strength:'sha',files},keep:'keep/A.JPG',remove:[files[1]],decided:false,auto:true,suggested:'keep/A.JPG',needsDecision:false}],new Map([['old/A.JPG',['old/A.xmp']]]));assert.equal(removal.carried,1);await f.coordinator.settled();
+ const page=await f.c.query(query(id));assert.equal(page.total,1);assert.equal(page.rows[0].relativePath,'keep/A.JPG');assert.equal(page.rows[0].companionCount,1);
+ const [sidecar]=await f.c.records(id,['keep/A.xmp']);assert.equal(sidecar?.companionOf,page.rows[0].fileId);
 });

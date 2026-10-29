@@ -1209,14 +1209,14 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   }
   const result:OrganizationFinalization={removed:0,bytes:0,finalized:0,handedOff:0};
   for(const [index,entry]of m.entries.entries()){
-   checkAbort(signal);report({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);
+   checkAbort(signal);report({step:'releasing',completed:index+1,total:m.entries.length,file:entry.destination});await roots(m);tick();
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index))){result.handedOff++;continue;}
    // A moved file has no kept duplicate to release.
    if(state.renamed.has(index))continue;
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Finalized destination unavailable');result.finalized++;continue;}
-   if(!entry.move)await parents(entry,m);
+   if(!entry.move){await parents(entry,m);tick();}
    if(entry.move&&await maybeStat(entry.source))throw new Error('Original path reappeared; retained originals preserved');
-   const saved=await savedOriginal(m,index,state);
+   const saved=await savedOriginal(m,index,state);tick();
    // Publish and synchronize the remaining copy before the authenticated intent.
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Destination unavailable; retained originals preserved');
@@ -1224,7 +1224,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    if(!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed while synchronizing');
    if(!entry.move){
     if(saved)throw new Error('Unexpected retained original');
-    if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
+    if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);tick();await checkpoint(m,'finalize-intent',index);tick();state.finalizing.add(index);}
    }else if(saved){
     await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();const originalStat=await fs.lstat(saved,{bigint:true});
     if(!state.finalizing.has(index)){await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
@@ -1236,8 +1236,9 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    tick();
    result.finalized++;
   }
-  await removeSiblingPointers(m);
-  await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:result.handedOff?undefined:0,status:'complete'});
+  // The closing bookkeeping repeats the last report, so the finished count never looks frozen.
+  tick();await removeSiblingPointers(m);tick();
+  await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:result.handedOff?undefined:0,status:'complete'});tick();
   return result;
  });
 }
@@ -1394,8 +1395,9 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    if(!handed)await observePath(entry.destination,entry.stat,entry.source,'undo');
    tick();log('trace','undo','entry-undone',{index,source:entry.source,destination:entry.destination});await checkpoint(m,'undone',index);state.undone.add(index);
   }
-  await checkpoint(m,'undo-complete');await removeSiblingPointers(m);
-  await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:0,retainedBytes:0,status:'undone'});
+  // The closing bookkeeping repeats the last report, so the finished count never looks frozen.
+  tick();await checkpoint(m,'undo-complete');tick();await removeSiblingPointers(m);tick();
+  await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:0,retainedBytes:0,status:'undone'});tick();
   return result;
  });
 }
@@ -1470,13 +1472,17 @@ function deletable(m:Manifest,state:JournalState):void{
  * folders it lists or leaves pointers in, its neighbours, the folders pointers here name, and the folders
  * each journal found lists. A journal that cannot be read stops the deletion: it may name this one. */
 async function dependents(m:Manifest,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<string[]>{
- let done=0,found=0;const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
- for(const {store,file} of await pointersIn(m.root).catch(()=>[])){const pointed=await siblingPointer(m.root,file,store.path).catch(()=>undefined);if(pointed&&!folders.includes(pointed))folders.push(pointed);}
+ // Finding the folders and checking each for old records reads many files before the first journal: each step reports, so the count never freezes.
+ let done=0,found=0;onLater?.(done,found,m.root);const names:string[]=[],folders=[...new Set([m.root,...pointerFolders(m),...await neighbourFolders(m.root)])];
+ onLater?.(done,found,m.root);
+ for(const {store,file} of await pointersIn(m.root).catch(()=>[])){onLater?.(done,found,file);const pointed=await siblingPointer(m.root,file,store.path).catch(()=>undefined);if(pointed&&!folders.includes(pointed))folders.push(pointed);}
  const unreadable=(id:string,folder:string,error:unknown)=>new Error(`Organization ${id} in ${folder} cannot be read, so it is not known whether it still relies on this one; nothing was deleted (${error instanceof Error?error.message:String(error)})`);
  for(let position=0;position<folders.length;position++){
   const folder=folders[position]!;
   // A folder that is itself a link can never get a notice, so it never refuses (a real folder reached through a linked parent does).
+  onLater?.(done,found,folder);
   if(folder===m.root||await fs.lstat(folder).then(stat=>!stat.isSymbolicLink(),()=>true))await refuseOldRecords(folder);
+  onLater?.(done,found,folder);
   const listed=(await journalsIn(folder)).filter(journal=>journal.id!==m.id);
   found+=listed.length;onLater?.(done,found,folder);
   for(const {id} of listed){

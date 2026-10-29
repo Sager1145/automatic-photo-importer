@@ -147,8 +147,9 @@ export class CatalogCoordinator {
     if(target&&target.fileId!==moving.fileId)changes.push({kind:'relinkCompanions',libraryId:id,fromFileId:target.fileId,toFileId:moving.fileId,mutationRevision:0});
     record.fileId=moving.fileId;if(sameName){record.familyId=moving.familyId;record.companionOf=moving.companionOf;}
    }
+   // The live primary first, then where it moved; failing both, it may already be stashed and marked missing (its publication was applied first), and its name still finds the keeper.
    if(old?.companionOf&&sameName&&oldBinding){
-    const movedPrimary=this.movedIds.get(old.companionOf),originalPrimary=await this.catalog.file(oldBinding.library.libraryId,old.companionOf)??(movedPrimary?await this.catalog.file(movedPrimary.libraryId,movedPrimary.fileId):undefined);
+    const movedPrimary=this.movedIds.get(old.companionOf),originalPrimary=await this.catalog.file(oldBinding.library.libraryId,old.companionOf)??(movedPrimary?await this.catalog.file(movedPrimary.libraryId,movedPrimary.fileId):undefined)??await this.catalog.file(oldBinding.library.libraryId,old.companionOf,{includeMissing:true});
     if(originalPrimary){
      const candidate=path.posix.join(record.parentPath,originalPrimary.name),primary=(await this.catalog.records(id,[candidate]))[0];
      if(primary&&!primary.companionOf)record.companionOf=primary.fileId;
