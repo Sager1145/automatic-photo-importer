@@ -156,3 +156,13 @@ test('a stopped Delete originals has its own history line and finish message in 
     if (language !== 'en') assert.notEqual(finish, 'Stopped after 3 originals deleted (1 MB); 2 left in place');
   }
 });
+
+test('a stop during the empty-folder pass keeps the deletion result and leaves the remaining folders', async t => {
+  const { source, files } = await fixture(t, ['a/b/one.jpg', 'c/two.jpg']);
+  const control = new AbortController();
+  const result = await deleteOriginals(source, files, { signal: control.signal, onFolders: done => { if (done === 1) control.abort(); } });
+  assert.equal(result.stopped, true);
+  assert.equal(result.deleted.length, 2, 'both files were removed before the stop and are still reported');
+  for (const file of files) assert.equal(await exists(file.source), false);
+  assert.ok(await exists(path.join(source, 'c')) || await exists(path.join(source, 'a')), 'the pass ended before every folder was looked at');
+});

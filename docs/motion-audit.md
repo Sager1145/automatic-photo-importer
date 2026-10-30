@@ -1,6 +1,6 @@
 # Motion audit
 
-Every user operation and state change in the renderer (`desktop/renderer/RootApp.tsx`, `styles.css`), what it changes on screen, the motion it had before this pass, and the motion it has now.
+Every user operation and state change in the renderer (`desktop/renderer/RootApp.tsx`, its shared motion helpers in `ui.tsx`, and `styles.css`), what it changes on screen, the motion it had before this pass, and the motion it has now.
 
 ## The motion system
 

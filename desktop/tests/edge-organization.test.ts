@@ -46,6 +46,8 @@ for(const strategy of ['rename','copy'] as const)test(`video-root organization i
  const camera='2026/202610/Nikon Z6III',pocket='2026/202610/DJI Osmo Pocket 3';
  for(const relative of [`photobackup/${camera}/DSC_0001.NEF`,`photobackup/${camera}/DSC_0001.xmp`,`photobackup/${camera}/IMG_0003.HEIC`,`photobackup/${camera}/IMG_0009.JPG`,
   `videobackup/${camera}/C0004.MP4`,`videobackup/${camera}/C0004M01.XML`,`videobackup/${pocket}/DJI_0005.MP4`,`videobackup/${pocket}/DJI_0005.LRF`])await fs.access(path.join(drive,relative));
+  // An empty file is never organized: it stays where it was.
+  await fs.access(path.join(drive,'photobackup/empty.JPG'));
  // The two DSC_0002.JPG keep both their bytes: one in the camera folder, one in a conflict folder.
  const organized=await tree(drive),twins=[...organized].filter(([relative])=>relative.endsWith('DSC_0002.JPG'));
  assert.equal(twins.length,2);assert.equal(new Set(twins.map(([,digest])=>digest)).size,2);
