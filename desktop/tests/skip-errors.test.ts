@@ -151,7 +151,7 @@ test('a mirror backup never skips a file, even one the user asks to skip',async 
 test('a job error in All errors names its job, so its Skip button reaches that job',async()=>{
  const {gatherErrors}=await import('../error-log');
  const error={key:'error.fileFailed' as const,params:{path:'/card/DCIM/B.JPG',error:'EIO'}};
- const [logged]=gatherErrors({jobs:[{id:'job-1',source:{id:'card',name:'Card',path:'/Volumes/Card',transport:'folder'},phase:'error',errors:[error],backup:false,skippablePath:'/card/DCIM/B.JPG'}],sources:[]} as never);
+ const [logged]=gatherErrors({jobs:[{id:'job-1',source:{id:'card',name:'Card',path:'/Volumes/Card',transport:'folder'},phase:'error',errors:[error],backup:false,skippablePath:'/card/DCIM/B.JPG'}],sources:[],preferences:{}} as never);
  assert.equal(logged!.jobId,'job-1');assert.equal(filePath(logged!.message),'/card/DCIM/B.JPG');
 });
 

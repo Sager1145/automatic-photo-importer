@@ -97,14 +97,14 @@ export const CHECK_CONCURRENCY=ROUTING_BATCH*(Math.max(...Object.values(STREAMS)
 /** CPU worker count for a pool wanting up to `cap`: never above the user's thread limit, never below one. */
 export {cpuWorkers};
 /** Run `work` over `items` with at most `limit` in flight, results in input order (by index). The first
- * failure stops new work and is rethrown once the running ones settle. */
-export async function mapPool<T,R>(items:readonly T[],limit:number,work:(item:T,index:number)=>Promise<R>):Promise<R[]> {
+ * failure stops new work and is rethrown once the running ones settle. A stopped `signal` fails the next item (checkAbort in paths.ts, which this file cannot import). */
+export async function mapPool<T,R>(items:readonly T[],limit:number,work:(item:T,index:number)=>Promise<R>,signal?:AbortSignal):Promise<R[]> {
   const results=new Array<R>(items.length);
   let next=0,failure:unknown,failed=false;
   await Promise.all(Array.from({length:Math.min(items.length,Math.max(1,limit))},async()=>{
     while(!failed&&next<items.length) {
       const index=next++;
-      try { results[index]=await work(items[index]!,index); } catch(error) { if(!failed){failed=true;failure=error;} }
+      try { if(signal?.aborted) throw new DOMException('Import stopped','AbortError'); results[index]=await work(items[index]!,index); } catch(error) { if(!failed){failed=true;failure=error;} }
     }
   }));
   if(failed) throw failure;

@@ -4,6 +4,7 @@ import { settingsTranslationRows } from './settings-translations';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Language } from '../shared';
 import { formatMessage, type Message } from '../messages';
+import { formatBytes, formatNumber } from '../format';
 
 export const localeNames: Record<Language, string> = { en: 'English', 'zh-Hans': '简体中文', 'zh-Hant': '繁體中文', ja: '日本語' };
 export const languages = Object.keys(localeNames) as Language[];
@@ -564,7 +565,6 @@ Checking the earlier organization: {completed} of {total} records|正在检查�
 Reading metadata|正在读取元数据|正在讀取中繼資料|メタデータを読み取り中
 Checking the destination: {completed} of {total} files · {size} read|正在检查目标：{completed}/{total} 个文件 · 已读取 {size}|正在檢查目的地：{completed}/{total} 個檔案 · 已讀取 {size}|保存先を確認中：{total} ファイル中 {completed} 件 · {size} 読み取り済み
 Reading later organizations: {completed} of {total}|正在读取较新的整理记录：{completed}/{total}|正在讀取較新的整理記錄：{completed}/{total}|新しい整理の記録を読み込み中：{total} 件中 {completed} 件
-Old records from an earlier version are on {drive}. Use records-migrator-v5 to convert them; they were left untouched.|{drive} 上有早期版本留下的旧记录。请使用 records-migrator-v5 转换它们；它们未被改动。|{drive} 上有早期版本留下的舊記錄。請使用 records-migrator-v5 轉換它們；它們未被更動。|{drive} に以前のバージョンの古い記録があります。records-migrator-v5 を使って変換してください。記録には手を加えていません。
 Acknowledge old records|确认旧记录|確認舊記錄|古い記録を確認済みにする
 Reading earlier organization records: {completed} of {total}|正在读取较早的整理记录：{completed}/{total}|正在讀取較早的整理記錄：{completed}/{total}|以前の整理の記録を読み込み中：{total} 件中 {completed} 件
 Reading earlier organizations: journal {journal} of {journals}, records {completed} of {total}|正在读取较早的整理：第 {journal}/{journals} 份记录，已读 {completed}/{total} 条|正在讀取較早的整理：第 {journal}/{journals} 份記錄，已讀 {completed}/{total} 筆|以前の整理を読み込み中：記録 {journal}/{journals} 件目、{total} 件中 {completed} 件
@@ -1045,17 +1045,7 @@ export function createTranslator(language: Language): Translator {
     return translated.replace(/\{(\w+)\}/g, (placeholder, key: string) => values && Object.hasOwn(values, key) ? String(values[key]) : placeholder);
   };
 }
-export function formatNumber(value: number, language: Language, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(language, options).format(value);
-}
-export function formatBytes(value = 0, language: Language = 'en'): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const n = Math.max(0, Math.min(Math.floor(Math.log(value) / Math.log(1000)), 4));
-  // Large sizes always keep their decimals ("1.00 TB", "994.7 GB") so capacity differences stay visible.
-  const digits = n === 4 ? 2 : n > 1 ? 1 : 0;
-  return `${formatNumber(value / 1000 ** n, language, { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${units[n]}`;
-}
+export { formatNumber, formatBytes };
 /** 0 B/s, 1 KB/s, 2 MB/s, 3 GB/s: decimal units, like formatBytes. */
 export type SpeedUnit = 0 | 1 | 2 | 3;
 const speedUnits = ['B/s', 'KB/s', 'MB/s', 'GB/s'];

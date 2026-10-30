@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {CleanupConfirmation,ResidueMaintenance,cleanupPreview,confirmCleanup} from '../renderer/CleanupConfirmation';
+import {CleanupConfirmation,cleanupPreview,confirmCleanup} from '../renderer/CleanupConfirmation';
 import {I18nProvider,translationCatalogs,createTranslator} from '../renderer/i18n';
 import {safetyTranslationRows} from '../renderer/safety-translations';
 import type {Action,ResidueStatus} from '../shared';
@@ -33,7 +33,6 @@ test('confirmation explains every category and retained files, while preserving 
  assert.doesNotMatch(markup,/will be freed/);
  for(const props of [{residue,busy:true},{residue:{...residue,checking:true},busy:false},{residue:undefined,busy:false}]){
   const locked=render(createElement(CleanupConfirmation,{...props,act:()=>{},onCancel:()=>{}}));assert.match(button(locked,'cleanup-confirm'),/disabled/);
-  const control=render(createElement(ResidueMaintenance,{...props,act:()=>{},onCleanup:()=>{}}));assert.match(button(control,'cleanup-open'),/disabled/);
  }
 });
 test('receipt-only cleanup remains available without claiming removal of the named files',()=>{

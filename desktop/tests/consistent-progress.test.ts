@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -14,9 +15,10 @@ import {I18nProvider,createTranslator,languages} from '../renderer/i18n';
 import {ImportDashboard,ImportDesk,LeftoverFiles,Organization,OrganizationRecoveryPanel,OrganizationCard,PlanningProgress,ScanProgress,SidebarSources,SidebarDestinations,ReviewPanel} from '../renderer/RootApp';
 import {progressCount,progressFraction} from '../renderer/progress';
 import type {AppState,Job,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
 const render=(node:ReturnType<typeof createElement>,language:typeof languages[number]='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:node}));
 const base:Progress={completed:0,total:1000,bytes:0,totalBytes:10e9,speed:0,file:'A.NEF'};
@@ -64,7 +66,7 @@ const stepsOf=(source:string)=>source.match(/step\?:([^;]+);completed/)![1]!.spl
 
 function stamp(item:Operation,where:'job'|'review'|'misplaced'|'residue'|'recovery'){
  const job:Job={id:'j',source:card,phase:item.phase==='verifying'?'verifying':'copying',errors:[],backup:false,progress:item.at(0)};
- const state:AppState={preferences,sources:[card],jobs:where==='job'?[job]:[],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:where==='job'?[job]:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  const tracker=new EtaTracker();let progress=item.at(0);
  for(let second=0;second<=40;second++){
   progress=item.at(second);
@@ -116,7 +118,7 @@ test('every step the renderer knows has a label and a progress mapping',()=>{
 
 const org=(extra:Partial<Job>={}):Job=>({id:'o',source:{id:'library:/Volumes/A006/photobackup',name:'Existing library',path:'/Volumes/A006/photobackup',transport:'folder'},organization:true,phase:'copying',errors:[],backup:false,startedAt:new Date(Date.now()-60000).toISOString(),...extra});
 const listing:Progress={phase:'planning',step:'listing',completed:10,total:0,bytes:1e9,totalBytes:0,speed:0,file:'a/b.jpg',share:.3,fileRate:50,eta:30,startedAt:new Date(0).toISOString()};
-const stateWith=(extra:Partial<AppState>):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',...extra});
+const stateWith=(extra:Partial<AppState>):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 const shared=(html:string)=>(html.match(/data-progress-display/g)??[]).length;
 
 test('every progress location renders the shared ProgressDisplay',()=>{

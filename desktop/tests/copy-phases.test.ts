@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -7,6 +8,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
 import {configureOrganizationRecovery} from '../core/index';
+import { defaultPreferences } from '../preferences';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 // Reintroducing per-file readback before the next source is staged must fail:
@@ -49,7 +51,7 @@ test('source cards distinguish copying from verification in every language',asyn
  const labels=[['Copying files','Verifying copied files'],['正在复制文件','正在验证已复制文件'],['正在複製檔案','正在驗證已複製檔案'],['ファイルをコピー中','コピーしたファイルを検証中']];
  for(const [index,language] of languages.entries())for(const phase of ['copying','verifying'] as const){
   const source={id:'card',name:'Card',path:'/fixture/card',transport:'storage' as const};
-  const state:import('../shared').AppState={preferences:{language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/fixture/destination'],copyMode:'single',basePath:'photobackup',template:'{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}},sources:[source],jobs:[{id:'job',source,phase,errors:[],backup:false as const,progress:{phase,completed:0,total:1,bytes:1,totalBytes:1,speed:0,file:'test.JPG'}}],history:[],platform:'darwin'};
+  const state:import('../shared').AppState={preferences:{...defaultPreferences, language,appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/fixture/destination'],copyMode:'single',basePath:'photobackup',template:'{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}},sources:[source],jobs:[{id:'job',source,phase,errors:[],backup:false as const,progress:{phase,completed:0,total:1,bytes:1,totalBytes:1,speed:0,file:'test.JPG'}}],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
   const markup=renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(ImportDesk,{state,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
   assert.ok(markup.includes(labels[index][phase==='copying'?0:1]),`${language} ${phase} must show the actual transfer phase`);
   assert.equal(progressFraction(state.jobs[0]!.progress!),phase==='copying'?1:0,'Verification progress must use checked files, not fully transferred bytes');

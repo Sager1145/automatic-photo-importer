@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {Inventory} from '../../../shared';
 import type {Check} from '../harness';
 import {syntheticJob} from '../synthetic';
+import {withFigures} from '../../../core/inventory';
 
 /** Check painted text fragments, not only their flex boxes (ellipsis can conceal overflowing text). */
 function capacityGeometry(){
@@ -48,7 +49,7 @@ export const capacityLayoutChecks=():Check[]=>[{
  skip:async h=>h.hooks?undefined:'needs QA injection hook',run:async h=>{
   await h.media([{name:'prefers-reduced-motion',value:'reduce'}]);
   const formats=['NEF','ARW','CR3','JPG','JPEG','PNG','HEIC','HEIF','MP4','MOV','MTS','TIFF'];
-  const inventory:Inventory={files:formats.map((format,i)=>({path:`/qa/frame-${i}.${format}`,relative:`frame-${i}.${format}`,size:1024**3,kind:'Images',included:true})),media:formats.length,companions:0,unknown:0,bytes:formats.length*1024**3,unknownExtensions:{},elapsedMs:100};
+  const inventory:Inventory=withFigures({files:formats.map((format,i)=>({path:`/qa/frame-${i}.${format}`,relative:`frame-${i}.${format}`,size:1024**3,kind:'Images',included:true})),media:formats.length,companions:0,unknown:0,bytes:formats.length*1024**3,unknownExtensions:{},elapsedMs:100});
   const state=await h.state(),sources=state.sources.map(source=>({...source,total:987.6*1024**3,free:123.4*1024**3}));
   h.hooks!.set('sources',sources);h.hooks!.set('sourceInventories',{...state.sourceInventories,'fixture:1':inventory});
   const job=syntheticJob('capacity-responsive',{phase:'complete',source:sources.find(source=>source.id==='fixture:1')!});job.backup=true;job.inventory=inventory;h.hooks!.addJobs([job]);

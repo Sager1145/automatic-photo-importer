@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -9,7 +10,7 @@ import { DiagnosticsSettings } from '../renderer/RootApp';
 import { defaultPreferences } from '../preferences';
 import type { Action, AppState } from '../shared';
 
-const state = (prefs = {}, logInfo?: AppState['logInfo']): AppState => ({ preferences: { ...defaultPreferences, ...prefs }, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [], ...(logInfo ? { logInfo } : {}) } as AppState);
+const state = (prefs = {}, logInfo?: AppState['logInfo']): AppState => ({ preferences: { ...defaultPreferences, ...prefs }, sources: [], jobs: [], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), destinationStatus: [], ...(logInfo ? { logInfo } : {}) } as AppState);
 const render = (value: AppState, language: 'en' | 'zh-Hans' | 'zh-Hant' | 'ja' = 'en', act: (action: Action) => void = () => {}) => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(DiagnosticsSettings, { state: value, act }) }));
 const strings = ['Diagnostics', 'Log detail', 'Detailed', 'Trace', 'Nothing is recorded.', 'Records settings changes, job phases, every file the app deletes, and errors.', "Also records each file's steps and decisions, drives, memory and timing.", 'Also records every routing decision and journal entry. Large; for troubleshooting.', 'Open log folder', 'Copy latest log path', 'Export logs…', 'Log size: {size}', 'Logs stay on this Mac. They never include file contents or recovery keys.'];
 

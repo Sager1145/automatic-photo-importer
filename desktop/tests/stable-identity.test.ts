@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { BigIntStats } from 'node:fs';
-import { sameStat, statKey, unreliableIno } from '../core/paths';
+import { sameFileIgnoringCtime, sameStat, statKey, unreliableIno } from '../core/paths';
 
 const stat=(over:Partial<Record<'dev'|'ino'|'size'|'mtimeNs'|'ctimeNs'|'birthtimeNs',bigint>>={}):BigIntStats=>({dev:1n,ino:42n,size:10n,mtimeNs:5n,ctimeNs:6n,birthtimeNs:7n,...over}) as BigIntStats;
 const synthetic=18446744073709254708n;
@@ -27,4 +27,12 @@ test('a normal file is still told apart by its inode',()=>{
   assert.ok(sameStat(stat(),stat()));
   assert.ok(!sameStat(stat(),stat({ino:43n})));
   assert.notEqual(statKey(stat()),statKey(stat({ino:43n})));
+});
+test('sameFileIgnoringCtime ignores ctime and trusts birth time when either inode is synthetic',()=>{
+  const real=stat({ino:42n}),synth=stat({ino:synthetic,ctimeNs:99n});
+  assert.ok(sameFileIgnoringCtime(real,synth)&&sameFileIgnoringCtime(synth,real));
+  assert.ok(!sameFileIgnoringCtime(real,stat({ino:synthetic,birthtimeNs:8n})));
+  assert.ok(sameFileIgnoringCtime(stat(),stat({ctimeNs:1n})));
+  assert.ok(!sameFileIgnoringCtime(stat(),stat({ino:43n})));
+  assert.ok(!sameFileIgnoringCtime(stat(),stat({mtimeNs:1n})));
 });

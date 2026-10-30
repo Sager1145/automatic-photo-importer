@@ -1,8 +1,8 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { Listing, Metadata } from '../shared';
-import { cacheRecord, readCache } from './user-caches';
+import { readCacheFile, serialized, writeCacheFile } from './user-caches';
 
 /** What a scan learned about one card, kept across app restarts under its volume UUID.
  * Paths are relative to the card and stats omit the device number, which changes on
@@ -31,19 +31,14 @@ export async function saveScanMemory(store:string,volume:string,mount:string,lis
       return file&&parts?.length===5?[[path.relative(mount,file),parts.slice(1).join(':'),metadata] as [string,string,Metadata]]:[];
     }),
   };
-  const target=memoryFile(store,volume),temporary=`${target}.${randomUUID()}.tmp`;
-  await fs.mkdir(path.dirname(target),{recursive:true});
-  try { await fs.writeFile(temporary,JSON.stringify(cacheRecord('scan',stored as unknown as Record<string,unknown>)),{mode:0o600}); await fs.rename(temporary,target); }
-  catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
+  await writeCacheFile(memoryFile(store,volume),'scan',stored as unknown as Record<string,unknown>);
 }
 
 /** The remembered listing (its folders without an identity, so each is checked by its names) and EXIF results rebased
  * onto the card's current mount, or undefined when nothing usable is remembered. */
 export async function loadScanMemory(store:string,volume:string,mount:string):Promise<{listing:Listing;routing:[string,Metadata][]}|undefined> {
   try {
-    const file=memoryFile(store,volume);
-    if((await fs.lstat(file)).size>MAX_BYTES) return undefined;
-    const stored=readCache<Stored>(JSON.parse(await fs.readFile(file,'utf8')),'scan',5);
+    const stored=await readCacheFile<Stored>(memoryFile(store,volume),'scan',5,{maxBytes:MAX_BYTES});
     if(!stored || stored.volume!==volume || !Array.isArray(stored.folders) || !Array.isArray(stored.files) || !Array.isArray(stored.routing)) return undefined;
     const dev=(await fs.lstat(mount,{bigint:true})).dev;
     const listing:Listing={
@@ -64,27 +59,17 @@ const importedFile=(store:string,volume:string)=>memoryFile(store,volume).replac
 type Imported=Record<string,{stat:string;sha256:string}>;
 const withoutDevice=(identity:string)=>identity.split(':').slice(1).join(':');
 async function readImported(store:string,volume:string):Promise<Imported> {
-  try {
-    const file=importedFile(store,volume);
-    if((await fs.lstat(file)).size>MAX_BYTES) return {};
-    const stored=readCache<{volume:string;files:Imported}>(JSON.parse(await fs.readFile(file,'utf8')),'imported',1);
-    if(!stored||stored.volume!==volume||!stored.files||typeof stored.files!=='object') return {};
-    return Object.fromEntries(Object.entries(stored.files as Imported).filter(([relative,value])=>safeRelative(relative)&&relative!==''&&typeof value?.stat==='string'&&/^-?\d+:\d+:\d+:\d+$/.test(value.stat)&&/^[a-f0-9]{64}$/.test(value?.sha256??'')));
-  } catch { return {}; }
+  const stored=await readCacheFile<{volume:string;files:Imported}>(importedFile(store,volume),'imported',1,{maxBytes:MAX_BYTES});
+  if(!stored||stored.volume!==volume||!stored.files||typeof stored.files!=='object') return {};
+  return Object.fromEntries(Object.entries(stored.files as Imported).filter(([relative,value])=>safeRelative(relative)&&relative!==''&&typeof value?.stat==='string'&&/^-?\d+:\d+:\d+:\d+$/.test(value.stat)&&/^[a-f0-9]{64}$/.test(value?.sha256??'')));
 }
-export async function rememberImported(store:string,volume:string,mount:string,verified:Record<string,{sha256:string;identity:string}>):Promise<void> {
-  const files=await readImported(store,volume),prefix=mount+path.sep;
-  for(const [file,{sha256,identity}] of Object.entries(verified)) if(file.startsWith(prefix)&&/^[a-f0-9]{64}$/.test(sha256)) files[path.relative(mount,file)]={stat:withoutDevice(identity),sha256};
-  const target=importedFile(store,volume),temporary=`${target}.${randomUUID()}.tmp`;
-  await fs.mkdir(path.dirname(target),{recursive:true});
-  try { await fs.writeFile(temporary,JSON.stringify(cacheRecord('imported',{volume,files})),{mode:0o600}); await fs.rename(temporary,target); }
-  catch(error) { await fs.unlink(temporary).catch(()=>{}); throw error; }
-}
-/** Run `work`, which fills `verified`, then `remember` what it verified: also when it stops or fails, so the next
- * plan still recognises those files. Only a cache: a failed write is ignored, and `work`'s own outcome stands. */
-export async function rememberingVerified<T>(verified:Record<string,unknown>,remember:()=>Promise<void>,work:()=>Promise<T>):Promise<T> {
-  try { return await work(); }
-  finally { if(Object.keys(verified).length) await remember().catch(()=>{}); }
+export function rememberImported(store:string,volume:string,mount:string,verified:Record<string,{sha256:string;identity:string}>):Promise<void> {
+  const target=importedFile(store,volume),prefix=mount+path.sep;
+  return serialized(target,async()=>{
+    const files=await readImported(store,volume);
+    for(const [file,{sha256,identity}] of Object.entries(verified)) if(file.startsWith(prefix)&&/^[a-f0-9]{64}$/.test(sha256)) files[path.relative(mount,file)]={stat:withoutDevice(identity),sha256};
+    await writeCacheFile(target,'imported',{volume,files});
+  });
 }
 export async function loadImported(store:string,volume:string,mount:string):Promise<(file:string,identity:string)=>string|undefined> {
   const files=await readImported(store,volume),prefix=mount+path.sep;

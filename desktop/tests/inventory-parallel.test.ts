@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
-import {inventory} from '../core/inventory';
+import {inventory,listingOf} from '../core/inventory';
 
 const mod=createRequire(import.meta.url)('node:fs/promises') as {lstat:typeof fs.lstat};
 
@@ -40,4 +40,11 @@ test('an lstat error is raised at its own entry, after the entries before it wer
  const real=mod.lstat;
  mod.lstat=((file:string,...rest:unknown[])=>file.endsWith('IMG_030.JPG')?Promise.reject(Object.assign(new Error('boom'),{code:'EIO'})):(real as (...a:unknown[])=>Promise<unknown>)(file,...rest)) as typeof fs.lstat;
  try{await assert.rejects(inventory(root),{message:'boom'});}finally{mod.lstat=real;}
+});
+
+test('listingOf builds exactly the listing an inventory reports',async t=>{
+ const root=await tree(t),found=await inventory(root,{backup:true});
+ assert.ok(found.listing);
+ assert.deepEqual(listingOf(found,true,found.listing.folders),found.listing);
+ assert.deepEqual(listingOf({files:[{relative:'a.JPG',size:3,path:'/x/a.JPG'} as never]},false,[]),{backup:false,folders:[],files:[{relative:'a.JPG',size:3}]});
 });

@@ -1,11 +1,12 @@
 import * as fs from 'node:fs/promises';
 import { constants, type BigIntStats } from 'node:fs';
 import path from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
-import { streams, STREAMS } from './devices';
+import { mapPool, streams, STREAMS } from './devices';
+import { hasher } from './hasher';
 import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
 import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
@@ -13,15 +14,14 @@ import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat } from './paths';
+import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
 export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;/** What removing macOS "._" files did; present only when it was on. */appleDouble?:AppleDoubleReport;/** Source folders this run removed because it left them empty; present only when there were some. */foldersRemoved?:number;}
 /** kept: a duplicate removal's entry names the copy that stays as its destination; that copy may differ from the removed file's bytes (EXIF-identical duplicates), so its own size and SHA-256 are checked instead. */
 export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;kept?:{digest:string;size:number};}
-interface FileIdentity {dev:string;ino:string;size:string;mtime:string;ctime:string;}
-interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:FileIdentity;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
+interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:StatRecord;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
 interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];/** rename: each file moves on its volume with rename(2), every new organization's. Absent (journals of earlier
  * versions): a verified copy plus a retained original. */strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];
  /** The chosen source folders (the source itself when none were chosen): only folders inside them that the run emptied
@@ -37,21 +37,19 @@ export function importRecoveryAvailable():boolean {return hostKeyConfigured();}
 const UUID_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',uuid=new RegExp(`^${UUID_PATTERN}$`);
 const locks=new Map<string,Promise<unknown>>();
 async function locked<T>(key:string,work:()=>Promise<T>):Promise<T> {
- const previous=locks.get(key)??Promise.resolve();let release!:()=>void;const next=new Promise<void>(r=>{release=r;});locks.set(key,next);
+ const previous=locks.get(key)??Promise.resolve();const {promise:next,resolve:release}=Promise.withResolvers<void>();locks.set(key,next);
  await previous.catch(()=>{});try{return await work();}finally{release();if(locks.get(key)===next)locks.delete(key);}
 }
-function snapshot(stat:BigIntStats):FileIdentity {return {dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)};}
 /** An empty file has no stable inode on exFAT (a synthetic number that changes on rename),
  * so it is identified by device, size and times only. */
-function matches(stat:BigIntStats,expected:FileIdentity,renamed=false):boolean {
- const actual=snapshot(stat);return Object.keys(expected).every(k=>renamed&&k==='ctime'||k==='ino'&&expected.size==='0'||actual[k as keyof FileIdentity]===expected[k as keyof FileIdentity]);
+function matches(stat:BigIntStats,expected:StatRecord,renamed=false):boolean {
+ const actual=statRecord(stat);return Object.keys(expected).every(k=>renamed&&k==='ctime'||k==='ino'&&expected.size==='0'||actual[k as keyof StatRecord]===expected[k as keyof StatRecord]);
 }
 export const sameFile=matches;
 async function ensureDirectory(folder:string,root:string):Promise<void> {
  await contained(folder,root);try{await fs.mkdir(folder,{mode:0o700});await syncDirectory(path.dirname(folder));}catch(error){if(code(error)!=='EEXIST')throw error;}
  await contained(folder,root);const stat=await fs.lstat(folder);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error(`Unsafe recovery directory: ${folder}`);
 }
-async function maybeStat(file:string):Promise<BigIntStats|undefined> {try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return;throw error;}}
 /** In a store: Organizations/<id>/journal.jsonl, and Pointers/<folder partition>/journal-<id>.json. */
 export const ORGANIZATIONS='Organizations',POINTERS='Pointers',JOURNAL='journal.jsonl';
 /** Where a journal is: its folder in a store (paths inside are checked against the store). */
@@ -63,8 +61,8 @@ const jobFolder=(m:Manifest)=>where(m).folder;
 const scopeOf=(m:Manifest)=>where(m).scope;
 /** One lock per journal, by library and id, wherever its records are. */
 const lockKey=(root:string,id:string)=>{if(!uuid.test(id))throw new Error('Invalid recovery identifier');return `${root}\0${id}`;};
-interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,FileIdentity[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
- renameIntent:Set<number>;renamed:Map<number,FileIdentity>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
+interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,StatRecord[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
+ renameIntent:Set<number>;renamed:Map<number,StatRecord>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
  /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;}
 /** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
 interface HandOff {successor:string;successorRoot:string;destination:string;}
@@ -124,14 +122,14 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
    const known=state.handedOff.get(index);if(known&&JSON.stringify(known)!==JSON.stringify(handOff))throw new Error('Invalid organization hand-off');
    state.handedOff.set(index,handOff as HandOff);
   }
-  if(record.event==='renamed'||record.event==='timed'){const stat=record.stat as FileIdentity;if(!stat||['dev','ino','size','mtime','ctime'].some(key=>typeof (stat as unknown as Record<string,unknown>)[key]!=='string'))throw new Error('Invalid moved file identity');state.renamed.set(index,stat);state.dated.set(index,new Set([...(state.dated.get(index)??[]),stat.mtime]));}
-  if(record.event==='exclusive-created'){const stat=record.stat as FileIdentity;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');state.exclusive.set(index,[...(state.exclusive.get(index)??[]),stat]);}
+  if(record.event==='renamed'||record.event==='timed'){const stat=record.stat as StatRecord;if(!isStatRecord(stat))throw new Error('Invalid moved file identity');state.renamed.set(index,stat);state.dated.set(index,new Set([...(state.dated.get(index)??[]),stat.mtime]));}
+  if(record.event==='exclusive-created'){const stat=record.stat as StatRecord;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');state.exclusive.set(index,[...(state.exclusive.get(index)??[]),stat]);}
  };
 }
 /** Identities recorded under an earlier mount are read as this mount's, like the manifest's. */
 function rebasedEvent(m:Manifest):(record:Record<string,unknown>)=>Record<string,unknown> {
  const mount=mountDevices.get(m);
- return record=>{const stat=record.stat as FileIdentity|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
+ return record=>{const stat=record.stat as StatRecord|undefined;return mount&&stat&&typeof stat==='object'?{...record,stat:{...stat,dev:mount}}:record;};
 }
 /** One v5 event line: undefined for a blank line or one an interrupted write cut short; a line that is JSON must verify. */
 function parseEvent(text:string,rebased:(record:Record<string,unknown>)=>Record<string,unknown>):Record<string,unknown>|undefined {
@@ -190,7 +188,7 @@ async function finishJournalRead(m:Manifest,state:JournalState,chain:Set<string>
 }
 async function savedOriginal(m:Manifest,index:number,state:JournalState):Promise<string|undefined> {
  let saved:string|undefined;
- for(const slot of state.slots.get(index)??[]){const file=originalPath(m,index,slot);await contained(file,scopeOf(m));if(await maybeStat(file)){if(saved)throw new Error('Multiple recovery originals require inspection');saved=file;}}
+ for(const slot of state.slots.get(index)??[]){const file=originalPath(m,index,slot);await contained(file,scopeOf(m));if(await maybeLstat(file)){if(saved)throw new Error('Multiple recovery originals require inspection');saved=file;}}
  return saved;
 }
 async function roots(m:Manifest):Promise<void> {
@@ -211,7 +209,7 @@ async function validateOriginal(file:string,entry:Entry,scope:string,renamed:boo
  if(!matches(await fs.lstat(file,{bigint:true}),entry.stat,renamed))throw new Error(`Source changed while rechecking: ${file}`);
 }
 async function targetMatches(entry:Entry,m:Manifest,signal?:AbortSignal,verifyContents=true,proofs?:Proofs):Promise<boolean> {
- await contained(entry.destination,m.root);const stat=await maybeStat(entry.destination);if(!stat)return false;
+ await contained(entry.destination,m.root);const stat=await maybeLstat(entry.destination);if(!stat)return false;
  const expected=entry.kept??entry;
  if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(expected.size)||(verifyContents&&await (proofs?proofs.digest(entry.destination,signal):digest(entry.destination,signal))!==expected.digest))throw new Error(`Destination changed; original retained: ${entry.destination}`);
  return true;
@@ -283,7 +281,7 @@ interface Found {store:Store;folder:string;journal:string;}
 async function locateJob(root:string,id:string):Promise<Found>{
  if(!uuid.test(id))throw new Error('Invalid recovery identifier');
  const found:Found[]=[];
- for(const store of await storesFor(root)){const folder=path.join(store.path,ORGANIZATIONS,id),journal=path.join(folder,JOURNAL);if((await maybeStat(journal))?.isFile())found.push({store,folder,journal});}
+ for(const store of await storesFor(root)){const folder=path.join(store.path,ORGANIZATIONS,id),journal=path.join(folder,JOURNAL);if((await maybeLstat(journal))?.isFile())found.push({store,folder,journal});}
  if(found.length>1)throw new MessageError('error.recordsMultipleCopies',{id});
  if(!found.length)throw Object.assign(new Error(`Organization record not found: ${id}`),{code:'ENOENT'});
  return found[0]!;
@@ -305,10 +303,10 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
   const organizations=path.join(store.path,ORGANIZATIONS);
-  for(const id of (await fs.readdir(organizations).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;})).sort()){
+  for(const id of (await readdirIfPresent(organizations)).sort()){
    if(!uuid.test(id))continue;
    const found={store,folder:path.join(organizations,id),journal:path.join(organizations,id,JOURNAL)};
-   if(!(await maybeStat(found.journal))?.isFile())continue;
+   if(!(await maybeLstat(found.journal))?.isFile())continue;
    let root:unknown;
    // A journal whose head cannot be read may be this folder's: refused, or (for a listing) reported as it is.
    try{root=(await readJournalHead(found.journal,store.path,false)).header.root;}
@@ -336,7 +334,7 @@ async function rebaseMount(m:Manifest):Promise<void>{
  if(String(now.ino)!==inode)return;
  const dev=String(now.dev);mountDevices.set(m,dev);
  if(dev===recorded)return;
- const rebase=(identity:string)=>identity.replace(/^\d+:/,`${dev}:`);
+ const rebase=(identity:string)=>rebaseDevice(identity,dev);
  m.rootIdentity=rebase(m.rootIdentity);m.sourceIdentity=rebase(m.sourceIdentity);
  for(const entry of m.entries){entry.stat.dev=dev;for(const folder of Object.keys(entry.parents))entry.parents[folder]=rebase(entry.parents[folder]!);}
 }
@@ -355,7 +353,7 @@ async function summary(m:Manifest,value:{files:number;completed:number;retainedF
 /** Append sealed event lines to the journal (group-committed with every other append waiting) and make them durable. */
 async function appendEvents(m:Manifest,lines:string[]):Promise<void> {
  const at=where(m);
- await appendLines(at.journal,lines,async()=>{await contained(at.journal,at.scope);const stat=await maybeStat(at.journal);if(!stat?.isFile())throw new Error('Unsafe recovery journal');},{create:false});
+ await appendLines(at.journal,lines,async()=>{await contained(at.journal,at.scope);const stat=await maybeLstat(at.journal);if(!stat?.isFile())throw new Error('Unsafe recovery journal');},{create:false});
 }
 
 // Filesystems without hard links need an exclusive stream. The synchronized
@@ -364,9 +362,12 @@ async function exclusivePublication(staged:string,entry:Entry,index:number,m:Man
  const output=await fs.open(entry.destination,'wx',0o600);
  try {
   await output.sync();await syncParents(entry.destination,m.root);
-  await checkpoint(m,'exclusive-created',index,{stat:snapshot(await output.stat({bigint:true}))});
-  const input=await regularHandle(staged);
-  try {const buffer=Buffer.allocUnsafe(1024*1024);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();}finally{await input.close();}
+  await checkpoint(m,'exclusive-created',index,{stat:statRecord(await output.stat({bigint:true}))});
+  // A stream slot on each device and the memory governor, like every other whole-file copy.
+  await streams.run([staged,entry.destination],async chunk=>{
+   const input=await regularHandle(staged);
+   try {const buffer=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();}finally{await input.close();}
+  },signal);
  }finally{await output.close();}
 }
 async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:string,state:JournalState,signal?:AbortSignal):Promise<boolean> {
@@ -374,12 +375,14 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
  const owned=(state.exclusive.get(index)??[]).some(stat=>stat.dev===String(current.dev)&&stat.ino===String(current.ino));
  if(!owned)return false;
  const partial=await regularHandle(entry.destination),original=await regularHandle(input);
- try {const a=Buffer.allocUnsafe(1024*1024),b=Buffer.allocUnsafe(1024*1024);for(;;){checkAbort(signal);const {bytesRead}=await partial.read(a,0,a.length,null);if(!bytesRead)break;let count=0;while(count<bytesRead){const read=await original.read(b,count,bytesRead-count,null);if(!read.bytesRead)return false;count+=read.bytesRead;}if(!a.subarray(0,bytesRead).equals(b.subarray(0,bytesRead)))return false;}
-  if(!matches(await partial.stat({bigint:true}),snapshot(current))||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(current)))throw new Error('Incomplete destination changed while checking');
+ try {
+  const identical=await streams.run([entry.destination,input],async chunk=>{const a=Buffer.allocUnsafe(chunk),b=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await partial.read(a,0,a.length,null);if(!bytesRead)break;let count=0;while(count<bytesRead){const read=await original.read(b,count,bytesRead-count,null);if(!read.bytesRead)return false;count+=read.bytesRead;}if(!a.subarray(0,bytesRead).equals(b.subarray(0,bytesRead)))return false;}return true;},signal);
+  if(!identical)return false;
+  if(!matches(await partial.stat({bigint:true}),statRecord(current))||!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(current)))throw new Error('Incomplete destination changed while checking');
  }finally{await partial.close();await original.close();}
  await checkpoint(m,'incomplete-intent',index);checkAbort(signal);await roots(m);await contained(entry.destination,m.root);
- if(!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(current)))throw new Error('Incomplete destination changed before preservation');
- const saved=path.join(jobFolder(m),`incomplete-${randomUUID()}`);await contained(saved,scopeOf(m));if(await maybeStat(saved))throw new Error('Recovery collision');
+ if(!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(current)))throw new Error('Incomplete destination changed before preservation');
+ const saved=path.join(jobFolder(m),`incomplete-${randomUUID()}`);await contained(saved,scopeOf(m));if(await maybeLstat(saved))throw new Error('Recovery collision');
  await fs.rename(entry.destination,saved);await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(saved));return true;
 }
 async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void,proofs?:Proofs):Promise<void> {
@@ -393,10 +396,16 @@ async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:Abo
 async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void,proofs?:Proofs):Promise<void> {
  let source:fs.FileHandle;try{source=await regularHandle(input);}catch(error){await output.close();throw error;}
  try {
-  const before=await source.stat({bigint:true}),hash=createHash('sha256'),buffer=Buffer.allocUnsafe(1024*1024);
-  for(;;){checkAbort(signal);const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to write recovery stage');offset+=bytesWritten;}onBytes?.(bytesRead);}
-  // The bytes hashed are the bytes staged: the source is not read a second time.
-  if(hash.digest('hex')!==entry.digest||!matches(await source.stat({bigint:true}),snapshot(before)))throw new Error(`Source changed while copying: ${input}`);
+  // A stream slot on each device and the memory governor; the SHA-256 runs on a worker thread while the next chunk is read.
+  const before=await streams.run([input,staged],async chunk=>{
+   const before=await source.stat({bigint:true}),hash=hasher(),buffer=Buffer.allocUnsafe(chunk);
+   try {
+    for(;;){checkAbort(signal);const {bytesRead}=await source.read(buffer,0,buffer.length,null);if(!bytesRead)break;await hash.update(buffer.subarray(0,bytesRead));let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to write recovery stage');offset+=bytesWritten;}onBytes?.(bytesRead);}
+    // The bytes hashed are the bytes staged: the source is not read a second time.
+    if(await hash.digest()!==entry.digest||!matches(await source.stat({bigint:true}),statRecord(before)))throw new Error(`Source changed while copying: ${input}`);
+   } finally {hash.drop();}
+   return before;
+  },signal);
   // Still the file streamed, by its path too: those bytes are this run's proof of it.
   proofs?.seed(input,before,entry.digest,await fs.lstat(input,{bigint:true}));
   await applyFileTimestamps(output,before,entry.captureTimeMs);await output.sync();
@@ -404,17 +413,17 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
  const stage=await proven(staged,async()=>{if(await digest(staged,signal)!==entry.digest)throw new Error('Recovery stage verification failed');});
  checkAbort(signal);await roots(m);await contained(entry.destination,m.root);await checkpoint(m,'publish-intent',index);
  let linked=false;
- try{await fs.link(staged,entry.destination);linked=true;}catch(error){if(!['EXDEV','ENOSYS','EPERM','ENOTSUP','EOPNOTSUPP'].includes(code(error)??''))throw error;await exclusivePublication(staged,entry,index,m,signal);}
+ try{await fs.link(staged,entry.destination);linked=true;}catch(error){if(!linkRefused(error))throw error;await exclusivePublication(staged,entry,index,m,signal);}
  await syncFile(entry.destination);await syncParents(entry.destination,m.root);
  // A hard link is the verified stage itself (the link only moves its change time and adds this one name); a streamed
  // copy, or a link with any other name besides, is read back.
- const published=linked&&stage?await maybeStat(entry.destination):undefined;
+ const published=linked&&stage?await maybeLstat(entry.destination):undefined;
  const same=!!published&&!!stage&&provable(published)&&published.dev===stage.dev&&published.ino===stage.ino&&published.nlink===stage.nlink+1n&&published.size===stage.size&&published.mtimeNs===stage.mtimeNs;
  if(!await targetMatches(entry,m,signal,!same,proofs))throw new Error('Destination disappeared after publication');
  // Retained originals are never unlinked; only the stage is.
  await contained(staged,scopeOf(m));await fs.unlink(staged);logDeletion('organize',staged,'recovery stage after its copy was published and verified',`SHA-256 ${entry.digest} matched at the stage and at the published destination ${entry.destination}`,{bytes:entry.size});
  // The stage's name is gone; its verified inode, unchanged but for the change time, is this run's proof of the copy.
- const kept=same?await maybeStat(entry.destination):undefined;
+ const kept=same?await maybeLstat(entry.destination):undefined;
  if(kept&&kept.dev===stage!.dev&&kept.ino===stage!.ino&&kept.size===stage!.size&&kept.mtimeNs===stage!.mtimeNs)proofs?.seed(entry.destination,kept,entry.digest);
  await checkpoint(m,'published',index);
 }
@@ -471,7 +480,7 @@ async function findHandOff(m:Manifest,index:number,state:JournalState,moves:Succ
  const entry=m.entries[index]!,later=moves.get(pathKey(entry.destination));if(!later)return;
  const next=later.m.entries[later.index]!,moved=state.renamed.get(index);
  if(next.digest!==entry.digest||next.size!==entry.size||(moved&&moved.ino!==next.stat.ino))return;
- const there=await maybeStat(next.destination);
+ const there=await maybeLstat(next.destination);
  if(!there?.isFile()||!movedIdentity(there,next,later.state.dated.get(later.index)))return;
  return {successor:later.m.id,successorRoot:later.root,destination:next.destination};
 }
@@ -482,7 +491,7 @@ const placed=(state:JournalState,index:number)=>state.renamed.has(index)||state.
 async function recordHandOffs(m:Manifest,state:JournalState,onLater?:(done:number,total:number,file:string)=>void,signal?:AbortSignal):Promise<void>{
  let moves:Successors|undefined;
  for(const [index,entry] of m.entries.entries()){
-  if(state.handedOff.has(index)||!placed(state,index)||await maybeStat(entry.destination))continue;
+  if(state.handedOff.has(index)||!placed(state,index)||await maybeLstat(entry.destination))continue;
   moves??=await laterMoves(m,onLater,signal);
   const handOff=await findHandOff(m,index,state,moves);if(!handOff)continue;
   await checkpoint(m,'handed-off',index,{...handOff});state.handedOff.set(index,handOff);
@@ -506,7 +515,7 @@ async function pointerDirectories(folder:string):Promise<{store:Store;directory:
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
   const base=path.join(store.path,POINTERS);
-  for(const name of await fs.readdir(base).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;}))
+  for(const name of await readdirIfPresent(base))
    if(name.endsWith(suffix))found.push({store,directory:path.join(base,name)});
  }
  return found;
@@ -527,7 +536,7 @@ async function writePointer(folder:string,m:Pick<Manifest,'root'|'id'>,at?:{stor
  await contained(target,store.path);
  await writeNewFile(temporary,JSON.stringify(sealV5('pointer',{library:folder,root:m.root,id:m.id})));
  // A torn or wrong pointer of this journal is replaced in one step, so a stop never leaves the folder without one.
- if((await maybeStat(target))?.isFile()){await fs.rename(temporary,target);await syncDirectory(directory);return;}
+ if((await maybeLstat(target))?.isFile()){await fs.rename(temporary,target);await syncDirectory(directory);return;}
  if(await renameChecked(temporary,target)!=='done')throw new Error(`Unable to write ${target}`);
 }
 /** In each pointer folder, a signed pointer naming the journal and its folder, written before
@@ -550,7 +559,7 @@ async function removeSiblingPointers(m:Manifest):Promise<void>{
  for(const folder of pointerFolders(m))for(const {store,directory} of await pointerDirectories(folder).catch(()=>[])){
   try{
    const file=path.join(directory,`journal-${m.id}.json`);
-   await contained(file,store.path);const stat=await maybeStat(file);if(!stat?.isFile())continue;
+   await contained(file,store.path);const stat=await maybeLstat(file);if(!stat?.isFile())continue;
    await fs.unlink(file);logDeletion('organize',file,'sibling pointer of a finished journal',`pointer file named journal-${m.id}.json kept for a folder this journal listed, now that the journal owns nothing more`);await syncDirectory(directory);
    await fs.rmdir(directory).then(()=>{logDeletion('organize',directory,'pointer folder emptied by removing its last pointer','empty (non-recursive removal)');return syncDirectory(path.dirname(directory));},()=>{});
    if(store.base===folder)await removeEmptyStore(store);
@@ -561,16 +570,15 @@ async function removeSiblingPointers(m:Manifest):Promise<void>{
  * anything else). */
 async function removeEmptyStore(store:Store):Promise<void>{
  await storeUnchanged(store);
- const finder=(name:string)=>name==='.DS_Store'||name.startsWith('._');
  const names=await fs.readdir(store.path);
- if(names.some(name=>!finder(name)&&name!=='store.json'&&name!==POINTERS))return;
+ if(names.some(name=>!finderMetadata(name)&&name!=='store.json'&&name!==POINTERS))return;
  const pointers=path.join(store.path,POINTERS);
- if(names.includes(POINTERS)){if((await fs.readdir(pointers)).some(name=>!finder(name)))return;}
+ if(names.includes(POINTERS)){if((await fs.readdir(pointers)).some(name=>!finderMetadata(name)))return;}
  const bookkeeping=(file:string)=>fs.unlink(file).then(()=>logDeletion('organize',file,'Finder bookkeeping in a records folder made only for pointers, now empty','.DS_Store or a "._" file, in a store holding nothing else'),()=>{});
- for(const name of names.filter(finder))await bookkeeping(path.join(store.path,name));
+ for(const name of names.filter(finderMetadata))await bookkeeping(path.join(store.path,name));
  if(names.includes(POINTERS)){for(const name of await fs.readdir(pointers))await bookkeeping(path.join(pointers,name));await fs.rmdir(pointers);logDeletion('organize',pointers,'empty Pointers folder of a records folder made only for pointers','empty (non-recursive removal)');}
  await fs.unlink(path.join(store.path,'store.json'));await fs.rmdir(store.path);logDeletion('organize',store.path,'records folder made only for pointers, now empty','it held only its own store record, an empty Pointers folder and Finder bookkeeping',{});await syncDirectory(store.base);
- const beside=path.join(store.base,`._${APP_DATA_FOLDER}`);if((await maybeStat(beside))?.isFile())await bookkeeping(beside);
+ const beside=path.join(store.base,`._${APP_DATA_FOLDER}`);if((await maybeLstat(beside))?.isFile())await bookkeeping(beside);
 }
 /** For the store cleanup: a pointer temp file left by a crash, a pointer whose folder is not the one it is kept
  * for (copied), or one whose journal is gone, finished, undone or superseded. A damaged pointer, or one whose
@@ -738,7 +746,6 @@ async function supersedePriorOrganizations(m:Manifest,signal?:AbortSignal,onProg
   });
  }
 }
-const unsupportedLink=['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK'];
 /** The moved inode: same device, inode and size as reviewed, with its reviewed Modified
  * date, any date journaled for it, or the capture date a move applies. Journal order and a
  * crash between dating and journaling therefore never strand a moved file. */
@@ -758,7 +765,7 @@ const earliestStorableDate=new Date(1980,0,2).getTime();
  * leaves the file with its original dates instead of failing a move already made. */
 /** Told after a file was moved by rename: where it was (path and reviewed identity), where it is, and its final identity.
  * Lets a cache keyed by path and stat follow the file (same bytes, so same metadata) instead of reading it again. */
-export type MoveObserver=(from:string,reviewed:FileIdentity,to:string,now:BigIntStats)=>void;
+export type MoveObserver=(from:string,reviewed:StatRecord,to:string,now:BigIntStats)=>void;
 let moveObserver:MoveObserver|undefined;
 export function setMoveObserver(observer:MoveObserver|undefined):void{moveObserver=observer;}
 async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void):Promise<void> {
@@ -769,7 +776,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
  let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
-  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:snapshot(stat)});final=stat;state.renamed.set(index,snapshot(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
+  const remember=async(event:'renamed'|'timed',stat:BigIntStats)=>{await checkpoint(m,event,index,{stat:statRecord(stat)});final=stat;state.renamed.set(index,statRecord(stat));state.dated.set(index,new Set([...(state.dated.get(index)??[]),String(stat.mtimeNs)]));};
   if(!movedIdentity(current,entry,state.dated.get(index)))throw new Error(`Moved file changed; it stays where it is: ${entry.destination}`);
   await remember('renamed',current);
   if(entry.captureTimeMs===undefined||String(current.mtimeNs)!==entry.stat.mtime)return;
@@ -798,12 +805,12 @@ export const sameHardLink=(a:Pick<BigIntStats,'dev'|'ino'|'nlink'>,b:Pick<BigInt
 async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,note:(message:string)=>void,signal?:AbortSignal):Promise<'moved'|'copy'> {
  await contained(entry.source,m.source);await contained(entry.destination,m.root);
  if(state.renamed.has(index)){
-  const target=await maybeStat(entry.destination);
-  if(await maybeStat(entry.source))throw new Error(`Original path reappeared after it was moved: ${entry.source}`);
+  const target=await maybeLstat(entry.destination);
+  if(await maybeLstat(entry.source))throw new Error(`Original path reappeared after it was moved: ${entry.source}`);
   if(!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error(`Moved file changed or is missing; no copy was kept: ${entry.destination}`);
   return 'moved';
  }
- let source=await maybeStat(entry.source),target=await maybeStat(entry.destination);
+ let source=await maybeLstat(entry.source),target=await maybeLstat(entry.destination);
  if(state.renameIntent.has(index)){
   // Finish or redo an interrupted move from what is on disk.
   if(source&&target&&sameHardLink(source,target)){await fs.unlink(entry.source);logDeletion('organize',entry.source,'second name of a file whose move was interrupted','source and destination are two hard links of one inode (same device, inode, link count >= 2)',{destination:entry.destination});await finishMove(entry,index,m,state,note);return 'moved';}
@@ -830,9 +837,9 @@ async function relocate(entry:Entry,index:number,m:Manifest,state:JournalState,n
  } catch(error) {
   if(code(error)==='EEXIST')throw appeared();
   if(code(error)==='EXDEV'){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}
-  if(!unsupportedLink.includes(code(error)??''))throw error;
+  if(!LINK_UNSUPPORTED.has(code(error)??''))throw error;
   // exFAT and FAT have no hard links: check, then rename(2) in the same breath.
-  if(await maybeStat(entry.destination))throw appeared();
+  if(await maybeLstat(entry.destination))throw appeared();
   try{await fs.rename(entry.source,entry.destination);}
   catch(failure){if(code(failure)==='EXDEV'){await checkpoint(m,'rename-fallback',index);state.fallback.add(index);return 'copy';}throw failure;}
  }
@@ -851,7 +858,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  // A recheck reads file contents again only for entries that changed since they were last verified in
  // this session (or for every entry when a full recheck is asked for); sizes and identities are always checked.
  const passKey=`${m.root}\0${m.id}\0${mountDevices.get(m)??''}`,verified=options.full?new Map<number,string>():verifiedPasses.get(passKey)??new Map<number,string>(),passed=new Map<number,string>();
- const fileKey=async(file?:string)=>{const stat=file?await maybeStat(file):undefined;return stat?[stat.dev,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].join(':'):'-';};
+ const fileKey=async(file?:string)=>{const stat=file?await maybeLstat(file):undefined;return stat?[stat.dev,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].join(':'):'-';};
  /** Whether this entry's file contents must be read: true unless it is unchanged since its last verified pass. */
  const deep=async(index:number,entry:Entry,saved?:string)=>{
   const signature=[await fileKey(entry.destination),await fileKey(saved),state.finalizing.has(index),state.finalized.has(index),state.slots.get(index)?.join(','),state.renamed.has(index)].join('|');
@@ -868,7 +875,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
  const tidyCopied=async(entry:Entry)=>{
   if(!sidecars)return;
   try{
-   const placed=await maybeStat(entry.destination);
+   const placed=await maybeLstat(entry.destination);
    if(placed)await sidecars.besideFile(entry.destination,m.root,stat=>sameStat(stat,placed));
   }catch(error){sidecars.warn(entry.destination,error);}
  };
@@ -894,7 +901,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    }
    if(m.strategy==='rename'&&entry.move&&!state.fallback.has(index)&&!state.slots.get(index)?.length&&!state.finalizing.has(index)&&await relocate(entry,index,m,state,message=>undated.push(message),signal)==='moved'){result.moved++;await tidyMoved(entry,index);completed++;progress(path.basename(entry.source));continue;}
    const saved=await savedOriginal(m,index,state);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
-   const source=await maybeStat(entry.source),stash=saved?await maybeStat(saved):undefined;
+   const source=await maybeLstat(entry.source),stash=saved?await maybeLstat(saved):undefined;
    if(state.finalizing.has(index)){
     if(entry.move&&source)throw new Error('Original path reappeared after finalization');
     const contents=await deep(index,entry,saved);
@@ -921,7 +928,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   for(const [index,entry]of m.entries.entries()) {
    checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index))continue;await roots(m);stashed++;stashedBytes+=entry.size;stash_(path.basename(entry.source));let saved=await savedOriginal(m,index,state);
    // Unchanged since its last verified pass (decided in the loop above): sizes and identities only.
-   if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,scopeOf(m),true,signal,contents,proofs);if(await maybeStat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents,proofs))throw new Error('Destination unavailable');continue;}
+   if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,scopeOf(m),true,signal,contents,proofs);if(await maybeLstat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents,proofs))throw new Error('Destination unavailable');continue;}
    await parents(entry,m);
    // What was read here, by stat: unchanged when the original is set aside, neither is read again.
    const sourceProof=await proven(entry.source,()=>validateOriginal(entry.source,entry,m.source,false,signal,true,proofs));
@@ -936,8 +943,8 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await checkpoint(m,'stash-intent',index,{slot});state.slots.set(index,[...(state.slots.get(index)??[]),slot]);checkAbort(signal);await roots(m);await parents(entry,m);await contained(saved,scopeOf(m));
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    await parents(entry,m);const reread=!unchangedSince(sourceProof,await fs.lstat(entry.source,{bigint:true}))||!unchangedSince(destinationProof,destinationStat);
-   await validateOriginal(entry.source,entry,m.source,false,signal,reread,proofs);if(!await targetMatches(entry,m,signal,reread,proofs)||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed before retaining original');
-   if(await maybeStat(saved))throw new Error(`Recovery original collision: ${saved}`);
+   await validateOriginal(entry.source,entry,m.source,false,signal,reread,proofs);if(!await targetMatches(entry,m,signal,reread,proofs)||!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('Destination changed before retaining original');
+   if(await maybeLstat(saved))throw new Error(`Recovery original collision: ${saved}`);
    // Same-filesystem rename preserves the original inode; its contents are never
    // deleted, even when the process exits immediately after this operation.
    await fs.rename(entry.source,saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
@@ -998,12 +1005,12 @@ type JournalSpec=Pick<Manifest,'kind'|'root'|'rootIdentity'|'source'|'strategy'|
 async function createJournal(spec:JournalSpec,entries:OrganizationEntry[],signal?:AbortSignal):Promise<Manifest>{
  checkAbort(signal);requireHostKey();await rootUnchanged(spec.root,spec.rootIdentity);await refuseOldRecords(spec.root,...spec.libraries??[]);
  const id=randomUUID(),m:Manifest={version:1,...spec,id,sourceIdentity:spec.source===spec.root?spec.rootIdentity:await identity(spec.source),entries:[]};
- for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==spec.source;folder=path.dirname(folder)){if(!beneath(folder,spec.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}m.entries.push({...entry,stat:snapshot(entry.stat),parents:ancestors});}
+ for(const entry of entries){const ancestors:Record<string,string>={};for(let folder=path.dirname(entry.source);folder!==spec.source;folder=path.dirname(folder)){if(!beneath(folder,spec.source))throw new Error('Unsafe source path');ancestors[folder]=await identity(folder);}m.entries.push({...entry,stat:statRecord(entry.stat),parents:ancestors});}
  validateManifest(m,spec.root,id);
  const store=await storeFor(m.root);
  if(store.dev!==(await fs.lstat(m.root,{bigint:true})).dev)throw new Error('Recovery records and the library must remain on the same filesystem');
  const folder=await storeFolder(store,ORGANIZATIONS,m.id),journal=path.join(folder,JOURNAL);
- if(await maybeStat(journal))throw new Error('Recovery collision');
+ if(await maybeLstat(journal))throw new Error('Recovery collision');
  const head=journalHead(m),temporary=path.join(folder,`journal-${randomUUID()}.tmp`);
  await writeNewFile(temporary,head);
  if(await renameChecked(temporary,journal)!=='done')throw new Error(`Unable to create ${journal}`);
@@ -1048,7 +1055,7 @@ export async function placedByEarlierJournals(root:string,signal?:AbortSignal,/*
   try{
    const prior=await readManifest(root,id),state=await readEvents(prior,undefined,(read,total)=>onProgress?.({journal,journals:ids.length,read,total,file:id}),false,signal);
    if(state.superseded||state.undoComplete)continue;
-   for(const entry of prior.entries)placed.add(path.relative(root,entry.destination).split(path.sep).join('/'));
+   for(const entry of prior.entries)placed.add(posixRelative(root,entry.destination));
   }catch(error){if(isAbort(error))throw error;}
  }
  return placed;
@@ -1110,26 +1117,26 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
    for(const [index,entry]of m.entries.entries()) {
     looked++;checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);
     // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
-    if(state.handedOff.has(index)||placed(state,index)&&!await maybeStat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m,(done,total,file)=>report(position,.5,file||id,undefined,{done,total}),signal))){
+    if(state.handedOff.has(index)||placed(state,index)&&!await maybeLstat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m,(done,total,file)=>report(position,.5,file||id,undefined,{done,total}),signal))){
      // Any kept original of it stays, but is not among those a finalize would release.
      job.completed++;continue;
     }
     if(state.renamed.has(index)){
-     const target=await maybeStat(entry.destination);
-     if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index))||(verifyContents&&await digest(entry.destination)!==entry.digest)){
+     const target=await maybeLstat(entry.destination);
+     if(await maybeLstat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index))||(verifyContents&&await digest(entry.destination)!==entry.digest)){
       // A finished organization's file that is gone with no later organization accounting for it may be
       // the only copy: every such file is counted and the job stays pending, without stopping the listing.
-      if(state.complete&&!await maybeStat(entry.source)&&!target){job.missing=(job.missing??0)+1;all=false;continue;}
+      if(state.complete&&!await maybeLstat(entry.source)&&!target){job.missing=(job.missing??0)+1;all=false;continue;}
       throw new Error(`Moved file changed or is missing: ${entry.destination}`);
      }
      job.completed++;continue;
     }
     if(state.renameIntent.has(index)&&!state.fallback.has(index)&&!state.slots.get(index)?.length){all=false;continue;}
     if(state.finalized.has(index)){
-     if(!await targetMatches(entry,m,undefined,verifyContents)){if(state.complete&&!await maybeStat(entry.destination)){job.missing=(job.missing??0)+1;all=false;continue;}throw new Error('Finalized destination unavailable');}
+     if(!await targetMatches(entry,m,undefined,verifyContents)){if(state.complete&&!await maybeLstat(entry.destination)){job.missing=(job.missing??0)+1;all=false;continue;}throw new Error('Finalized destination unavailable');}
      job.completed++;continue;
     }
-    const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
+    const saved=await savedOriginal(m,index,state),source=await maybeLstat(entry.source);if(!saved&&!state.finalizing.has(index))await parents(entry,m);
     if(state.finalizing.has(index)){
      if(entry.move&&source)throw new Error('Original path reappeared after finalization');
      if(saved){if(!entry.move)throw new Error('Unexpected retained original');await validateOriginal(saved,entry,scopeOf(m),true,undefined,verifyContents);}
@@ -1174,16 +1181,16 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
   // that stay at their original paths and previously finalized destinations. A file's content is read here only
   // where its stat can prove it unchanged until its release (a real change time: not FAT or exFAT), so the release
   // reuses that read. Elsewhere this pass checks stats only, and the file is read once, right before its release.
-  const upFront=async(file:string)=>{const stat=await maybeStat(file);return !!stat&&provable(stat);};
+  const upFront=async(file:string)=>{const stat=await maybeLstat(file);return !!stat&&provable(stat);};
   for(const [index,entry]of m.entries.entries()){
    checkAbort(signal);report({step:'checking',completed:index+1,total:m.entries.length,file:entry.destination});
    if(state.undone.size)throw new Error('This organization was undone');
    // A later organization took this file over: its kept original, if any, is kept, not released
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
-   if(state.renamed.has(index)){const target=await maybeStat(entry.destination);if(await maybeStat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
+   if(state.renamed.has(index)){const target=await maybeLstat(entry.destination);if(await maybeLstat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,await upFront(entry.destination),proofs))throw new Error('Finalized destination unavailable');tick();continue;}
-   const saved=await savedOriginal(m,index,state),source=await maybeStat(entry.source);if(!entry.move)await parents(entry,m);
+   const saved=await savedOriginal(m,index,state),source=await maybeLstat(entry.source);if(!entry.move)await parents(entry,m);
    if(entry.move){
     if(source)throw new Error('Original path reappeared; retained originals preserved');
     if(saved){await validateOriginal(saved,entry,scopeOf(m),true,signal,await upFront(saved),proofs);tick();}
@@ -1200,13 +1207,13 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    if(state.renamed.has(index))continue;
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Finalized destination unavailable');result.finalized++;continue;}
    if(!entry.move)await parents(entry,m);
-   if(entry.move&&await maybeStat(entry.source))throw new Error('Original path reappeared; retained originals preserved');
+   if(entry.move&&await maybeLstat(entry.source))throw new Error('Original path reappeared; retained originals preserved');
    const saved=await savedOriginal(m,index,state);
    // Publish and synchronize the remaining copy before the authenticated intent.
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Destination unavailable; retained originals preserved');
    tick();await syncFile(entry.destination);await syncParents(entry.destination,m.root);tick();
-   if(!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('Destination changed while synchronizing');
+   if(!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('Destination changed while synchronizing');
    if(!entry.move){
     if(saved)throw new Error('Unexpected retained original');
     if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
@@ -1214,7 +1221,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
     await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();const originalStat=await fs.lstat(saved,{bigint:true});
     if(!state.finalizing.has(index)){await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
     checkAbort(signal);await roots(m);await contained(saved,scopeOf(m));await contained(entry.destination,m.root);
-    if(await maybeStat(entry.source)||!matches(await fs.lstat(saved,{bigint:true}),snapshot(originalStat))||!matches(await fs.lstat(entry.destination,{bigint:true}),snapshot(destinationStat)))throw new Error('A verified file changed before finalization');
+    if(await maybeLstat(entry.source)||!matches(await fs.lstat(saved,{bigint:true}),statRecord(originalStat))||!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('A verified file changed before finalization');
     await fs.unlink(saved);logDeletion('release',saved,'retained original released after the organization was finalized',`SHA-256 ${entry.digest} validated at the retained copy and at the organized file ${entry.destination}; the original path is empty; both files unchanged until removal`,{bytes:entry.size,destination:entry.destination,duplicatesJournal:m.kind==='duplicates'});tick();await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
    }else if(!state.finalizing.has(index))throw new Error('Retained original disappeared before authorization');
    if(!state.finalized.has(index)){await checkpoint(m,'finalized',index);state.finalized.add(index);}
@@ -1246,7 +1253,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
   // Until the undo completes, the folders it restores into must be found by other organizations.
   await writeSiblingPointers(m);await recordHandOffs(m,state,(completed,total,file)=>onProgress?.({step:'later',completed,total,file}),signal);
   // A file a later organization took over stays with it: undoing that one brings it back first.
-  const handedOff=async(index:number)=>{const handOff=state.handedOff.get(index);return !!handOff&&!await maybeStat(m.entries[index]!.destination)&&!!await maybeStat(handOff.destination);};
+  const handedOff=async(index:number)=>{const handOff=state.handedOff.get(index);return !!handOff&&!await maybeLstat(m.entries[index]!.destination)&&!!await maybeLstat(handOff.destination);};
   const occupied=(file:string)=>new Error(`Original path is occupied; nothing was overwritten: ${file}`);
   const restore=async(from:string,to:string)=>{
    // A proof of `from` follows it to `to` when nothing but the change time (moved by the link or rename) differs.
@@ -1255,17 +1262,17 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    try{await fs.link(from,to);const a=await fs.lstat(from,{bigint:true}),b=await fs.lstat(to,{bigint:true});if(!sameHardLink(a,b))throw occupied(to);await fs.unlink(from);}
    catch(error){
     if(code(error)==='EEXIST')throw occupied(to);
-    if(!unsupportedLink.includes(code(error)??''))throw error;
-    if(await maybeStat(to))throw occupied(to);
+    if(!LINK_UNSUPPORTED.has(code(error)??''))throw error;
+    if(await maybeLstat(to))throw occupied(to);
     await fs.rename(from,to);
    }
    await syncParents(to,m.source);await syncDirectory(path.dirname(from));
-   const there=held?await maybeStat(to):undefined;
+   const there=held?await maybeLstat(to):undefined;
    if(there&&there.dev===moving.dev&&there.ino===moving.ino&&there.size===moving.size&&there.mtimeNs===moving.mtimeNs&&there.birthtimeNs===moving.birthtimeNs)proofs.seed(to,there,held!);
   };
   /** Where a moved entry is now: 'back' (already at its original path), 'moved' (still at the destination), or 'none'. */
   const movedState=async(index:number,entry:Entry):Promise<'back'|'moved'|'none'|'pair'>=>{
-   const source=await maybeStat(entry.source),target=await maybeStat(entry.destination),dated=state.dated.get(index);
+   const source=await maybeLstat(entry.source),target=await maybeLstat(entry.destination),dated=state.dated.get(index);
    if(source&&target&&sameHardLink(source,target))return 'pair';
    if(source&&target&&source.dev===target.dev&&source.ino===target.ino&&entry.size>0)throw new Error(`Two names point at one file entry without a hard link; nothing was changed. Check the drive: ${entry.source}`);
    // The original is in place and something else appeared at the destination: nothing to undo here.
@@ -1288,7 +1295,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    if(await handedOff(index))continue;tick();
    if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
    const saved=await savedOriginal(m,index,state);tick();
-   if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
+   if(saved){if(await maybeLstat(entry.source))throw occupied(entry.source);await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
   }
   if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
   for(const [step,index] of [...m.entries.keys()].reverse().entries()){
@@ -1312,10 +1319,10 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     }
    } else {
     const saved=await savedOriginal(m,index,state);
-    if(saved){if(await maybeStat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;tick();}
+    if(saved){if(await maybeLstat(entry.source))throw occupied(entry.source);await restore(saved,entry.source);result.restored++;tick();}
     // Only a copy this organization published is removed, and only once the reviewed
     // original is verified at its own path, so the copy is never the last one.
-    if(state.published.has(index)&&await maybeStat(entry.destination)&&await maybeStat(entry.source)){
+    if(state.published.has(index)&&await maybeLstat(entry.destination)&&await maybeLstat(entry.source)){
      // Restoring a kept original moves its change time; its contents are still hashed.
      await validateOriginal(entry.source,entry,m.source,true,signal,true,proofs);tick();
      if(await targetMatches(entry,m,signal,true,proofs)){tick();await fs.unlink(entry.destination);logDeletion('undo',entry.destination,'copy this organization published, removed by Undo',`the original was restored and verified at ${entry.source} (SHA-256 ${entry.digest}) and this copy still matched the journal`,{bytes:entry.size});await syncParents(entry.destination,m.root);result.removed++;}
@@ -1346,25 +1353,25 @@ export async function journalReaderCount(folder:string):Promise<number> {
 async function tally(folder:string,signal?:AbortSignal,onFiles?:(files:number,estimate:number)=>void):Promise<{files:number;bytes:number}>{
  const total={files:0,bytes:0};let estimate=0;
  const walk=async(current:string):Promise<void>=>{
-  const entries=await fs.readdir(current,{withFileTypes:true});let next=0;estimate+=entries.length;
+  const entries=await fs.readdir(current,{withFileTypes:true});estimate+=entries.length;
   // Several at a time: a drive answers many small requests better than one after another.
-  await Promise.all(Array.from({length:Math.min(await journalReaderCount(current),entries.length)},async()=>{while(next<entries.length){
-   checkAbort(signal);const entry=entries[next++]!,file=path.join(current,entry.name);
+  await mapPool(entries,await journalReaderCount(current),async entry=>{
+   const file=path.join(current,entry.name);
    if(entry.isDirectory())await walk(file);
-   else{const stat=await maybeStat(file);if(stat){total.files++;total.bytes+=Number(stat.size);onFiles?.(total.files,Math.max(estimate,total.files));}}
-  }}));
+   else{const stat=await maybeLstat(file);if(stat){total.files++;total.bytes+=Number(stat.size);onFiles?.(total.files,Math.max(estimate,total.files));}}
+  },signal);
  };
  onFiles?.(0,0);await walk(folder);
  return total;
 }
 /** Remove a folder and everything in it, counting the files as they go; a stop leaves what is left of it. */
 export async function removeTree(folder:string,signal?:AbortSignal,onFile?:(removed:number)=>void,counter={removed:0}):Promise<void>{
- const entries=await fs.readdir(folder,{withFileTypes:true});let next=0;
- await Promise.all(Array.from({length:Math.min(await journalReaderCount(folder),entries.length)},async()=>{while(next<entries.length){
-  checkAbort(signal);const entry=entries[next++]!,file=path.join(folder,entry.name);
+ const entries=await fs.readdir(folder,{withFileTypes:true});
+ await mapPool(entries,await journalReaderCount(folder),async entry=>{
+  const file=path.join(folder,entry.name);
   if(entry.isDirectory())await removeTree(file,signal,onFile,counter);
   else{await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});onFile?.(++counter.removed);}
- }}));
+ },signal);
  await fs.rmdir(folder);
 }
 /** This journal's pointers (and their crash leftovers) in the folders it leaves them in. */
@@ -1372,7 +1379,7 @@ async function ownPointers(m:Manifest):Promise<{file:string;folder:string;size:n
  const found:{file:string;folder:string;size:number}[]=[];
  for(const folder of pointerFolders(m))for(const {store,file,name} of await pointersIn(folder).catch(()=>[])){
   if(name!==`journal-${m.id}.json`&&!(pointerTemporary.test(name)&&name.replace(/^\./,'').startsWith(`journal-${m.id}-`)))continue;
-  await contained(file,store.path);const stat=await maybeStat(file);
+  await contained(file,store.path);const stat=await maybeLstat(file);
   if(stat?.isFile())found.push({file,folder,size:Number(stat.size)});
  }
  return found;
@@ -1428,7 +1435,7 @@ async function copyElsewhere(m:Manifest,state:JournalState,index:number,expected
  const entry=m.entries[index]!;
  const same=async(file:string|undefined,scope:string)=>{
   if(!file)return false;try{await contained(file,scope);}catch{return false;}
-  const stat=await maybeStat(file);return !!stat?.isFile()&&!stat.isSymbolicLink()&&stat.size===expected.size&&await digest(file,signal)===expected.digest;
+  const stat=await maybeLstat(file);return !!stat?.isFile()&&!stat.isSymbolicLink()&&stat.size===expected.size&&await digest(file,signal)===expected.digest;
  };
  if(await same(entry.destination,m.root)||await same(entry.source,m.source))return true;
  const handOff=state.handedOff.get(index);if(handOff&&await same(handOff.destination,handOff.successorRoot))return true;
@@ -1449,7 +1456,7 @@ async function checkJournalFolder(m:Manifest,state:JournalState,folder:string,si
  const entries=async(directory:string)=>{const stat=await fs.lstat(directory);if(!stat.isDirectory()||stat.isSymbolicLink())throw unexpected(directory);return (await fs.readdir(directory)).filter(name=>!finderMetadata(name));};
  for(const name of await entries(folder))if(!journalFile.test(name))throw unexpected(path.join(folder,name));
  const originals=path.join(folder,'originals'),kept:{index:number;file:string}[]=[];
- for(const index of await maybeStat(originals)?await entries(originals):[]){
+ for(const index of await maybeLstat(originals)?await entries(originals):[]){
   const position=Number(index),indexFolder=path.join(originals,index);
   if(!/^\d+$/.test(index)||position>=m.entries.length)throw unexpected(indexFolder);
   for(const slot of await entries(indexFolder)){
@@ -1473,9 +1480,9 @@ const ended=(state:JournalState)=>!state.halfConverted&&(state.undoComplete||!!s
 /** The journals of one store, with the library each header names. */
 export async function storeJournals(store:Store):Promise<{id:string;root:string}[]>{
  const organizations=path.join(store.path,ORGANIZATIONS),found:{id:string;root:string}[]=[];
- for(const id of (await fs.readdir(organizations).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;})).sort()){
+ for(const id of (await readdirIfPresent(organizations)).sort()){
   if(!uuid.test(id))continue;const journal=path.join(organizations,id,JOURNAL);
-  if(!(await maybeStat(journal))?.isFile())continue;
+  if(!(await maybeLstat(journal))?.isFile())continue;
   const root=await readJournalHead(journal,store.path,false).then(head=>head.header.root,()=>undefined);
   if(typeof root==='string')found.push({id,root});
  }

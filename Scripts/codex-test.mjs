@@ -4,12 +4,14 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
+import {parseArgs} from 'node:util';
 const repo=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const interactive=process.argv.includes('--interactive');
+const {values:flags}=parseArgs({strict:false,options:{interactive:{type:'boolean'},large:{type:'string'},only:{type:'string',multiple:true},'no-build':{type:'boolean'},'ui-only':{type:'boolean'},'organization-only':{type:'boolean'},'reduced-motion':{type:'boolean'}}});
+const interactive=flags.interactive===true;
 // --only=<regex> runs only the checks whose id matches (the final checks always run), for working on one area.
 // --large=N seeds N misplaced media files into the first destination, so both organization checks
 // review and move them through the app (UI under load). It lengthens the deadline accordingly.
-const large=Number(process.argv.find(arg=>arg.startsWith('--large='))?.slice('--large='.length)??0);
+const large=Number(flags.large??0);
 const run=(bin,args,timeoutMs=0)=>new Promise((resolve,reject)=>{
  const child=spawn(bin,args,{cwd:repo,stdio:'inherit',env:{...process.env,ELECTRON_RUN_AS_NODE:undefined}});
  let expired=false;
@@ -17,7 +19,7 @@ const run=(bin,args,timeoutMs=0)=>new Promise((resolve,reject)=>{
  child.on('error',error=>{clearTimeout(deadline);reject(error);});
  child.on('exit',(code,signal)=>{clearTimeout(deadline);if(expired)reject(new Error('Automated Electron QA exceeded its 7-minute deadline'));else if(code===0)resolve();else reject(new Error(`${bin} exited ${code??signal}`));});
 });
-if(!process.argv.includes('--no-build'))await run(process.platform==='win32'?'npm.cmd':'npm',['run','build']);
+if(flags['no-build']!==true)await run(process.platform==='win32'?'npm.cmd':'npm',['run','build']);
 const root=await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()),'photo-importer-codex-'));
 for(let i=1;i<=6;i++){
  const source=path.join(root,`source-${i}`);await fs.mkdir(source);const payload=Buffer.alloc(8*1024*1024,i);await fs.writeFile(path.join(source,'payload.bin'),payload);await fs.writeFile(path.join(source,'.hidden-note'),`Fixture ${i}\n`);
@@ -30,6 +32,6 @@ console.log(`Codex QA fixtures and results: ${root}`);
 const require=createRequire(import.meta.url);const electron=require('electron');
 const deadlineMs=420000+large*300;
 // The app writes its report by 45 s before the kill: enough to close and exit on a loaded machine.
-try{await run(electron,['.', '--qa',`--qa-fixture-root=${root}`,`--codex-deadline=${Date.now()+deadlineMs-45000}`,...(process.argv.includes('--reduced-motion')?['--force-prefers-reduced-motion']:[]),...(interactive?[]:['--codex-test']),...((process.argv.includes('--ui-only')||process.argv.includes('--organization-only'))?['--codex-ui-only']:[]),...(process.argv.includes('--organization-only')?['--codex-organization-only']:[]),...process.argv.filter(arg=>arg.startsWith('--only=')).map(arg=>'--codex-'+arg.slice(2))],interactive?0:deadlineMs);}
+try{await run(electron,['.', '--qa',`--qa-fixture-root=${root}`,`--codex-deadline=${Date.now()+deadlineMs-45000}`,...(flags['reduced-motion']===true?['--force-prefers-reduced-motion']:[]),...(interactive?[]:['--codex-test']),...((flags['ui-only']===true||flags['organization-only']===true)?['--codex-ui-only']:[]),...(flags['organization-only']===true?['--codex-organization-only']:[]),...(flags.only??[]).map(value=>`--codex-only=${value}`)],interactive?0:deadlineMs);}
 catch(error){console.error(String(error));process.exitCode=1;}
 if(!interactive){const reportPath=path.join(root,'artifacts','report.json');try{const report=JSON.parse(await fs.readFile(reportPath,'utf8'));for(const check of report.checks)console.log(`${{passed:'PASS',failed:'FAIL',skipped:'SKIP'}[check.status]??(check.passed?'PASS':'FAIL')} ${check.id??''} ${check.title??check.name}${check.reason?` (${check.reason})`:''}${check.error?`\n     ${check.error.split('\n')[0]}`:''}`);console.log(`${report.passed?'PASSED':'FAILED'} ${report.suite} suite in ${Math.round(report.seconds??0)} s${report.error?`: ${report.error}`:''}`);console.log(`Checks and coverage: ${path.join(root,'artifacts','report.md')}`);if(!report.passed)process.exitCode=1;}catch{console.error('No QA report produced: app failed before the integration checks finished.');process.exitCode=1;}console.log(`Report: ${reportPath}`);}

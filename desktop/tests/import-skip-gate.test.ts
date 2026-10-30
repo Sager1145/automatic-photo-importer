@@ -5,7 +5,7 @@ import {syncBuiltinESMExports} from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
 import {plan,type PlanProgress} from '../core';
-import {routingChanged,rememberRouting} from '../platform/routing-memory';
+import {placementId,placementScope,replacePlacement} from '../platform/placement-memory';
 import {ruleOptions,rulesScope} from '../routing-options';
 import {defaultPreferences} from '../preferences';
 import type {Preferences} from '../shared';
@@ -28,18 +28,27 @@ const listings=(t:test.TestContext,root:string)=>{
  return calls;
 };
 
-test('routing memory: changed until recorded, unchanged for the same rules, changed when a rule changes',async t=>{
+test('placement record scope: unrecorded until a library is filled, then unchanged for the same rules and changed when a rule changes',async t=>{
  const routingScope=(rules:Partial<Preferences>)=>rulesScope(ruleOptions({...defaultPreferences,unknownRules:{},mediaLayout:'flat',...rules}));
- const f=await fixture(t),scope=routingScope({template:'{year}/{camera}'});
- assert.equal(await routingChanged(f.store,['a'],scope),true);
- await rememberRouting(f.store,['a','b'],scope);
- assert.equal(await routingChanged(f.store,['a','b'],scope),false);
- assert.equal(await routingChanged(f.store,['a','c'],scope),true,'one unrecorded library is enough');
+ const f=await fixture(t),scope=routingScope({template:'{year}/{camera}'}),id=placementId('uuid',f.root);
+ assert.equal(await placementScope(f.store,id),undefined);
+ await replacePlacement(f.store,id,scope,[]);
+ assert.equal(await placementScope(f.store,id),scope,'a header with no files still records the rules');
+ assert.notEqual(await placementScope(f.store,id),routingScope({template:'other'}));
+ assert.equal(await placementScope(f.store,placementId('uuid',path.join(f.base,'other'))),undefined,'another library is not recorded');
  assert.notEqual(routingScope({template:'{year}/{yyyymm}/{camera}'}),scope);
  assert.notEqual(routingScope({template:'{year}/{camera}',mediaLayout:'video-root'}),scope);
  assert.notEqual(routingScope({template:'{year}/{camera}',videoTemplate:'v'}),scope);
  assert.notEqual(routingScope({template:'{year}/{camera}',editedFolder:'x'}),scope);
- assert.equal(await routingChanged(f.store,['a'],routingScope({template:'other'})),true);
+});
+
+test('a library is recognised by its volume UUID and folders, whatever device number the volume has now',async t=>{
+ const f=await fixture(t),scope=rulesScope(ruleOptions({...defaultPreferences,unknownRules:{}}));
+ // The id is made of the volume UUID and the folders only; the stat's device number (part of the root identity "dev:ino") changes on every mount and is not in it.
+ const before=placementId('volume-uuid',f.root),after=placementId('volume-uuid',f.root);
+ await replacePlacement(f.store,before,scope,[]);
+ assert.equal(await placementScope(f.store,after),scope);
+ assert.equal(await placementScope(f.store,placementId('another-uuid',f.root)),undefined);
 });
 
 test('with unchanged rules the library is not listed and nothing is looked for',async t=>{

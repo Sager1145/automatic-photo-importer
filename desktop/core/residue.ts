@@ -1,13 +1,13 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type { BigIntStats, Dirent } from 'node:fs';
-import { APP_DATA_FOLDER, maybeLstat, storesFor, storeUnchanged, type Store } from './app-store';
+import { APP_DATA_FOLDER, storesFor, storeUnchanged, type Store } from './app-store';
 import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
 import { assessReceipt, closeReceipts, IMPORTS, openReceipts, readSegment, receiptSegments, removeSegmentIfDone, STAGING, stagePattern as stageName } from './import-recovery';
 import { deleteOrganizationRecovery, deletingPattern, endedJournal, isRecoveryName, journalTerminal, ORGANIZATIONS, POINTERS, removeTree, storeJournals, storePointerLeftover } from './recovery';
 import { log, logDeletion } from '../logger';
 import { LIBRARIES } from './destination-index';
-import { checkAbort, code, contained, digest, sameStat } from './paths';
+import { checkAbort, code, contained, digest, isAbort, maybeLstat, sameStat } from './paths';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
@@ -196,14 +196,10 @@ async function storeLeftovers(store:Store,items:ResidueItem[],signal?:AbortSigna
   if(besideStat)items.push({path:beside,kind:'sidecar',bytes:Number(besideStat.size),root:store.base,stat:besideStat});
 }
 
-/** Folders in the temporary folder being used now; asked again right before each removal. */
-type InUse=()=>string[];
-const used=async(folder:string,inUse?:InUse)=>!!inUse&&(await Promise.all(inUse().map(item=>fs.realpath(item).catch(()=>item)))).includes(folder);
 /** Read-only: the app's leftovers in the records folders of the backup folders in `roots` (every store readers
- * consult for them), and its camera and preview folders in `temporary` (the system temporary folder) other than
- * those `inUse`.
+ * consult for them), and its camera and preview folders in `temporary` (the system temporary folder).
  * User files are never listed, whatever their names. */
-export async function findResidue(roots:string[],options:{temporary?:string;inUse?:InUse;signal?:AbortSignal;/** Hears how far the look has come, as it goes (the caller throttles). */onProgress?:(scan:ResidueScan)=>void}={}):Promise<Residue> {
+export async function findResidue(roots:string[],options:{temporary?:string;signal?:AbortSignal;/** Hears how far the look has come, as it goes (the caller throttles). */onProgress?:(scan:ResidueScan)=>void}={}):Promise<Residue> {
   const items:ResidueItem[]=[];
   // Canonical paths, as removal checks every item is still inside its root (macOS /var is /private/var).
   const canonical=(folder:string)=>fs.realpath(folder).catch(()=>undefined);
@@ -218,13 +214,13 @@ export async function findResidue(roots:string[],options:{temporary?:string;inUs
   const scan=options.onProgress&&{state,emit:()=>options.onProgress!({...state})};
   scan?.emit();
   for(const store of stores.values()){
-    await storeLeftovers(store,items,options.signal,scan).catch(error=>{if((error as Error)?.name==='AbortError')throw error;/* A store that changed or cannot be read is looked at again next time. */});
+    await storeLeftovers(store,items,options.signal,scan).catch(error=>{if(isAbort(error))throw error;/* A store that changed or cannot be read is looked at again next time. */});
     state.done++;state.file=path.basename(store.base);scan?.emit();
   }
   if(temporary) for(const entry of await list(temporary)) {
     checkAbort(options.signal);
     const folder=path.join(temporary,entry.name);
-    if(!entry.isDirectory()||!temporaryFolder.test(entry.name)||await used(folder,options.inUse)) continue;
+    if(!entry.isDirectory()||!temporaryFolder.test(entry.name)) continue;
     // A preview removes its own folder when it finishes.
     const stat=await fs.lstat(folder,{bigint:true}).catch(()=>undefined);
     if(stat) items.push({path:folder,kind:'temporary',bytes:await folderBytes(folder,options.signal),root:temporary,stat});
@@ -247,7 +243,7 @@ function summary(items:ResidueItem[]):Residue {
 /** Remove what findResidue listed, each only while it is still the very file or folder found. Folders go only
  * when empty. keepResumable leaves copies a re-import could continue and those not proven dead. Recoverable copies
  * are never removed. Receipts are closed after their file is gone, a store's together in one append. */
-export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;inUse?:InUse;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
+export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
   const keeps=(item:ResidueItem)=>item.kind==='recoverable'||(options.keepResumable===true&&keptKinds.has(item.kind));
   // Only what this run removes counts toward the total: kept copies are not work.
@@ -280,7 +276,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
         await contained(item.path,item.root);
         const now=await fs.lstat(item.path,{bigint:true});
         if(item.kind==='folder'||item.kind==='temporary'||item.stat?.isDirectory()) {
-          if(!now.isDirectory()||now.dev!==item.stat?.dev||now.ino!==item.stat?.ino||item.kind==='temporary'&&await used(item.path,options.inUse)) continue;
+          if(!now.isDirectory()||now.dev!==item.stat?.dev||now.ino!==item.stat?.ino) continue;
           // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
           if(item.kind==='folder') await fs.rmdir(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
           logDeletion('residue',item.path,residueReason(item.kind),item.kind==='folder'?'directory is still the one found by the scan (same device and inode) and rmdir only removes empty folders':`directory is still the one found by the scan (same device and inode) and is this app's own ${item.kind==='temporary'?'temporary':'set-aside'} folder, not in use`,{kind:item.kind,bytes:item.bytes,folder:true});
@@ -293,7 +289,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
         close(item);
         left.pop();removed.files++;removed.bytes+=item.bytes;
       }
-    } catch(error) { if((error as Error)?.name==='AbortError') throw error; log('detailed','residue','left',{path:item.path,kind:item.kind,error}); /* Gone, changed, in use or unavailable: left for a later check. */ }
+    } catch(error) { if(isAbort(error)) throw error; log('detailed','residue','left',{path:item.path,kind:item.kind,error}); /* Gone, changed, in use or unavailable: left for a later check. */ }
     options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path));
   }
   for(const {store,rids} of closes.values())await closeReceipts(store,rids).catch(()=>{/* Closed by a later check: its file is gone. */});

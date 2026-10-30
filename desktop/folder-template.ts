@@ -39,6 +39,40 @@ export function safeComponent(value: string): string {
 export const validFolderName = (name: unknown): name is string => typeof name === 'string' && name.normalize('NFC') === safeComponent(name) && !/[{}]/.test(name);
 /** Where edited exports go: the month, the edited folder, then the camera. */
 export const editedTemplate = (editedFolder: string) => `{year}/{yyyymm}/${editedFolder}/{camera}`;
+/** The edited-exports folder name when the user chose none. */
+export const DEFAULT_EDITED_FOLDER = 'editied';
+/** The one edited-export folder rule: whether a folder path (the parts of a file's directory) passes through the edited folder. Exact, case-sensitive. */
+export const inEditedFolder = (relativeDirParts: string[], editedFolder = DEFAULT_EDITED_FOLDER): boolean => relativeDirParts.includes(editedFolder);
+/** Where an organization sets aside a name taken by other content. */
+export const CONFLICTS_FOLDER = 'Conflicts';
+
+/** What each token can expand to (see templateValues). The camera is any single folder name. */
+const TOKEN_PATTERNS: Record<string, string> = {
+  year: '\\d{4}', month: '\\d{2}', day: '\\d{2}', yyyymm: '\\d{6}', yyyyMMdd: '\\d{8}',
+  monthName: `\\d{2} (?:${MONTHS.join('|')})`, yearMonthName: `\\d{4}-\\d{2} (?:${MONTHS.join('|')})`, camera: '[^/]+',
+};
+const DATE_ONLY = new Set(['year', 'month', 'day', 'yyyymm', 'yyyyMMdd', 'monthName', 'yearMonthName']);
+const escapeText = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Whether a library-relative folder (posix separators) is laid out by `template`: its parts begin with the template's levels, directly
+ * under the library root or under one base folder, and none of the parts the template does not fix by date is the edited folder or one of `reserved`. */
+export function templateMatcher(template: string, editedFolder = DEFAULT_EDITED_FOLDER, reserved: readonly string[] = []): (relativeDir: string) => boolean {
+  const levels = template.split('/').map(level => {
+    let dateOnly = true;
+    const source = level.split(/(\{[^{}]+\})/).map(piece => {
+      const key = /^\{([^{}]+)\}$/.exec(piece)?.[1];
+      if (key === undefined || !Object.hasOwn(TOKEN_PATTERNS, key)) return escapeText(piece);
+      if (!DATE_ONLY.has(key)) dateOnly = false;
+      return TOKEN_PATTERNS[key]!;
+    }).join('');
+    return { pattern: new RegExp(`^${source}$`, 'u'), dateOnly };
+  });
+  const excluded = new Set([editedFolder, ...reserved]);
+  return relativeDir => {
+    const parts = relativeDir.split('/');
+    return [0, 1].some(start => parts.length >= start + levels.length && levels.every((level, at) => level.pattern.test(parts[start + at]!))
+      && !parts.slice(start).some((part, at) => !levels[at]?.dateOnly && excluded.has(part)));
+  };
+}
 
 export const monthToken = ({ full, english }: FolderPath['month']) => english ? (full ? '{yearMonthName}' : '{monthName}') : (full ? '{yyyymm}' : '{month}');
 const dayToken = ({ full }: FolderPath['day']) => full ? '{yyyyMMdd}' : '{day}';

@@ -22,7 +22,7 @@
 
   /* Spacing, radii, sizes */
   --radius-sm:.45rem;--radius-md:.7rem;--radius-lg:.95rem;--radius-xl:1.2rem;--radius-capsule:999px;
-  --control-height:2.5rem;--toolbar-control-height:var(--control-height);
+  --control-height:2.5rem;--control-height-sm:2rem;--toolbar-control-height:var(--control-height);
   /* One card and tile rhythm for every screen */
   --card-pad-y:1rem;--card-pad-x:1.15rem;--card-gap:.85rem;--dialog-pad-x:1.35rem;--dialog-pad-y:1rem;--tile-pad:.75rem .9rem;
   --sidebar-width:clamp(190px,15rem,min(300px,24vw));
@@ -99,7 +99,8 @@
 
 /* ---------- Base ---------- */
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;background:var(--window)}
+/* The scrollbar track is always reserved, so the fixed title bar and its controls sit in the same place on every page. */
+html{-webkit-text-size-adjust:100%;background:var(--window);overflow-y:scroll}
 body{margin:0;min-width:760px;background:var(--window);color:var(--label);font-family:var(--font-sans);font-size:var(--text-body);line-height:1.38;font-optical-sizing:auto;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 h1,h2,h3,h4{margin:0;font-weight:600;color:var(--label)}
 h2{font-size:var(--text-title);letter-spacing:var(--tracking-snug);line-height:1.2}
@@ -318,7 +319,6 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .parallel-source-label{font-size:var(--text-footnote);color:var(--label-secondary);font-weight:500;white-space:nowrap}
 .parallel-source-control input{width:6.5rem}
 .parallel-source-control output{font-size:var(--text-footnote);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
-.connected-count{font-size:var(--text-footnote);color:var(--label-secondary);font-weight:500;white-space:nowrap;padding:0 .25rem}
 
 .source-ledger{display:grid;gap:.75rem;align-items:start}
 /* Grid view: as many columns as fit a 22rem card (two from ~45rem); list view stays one column. */
@@ -464,13 +464,14 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .inventory-open svg{flex:none}
 
 /* Empty ledger and footer */
-.source-empty{display:grid;justify-items:center;gap:.6rem;padding:2.75rem 1.5rem;text-align:center;border-radius:var(--radius-xl);border:1.5px dashed var(--separator-strong);background:var(--surface-raised)}
+.source-empty{display:grid;justify-items:center;gap:.6rem;padding:1.75rem 1.5rem;text-align:center;border-radius:var(--radius-xl);border:1.5px dashed var(--separator-strong);background:var(--surface-raised)}
 :root[data-theme=dark] .source-empty{background:rgba(255,255,255,.02)}
 .empty-device-line{display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;color:var(--label-secondary)}
 .empty-device-line>svg:first-child,.empty-device-line>svg:last-child{color:var(--accent)}
 .empty-device-line>span{width:2.5rem;border-top:2px dashed var(--separator-strong)}
 .source-empty h3{font-size:var(--text-title-3)}
 .source-empty p{max-width:34rem;color:var(--label-secondary)}
+.source-empty-other{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:.25rem .5rem;font-size:var(--text-footnote);color:var(--label-secondary)}
 .source-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem 1rem;padding:.8rem 1rem;border-radius:var(--radius-xl);border:1px dashed var(--separator-strong)}
 .source-footer .switch-row{flex:1 1 16rem}
 
@@ -520,7 +521,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .destination-drive{display:flex;align-items:center;gap:.7rem;min-width:0}
 .destination-drive svg{flex:none;color:var(--accent)}
 .destination-drive h3{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.destination-path{font-family:var(--font-mono);font-size:var(--text-caption);color:var(--label-secondary);overflow-wrap:anywhere;user-select:text}
+.destination-path{font-family:var(--font-mono);font-size:var(--text-caption);color:var(--label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left;user-select:text}
+.destination-path>bdi{direction:ltr;unicode-bidi:isolate}
 .destination-health{display:inline-flex;align-items:center;gap:.4rem;font-size:var(--text-footnote);font-weight:500;color:var(--success)}
 .destination-health.offline{color:var(--danger)}
 .destination-buttons{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;flex-wrap:wrap}
@@ -734,7 +736,12 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .organization-paths dd{font-family:var(--font-mono);font-size:var(--text-footnote);overflow-wrap:anywhere;user-select:text}
 .organization-option{padding:var(--tile-pad);border-radius:var(--radius-md);background:var(--fill-4)}
 .organization-scope{display:grid;gap:.5rem}
-.organization-scope>p{font-size:var(--text-footnote);color:var(--label-secondary)}
+.organization-scope-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem 1rem}
+.organization-scope-row>p{flex:1 1 14rem;font-size:var(--text-footnote);color:var(--label-secondary)}
+/* Folder rules lead the action row; Review and Organize stay together on the right. */
+.organization-execute>.organization-rules{margin-right:auto}
+.activity-jobs-bar{justify-content:space-between}
+.activity-jobs-bar>.inline-note{flex:1 1 auto}
 .organization-scope ul{display:grid;gap:.25rem;list-style:none}
 .organization-scope li{padding:.35rem .7rem;border-radius:var(--radius-sm);background:var(--fill-4);font-family:var(--font-mono);font-size:var(--text-footnote);overflow-wrap:anywhere}
 .organization-safety{display:flex;align-items:flex-start;gap:.6rem;padding-top:.85rem;border-top:1px solid var(--separator);font-size:var(--text-footnote);color:var(--label-secondary)}
@@ -887,8 +894,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
 .section-heading h2{font-size:var(--text-title-3);font-weight:700}
 .page-toolbar{display:flex;justify-content:flex-end}
 /* Paired buttons under the destination inspector */
-.bay-actions{display:flex;flex-wrap:wrap;gap:.5rem}
-.bay-actions .button{min-width:0;padding:0 .75rem}
+.bay-actions{display:grid;justify-items:start;gap:.5rem}
+.bay-actions .button{min-width:0;max-width:100%;padding:0 .9rem}
 
 /* ---------- Layout constraints ----------
    Guarantees that no content can push its container wider or overlap a neighbour:
@@ -961,10 +968,8 @@ button.sidebar-item:hover{background:var(--fill-3)}
    controls grow and shrink fluidly, secondary buttons collapse from labelled capsules to round
    icon buttons, and layouts reflow from rows to stacks as room runs out. */
 
-/* Fluid control sizes: buttons scale with their toolbar or card, within readable bounds. */
-.titlebar-actions{--control-height:clamp(2.15rem,1.55rem + 1.5cqi,2.6rem)}
-.source-row-actions{--control-height:clamp(2.15rem,1.7rem + 1.6cqi,2.6rem)}
-.card-actions,.bay-actions,.destination-buttons,.rule-actions{--control-height:clamp(2.2rem,1.8rem + 1cqi,2.6rem)}
+/* Controls share one height (--control-height) and one compact height (--control-height-sm) on every page;
+   narrow containers collapse labels to icons instead of shrinking controls. */
 .button,.selection-chip,.segmented button,.source-layout-switch button{transition-property:transform,background-color,box-shadow,color,opacity}
 .source-row{padding:clamp(.8rem,.5rem + 1.2cqi,1.2rem) clamp(.9rem,.55rem + 1.4cqi,1.35rem)}
 
@@ -984,7 +989,7 @@ button.sidebar-item:hover{background:var(--fill-3)}
 
 /* Desk: destinations sit beside the drives when there is room, and move below them otherwise. */
 @container desk (min-width:52rem){
-  .workbench-columns{grid-template-columns:minmax(0,1fr) clamp(16rem,25cqi,21rem)}
+  .workbench-columns{grid-template-columns:minmax(0,1fr) clamp(17rem,28cqi,22rem)}
 }
 @container desk (max-width:52rem){
   .destination-bay{position:static;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));align-items:start}
@@ -1205,9 +1210,8 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
   .desk-page .import-dashboard>.progress-jobs .organization-progress{gap:.25rem}
   .desk-page .import-dashboard>.progress-jobs .progress-track{height:.3rem}
 }
-/* Narrow sources column: the toolbar keeps its controls on one line; the count repeats the overview. */
+/* Narrow sources column: the toolbar keeps its controls on one line. */
 @container sources (max-width:46rem){
-  .connected-count{display:none}
   .parallel-source-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .parallel-source-control{padding:0 .7rem}
   .parallel-source-control input{width:4.5rem}
@@ -1220,8 +1224,7 @@ svg[class*=lucide-loader]{animation:spin 900ms linear infinite}
 
 /* Hide / show the import overview */
 .dashboard-title{display:flex;align-items:center;gap:.4rem;min-width:0}
-.dashboard-hide.button-icon-only{--control-height:1.75rem;min-height:1.75rem}
-.dashboard-hide>svg{width:14px;height:14px}
+
 
 /* Sidebar drive status: the running step flashes. Reduced motion keeps a steady filled dot. */
 .mini-steps i[data-state=active]{position:relative;isolation:isolate;background:var(--accent-soft)}
@@ -1506,14 +1509,13 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 ::view-transition-group-children(sidebar-devices){overflow:clip}
 
 .parallel-summary{display:inline-flex;align-items:center;gap:.2rem;font-size:var(--text-footnote);color:var(--label-secondary);white-space:nowrap}
-.parallel-summary>.button{--control-height:1.8rem;padding:0;width:var(--control-height)}
+.parallel-summary>.button{--control-height:var(--control-height-sm);padding:0;width:var(--control-height)}
 
 /* No summary data disappears to obtain density: wrap into available width. */
 .desk-page .import-dashboard .metric-optional,.desk-page .import-dashboard .dashboard-metrics small{display:block}
 .desk-page .import-dashboard .dashboard-metrics>div{flex-wrap:wrap}
 .desk-page .import-dashboard .dashboard-metrics small{flex-basis:100%;white-space:normal}
 .desk-page .import-dashboard>.progress-jobs li>span,.desk-page .import-dashboard>.progress-jobs .organization-progress>small{display:block}
-.desk-page .connected-count{display:inline-block}
 
 .desk-page .import-dashboard .dashboard-metrics dt{white-space:normal;overflow:visible;text-overflow:clip}
 /* A full-width metric strip and a shared title/progress row retain every value. */

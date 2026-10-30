@@ -5,6 +5,7 @@ import { access, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Source } from '../shared';
+import { beneath } from '../core/paths';
 
 interface Camera {name:string;cameraID:string;}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;}
@@ -89,8 +90,8 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
     const result=await request({command:'stage',cameraID,directory:scratch},30*60*1000,onProgress,signal) as {path?:unknown};
     signal?.throwIfAborted();
     if(typeof result?.path!=='string')throw new Error('The camera helper did not return its staged folder.');
-    const root=await realpath(scratch);const staged=await realpath(result.path);const relative=path.relative(root,staged);
-    if(!relative||relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative)||!(await stat(staged)).isDirectory())throw new Error('The camera helper returned an unsafe staging folder.');
+    const root=await realpath(scratch);const staged=await realpath(result.path);
+    if(!beneath(staged,root)||!(await stat(staged)).isDirectory())throw new Error('The camera helper returned an unsafe staging folder.');
     return {path:staged,cleanup};
   }catch(error){await cleanup();signal?.throwIfAborted();throw error;}finally{staging--;signal?.removeEventListener('abort',abort);}
 }

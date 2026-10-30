@@ -1,6 +1,5 @@
-import {Trash2} from 'lucide-react';
 import type {Action,ResidueStatus} from '../shared';
-import {Button,ConfirmSheet} from './ui';
+import {ConfirmSheet} from './ui';
 import {OperationProgress} from './progress';
 import {useTranslation} from './i18n';
 
@@ -45,15 +44,4 @@ export function CleanupConfirmation({residue,busy,act,onCancel}:{residue?:Residu
   {busy&&<p>{t("Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.")}</p>}
   {residue?.checking&&<OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="cleanup-confirm-progress"/>}
  </ConfirmSheet>;
-}
-/** Optional maintenance surface. Existing richer diagnostics can keep their body and use onCleanup to open the shared sheet. */
-export function ResidueMaintenance({residue,busy,act,onCleanup}:{residue?:ResidueStatus;busy:boolean;act:Dispatch;onCleanup:()=>void}){
- const {t,formatNumber,formatBytes}=useTranslation();
- return <div data-testid="residue-cleanup">
-  <div className="settings-row"><span>{residue?.checking?t("Looking for leftover files…"):!residue?.checkedAt?t("Not checked yet."):residue.files?`${formatNumber(residue.files)} · ${formatBytes(residue.bytes)}`:t("No leftover files.")}</span><Button icon={Trash2} data-testid="cleanup-open" disabled={locked(residue,busy)} onClick={onCleanup}>{t("Clean up")}</Button></div>
-  <CleanupPreview residue={residue}/>
-  {residue?.checking&&<OperationProgress progress={residue.progress} label={t("Leftover files progress")} testId="residue-progress"/>}
-  {residue?.unbound?.paths.map(file=><p key={file} className="settings-row-note" data-testid="residue-unbound">{t("A file at {path} has an old copy receipt that no longer matches it; the file is kept. Remove the receipt so imports can continue.",{path:file})} <Button disabled={busy||!!residue.checking} onClick={()=>act({type:'removeReceipt',file})}>{t("Remove receipt")}</Button></p>)}
-  {residue?.cleaned&&<p className="settings-row-note">{t("Last cleanup removed {files} ({size}).",{files:formatNumber(residue.cleaned.files),size:formatBytes(residue.cleaned.bytes)})}</p>}
- </div>;
 }

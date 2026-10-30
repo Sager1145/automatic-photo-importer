@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readdir, readFile, realpath, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
@@ -45,17 +45,10 @@ export function parseWindowsVolumes(data:unknown):MountedVolume[] {
 }
 function fsType(value:unknown):string|undefined {return typeof value==='string'&&value.trim()?value.trim().toLowerCase():undefined;}
 function finite(value:unknown):number|undefined {const n=Number(value); return value!==null && value!==undefined && value!=='' && Number.isFinite(n) && n>=0 ? n : undefined;}
-function plistJSON(plist:string):Promise<any> {
-  return new Promise((resolve,reject)=>{
-    const child=spawn('/usr/bin/plutil',['-convert','json','-o','-','-'],{stdio:['pipe','pipe','pipe']});
-    const chunks:Buffer[]=[]; let size=0; let error='';
-    const timer=setTimeout(()=>child.kill(),8000);
-    child.on('error',reject);
-    child.stdout.on('data',(chunk:Buffer)=>{size+=chunk.length;if(size>4*1024*1024)child.kill();else chunks.push(chunk);});
-    child.stderr.on('data',(chunk:Buffer)=>{if(error.length<4096)error+=chunk.toString();});
-    child.on('close',code=>{clearTimeout(timer);if(code!==0)reject(new Error(error||'Volume information conversion failed'));else try{resolve(JSON.parse(Buffer.concat(chunks).toString()));}catch(error){reject(error);}});
-    child.stdin.on('error',()=>{}); child.stdin.end(plist);
-  });
+async function plistJSON(plist:string):Promise<any> {
+  const pending=exec('/usr/bin/plutil',['-convert','json','-o','-','-'],{timeout:8000,maxBuffer:4*1024*1024});
+  pending.child.stdin?.on('error',()=>{}); pending.child.stdin?.end(plist);
+  return JSON.parse((await pending).stdout);
 }
 /** APFS synthesized containers need physical-store identity for mirror independence checks. */
 export function parseMacPhysicalStores(data:unknown):Map<string,string> {
@@ -235,6 +228,13 @@ export async function classifyMounted(volume:MountedVolume,deps:ClassifyDeps={})
     return result;
   }catch{return {...baseline,layoutUnavailable:true};}
 }
+/** Whether a folder lives on a camera card or removable flash (the same test that refuses such a destination). An unknown volume, or one whose top level could not be listed, counts as a card: the safe answer for anything that deletes. */
+export async function onCameraCard(folder:string,deps:{volumes?:()=>Promise<MountedVolume[]>;classify?:(volume:MountedVolume)=>Promise<Classification>}={}):Promise<boolean> {
+  try {
+    const volume=volumeOf(await (deps.volumes??mountedVolumes)(),path.resolve(folder));
+    if(!volume)return true;const c=await (deps.classify??classifyMounted)(volume);return c.source||!!c.layoutUnavailable;
+  }catch{return true;}
+}
 /** `destinations`: drives and folders chosen as destinations are never sources, so they are not read at all. */
 export async function getSources(volumes:MountedVolume[],options:ClassifyDeps&{destinations?:Pick<DestinationStatus,'path'|'volumeId'>[]}={}):Promise<Source[]> {
   const cache=options.cache??classified,present=new Set(volumes.map(volume=>volume.path));
@@ -245,7 +245,7 @@ export async function getSources(volumes:MountedVolume[],options:ClassifyDeps&{d
     if(options.destinations?.some(d=>(!!volume.volumeId&&d.volumeId===volume.volumeId)||within(volume.path,d.path)||within(d.path,volume.path)))return null;
     const classification=await classifyMounted(volume,options); if(!classification.source)return null;
     try {
-      const capacity=await statfs(volume.path);return {id:volume.volumeId||volume.path,name:volume.name||path.basename(volume.path),path:volume.path,transport:'storage' as const,camera:classification.camera,total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};
+      const {total,free}=await folderCapacity(volume.path);if(total===undefined||free===undefined)return null;return {id:volume.volumeId||volume.path,name:volume.name||path.basename(volume.path),path:volume.path,transport:'storage' as const,camera:classification.camera,total,free};
     } catch {return null;}
   }));
   // A camera-protocol failure must not hide working mounted camera cards.
@@ -284,7 +284,7 @@ export async function backupDriveIdentity(target:string, volumes?:MountedVolume[
   try {volume=volumeOf(volumes??await mountedVolumes(),resolved);} catch {}
   return driveIdentity(resolved,volume);
 }
-/** Total and free space of the volume a chosen source folder lives on; empty when it cannot be read. */
+/** Total and free space of the volume a folder lives on (the one statfs computation); empty when it cannot be read. */
 export async function folderCapacity(folder:string):Promise<{total?:number;free?:number}> {
   try {const capacity=await statfs(folder);return {total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail)};}
   catch {return {};}
@@ -301,10 +301,10 @@ export async function folderDrive(folder:string, volumes?:MountedVolume[]):Promi
 export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promise<DestinationStatus> {
   try {
     await requireMountedRoot(target);
-    const ancestor=await existingAncestor(target);const resolved=await realpath(ancestor);const capacity=await statfs(ancestor);
+    const ancestor=await existingAncestor(target);const resolved=await realpath(ancestor);const {total,free}=await folderCapacity(ancestor);if(total===undefined||free===undefined)throw new Error('The destination volume could not be read.');
     let volume:MountedVolume|undefined;
     try {volume=volumeOf(volumes??await mountedVolumes(),resolved);} catch {}
-    return {path:target,available:true,total:Number(capacity.bsize)*Number(capacity.blocks),free:Number(capacity.bsize)*Number(capacity.bavail),volumeId:volume?.volumeId ?? `filesystem:${(await stat(ancestor)).dev}`,physicalId:volume?.physicalId,detail:volume?.readOnly && !(process.platform==='darwin' && volume.path==='/')?'Read-only filesystem':undefined};
+    return {path:target,available:true,total,free,volumeId:volume?.volumeId ?? `filesystem:${(await stat(ancestor)).dev}`,physicalId:volume?.physicalId,detail:volume?.readOnly && !(process.platform==='darwin' && volume.path==='/')?'Read-only filesystem':undefined};
   } catch(error){return {path:target,available:false,detail:(error as Error).message};}
 }
 /** Pass `identity` to require the saved volume: a destination is a particular disk, not a reusable path. */

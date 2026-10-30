@@ -1,15 +1,12 @@
+import { formatFolder } from './media-formats';
+import { CONFLICTS_FOLDER, DEFAULT_EDITED_FOLDER, templateMatcher } from './folder-template';
 import type { DuplicateExif, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength } from './shared';
 
 /** Pure duplicate rules, shared by the main process and the renderer (no Node imports). */
 
-/** Get-or-create then push: linear, and keeps first-seen key order and member order. */
-function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V): void { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); }
 const base = (file: string) => file.split('/').at(-1)!;
-/** `jpg` and `jpeg`, `tif` and `tiff`, `heic` and `heif` are one format. */
-export function extensionClass(file: string): string {
-  const ext = base(file).split('.').slice(1).at(-1)?.toLowerCase() ?? '';
-  return ({ jpeg: 'jpg', jpe: 'jpg', tiff: 'tif', heif: 'heic' } as Record<string, string>)[ext] ?? ext;
-}
+/** `jpg` and `jpeg`, `tif` and `tiff`, `heic` and `heif`, `mpg` and `mpeg` are one format (the format folder's key). */
+export const extensionClass = formatFolder;
 /** Files are compared only with the same format and the same edited state, so RAW+JPG pairs, Live Photo
  * HEIC+MOV pairs and an original beside its edited version are never duplicates of each other. */
 export function comparable(a: Pick<DuplicateFile, 'path' | 'edited'>, b: Pick<DuplicateFile, 'path' | 'edited'>): boolean {
@@ -24,18 +21,22 @@ export function exifKey(exif?: DuplicateExif): string | undefined {
   if (!fraction(exif.date) && !exif.shutterCount && !exif.imageNumber) return undefined;
   return [exif.date, exif.serial ?? '', exif.camera ?? '', exif.shutterCount ?? '', exif.imageNumber ?? '', `${exif.width ?? '?'}x${exif.height ?? '?'}`, exif.lens ?? '', exif.exposureTime ?? '', exif.aperture ?? '', exif.iso ?? '', exif.exposureCompensation ?? ''].join('|');
 }
-/** Whether a path is in the organized structure: {year}/{yyyymm}/{camera}/… directly under the library
- * root or under one base folder, and not in an edited, conflict or drive backup folder. */
-export function organizedPath(relative: string, editedFolder = 'editied'): boolean {
-  const parts = relative.split('/');
-  const start = [0, 1].find(at => /^\d{4}$/.test(parts[at] ?? '') && /^\d{6}$/.test(parts[at + 1] ?? '') && parts[at + 1]!.startsWith(parts[at]!) && parts.length > at + 3);
-  if (start === undefined) return false;
-  return !parts.slice(start + 2, -1).some(part => part === 'Conflicts' || part === editedFolder || part === 'Drive backups');
+/** The folder rules a library is organized by: the template and the edited exports' folder. */
+export interface OrganizeRules { template: string; editedFolder?: string; }
+const DEFAULT_RULES: OrganizeRules = { template: '{year}/{yyyymm}/{camera}' };
+const matchers = new Map<string, (relativeDir: string) => boolean>();
+/** Whether a path is in the organized structure: the template's folders directly under the library root or
+ * under one base folder, and not in an edited, conflict or drive backup folder. */
+export function organizedPath(relative: string, rules: OrganizeRules = DEFAULT_RULES): boolean {
+  const key = `${rules.template}\0${rules.editedFolder ?? DEFAULT_EDITED_FOLDER}`;
+  let matches = matchers.get(key);
+  if (!matches) { matches = templateMatcher(rules.template, rules.editedFolder, [CONFLICTS_FOLDER, 'Drive backups']); matchers.set(key, matches); }
+  return matches(relative.split('/').slice(0, -1).join('/'));
 }
 /** The copy to keep by default: the one in the organized structure, then the earliest imported
  * (oldest birth time, then ctime), then the shortest path. */
-export function chooseKeeper<T extends Pick<DuplicateFile, 'path' | 'birth' | 'ctime'>>(files: T[], editedFolder?: string): T {
-  const rank = (file: T) => organizedPath(file.path, editedFolder) ? 0 : 1;
+export function chooseKeeper<T extends Pick<DuplicateFile, 'path' | 'birth' | 'ctime'>>(files: T[], rules?: OrganizeRules): T {
+  const rank = (file: T) => organizedPath(file.path, rules) ? 0 : 1;
   return [...files].sort((a, b) => rank(a) - rank(b) || a.birth - b.birth || a.ctime - b.ctime || a.path.length - b.path.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))[0]!;
 }
 function hash(text: string): string {
@@ -51,18 +52,14 @@ export function candidates<T extends DuplicateFile>(files: T[]): T[] {
   const picked = new Set<T>();
   for (const members of classes(files)) {
     for (const key of [(file: T) => base(file.path).toLowerCase(), (file: T) => exifKey(file.exif)]) {
-      const seen = new Map<string, T[]>();
-      for (const file of members) { const value = key(file); if (value) pushTo(seen, value, file); }
-      for (const same of seen.values()) if (same.length > 1) for (const file of same) picked.add(file);
+      for (const [value, same] of Map.groupBy(members, key)) if (value && same.length > 1) for (const file of same) picked.add(file);
     }
   }
   return [...picked];
 }
 function classes<T extends DuplicateFile>(files: T[]): T[][] {
-  const map = new Map<string, T[]>();
   // Empty files all share one SHA and prove nothing.
-  for (const file of files) if (file.kind !== 'Other' && file.size > 0) { const key = `${file.edited ? 1 : 0}|${extensionClass(file.path)}`; pushTo(map, key, file); }
-  return [...map.values()].filter(members => members.length > 1);
+  return [...Map.groupBy(files.filter(file => file.kind !== 'Other' && file.size > 0), file => `${file.edited ? 1 : 0}|${extensionClass(file.path)}`).values()].filter(members => members.length > 1);
 }
 /** How sure a set of files linked by SHA-256 or EXIF is. sha: one SHA-256 for all; exif: one trusted EXIF key and
  * one size; exif-size: linked, but the size (or the evidence) differs, so only the user decides. */
@@ -87,16 +84,14 @@ export function buildGroups(files: DuplicateFile[]): DuplicateGroup[] {
         if (known === undefined) owner.set(key, index); else parent[find(index)] = find(known);
       }
     });
-    const components = new Map<number, DuplicateFile[]>();
-    members.forEach((file, index) => pushTo(components, find(index), file));
+    const components = Map.groupBy(members, (_, index) => find(index));
     const leftover: DuplicateFile[] = [];
     for (const component of components.values()) {
       if (component.length > 1) groups.push({ id: groupId(component), strength: classify(component), files: component });
       else leftover.push(component[0]!);
     }
     // The same name and capture time alone is only a hint: the user decides.
-    const named = new Map<string, DuplicateFile[]>();
-    for (const file of leftover) if (file.exif?.date) { const key = `${base(file.path).toLowerCase()}|${file.exif.date}`; pushTo(named, key, file); }
+    const named = Map.groupBy(leftover.filter(file => file.exif?.date), file => `${base(file.path).toLowerCase()}|${file.exif!.date}`);
     for (const same of named.values()) if (same.length > 1) groups.push({ id: groupId(same), strength: 'similar', files: same });
   }
   return groups.sort((a, b) => a.files[0]!.path.localeCompare(b.files[0]!.path));
@@ -116,21 +111,20 @@ export interface ResolvedGroup {
 }
 /** Split groups by level into automatic and manual ones. `decisions` are the user's choices by group id
  * (a path of the group, or 'all'); they win over the level. */
-export function resolveGroups(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string> = {}, editedFolder?: string): ResolvedGroup[] {
+export function resolveGroups(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string> = {}, rules?: OrganizeRules): ResolvedGroup[] {
   return groups.map(group => {
-    const suggested = chooseKeeper(group.files, editedFolder).path, auto = automatic(group.strength, level);
+    const suggested = chooseKeeper(group.files, rules).path, auto = automatic(group.strength, level);
     const chosen = decisions[group.id], valid = chosen === 'all' || group.files.some(file => file.path === chosen);
     const keep = valid ? chosen : auto ? suggested : undefined;
     return { group, auto, suggested, keep, remove: keep === undefined || keep === 'all' ? [] : group.files.filter(file => file.path !== keep), needsDecision: keep === undefined, decided: valid };
   });
 }
-export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; /** Files to remove that an earlier organization placed: removing them supersedes it and ends its Undo. Present when `earlier` is given. */ earlier?: number; }
-export function summarize(resolved: ResolvedGroup[], earlier?: ReadonlySet<string> | readonly string[]): RemovalSummary {
-  const placed = earlier && new Set(earlier);
+export interface RemovalSummary { groups: number; files: number; bytes: number; undecided: number; automatic: number; manual: number; /** Files to remove that an earlier organization placed (DuplicateFile.earlier): removing them supersedes it and ends its Undo. */ earlier: number; }
+export function summarize(resolved: ResolvedGroup[]): RemovalSummary {
   const removing = resolved.filter(item => item.remove.length);
   return {
     groups: removing.length, files: removing.reduce((sum, item) => sum + item.remove.length, 0), bytes: removing.reduce((sum, item) => sum + item.remove.reduce((n, file) => n + file.size, 0), 0),
     undecided: resolved.filter(item => item.needsDecision).length, automatic: resolved.filter(item => item.auto).length, manual: resolved.filter(item => !item.auto).length,
-    ...(placed ? { earlier: removing.reduce((sum, item) => sum + item.remove.filter(file => placed.has(file.path)).length, 0) } : {}),
+    earlier: removing.reduce((sum, item) => sum + item.remove.filter(file => file.earlier).length, 0),
   };
 }

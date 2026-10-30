@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { inferCameraHints, analyzeSourceCameras } from '../source-cameras';
 import { metadataFromTags } from '../platform/metadata';
 import type { Inventory, InventoryFile, Source } from '../shared';
+import {withFigures} from '../core/inventory';
 
 const source: Source = { id:'card', name:'NIKON Z6III', path:'/Volumes/NIKON Z6III', transport:'storage' };
 function file(relative:string, kind:InventoryFile['kind'], size:number, companionOf?:string):InventoryFile {
   return {path:`/Volumes/card/${relative}`, relative, kind, size, included:true, ...(companionOf ? {companionOf} : {})};
 }
 function inventory(files:InventoryFile[]):Inventory {
-  return {files, media:0, companions:0, unknown:0, bytes:0, unknownExtensions:{}, elapsedMs:0};
+  return withFigures({files, media:0, companions:0, unknown:0, bytes:0, unknownExtensions:{}, elapsedMs:0});
 }
 
 test('drive, extension and specific camera layouts give hints without treating generic folders as camera evidence',()=>{

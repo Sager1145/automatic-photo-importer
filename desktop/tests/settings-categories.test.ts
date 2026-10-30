@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
@@ -7,7 +8,7 @@ import { I18nProvider } from '../renderer/i18n';
 import { defaultPreferences } from '../preferences';
 import type { AppState } from '../shared';
 
-const state: AppState = {preferences: {...defaultPreferences, destinations: ['/backup']}, sources: [], jobs: [], history: [], platform: 'darwin'};
+const state: AppState = {preferences: {...defaultPreferences, destinations: ['/backup']}, sources: [], jobs: [], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions()};
 const render = (requestedCategory?: SettingsCategory, busy = false) => renderToStaticMarkup(createElement(I18nProvider, {language: 'en', children: createElement(SettingsPage, {state, act: () => {}, busy, requestedCategory})}));
 const panel = (markup: string, category: SettingsCategory) => markup.split(`data-testid="settings-panel-${category}"`)[1]?.split('role="tabpanel"')[0] ?? '';
 

@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement,isValidElement} from 'react';
@@ -5,12 +6,14 @@ import type {ReactElement,ReactNode} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createTranslator,I18nProvider,languages} from '../renderer/i18n';
 import type {Action,AppState,Language,Progress} from '../shared';
+import {gated} from './gated';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const online=[{path:'/Volumes/A006',available:true,volumeId:'a',total:2e12,free:1e12}];
 const progress:Progress={phase:'planning',step:'checking',completed:10,total:100,bytes:0,totalBytes:0,speed:0,file:'a.jpg'};
 const result={count:3,bytes:2e6,checkedAt:'2026-10-23T10:00:00Z'};
-const stateOf=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[],jobs:[],history:[],platform:'darwin',destinationStatus:online,...extra});
+const stateOf=(extra:Partial<AppState>={}):AppState=>gated({preferences,sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:online,...extra});
 const html=(language:Language,child:ReactElement)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
 /** Calls a component inside a render and returns the element tree it produced, so a click handler can be run. */
 function tree(language:Language,component:(props:any)=>ReactElement,props:object):ReactNode{
@@ -36,7 +39,7 @@ test('with no result the backup card prompts for the check and the button dispat
     const check=button(page,'check-backup-folder');
     assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: primary, enabled`);
     assert.ok(!page.includes('segmented')&&!page.includes('aria-pressed')&&page.includes(t('The folder layout is checked only when you click Check folder layout.')),`${language}: no mode control`);
-    const node=find(tree(language,BackupCheck,{state:stateOf(),act:(action:Action)=>actions.push(action),busy:false,organizeBusy:false,destinationIndex:0}),'check-backup-folder');
+    const node=find(tree(language,BackupCheck,{state:stateOf(),act:(action:Action)=>actions.push(action),destinationIndex:0}),'check-backup-folder');
     assert.ok(node,`${language}: button found`);node!.props.onClick();
     assert.deepEqual(actions,[{type:'checkBackupFolder',destinationIndex:0}]);
   }
@@ -75,7 +78,8 @@ test('the check button is disabled while busy, organizing or offline, and says w
   const {Organization}=await import('../renderer/RootApp');
   const t=createTranslator('en');
   const disabled=(state:AppState,busy=false)=>/disabled/.test(button(card(html('en',createElement(Organization,{state,act:()=>{},busy}))),'check-backup-folder'));
-  assert.ok(disabled(stateOf(),true));
+  // Busy is no longer a local rule: the gate (gates.ts) decides, here a queued import.
+  assert.ok(disabled(stateOf({jobs:[{id:'i',source:{id:'c',name:'Card',path:'/Volumes/Card',transport:'storage'},phase:'queued',errors:[],backup:false}] as AppState['jobs']})));
   assert.ok(disabled(stateOf({jobs:[{id:'o',source:{id:'l',name:'Backup organization',path:'/Volumes/A006',transport:'folder'},phase:'copying',organization:true,errors:[],backup:false}] as AppState['jobs']})));
   const offline=stateOf({destinationStatus:[{...online[0]!,available:false}]});
   assert.ok(disabled(offline));
@@ -96,13 +100,13 @@ test('Settings no longer has the Off, Ask, Automatic check control',async()=>{
   }
 });
 
-test('the Import desk destination slot prompts with an emphasized button, keeps Organize for misplaced files, and is quiet when clean',async()=>{
+test('the Import desk destination slot offers a secondary Check folder layout button (Start stays the only primary action), keeps Organize for misplaced files, and is quiet when clean',async()=>{
   const {DestinationBay}=await import('../renderer/RootApp');
   const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationBay,{state,act:()=>{}}));
   for(const language of languages){
     const t=createTranslator(language),actions:Action[]=[];
     const none=slot(language,stateOf()),check=button(none,'destination-check-backup-folder-0');
-    assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: emphasized`);
+    assert.ok(/button-secondary/.test(check)&&!/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: secondary`);
     find(tree(language,DestinationBay,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
     assert.deepEqual(actions,[{type:'checkBackupFolder',destinationIndex:0}]);
     const found=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':result}}));
@@ -151,7 +155,7 @@ test('while checking a Stop button dispatches stopBackupCheck, in the card and i
   const state=stateOf({misplacedProgress:{'/Volumes/A006':progress}});
   for(const language of languages){
     const t=createTranslator(language);
-    for(const [component,props,id] of [[BackupCheck,{busy:false,organizeBusy:false,destinationIndex:0},'stop-backup-check'],[DestinationBay,{},'destination-stop-backup-check-0']] as const){
+    for(const [component,props,id] of [[BackupCheck,{destinationIndex:0},'stop-backup-check'],[DestinationBay,{},'destination-stop-backup-check-0']] as const){
       const actions:Action[]=[];
       const node=find(tree(language,component as any,{...props,state,act:(action:Action)=>actions.push(action)}),id);
       assert.ok(node,`${language}: ${id}`);node!.props.onClick();
@@ -159,7 +163,7 @@ test('while checking a Stop button dispatches stopBackupCheck, in the card and i
     }
     const slot=html(language,createElement(DestinationBay,{state,act:()=>{}}));
     assert.ok(slot.includes(t('Stop')),`${language}: label`);
-    const running=card(html(language,createElement(BackupCheck,{state,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
+    const running=card(html(language,createElement(BackupCheck,{state,act:()=>{},destinationIndex:0})));
     assert.ok(button(running,'check-backup-folder').includes(t('Checking…'))&&/disabled/.test(button(running,'check-backup-folder')),`${language}: Checking…`);
   }
 });
@@ -171,16 +175,16 @@ test('the check is disabled with a one-line reason while an import runs or anoth
   for(const language of languages){
     const t=createTranslator(language);
     const importing=stateOf({jobs:runningJob});
-    const a=card(html(language,createElement(BackupCheck,{state:importing,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
+    const a=card(html(language,createElement(BackupCheck,{state:importing,act:()=>{},destinationIndex:0})));
     assert.ok(/disabled/.test(button(a,'check-backup-folder'))&&a.includes(t('Wait for the current work to finish before checking.')),`${language}: import reason`);
     const slot=html(language,createElement(DestinationBay,{state:importing,act:()=>{}}));
     assert.ok(/disabled/.test(button(slot,'destination-check-backup-folder-0'))&&slot.includes(t('Wait for the current work to finish before checking.')),`${language}: slot import`);
     const other=stateOf({preferences:two,destinationStatus:status,misplacedProgress:{'/Volumes/B':progress}});
-    const b=card(html(language,createElement(BackupCheck,{state:other,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
+    const b=card(html(language,createElement(BackupCheck,{state:other,act:()=>{},destinationIndex:0})));
     assert.ok(/disabled/.test(button(b,'check-backup-folder'))&&b.includes(t('Another backup folder check is running.')),`${language}: other reason`);
     const dup=stateOf({duplicates:{status:'scanning'} as AppState['duplicates']});
-    assert.ok(/disabled/.test(button(card(html(language,createElement(BackupCheck,{state:dup,act:()=>{},busy:false,organizeBusy:false,destinationIndex:0}))),'check-backup-folder')),`${language}: duplicates`);
-    const idle=card(html(language,createElement(BackupCheck,{state:stateOf(),act:()=>{},busy:false,organizeBusy:false,destinationIndex:0})));
+    assert.ok(/disabled/.test(button(card(html(language,createElement(BackupCheck,{state:dup,act:()=>{},destinationIndex:0}))),'check-backup-folder')),`${language}: duplicates`);
+    const idle=card(html(language,createElement(BackupCheck,{state:stateOf(),act:()=>{},destinationIndex:0})));
     assert.ok(!idle.includes(t('Wait for the current work to finish before checking.')),`${language}: no reason when idle`);
   }
 });

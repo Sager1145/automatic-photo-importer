@@ -26,7 +26,6 @@ export function requiredTransferSpace(plan:TransferPlan):number{
 }
 
 /** Sizes in space errors; the renderer formats the same figures for display. */
-const size=(bytes:number)=>bytes>=1e9?`${(bytes/1e9).toFixed(1)} GB`:bytes>=1e6?`${(bytes/1e6).toFixed(1)} MB`:bytes>=1e3?`${(bytes/1e3).toFixed(1)} KB`:`${bytes} B`;
 /** What an import needs on one destination once duplicates are known: only files the plan writes count. */
 export function destinationSpace(plan:TransferPlan,free:number,sameDrive=false):DestinationSpace{
  let existing=0,existingFiles=0,newFiles=0;
@@ -60,7 +59,7 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
   if(space.needed<=space.free)return space.needed;
   // The second disk of fill-first holds what the first could not.
   if(mode==='sequential'&&index===1)throw new MessageError('error.bothNeedSpace');
-  throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:size(space.needed),free:size(space.free),existing:size(space.existing)});
+  throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:{bytes:space.needed},free:{bytes:space.free},existing:{bytes:space.existing}});
  });
 }
 

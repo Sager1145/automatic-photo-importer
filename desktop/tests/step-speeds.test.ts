@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -10,9 +11,10 @@ import {EtaTracker,stampEstimates} from '../eta';
 import {I18nProvider,languages} from '../renderer/i18n';
 import {ImportDashboard,ImportDesk,OrganizationCard} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/b'],copyMode:'single',basePath:'p',template:'{year}',mediaLayout:'flat',videoBasePath:'v',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/b'],copyMode:'single',basePath:'p',template:'{year}',mediaLayout:'flat',videoBasePath:'v',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
 const base:Progress={completed:0,total:1000,bytes:0,totalBytes:10e9,speed:0,file:'A.NEF'};
 
@@ -30,7 +32,7 @@ const cases:Case[]=[
 ];
 function run(item:Case){
  const job:Job={id:'j',source:card,phase:item.phase,errors:[],backup:!!item.backup,...(item.organization?{organization:true}:{}),progress:item.at(0)};
- const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  const tracker=new EtaTracker();
  for(let second=0;second<=6;second++){job.progress=item.at(second);stampEstimates(state,tracker,1_000_000+second*1000);}
  return {job,state};
@@ -44,13 +46,13 @@ for(const item of cases)test(`${item.name} reports a live ${item.unit==='bytes'?
 
 test('the speed follows a rolling window, not the average since the start',()=>{
  const job:Job={id:'j',source:card,phase:'copying',errors:[],backup:false,progress:{...base,phase:'copying'}};
- const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  const tracker=new EtaTracker();let bytes=0;
  for(let second=0;second<=40;second++){bytes+=second<20?200e6:20e6;job.progress={...base,phase:'copying',bytes};stampEstimates(state,tracker,1_000_000+second*1000);}
  assert.ok(job.progress!.speed<60e6,`window forgot the fast start: ${job.progress!.speed}`);
 });
 
-const sessionState=(jobs:Job[]):AppState=>({preferences,sources:[card],jobs,history:[],platform:'darwin'});
+const sessionState=(jobs:Job[]):AppState=>({preferences,sources:[card],jobs,history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
 const render=(node:ReturnType<typeof createElement>,language:typeof languages[number]='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:node}));
 
 test('the source card, organization card and dashboard show a speed while verifying and moving',()=>{

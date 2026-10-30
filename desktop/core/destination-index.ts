@@ -2,8 +2,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
-import { checkAbort, digest, identity, sameStat, statKey, syncDirectory } from './paths';
-import { libraryPartition, openV5, sealV5, storeFolder, storeFor, storesFor } from './app-store';
+import { checkAbort, digest, identity, isStatRecord, sameStat, statKey, statRecord, syncDirectory, type StatRecord } from './paths';
+import { libraryPartition, readSealedRecord, replaceSealed, storeFolder, storeFor, storesFor } from './app-store';
 
 /** Per-destination cache of verified SHA-256 values, sealed, in the records folder: Libraries/<library>/index.json.
  */
@@ -18,10 +18,39 @@ export async function indexLocations(root:string,name:string):Promise<string[]>{
 export async function indexTarget(root:string,name:string):Promise<string>{
   const store=await storeFor(root);return path.join(await storeFolder(store,LIBRARIES,libraryPartition(store,root)),name);
 }
-/** The stat a cached record (a digest here, a file's metadata in the duplicate store) is bound to. */
-export interface StatRecord {dev:string;ino:string;size:string;mtime:string;ctime:string;}
+/** The first sealed record of this kind, in the stores readers consult, that belongs to this root (same identity, a `files` object); undefined when none does. */
+export async function loadRootRecord(root:string,rootIdentity:string,fileName:string,kind:Parameters<typeof readSealedRecord>[0],maxBytes:number,read?:Parameters<typeof readSealedRecord>[3]):Promise<Record<string,unknown>|undefined>{
+  for(const file of await indexLocations(root,fileName)) {
+    try {
+      const data=await readSealedRecord(kind,file,maxBytes,read);
+      if(!data) continue;
+      if(data.rootIdentity!==rootIdentity || !data.files || typeof data.files!=='object') continue;
+      return data;
+    } catch { /* Missing, unreadable, corrupt, from another volume or another Mac's: try the next, else start empty and rebuild. */ }
+  }
+  return undefined;
+}
+/** Atomic, serialized writes of one root's record: a dirty flag, a guard that the root is still the same volume, and re-dirtying when the write fails. */
+export class RootRecordWriter {
+  private dirty=false;
+  private writing:Promise<void>=Promise.resolve();
+  constructor(private readonly root:string,private readonly rootIdentity:string,private readonly fileName:string,private readonly kind:Parameters<typeof replaceSealed>[0]) {}
+  mark():void {this.dirty=true;}
+  flush(payload:()=>Record<string,unknown>):Promise<void> {
+    const write=this.writing.then(async()=>{
+      if(!this.dirty) return;
+      if(await identity(this.root).catch(()=>undefined)!==this.rootIdentity) return;
+      this.dirty=false;
+      let target:string;
+      try { target=await indexTarget(this.root,this.fileName); } catch(error) { this.dirty=true; throw error; }
+      // A cache is replaced in one step; a crash leaves either version (and a temp file the cleanup removes after an hour).
+      try { await replaceSealed(this.kind,target,this.kind,{rootIdentity:this.rootIdentity,files:payload()}); } catch(error) { this.dirty=true; throw error; }
+    });
+    this.writing=write.catch(()=>{});
+    return write;
+  }
+}
 interface Recorded extends StatRecord {sha256:string;}
-export const statRecord=(stat:BigIntStats):StatRecord=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
 /** FAT and exFAT report ctime equal to mtime and reuse entry numbers as inodes, so
  * there an unchanged stat proves nothing; such files are always read again. */
 export const provable=(stat:BigIntStats)=>stat.ctimeNs!==stat.mtimeNs;
@@ -64,31 +93,22 @@ async function readWhole(file:string,size:number,onBytes?:(read:number,total:num
 export class DestinationIndex implements Digests {
   private files=new Map<string,Recorded>();
   private hints=new Map<string,{stat:string;sha256:string}>();
-  private dirty=false;
+  private readonly writer:RootRecordWriter;
   /** This session's listing of the library (path and size of each file), for the lookup of files filed elsewhere. Dropped with the index, and when the library is reorganized. */
   listing?:Promise<{path:string;size:number}[]>;
-  private writing:Promise<void>=Promise.resolve();
-  constructor(readonly root:string,readonly rootIdentity:string) {}
+  constructor(readonly root:string,readonly rootIdentity:string) {this.writer=new RootRecordWriter(root,rootIdentity,INDEX_FILE,'index');}
   /** `onBytes`: bytes of the index file read so far and its size, as it is read (it can be hundreds of MB on a slow drive). */
   static async load(root:string,rootIdentity:string,onBytes?:(read:number,total:number)=>void):Promise<DestinationIndex> {
     const index=new DestinationIndex(root,rootIdentity);
-    for(const file of await indexLocations(root,INDEX_FILE)) {
-      try {
-        const stat=await fs.lstat(file);
-        if(!stat.isFile() || stat.size>MAX_INDEX_BYTES) continue;
-        // Sealed: a digest read from here can let a copy be skipped, so only this Mac's own record is trusted.
-        const data=openV5('index',JSON.parse(await readWhole(file,stat.size,onBytes)));
-        if(data.rootIdentity!==rootIdentity || !data.files || typeof data.files!=='object') continue;
-        index.load(data.files as Record<string,Recorded>);
-        return index;
-      } catch { /* Missing, unreadable, corrupt or another Mac's: start empty and rebuild. */ }
-    }
+    // Sealed: a digest read from here can let a copy be skipped, so only this Mac's own record is trusted.
+    const data=await loadRootRecord(root,rootIdentity,INDEX_FILE,'index',MAX_INDEX_BYTES,(name,size)=>readWhole(name,size,onBytes));
+    if(data) index.load(data.files as Record<string,Recorded>);
     return index;
   }
   /** Take the recorded digests of a stored index (this one's, or the earlier version's being converted). */
   load(files:Record<string,Recorded>):void {
     for(const [relative,value] of Object.entries(files))
-      if(value && ['dev','ino','size','mtime','ctime','sha256'].every(key=>typeof (value as unknown as Record<string,unknown>)[key]==='string') && /^[a-f0-9]{64}$/.test(value.sha256)) this.files.set(relative,value);
+      if(isStatRecord(value) && typeof (value as Recorded).sha256==='string' && /^[a-f0-9]{64}$/.test((value as Recorded).sha256)) this.files.set(relative,value);
   }
   private key(file:string):string {return path.relative(this.root,file);}
   /** SHA-256 of a regular file inside the root, reusing a still-valid record. */
@@ -119,31 +139,12 @@ export class DestinationIndex implements Digests {
   /** Record a digest computed from bytes this app just wrote or verified. */
   remember(file:string,sha256:string,stat:BigIntStats):void {
     if(!stat.isFile() || !provable(stat)) return;
-    this.files.set(this.key(file),{...statRecord(stat),sha256});this.dirty=true;
+    this.files.set(this.key(file),{...statRecord(stat),sha256});this.writer.mark();
   }
-  forget(file:string):void {this.hints.delete(file);if(this.files.delete(this.key(file)))this.dirty=true;}
-  clear():void {this.listing=undefined;this.hints.clear();if(this.files.size){this.files.clear();this.dirty=true;}}
+  forget(file:string):void {this.hints.delete(file);if(this.files.delete(this.key(file)))this.writer.mark();}
+  clear():void {this.listing=undefined;this.hints.clear();if(this.files.size){this.files.clear();this.writer.mark();}}
   /** Atomic replace: write a sibling, fsync, rename, fsync the folder. */
-  flush():Promise<void> {
-    const write=this.writing.then(async()=>{
-      if(!this.dirty) return;
-      if(await identity(this.root).catch(()=>undefined)!==this.rootIdentity) return;
-      this.dirty=false;
-      let target:string;
-      try { target=await indexTarget(this.root,INDEX_FILE); } catch(error) { this.dirty=true; throw error; }
-      const temporary=path.join(path.dirname(target),`index-${randomUUID()}.tmp`);
-      try {
-        const handle=await fs.open(temporary,'wx',0o600);
-        try { await handle.writeFile(JSON.stringify(sealV5('index',{rootIdentity:this.rootIdentity,files:Object.fromEntries(this.files)}))); await handle.sync(); }
-        finally { await handle.close(); }
-        // A cache is replaced in one step; a crash leaves either version (and a temp file the cleanup removes after an hour).
-        await fs.rename(temporary,target);
-      } catch(error) { await fs.unlink(temporary).catch(()=>{}); this.dirty=true; throw error; }
-      await syncDirectory(path.dirname(target));
-    });
-    this.writing=write.catch(()=>{});
-    return write;
-  }
+  flush():Promise<void> {return this.writer.flush(()=>Object.fromEntries(this.files));}
 }
 const indexes=new Map<string,Promise<DestinationIndex>>();
 const loading=new Map<string,Set<(read:number,total:number)=>void>>();

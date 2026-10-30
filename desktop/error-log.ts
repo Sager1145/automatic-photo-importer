@@ -1,7 +1,7 @@
 import type {AppState,Job,JobIssueGroup} from './shared';
 import {message as makeMessage,text,type Message} from './messages';
 
-export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata';
+export type ErrorKind='app'|'source'|'destination'|'organization'|'metadata'|'format';
 /** An error failed or stopped something. A warning is informational: nothing was left undone. */
 export type Severity='error'|'warning';
 /** Message keys that are only ever warnings. Every other key is an error. */
@@ -10,7 +10,7 @@ const warningKeys=new Set<string>(['error.userSkipped','job.appleDouble','invent
  * A file skipped on purpose (by the user) is a warning; a file skipped because it failed is an error. Metadata problems (kind 'metadata') are warnings: the file is still handled. */
 export function severityOf(value:Message,kind?:ErrorKind):Severity{
  if(warningKeys.has(value.key)||value.params?.severity==='warning')return 'warning';
- if(value.key==='error.fileSkipped'){const reason=value.params?.error;return reason&&typeof reason==='object'&&!Array.isArray(reason)&&reason.key==='error.userSkipped'?'warning':'error';}
+ if(value.key==='error.fileSkipped'){const reason=value.params?.error;return reason&&typeof reason==='object'&&!Array.isArray(reason)&&'key' in reason&&reason.key==='error.userSkipped'?'warning':'error';}
  return kind==='metadata'?'warning':'error';
 }
 /** Codes for messages that carry none of their own, derived from the message key. Raw text keeps the code 'text'. */
@@ -22,9 +22,9 @@ export function pathOf(value:Message):string|undefined{const own=value.params?.p
 /** Codes shown as one row per job however many entries there are. Other entries keep a row each. */
 export const groupedCodes=new Set<string>(['staging-left','unreadable','zero-byte','copy-failed','file-skipped']);
 /** One problem shown in All errors. id is stable while the problem lasts; source groups it, drive names the volume it came from. */
-export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;}
-/** When each shown error first appeared (ISO), and the ids the user cleared while they last. */
-export interface ErrorLogState {at:Record<string,string>;cleared:string[];}
+export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;/** The source whose unknown file formats await a rule (kind 'format'). */formatSourceId?:string;}
+/** Every shown error with when it first appeared (ISO); errors the user cleared are left out. */
+export interface ErrorLogState {entries:(LoggedError&{at:string})[];}
 
 /** "/Volumes/A006/photobackup" → "A006"; anything not on a mounted volume keeps its source name. */
 export function driveName(location:string,fallback:string):string{return /^\/Volumes\/([^/]+)/.exec(location)?.[1]??fallback;}
@@ -78,28 +78,29 @@ export function gatherErrors(state:AppState):LoggedError[]{
  for(const recovery of state.organizationRecovery??[])add('recovery:'+recovery.id,recovery.root,recovery.root,raw(recovery.error),'organization');
  for(const destination of state.destinationStatus??[])add('destination',destination.path,destination.path,raw(destination.detail),'destination');
  for(const source of state.sources)for(const item of state.sourceInventories?.[source.id]?.issues??[])add('issue:'+source.id,source.name,source.path,issue(item),'metadata',source.id);
+ // With "ask" as the default for unknown file formats, a source holding formats without a rule awaits a choice (backups never ask).
+ if(state.preferences.unknownDefault==='ask'){
+  const known={...state.preferences.unknownRules,...state.sessionUnknownRules},sources=new Map(state.sources.map(source=>[source.id,source]));
+  for(const job of state.jobs)if(!job.organization&&!sources.has(job.source.id))sources.set(job.source.id,job.source);
+  for(const source of sources.values()){
+   const job=state.jobs.find(item=>!item.organization&&item.source.id===source.id),inventory=state.sourceInventories?.[source.id]??job?.inventory;
+   if(!inventory||job?.backup||!Object.keys(inventory.unknownExtensions).some(extension=>!Object.hasOwn(known,extension)))continue;
+   const id=hash('format|'+source.id);if(seen.has(id))continue;seen.add(id);
+   result.push({id,code:'unknown-formats',source:source.name,drive:driveName(source.path,source.name),message:makeMessage('issue.unknownFormats'),kind:'format',severity:'warning',sourceId:source.id,formatSourceId:source.id});
+  }
+ }
  return result;
-}
-
-/** Entries saved before severities existed have none: they get the default for their message key. */
-export function migrateLoggedError<T extends Omit<LoggedError,'severity'|'code'>&{severity?:Severity;code?:string}>(entry:T):T&{severity:Severity;code:string}{
- return {...entry,code:typeof entry.code==='string'&&entry.code?entry.code:codeOf(entry.message),severity:entry.severity==='error'||entry.severity==='warning'?entry.severity:severityOf(entry.message,entry.kind)};
 }
 
 /** Remembers when errors appeared and which ones the user cleared. Both are forgotten once an error is gone, so it shows again if it returns. */
 export class ErrorLog{
  private at=new Map<string,string>();private cleared=new Set<string>();
- /** Picks up a saved state (timestamps and cleared ids keep working across versions; ids are severity-independent). */
- constructor(saved?:Partial<ErrorLogState>){
-  for(const [id,when] of Object.entries(saved?.at??{}))if(typeof when==='string')this.at.set(id,when);
-  for(const id of saved?.cleared??[])if(typeof id==='string')this.cleared.add(id);
- }
  update(errors:LoggedError[],now=new Date()):ErrorLogState{
   const live=new Set(errors.map(error=>error.id));
   for(const id of this.at.keys())if(!live.has(id))this.at.delete(id);
   for(const id of this.cleared)if(!live.has(id))this.cleared.delete(id);
   for(const id of live)if(!this.at.has(id))this.at.set(id,now.toISOString());
-  return {at:Object.fromEntries([...this.at].filter(([id])=>!this.cleared.has(id))),cleared:[...this.cleared]};
+  return {entries:errors.filter(error=>!this.cleared.has(error.id)).map(error=>({...error,at:this.at.get(error.id)!}))};
  }
  /** Bumps whenever something is cleared, so a cache keyed on the state also notices clears. */
  revision=0;
@@ -109,7 +110,7 @@ export class ErrorLog{
 /** Clears the listed errors (one, or a whole group), or every error when no ids are given; with a severity, only those of it.
  * Clearing warnings never clears errors, and the reverse. Jobs keep their errors; only the shared app error is reset at its source. */
 export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:string[];severity?:Severity}={}){
- const wanted=ids&&new Set(ids),errors=gatherErrors(state).filter(error=>(!wanted||wanted.has(error.id))&&(!severity||error.severity===severity));
+ const wanted=ids&&new Set(ids),errors=gatherErrors(state).filter(error=>error.kind!=='format'&&(!wanted||wanted.has(error.id))&&(!severity||error.severity===severity));
  log.clear(errors.map(error=>error.id));
  if(errors.some(error=>error.kind==='app'))state.error=undefined;
 }
@@ -117,9 +118,9 @@ export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:str
 /** What the log is built from: the change count of each list that grows in place, the identity of values only ever replaced whole,
  * and the fields read from lists main rebuilds with the same contents on every emit or poll (sources, destinations, recoveries). */
 function errorInputs(state:AppState,log:ErrorLog):unknown[]{
- const inputs:unknown[]=[log.revision,state.error];
+ const inputs:unknown[]=[log.revision,state.error,state.preferences.unknownDefault,JSON.stringify([state.preferences.unknownRules,state.sessionUnknownRules])];
  for(const job of state.jobs){
-  inputs.push(job,job.errors,versionOf(job.errors),job.groups,job.groups&&versionOf(job.groups),job.acknowledged,job.inventory,job.phase==='error'&&job.detail);
+  inputs.push(job,job.errors,versionOf(job.errors),job.groups,job.groups&&versionOf(job.groups),job.acknowledged,job.inventory,job.backup,job.phase==='error'&&job.detail);
  }
  for(const [id,info] of Object.entries(state.sourceCameraInfo??{}))inputs.push(id,info.issues,info.error);
  for(const source of state.sources)inputs.push(source.id,source.name,source.path,state.sourceInventories?.[source.id]);

@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -6,14 +7,15 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider,createTranslator,languages,translationCatalogs} from '../renderer/i18n';
 import {SidebarDestinations,destinationActivity} from '../renderer/RootApp';
 import type {AppState,Job,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 const GB=1e9;
-const preferences={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/BACKUP'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+const preferences={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/BACKUP'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const online=[{path:'/Volumes/BACKUP',available:true,total:2000*GB,free:800*GB}];
 const source=(id:string,name:string)=>({id,name,path:`/Volumes/${name}`,transport:'storage' as const,selected:true,total:128*GB,free:40*GB});
 const progress=(patch:Partial<Progress>={}):Progress=>({phase:'copying',completed:120,total:400,bytes:12*GB,totalBytes:40*GB,speed:150e6,file:'SECRET_NAME.NEF',...patch});
 const job=(id:string,name:string,patch:Partial<Job>={}):Job=>({id,source:source(id,name),phase:'copying',errors:[],backup:false,progress:progress(),eta:600,...patch});
-const stateOf=(patch:Partial<AppState>={}):AppState=>({preferences,sources:[],jobs:[],history:[],platform:'darwin',destinationStatus:online,...patch});
+const stateOf=(patch:Partial<AppState>={}):AppState=>({preferences,sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:online,...patch});
 const render=(state:AppState,language:typeof languages[number]='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(SidebarDestinations,{state})}));
 const status=(markup:string)=>markup.match(/data-testid="sidebar-destination-status"[^>]*>/)?.[0]??'';
 const kindOf=(state:AppState)=>destinationActivity(state,'/Volumes/BACKUP').kind;
@@ -53,7 +55,7 @@ test('only offline uses the danger colour; the bar uses the shared layers and th
 });
 
 test('detail shows count, bytes, speed, time left and the source, but never a file name',()=>{
- const markup=render(stateOf({jobs:[job('a','photobackup')]}));
+ const markup=render(stateOf({jobs:[job('a','photobackup')],destinationEta:{'/Volumes/BACKUP':600}}));
  assert.match(markup,/role="meter" aria-label="Destination progress"[^>]*aria-valuenow="30"/);
  assert.match(markup,/120 of 400 files · 12\.0 GB of 40\.0 GB/);
  assert.match(markup,/150 MB\/s/);
@@ -64,7 +66,7 @@ test('detail shows count, bytes, speed, time left and the source, but never a fi
 });
 
 test('jobs writing to the same destination are added together',()=>{
- const state=stateOf({jobs:[
+ const state=stateOf({destinationEta:{'/Volumes/BACKUP':1200},jobs:[
   job('a','photobackup',{progress:progress({completed:100,total:300,bytes:10*GB,totalBytes:30*GB,speed:100e6}),eta:300}),
   job('b','cardtwo',{progress:progress({completed:50,total:100,bytes:5*GB,totalBytes:10*GB,speed:50e6}),eta:900}),
   job('c','cardthree',{progress:progress({completed:0,total:100,bytes:0,totalBytes:10*GB,speed:0}),eta:1200}),

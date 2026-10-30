@@ -6,6 +6,7 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {setTimeout as sleep} from 'node:timers/promises';
 import type {Action,AppState,Preferences} from '../../shared';
 import {createStateReceiver,type StateUpdate} from '../../state-channel';
 import {lockedPreferenceKeys,settingsLocked} from '../../settings-lock';
@@ -44,7 +45,6 @@ export interface CheckResult {id:string;stage:Stage;title:string;covers:string[]
 class Cancelled extends Error {constructor(){super('Check cancelled after its time budget ran out');}}
 /** Thrown by a check that finds the feature it tests is not on this build. */
 export class SkipCheck extends Error {}
-const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
 export class Harness {
  readonly report:string;

@@ -30,7 +30,8 @@ async function scan(reuse:Listing|undefined,routing:[string,Metadata][],volume:M
   if(volume)await adoptVolumes([volume]);
   primeRouting(routing);
   const {listing,...result}=await inventory(source.path,{...options,reuse,onProgress:(files,bytes,top,file)=>process.parentPort.postMessage({type:'progress',files,bytes,file,top})},signal.signal);
-  process.parentPort.postMessage({type:'inventory',inventory:result,listing});
+  // The file table travels once, inside the inventory; the parent derives the listing's files from it (listingOf).
+  process.parentPort.postMessage({type:'inventory',inventory:result,...(listing?{listing:{backup:listing.backup,folders:listing.folders}}:{})});
   await analyzeSourceCameras(source,result,file=>metadata(file,{details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
   clearInterval(timer);flush();
   await closeMetadata();process.parentPort.postMessage({type:'done'});

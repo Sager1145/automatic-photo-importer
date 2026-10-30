@@ -4,11 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {spawn} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {plan,execute} from '../desktop/core/index.ts';
 
 const self=fileURLToPath(import.meta.url);
+const exec=promisify(execFile);
 const options={backup:true,template:'{year}/{camera}',layout:'flat' as const,unknownRules:{}};
 if(process.argv[2]==='--fixture-worker'){
  const [source,destination,stop]=process.argv.slice(3);
@@ -32,13 +34,7 @@ if(process.argv[2]==='--fixture-worker'){
  await fs.mkdir(path.dirname(report),{recursive:true});
  const checks:{name:string;passed:boolean;detail?:unknown;error?:string}[]=[];
  const hash=async(file:string)=>createHash('sha256').update(await fs.readFile(file)).digest('hex');
- const command=(bin:string,args:string[],timeout=30000)=>new Promise<string>((resolve,reject)=>{
-  const child=spawn(bin,args,{stdio:['ignore','pipe','pipe']});let out='',err='';
-  child.stdout.on('data',data=>{out+=data;});child.stderr.on('data',data=>{err+=data;});
-  const timer=setTimeout(()=>{child.kill('SIGKILL');reject(new Error(`${bin} timed out: ${err}`));},timeout);
-  child.once('error',error=>{clearTimeout(timer);reject(error);});
-  child.once('exit',code=>{clearTimeout(timer);code===0?resolve(out):reject(new Error(`${bin} exited ${code}: ${err}`));});
- });
+ const command=async(bin:string,args:string[],timeout=30000)=>(await exec(bin,args,{timeout,killSignal:'SIGKILL',maxBuffer:64*1024*1024,encoding:'utf8'})).stdout;
  const entities=(xml:string)=>[...xml.matchAll(/<dict>((?:(?!<dict>)[\s\S])*?)<\/dict>/g)].map(match=>{
   const field=(key:string)=>match[1].match(new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`))?.[1];
   return {device:field('dev-entry'),mount:field('mount-point')};

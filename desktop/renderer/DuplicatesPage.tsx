@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronLeft, ChevronRight, CheckCircle2, Clock3, CopyCheck, ImageOff, Info, LoaderCircle, RotateCcw, ScanSearch, Square, Trash2, FolderOpen } from 'lucide-react';
 import type { AppState, DuplicatesState, DuplicateFile, DuplicateGroup, DuplicateLevel, DuplicateStrength, Language, Metadata, OrganizationRecovery, Thumbnail } from '../shared';
 import { isLive } from '../shared';
-import { exifKey, organizedPath, resolveGroups, summarize, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
+import { exifKey, organizedPath, resolveGroups, summarize, type OrganizeRules, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
 import { categorize } from './exif-categories';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
@@ -10,6 +10,7 @@ import { message } from '../messages';
 import { createDetailStore, type FileDetails, type Outcome } from './duplicate-details';
 import { Button, CardHeader, Icon, ConfirmSheet, ReleaseConfirm, nextConfirmStep, type DeleteRecoveryStep, type Dispatch } from './ui';
 import { OperationProgress, OrganizationProgress } from './progress';
+import { basename } from './paths';
 
 /** Groups shown per page: only these are drawn and only their previews are fetched, so thousands of groups stay responsive. */
 export const GROUPS_PER_PAGE = 8;
@@ -27,15 +28,14 @@ export function LevelSelector({ level, onChange, disabled = false }: { level: Du
 }
 
 /** What removing would do with the current level and the user's choices. */
-export function removalPlan(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string>, editedFolder?: string, earlier?: readonly string[]): { resolved: ResolvedGroup[]; summary: RemovalSummary } {
-  const resolved = resolveGroups(groups, level, decisions, editedFolder);
-  return { resolved, summary: summarize(resolved, earlier) };
+export function removalPlan(groups: DuplicateGroup[], level: DuplicateLevel, decisions: Record<string, string>, rules?: OrganizeRules): { resolved: ResolvedGroup[]; summary: RemovalSummary } {
+  const resolved = resolveGroups(groups, level, decisions, rules);
+  return { resolved, summary: summarize(resolved) };
 }
 
 const separator = (root: string) => root.includes('\\') && !root.includes('/') ? '\\' : '/';
 /** The absolute path of a file whose path is relative to the scope root. */
 export const absolutePath = (root: string, relative: string) => { const sep = separator(root); return root.replace(/[\\/]+$/, '') + sep + (sep === '/' ? relative : relative.replaceAll('/', sep)); };
-const baseName = (path: string) => path.split('/').at(-1) ?? path;
 
 export function strengthLabel(strength: DuplicateStrength, t: Translator): string {
   return strength === 'sha' ? t("Identical files") : strength === 'exif' ? t("Same EXIF and size") : strength === 'exif-size' ? t("Same EXIF, different size") : t("Same name and time");
@@ -43,14 +43,14 @@ export function strengthLabel(strength: DuplicateStrength, t: Translator): strin
 
 export type FileBadge = 'sha' | 'exif' | 'size' | 'organized' | 'suggested';
 /** The badges of one file within its group. */
-export function fileBadges(group: DuplicateGroup, file: DuplicateFile, suggested: string, editedFolder?: string): FileBadge[] {
+export function fileBadges(group: DuplicateGroup, file: DuplicateFile, suggested: string, rules?: OrganizeRules): FileBadge[] {
   const others = group.files.filter(other => other !== file);
   const badges: FileBadge[] = [];
   if (file.sha256 && others.some(other => other.sha256 === file.sha256)) badges.push('sha');
   const key = exifKey(file.exif);
   if (key && others.some(other => exifKey(other.exif) === key)) badges.push('exif');
   if (others.length && !others.some(other => other.size === file.size)) badges.push('size');
-  if (organizedPath(file.path, editedFolder)) badges.push('organized');
+  if (organizedPath(file.path, rules)) badges.push('organized');
   if (file.path === suggested) badges.push('suggested');
   return badges;
 }
@@ -78,7 +78,7 @@ function Preview({ file, outcome }: { file: DuplicateFile; outcome?: Outcome<Thu
   // A preview that failed to arrive reads like an unreadable file; the file's Retry asks again.
   const thumbnail: Thumbnail | undefined = outcome && ('value' in outcome ? outcome.value : { via: 'none', problem: 'unreadable' });
   return <div className="duplicate-preview">
-    {thumbnail?.src ? <img src={thumbnail.src} alt={t("Preview of {name}", { name: baseName(file.path) })} loading="lazy" /> : <div className="duplicate-preview-empty" aria-label={thumbnail ? t("No preview available") : t("Loading preview…")}>{thumbnail ? <Icon icon={ImageOff} size={28} /> : <Icon icon={LoaderCircle} size={24} />}</div>}
+    {thumbnail?.src ? <img src={thumbnail.src} alt={t("Preview of {name}", { name: basename(file.path) })} loading="lazy" /> : <div className="duplicate-preview-empty" aria-label={thumbnail ? t("No preview available") : t("Loading preview…")}>{thumbnail ? <Icon icon={ImageOff} size={28} /> : <Icon icon={LoaderCircle} size={24} />}</div>}
     {thumbnail?.problem === 'raw-unsupported' && <p className="inline-note duplicate-raw-note" role="note" data-testid="raw-unsupported"><Icon icon={Info} size={14} />{t("This Mac can't decode this RAW format yet, so the camera's embedded preview is shown. Updating macOS or converting the files with Adobe DNG Converter adds support.")}</p>}
     {thumbnail?.problem === 'unreadable' && <p className="inline-note" role="note">{t("This file's preview could not be read.")}</p>}
   </div>;
@@ -99,9 +99,9 @@ function FullExif({ outcome }: { outcome?: Outcome<Metadata> }) {
 
 export interface GroupViewProps {
   item: ResolvedGroup; number?: number; details: Readonly<Record<string, FileDetails>>; onRetry: (path: string) => void;
-  onDecide: (id: string, keep: string) => void; disabled?: boolean; editedFolder?: string;
+  onDecide: (id: string, keep: string) => void; disabled?: boolean; rules?: OrganizeRules;
 }
-export function GroupView({ item, number, details, onRetry, onDecide, disabled = false, editedFolder }: GroupViewProps) {
+export function GroupView({ item, number, details, onRetry, onDecide, disabled = false, rules }: GroupViewProps) {
   const { t, formatBytes, formatNumber, language } = useTranslation();
   const { group } = item;
   return <article className="duplicate-group" data-testid="duplicate-group" data-group-id={group.id} data-strength={group.strength} data-auto={item.auto ? 'true' : 'false'}>
@@ -117,8 +117,8 @@ export function GroupView({ item, number, details, onRetry, onDecide, disabled =
       const failed = (thumbnail && 'error' in thumbnail) || (exif && 'error' in exif);
       return <div key={file.path} className={`duplicate-file ${item.keep === file.path ? 'keeping' : ''} ${removing ? 'removing' : ''}`} data-testid="duplicate-file" data-path={file.path}>
         <Preview file={file} outcome={thumbnail} />
-        <label className="duplicate-keep"><input type="radio" name={`keep-${group.id}`} value={file.path} checked={item.keep === file.path} disabled={disabled} data-testid="keep-file" onChange={() => onDecide(group.id, file.path)} /><strong>{baseName(file.path)}</strong></label>
-        <div className="duplicate-badges">{fileBadges(group, file, item.suggested, editedFolder).map(badge => <Badge key={badge} kind={badge} />)}{removing && <span className="small-tag duplicate-badge-remove" data-badge="remove">{t("Will be set aside")}</span>}</div>
+        <label className="duplicate-keep"><input type="radio" name={`keep-${group.id}`} value={file.path} checked={item.keep === file.path} disabled={disabled} data-testid="keep-file" onChange={() => onDecide(group.id, file.path)} /><strong>{basename(file.path)}</strong></label>
+        <div className="duplicate-badges">{fileBadges(group, file, item.suggested, rules).map(badge => <Badge key={badge} kind={badge} />)}{removing && <span className="small-tag duplicate-badge-remove" data-badge="remove">{t("Will be set aside")}</span>}</div>
         <dl className="duplicate-basic" data-testid="basic-exif">{basicExif(file, exif && 'value' in exif ? exif.value : undefined, t, formatBytes, language).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={label === t("Path") ? 'recovery-root' : undefined}>{value}</dd></div>)}</dl>
         <FullExif outcome={exif} />
         {failed && <div className="rule-actions"><Button icon={RotateCcw} data-testid="details-retry" onClick={() => onRetry(file.path)}>{t("Retry")}</Button></div>}
@@ -182,11 +182,6 @@ export function Pagination({ page, pages, onPage }: { page: number; pages: numbe
   </nav>;
 }
 
-export function duplicatesBusy(state: AppState): boolean {
-  const status = state.duplicates?.status;
-  return status === 'scanning' || status === 'removing' || !!state.review || !!state.busyReview || state.jobs.some(isLive);
-}
-
 type Filter = 'all' | 'manual' | 'auto';
 
 export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; act: Dispatch; onRecovery?: () => void }) {
@@ -199,7 +194,7 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
   const [filter, setFilter] = useState<Filter>('all');
   const [pageIndex, setPageIndex] = useState(0);
   const [confirm, setConfirm] = useState<DeleteRecoveryStep>('closed');
-  const editedFolder = state.preferences.editedFolder;
+  const { template, editedFolder } = state.preferences, rules = useMemo(() => ({ template, editedFolder }), [template, editedFolder]);
   // The groups come over a separate call, only when the scan or a removal has changed them.
   useEffect(() => {
     let alive = true;
@@ -214,8 +209,8 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
   }, [dup.revision, dup.root]);
   useEffect(() => { setPageIndex(0); }, [dup.root, dup.revision, level, filter]);
   const locked = dup.status === 'scanning' || dup.status === 'removing';
-  const busy = duplicatesBusy(state);
-  const plan = useMemo(() => removalPlan(groups, level, decisions, editedFolder, dup.earlier), [groups, level, decisions, editedFolder, dup.earlier]);
+  const busy = !!state.blocked?.duplicates;
+  const plan = useMemo(() => removalPlan(groups, level, decisions, rules), [groups, level, decisions, rules]);
   const shown = useMemo(() => plan.resolved.map((item, index) => ({ item, number: index + 1 })).filter(entry => filter === 'all' || (filter === 'auto') === entry.item.auto), [plan.resolved, filter]);
   const pages = Math.max(1, Math.ceil(shown.length / GROUPS_PER_PAGE)), current = Math.min(pageIndex, pages - 1);
   const visible = shown.slice(current * GROUPS_PER_PAGE, (current + 1) * GROUPS_PER_PAGE);
@@ -277,7 +272,7 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
         {groups.length > 0 && <div className="segmented" role="group" aria-label={t("Show groups")}>{([['all', t("All ({count})", { count: formatNumber(counts.all) })], ['manual', t("You decide ({count})", { count: formatNumber(counts.manual) })], ['auto', t("Automatic ({count})", { count: formatNumber(counts.auto) })]] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} data-testid={`duplicates-filter-${id}`} onClick={() => setFilter(id)}>{label}</button>)}</div>}
         {groups.length === 0 ? <p className="inline-note" data-testid="duplicates-none"><Icon icon={CheckCircle2} size={14} />{t("No duplicates found.")}</p> : <>
           <Pagination page={current} pages={pages} onPage={setPageIndex} />
-          <div className="duplicate-list" data-testid="duplicate-list">{visible.map(entry => <GroupView key={entry.item.group.id} item={entry.item} number={entry.number} details={details} onRetry={retry} onDecide={decide} disabled={locked} editedFolder={editedFolder} />)}</div>
+          <div className="duplicate-list" data-testid="duplicate-list">{visible.map(entry => <GroupView key={entry.item.group.id} item={entry.item} number={entry.number} details={details} onRetry={retry} onDecide={decide} disabled={locked} rules={rules} />)}</div>
           <Pagination page={current} pages={pages} onPage={setPageIndex} />
         </>}
       </section>

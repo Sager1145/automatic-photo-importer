@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStallWatch} from '../qa/stall-watch';
@@ -5,7 +6,7 @@ import type {AppState,Job,Progress} from '../shared';
 
 const progress=(extra:Partial<Progress>={}):Progress=>({phase:'planning',step:'comparing',completed:5,total:100,bytes:0,totalBytes:0,speed:0,file:'a.jpg',...extra});
 const job=(phase:Job['phase'],value?:Progress,organization=false):Job=>({id:'j1',source:{id:'s',name:'S',path:'/s',transport:'folder'},phase,errors:[],backup:false,...(organization?{organization:true}:{}),...(value?{progress:value}:{})});
-const state=(extra:Partial<AppState>):AppState=>({preferences:{} as AppState['preferences'],sources:[],jobs:[],history:[],platform:'darwin',...extra});
+const state=(extra:Partial<AppState>):AppState=>({preferences:{} as AppState['preferences'],sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 
 test('a running job whose progress stays the same for more than 10 s is a stall',()=>{
  const watch=createStallWatch({limitMs:10_000});

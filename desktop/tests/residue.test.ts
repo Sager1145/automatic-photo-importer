@@ -94,17 +94,16 @@ async function littered(t:test.TestContext) {
   // Camera downloads and previews left in the system temporary folder; one still in use.
   const camera1=path.join(temporary,'photo-importer-camera-Ab12Cd');await fs.mkdir(path.join(camera1,'DCIM'),{recursive:true});await fs.writeFile(path.join(camera1,'DCIM','IMG_0001.JPG'),Buffer.alloc(1200));
   const preview=path.join(temporary,'photo-importer-preview-Zz9Yy8');await fs.mkdir(preview);
-  const inUse=path.join(temporary,'photo-importer-preview-InUse1');await fs.mkdir(inUse);
   // User files that only look similar, and the earlier version's leftovers in the library (Clean up's business only).
   const user=[path.join(camera,`${randomUUID()}.partial`),path.join(camera,`.import-${randomUUID()}.partial.jpg`),path.join(root,'Photo Importer Data notes.txt'),path.join(temporary,'photo-importer-electron-fixtures','keep.txt'),path.join(store.path,'Imports','Staging','notes.txt')];
   for(const file of user){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'user data');}
   const oldPartial=path.join(camera,`photo-importer-${randomUUID()}.partial`);await fs.writeFile(oldPartial,Buffer.alloc(700));
-  return {card,root,temporary,inUse,store,resumable,resumableReceipt,orphan,goneReceipt,bound,second,third,vanishedReceipt,completeReceipt,oldIndexTemp,freshIndexTemp,sidecar,labelled,besideStore,aside,camera1,preview,user,oldPartial};
+  return {card,root,temporary,store,resumable,resumableReceipt,orphan,goneReceipt,bound,second,third,vanishedReceipt,completeReceipt,oldIndexTemp,freshIndexTemp,sidecar,labelled,besideStore,aside,camera1,preview,user,oldPartial};
 }
 
 test('residue lists only the app\'s own leftovers in the records folder, with resumable copies apart',async t=>{
   const f=await littered(t);
-  const found=await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]});
+  const found=await findResidue([f.root],{temporary:f.temporary});
   assert.equal(kindOf(found,f.resumable),'resumable');
   assert.equal(found.items.find(item=>item.path===f.resumable)?.rid,f.resumableReceipt.rid);
   assert.equal(kindOf(found,f.orphan),'kept');
@@ -115,7 +114,7 @@ test('residue lists only the app\'s own leftovers in the records folder, with re
   assert.equal(kindOf(found,f.aside),'organization');
   assert.equal(kindOf(found,f.camera1),'temporary');assert.equal(kindOf(found,f.preview),'temporary');
   // A receipt to close names its file; the file itself is never residue.
-  for(const kept of [f.second.destination,f.third.destination,f.inUse,f.oldPartial,...f.user])assert.ok(!found.items.some(item=>item.path===kept&&!item.rid),`not residue: ${kept}`);
+  for(const kept of [f.second.destination,f.third.destination,f.oldPartial,...f.user])assert.ok(!found.items.some(item=>item.path===kept&&!item.rid),`not residue: ${kept}`);
   assert.deepEqual(found.resumable,{files:1,bytes:1000},'only a copy a re-import could continue');
   assert.deepEqual(found.kept,{files:1,bytes:2500},'a copy not proven dead is counted apart');
   // Receipts to close are not files the user has.
@@ -124,15 +123,15 @@ test('residue lists only the app\'s own leftovers in the records folder, with re
 
 test('cleaning removes the residue and closes receipts; automatic cleaning keeps resumable copies',async t=>{
   const f=await littered(t);
-  const automatic=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]}),{keepResumable:true});
+  const automatic=await cleanResidue(await findResidue([f.root],{temporary:f.temporary}),{keepResumable:true});
   assert.ok(automatic.removed.files>0);
   assert.deepEqual(automatic.left.items.map(item=>item.kind).sort(),['kept','resumable']);
   assert.ok(await exists(f.resumable));assert.ok(await exists(f.orphan));assert.ok(await open(f.root,f.resumableReceipt.rid));
   for(const receipt of [f.goneReceipt,f.vanishedReceipt,f.completeReceipt])assert.equal(await open(f.root,receipt.rid),false,receipt.record.file);
   assert.ok(await open(f.root,f.bound.rid));
   for(const removed of [f.oldIndexTemp,f.sidecar,f.besideStore,f.aside,f.camera1,f.preview])assert.equal(await exists(removed),false,removed);
-  for(const kept of [f.freshIndexTemp,f.labelled,f.second.destination,f.third.destination,f.inUse,f.oldPartial,...f.user])assert.ok(await exists(kept),kept);
-  const manual=await cleanResidue(await findResidue([f.root],{temporary:f.temporary,inUse:()=>[f.inUse]}));
+  for(const kept of [f.freshIndexTemp,f.labelled,f.second.destination,f.third.destination,f.oldPartial,...f.user])assert.ok(await exists(kept),kept);
+  const manual=await cleanResidue(await findResidue([f.root],{temporary:f.temporary}));
   assert.equal(await exists(f.resumable),false);assert.equal(await exists(f.orphan),false);assert.equal(await open(f.root,f.resumableReceipt.rid),false);
   assert.equal(await exists(f.oldPartial),true,'an earlier version\'s staged copy is never touched');
   assert.equal(manual.left.files,0);
@@ -170,9 +169,9 @@ test('camera and preview folders are found and removed through the system tempor
   // os.tmpdir() is not canonical on macOS (/var is /private/var), and mkdtemp returns paths under it.
   const left=await fs.mkdtemp(path.join(os.tmpdir(),'photo-importer-preview-')),reading=await fs.mkdtemp(path.join(os.tmpdir(),'photo-importer-camera-'));
   t.after(async()=>{await fs.rm(left,{recursive:true,force:true});await fs.rm(reading,{recursive:true,force:true});});
-  const found=await findResidue([],{temporary:os.tmpdir(),inUse:()=>[reading]});
+  const found=await findResidue([],{temporary:os.tmpdir()});
   const own=found.items.filter(item=>item.path.endsWith(path.sep+path.basename(left)));
-  assert.equal(own.length,1);assert.ok(!found.items.some(item=>item.path.endsWith(path.sep+path.basename(reading))),'a folder in use is not listed');
+  assert.equal(own.length,1);
   const {removed}=await cleanResidue({items:own,files:1,bytes:own[0]!.bytes,resumable:{files:0,bytes:0},kept:{files:0,bytes:0},recoverable:{files:0,bytes:0}});
   assert.equal(removed.files,1);await assert.rejects(fs.lstat(left),{code:'ENOENT'});await fs.lstat(reading);
 });
@@ -187,14 +186,6 @@ test('a staged copy whose card is not connected is kept as resumable; one whose 
   assert.equal(kindOf(found,f.resumable),'partial');
   await cleanResidue(found,{keepResumable:true});
   assert.equal(await exists(f.resumable),false);assert.equal(await open(f.root,f.resumableReceipt.rid),false);
-});
-
-test('a preview folder that starts being used after the listing is not removed',async t=>{
-  const f=await littered(t);const inUse:string[]=[];
-  const found=await findResidue([f.root],{temporary:f.temporary,inUse:()=>inUse});
-  inUse.push(f.preview);
-  await cleanResidue(found,{inUse:()=>inUse});
-  await fs.lstat(f.preview);await assert.rejects(fs.lstat(f.camera1),{code:'ENOENT'});
 });
 
 /** One staged copy with a sealed receipt, on plain folders. `full`: the copy holds every byte. */

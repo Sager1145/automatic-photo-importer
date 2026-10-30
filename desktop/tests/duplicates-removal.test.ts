@@ -8,6 +8,7 @@ import { scanDuplicates, dropDuplicateStores } from '../core/duplicates';
 import { removeDuplicates, afterRemoval, companionTarget } from '../core/duplicate-removal';
 import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
 import { identity } from '../core/paths';
+import { inEditedFolder } from '../folder-template';
 import { chooseKeeper, organizedPath, resolveGroups, summarize } from '../duplicate-rules';
 import type { DuplicateExif, DuplicateFile, DuplicateGroup, Metadata } from '../shared';
 
@@ -15,6 +16,18 @@ configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const exif = (patch: Partial<DuplicateExif> = {}): DuplicateExif => ({ date: '2024-05-06T07:08:09.12', camera: 'Nikon Z f', serial: '3000123', shutterCount: '1001', width: 6048, height: 4032, ...patch });
 const file = (name: string, patch: Partial<DuplicateFile> = {}): DuplicateFile => ({ path: name, size: 1000, kind: 'JPEG', edited: false, birth: 1, ctime: 1, ...patch });
 const group = (strength: DuplicateGroup['strength'], id: string, ...files: DuplicateFile[]): DuplicateGroup => ({ id, strength, files });
+
+test('the organized structure follows the library template, not a fixed shape', () => {
+  const rules = { template: '{camera}/{year}/{monthName}', editedFolder: 'Finished' };
+  assert.equal(organizedPath('Nikon Z f/2024/05 May/DSC_1.NEF', rules), true);
+  assert.equal(organizedPath('photobackup/Nikon Z f/2024/05 May/DSC_1.NEF', rules), true);
+  assert.equal(organizedPath('2024/202405/Nikon Z f/DSC_1.NEF', rules), false);
+  assert.equal(organizedPath('Finished/2024/05 May/DSC_1.NEF', rules), false, 'an edited folder in the camera place');
+  assert.equal(organizedPath('Nikon Z f/2024/05 May/Conflicts/x/DSC_1.NEF', rules), false);
+  assert.equal(organizedPath('2024/202405/editied/cam/DSC_1.NEF', { template: '{year}/{yyyymm}/{camera}' }), false);
+  assert.equal(inEditedFolder(['a', 'editied']), true);
+  assert.equal(inEditedFolder(['a', 'Editied']), false);
+});
 
 test('the kept copy is the one in the organized structure, then the earliest imported', () => {
   assert.equal(organizedPath('2024/202405/Nikon Z f/DSC_1.NEF'), true);
@@ -41,7 +54,7 @@ test('each of the two levels splits groups into automatic and manual ones; the s
   assert.deepEqual(split(2), { sha: true, exif: false, size: false, name: false });
   const level2 = resolveGroups(groups, 2);
   assert.deepEqual(level2.filter(item => item.needsDecision).map(item => item.group.id), ['exif', 'size', 'name']);
-  assert.deepEqual(summarize(level2), { groups: 1, files: 1, bytes: 1000, undecided: 3, automatic: 1, manual: 3 });
+  assert.deepEqual(summarize(level2), { groups: 1, files: 1, bytes: 1000, undecided: 3, automatic: 1, manual: 3, earlier: 0 });
   assert.deepEqual(level2.map(item => item.decided), [false, false, false, false]);
   // The user's choice wins: another keeper, or keep everything; a path outside the group is ignored.
   const chosen = resolveGroups(groups, 2, { sha: 'b.jpg', exif: 'all', size: 'f.jpg', name: 'nowhere.jpg' });
@@ -256,9 +269,10 @@ test('the summary counts files an earlier journal placed, and drops them again a
   // A later pair whose copy to remove is that file would supersede the journal.
   const later = [group('sha', 'later', file('a/one.JPG'), file('c/three.JPG'))];
   const resolved = resolveGroups(later, 1, { later: 'c/three.JPG' });
-  assert.equal(summarize(resolved).earlier, undefined, 'only reported when asked');
-  assert.equal(summarize(resolved, placed).earlier, 1);
-  assert.equal(summarize(resolveGroups(later, 1, { later: 'a/one.JPG' }), placed).earlier, 0);
+  const marked = (list: typeof later) => list.map(item => ({ ...item, files: item.files.map(f => placed.has(f.path) ? { ...f, earlier: true as const } : f) }));
+  assert.equal(summarize(resolveGroups(marked(later), 1, { later: 'c/three.JPG' })).earlier, 1);
+  assert.equal(summarize(resolveGroups(marked(later), 1, { later: 'a/one.JPG' })).earlier, 0);
+  void resolved;
   await undoOrganization(root, removal.id!);
   assert.equal((await placedByEarlierJournals(root)).size, 0, 'an undone journal supersedes nothing');
 });

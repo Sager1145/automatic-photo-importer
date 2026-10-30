@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
@@ -6,8 +7,9 @@ import { createTranslator, formatSpeed, I18nProvider, languages, speedUnit } fro
 import { EtaTracker, stampEstimates } from '../eta';
 import { RateMeter } from '../rate-meter';
 import type { AppState, Job, Progress } from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 
@@ -49,7 +51,7 @@ test('rates settle on the measured speed and fall during a stall', () => {
 test('planning steps, the review and scans get a start time and a read speed', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'verifying', errors: [], backup: false, progress: { phase: 'planning', step: 'comparing', completed: 0, total: 100, bytes: 0, totalBytes: 0, speed: 0, file: '' } };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', reviewProgress: { phase: 'planning', step: 'reading', completed: 0, total: 10, bytes: 0, totalBytes: 1e9, speed: 0, file: '' }, scanProgress: { card: { files: 0, bytes: 0 } } };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), reviewProgress: { phase: 'planning', step: 'reading', completed: 0, total: 10, bytes: 0, totalBytes: 1e9, speed: 0, file: '' }, scanProgress: { card: { files: 0, bytes: 0 } } };
   for (let t = 0; t <= 10; t++) {
     job.progress = { ...job.progress!, completed: t * 5, bytes: t * 20e6, speed: 0 };
     state.reviewProgress = { ...state.reviewProgress!, completed: t, bytes: t * 30e6, speed: 0 };
@@ -81,7 +83,7 @@ test('every progress display shows elapsed time and time left together, and the 
       assert.ok(timing.includes(' · '), `${language} ${where}: separated by a dot`);
     };
     const left = (seconds: number) => t('{time} left', { time: formatRemaining(seconds, t) });
-    const desk = (job: Job) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    const desk = (job: Job) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     const base: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: ago(723_000), eta: 480, progress: { phase: 'copying', completed: 50, total: 200, bytes: 1e9, totalBytes: 8e9, speed: 12.44e6, file: 'a', eta: 480 } };
     const copying = desk(base);
     together(copying, left(480), 'source card');
@@ -96,7 +98,7 @@ test('every progress display shows elapsed time and time left together, and the 
     const estimating = desk({ ...base, eta: undefined, progress: { ...base.progress!, eta: undefined } });
     together(estimating, t('Estimating time left…'), 'estimating');
 
-    const dashboard = render(createElement(ImportDashboard, { state: { preferences, sources: [card], jobs: [base], history: [], platform: 'darwin', etaTotal: { eta: 480 } }, act: () => {} }));
+    const dashboard = render(createElement(ImportDashboard, { state: { preferences, sources: [card], jobs: [base], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), etaTotal: { eta: 480 } }, act: () => {} }));
     const total = dashboard.slice(dashboard.indexOf('data-testid="total-progress"'));
     together(total, left(480), 'dashboard total');
     assert.match(total, /data-testid="total-eta"/);

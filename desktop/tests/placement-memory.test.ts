@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { findMisplaced } from '../core/index';
-import { addPlacement, loadPlacement, placedMatches, placementId, rememberEntries, replacePlacement } from '../platform/placement-memory';
+import { addPlacement, loadPlacement, forgetPlacement, placedMatches, placementId, placementScope, rememberEntries, replacePlacement } from '../platform/placement-memory';
 import { ruleOptions, rulesScope } from '../routing-options';
 import { defaultPreferences } from '../preferences';
 import type { Metadata } from '../shared';
@@ -153,4 +153,29 @@ test('an import adds the entries it placed, and only those that exist inside the
   // The next check then reads nothing for it.
   const next=await check(scope);
   assert.equal(next.reads,0);
+});
+
+test('a record from before the guarded writers does not claim its rules, a current one does, and forgetting clears the cached header',async t=>{
+  const {store,id,put,check}=await fixture(t);
+  await put('2024/202402/Sony A7/JPEG/IMG_0.JPG');
+  const scope=scopeOf(options.template);
+  await check(scope);
+  assert.equal(await placementScope(store,id),scope);
+  const file=path.join(store,'placement-memory',`${id}.json.gz`),old=path.join(store,'old-store');
+  const record=JSON.parse(gunzipSync(await fs.readFile(file)).toString('utf8'));
+  assert.equal(record.rulesClaimed,true);delete record.rulesClaimed;
+  await fs.mkdir(path.join(old,'placement-memory'),{recursive:true});await fs.writeFile(path.join(old,'placement-memory',`${id}.json.gz`),gzipSync(JSON.stringify(record)));
+  assert.equal(await placementScope(old,id),undefined);
+  assert.equal((await loadPlacement(old,id,scope))?.size,1);
+  await addPlacement(old,id,scope,[]);
+  assert.equal(await placementScope(old,id),scope);
+  await forgetPlacement(store,id);
+  assert.equal(await placementScope(store,id),undefined);
+});
+
+test('a file whose metadata cannot be read counts as misplaced, so a check never claims the rules over it',async t=>{
+  const {root,put}=await fixture(t);
+  await put('2024/202402/Sony A7/JPEG/IMG_0.JPG');await put('2024/202402/Sony A7/JPEG/BAD.JPG');
+  const found=await findMisplaced(root,root,options,async file=>{if(file.endsWith('BAD.JPG'))throw new Error('unreadable');return {camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}};});
+  assert.equal(found.count,1);assert.equal(found.failures,0);
 });

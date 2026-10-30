@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {inventory, plan, execute} from '../core/index';
 import {configureOrganizationRecovery} from '../core/index';
+import {withFigures} from '../core/inventory';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 test('camera imports include standalone DJI LRF videos and preserve their bytes',async t=>{
@@ -55,6 +56,6 @@ test('DJI proxy videos remain visible in scanned format summaries when paired',a
  const {createElement}=await import('react'),{renderToStaticMarkup}=await import('react-dom/server');
  const {CapacityBar}=await import('../renderer/RootApp');
  const {I18nProvider}=await import('../renderer/i18n');
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(CapacityBar,{total:1000,free:500,inventory:{files:[{path:'/card/DJI_001.LRF',relative:'DJI_001.LRF',kind:'Videos',size:100,included:true,companionOf:'/card/DJI_001.MP4'}],media:1,companions:1,unknown:0,bytes:100,unknownExtensions:{},elapsedMs:0}})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(CapacityBar,{total:1000,free:500,inventory:withFigures({files:[{path:'/card/DJI_001.LRF',relative:'DJI_001.LRF',kind:'Videos',size:100,included:true,companionOf:'/card/DJI_001.MP4'}],media:1,companions:1,unknown:0,bytes:100,unknownExtensions:{},elapsedMs:0})})}));
  assert.ok(markup.includes('LRF'),'An actual proxy video must have its own format segment');
 });

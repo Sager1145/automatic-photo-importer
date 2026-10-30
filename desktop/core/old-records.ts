@@ -2,11 +2,11 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
-import {hostKeyConfigured,maybeLstat,openRegular,openV5,renameChecked,requireHostKey,sealV5,storeFor,storesFor,writeNewFile} from './app-store';
+import {hostKeyConfigured,openRegular,openV5,renameChecked,requireHostKey,sealV5,storeFor,storesFor,writeNewFile} from './app-store';
 import {halfConvertedJournals} from './recovery';
 import {logDeletion} from '../logger';
 import {isOldPointerName,isOldReceiptName,LEGACY_RECOVERY_FOLDER,OLD_JOURNAL_ID,RECOVERY_FOLDER} from './legacy-names';
-import {beneath,syncDirectory} from './paths';
+import {beneath,maybeLstat,syncDirectory} from './paths';
 import {MessageError} from '../messages';
 
 /** Records v5 left every earlier format behind. What an earlier version wrote on a drive is never read beyond

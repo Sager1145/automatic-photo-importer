@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -13,6 +14,7 @@ import {ImportDashboard,ImportDesk} from '../renderer/RootApp';
 import {cardFraction} from '../renderer/progress';
 import type {AppState,Job,Progress} from '../shared';
 import {configureOrganizationRecovery} from '../core/index';
+import { defaultPreferences } from '../preferences';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -97,11 +99,11 @@ test('the copy first reports the check of existing destination files, then copie
 });
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const job=(progress:Progress,phase:Job['phase']='verifying'):Job=>({id:'j',source,phase,errors:[],backup:false,progress});
-const state=(value:Job):AppState=>({preferences,sources:[source],jobs:[value],history:[],platform:'darwin'});
-const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
-const dashboard=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:state(value),act:()=>{}})})).match(/data-testid="total-progress"[\s\S]*?progress-display-line[\s\S]*?<\/div><\/div>/)?.[0]??'';
+const state=(value:Job):AppState=>({preferences,sources:[source],jobs:[value],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
+const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
+const dashboard=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDashboard,{state:state(value),act:()=>{}})})).match(/data-testid="total-progress"[\s\S]*?progress-display-line[\s\S]*?<\/div><\/div>/)?.[0]??'';
 const checked:Progress={phase:'planning',step:'checking',completed:64832,total:64832,bytes:834e9,totalBytes:834e9,speed:0,file:'DSC1.JPG'};
 const comparing:Progress={phase:'planning',step:'comparing',completed:3000,total:64832,bytes:36e9,totalBytes:0,speed:0,file:'DSC2.JPG'};
 

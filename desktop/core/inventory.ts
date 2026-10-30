@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Inventory, InventoryFile, Listing, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
-import { mediaKindForPath } from '../media-formats';
+import { formatFolder, mediaKindForPath } from '../media-formats';
 import { isOldReceiptName } from './legacy-names';
 import { noteOldReceipt } from './old-records';
 import { checkAbort, contained, directory, pathKey } from './paths';
@@ -56,6 +56,21 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   }
   return result;
 }
+/** The record of a whole-source listing, to reuse while its folders are unchanged. */
+export const listingOf=(inventory:Pick<Inventory,'files'>,backup:boolean,folders:Listing['folders']):Listing=>({backup,folders,files:inventory.files.map(file=>({relative:file.relative,size:file.size}))});
+/** What the screens show about an inventory, counted once here: files and bytes per format folder, unknown files copied or skipped, camera system files per kind. */
+export function figuresOf(files:readonly InventoryFile[],backup:boolean):Pick<Inventory,'formats'|'unknownFiles'|'systemKinds'>{
+  const formats:Inventory['formats']={},systemKinds:Record<string,number>={};let copied=0,skipped=0;
+  for(const file of files){
+    if(file.system)systemKinds[file.system.id]=(systemKinds[file.system.id]??0)+1;
+    if(file.kind!=='Other'){const key=formatFolder(file.path)||file.kind,entry=formats[key]??={video:file.kind==='Videos',files:0,bytes:0};entry.files++;entry.bytes+=file.size;}
+    else if(!file.companionOf&&!file.system&&(backup||file.size>0)){if(file.included)copied++;else skipped++;}
+  }
+  return {formats,unknownFiles:{copied,skipped},systemKinds};
+}
+/** An inventory whose figures are derived from its files (for callers that build one by hand). */
+export function withFigures<T extends Omit<Inventory,'formats'|'unknownFiles'|'systemKinds'>>(inventory:T,backup=false):T&Pick<Inventory,'formats'|'unknownFiles'|'systemKinds'>{return {...inventory,...figuresOf(inventory.files,backup)};}
+
 export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
@@ -174,9 +189,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     file.included=!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
   }
   // Nothing is dropped silently: every file left out is listed with its reason.
-  const skipped:SkippedFile[]=[],systemKinds:Record<string,number>={};
+  const skipped:SkippedFile[]=[];
   for(const file of files) {
-    if(file.system) systemKinds[file.system.id]=(systemKinds[file.system.id]??0)+1;
     // Resolve links only after every companion is identified: a sidecar can belong
     // to a proxy which itself belongs to an original listed later. Empty companions
     // travel with that original; an empty original leaves the whole family in place.
@@ -191,5 +205,5 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   const unknown=files.filter(f=>f.kind==='Other' && !f.companionOf && !f.system && (options.backup || f.size>0)), unknownExtensions:Record<string,number>={};
   for(const file of unknown) {const ext=extension(file.path); unknownExtensions[ext]=(unknownExtensions[ext]??0)+1;}
-  return {files,media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:{backup:!!options.backup,folders:listedFolders,files:files.map(file=>({relative:file.relative,size:file.size}))}}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,systemKinds,skipped,elapsedMs:performance.now()-started};
+  return {files,...figuresOf(files,!!options.backup),media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:listingOf({files},!!options.backup,listedFolders)}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,skipped,elapsedMs:performance.now()-started};
 }

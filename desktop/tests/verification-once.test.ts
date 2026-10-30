@@ -199,16 +199,16 @@ test('deleting originals keeps a source whose backup differs, even when the sour
  await fs.lstat(f.source);
 });
 
-// A stopped import keeps the checksums of the files it verified (main.ts runs the copy inside rememberingVerified),
+// A stopped import keeps the checksums of the files it verified (main.ts remembers them in a finally after the copy),
 // so the next plan of the same card recognises those files by identity without reading them.
 test('a stopped import still remembers its checksums, and the next plan does not read those files',async t=>{
- const {rememberImported,rememberingVerified,loadImported}=await import('../platform/scan-memory');
+ const {rememberImported,loadImported}=await import('../platform/scan-memory');
  const base=await folder(t,'verify-once-stopped-'),card=path.join(base,'card'),root=path.join(base,'backup'),store=path.join(base,'store');
  const first=path.join(card,'A.bin'),second=path.join(card,'B.bin');await photo(first,Buffer.alloc(SIZE,1));await photo(second,Buffer.alloc(SIZE,2));await fs.mkdir(root);
  const options={backup:true as const,template:'{camera}',layout:'flat' as const,unknownRules:{}},none=async()=>({fields:{}});
  const {plans:[transfer]}=await core.plan(card,[root],options,none);
  const control=new AbortController(),verified:Record<string,{sha256:string;identity:string}>={};
- const stopped=await rememberingVerified(verified,()=>rememberImported(store,'card-volume',card,verified),()=>core.execute(transfer!,control.signal,undefined,{onFileOutcome:outcome=>{verified[outcome.source]={sha256:outcome.sha256,identity:outcome.sourceIdentity!};control.abort();}})).then(()=>false,error=>{if(error?.name!=='AbortError')throw error;return true;});
+ const stopped=await core.execute(transfer!,control.signal,undefined,{onFileOutcome:outcome=>{verified[outcome.source]={sha256:outcome.sha256,identity:outcome.sourceIdentity!};control.abort();}}).then(()=>false,error=>{if(error?.name!=='AbortError')throw error;return true;}).finally(()=>rememberImported(store,'card-volume',card,verified));
  assert.equal(stopped,true);assert.ok(Object.keys(verified).length>0);
  const other=path.join(base,'other');await fs.mkdir(other);
  const reads=countReads(t,file=>file===first?'first':file===second?'second':undefined);

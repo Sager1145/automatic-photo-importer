@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fs from 'node:fs/promises';
@@ -18,7 +19,7 @@ const checking = (total: number, totalBytes: number): Job => ({ id: 'j', source:
 test('metadata checking measures and shows files/s only', async () => {
   const { PlanningProgress } = await import('../renderer/RootApp');
   const tracker = new EtaTracker(), job = checking(1000, 4e9);
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   for (let s = 0; s <= 10; s++) { job.progress = { ...job.progress!, completed: s * 40, bytes: s * 40 * 4e6 }; stampEstimates(state, tracker, 2_000_000 + s * 1000); }
   assert.ok(job.progress!.fileRate! > 36 && job.progress!.fileRate! < 44, `${job.progress!.fileRate} files/s`);
   assert.equal(job.progress!.speed, 0, 'the bytes of the files covered are not data moved');
@@ -33,7 +34,7 @@ test('metadata checking measures and shows files/s only', async () => {
 
 test('time left stays steady while files finish in bursts of a batch', () => {
   const tracker = new EtaTracker(), job = checking(29000, 29000 * 5e6);
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   let completed = 0, last: number | undefined, worst = 0;
   for (let ms = 0; ms <= 120_000; ms += 100) {
     if (!(ms > 60_000 && ms < 63_000) && (ms / 100) % 2 === 0) completed += 48; // about 240 files/s in bursts

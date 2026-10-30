@@ -5,15 +5,16 @@ import os from 'node:os';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
+import {parseArgs} from 'node:util';
 import assert from 'node:assert/strict';
 import type * as Core from '../desktop/core/index.ts';
 
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const args=process.argv.slice(2);
-if(args.some(value=>!value.startsWith('--core=')&&!value.startsWith('--label=')))throw new Error('Usage: node --import tsx Scripts/measure-transfer-io.mts [--core=/absolute/index.ts] [--label=before|after]');
-const moduleFile=path.resolve(args.find(value=>value.startsWith('--core='))?.slice(7)??path.join(repository,'desktop/core/index.ts'));
+const usage='Usage: node --import tsx Scripts/measure-transfer-io.mts [--core=/absolute/index.ts] [--label=before|after]';
+let flags;try{flags=parseArgs({options:{core:{type:'string'},label:{type:'string'}}}).values;}catch{throw new Error(usage);}
+const {core,label='after'}=flags;
+const moduleFile=path.resolve(core??path.join(repository,'desktop/core/index.ts'));
 if(moduleFile.startsWith('/Volumes/'))throw new Error('This experiment must never load a module from a physical test volume.');
-const label=args.find(value=>value.startsWith('--label='))?.slice(8)??'after';
 if(!['before','after'].includes(label))throw new Error('Label must be before or after.');
 const {plan,execute}=await import(pathToFileURL(moduleFile).href) as typeof Core;
 const fixture=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'photo-importer-io-count-')));

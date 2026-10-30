@@ -2,11 +2,9 @@
  * Saved in userData/eta-priors.json, never in preferences or reports. It holds no paths, names or raw ids: volume ids appear only as a
  * truncated keyed hash. Pure apart from PriorStore's file; callers pass the day and the clock. See docs/eta-estimates.md. */
 import {createHmac} from 'node:crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type {Coef,PriorBook,PriorChoice} from './eta-model';
 import {priorWeight} from './eta-model';
-import {cacheRecord,readCache} from './platform/user-caches';
+import {cacheRecord,readCacheFile,writeCacheFile} from './platform/user-caches';
 
 export interface DriveInfo {id?:string;transport?:string;fsType?:string;external?:boolean;}
 export interface PriorContext {source?:DriveInfo;destinations:DriveInfo[];}
@@ -16,7 +14,7 @@ export interface PriorFile {version:1;salt:string;entries:Record<string,PriorEnt
 /** One finished step: the fit rescaled to the whole step's time, the totals it covered and the share of its time the drive was shared. */
 export interface StepResult extends Coef {T:number;F:number;G:number;observed:number;shared:number;}
 
-const MAX_ENTRIES=200,MAX_SUMMARIES=8,MIN_SECONDS=30,MIN_FILES=20,MIN_GB=1,MAX_SHARED=0.2,SAVE_EVERY=30_000;
+const MAX_ENTRIES=200,MAX_BYTES=1024*1024,MAX_SUMMARIES=8,MIN_SECONDS=30,MIN_FILES=20,MIN_GB=1,MAX_SHARED=0.2,SAVE_EVERY=30_000;
 const clean=(text:string|undefined,fallback:string)=>(text??'').toLowerCase().replace(/[^a-z0-9_-]/g,'')||fallback;
 /** "usb:exfat:ext": transport, file system, external or internal. */
 export function driveClass(info:DriveInfo):string{return `${clean(info.transport,'unknown')}:${clean(info.fsType,'unknown')}:${info.external?'ext':'int'}`;}
@@ -86,8 +84,9 @@ export class PriorTable {
  }
  /** As this version stores it (records v5: {v:5,kind:'eta'}). */
  toJSON():Record<string,unknown>{return cacheRecord('eta',{salt:this.salt,entries:Object.fromEntries(this.entries)});}
- static from(data:unknown,fallbackSalt:()=>string):PriorTable{
-  const file=readCache<PriorFile>(data,'eta',1);
+ /** `data`: the stored file as readCacheFile returns it (undefined when it could not be read). */
+ static from(data:PriorFile|undefined,fallbackSalt:()=>string):PriorTable{
+  const file=data as PriorFile|undefined;
   if(!file||typeof file.salt!=='string'||!file.salt||!file.entries||typeof file.entries!=='object'||Array.isArray(file.entries))return new PriorTable(fallbackSalt());
   return new PriorTable(file.salt,file.entries);
  }
@@ -99,18 +98,12 @@ export class PriorStore {
  private saved=-Infinity;
  constructor(private readonly file:string,private readonly newSalt:()=>string){this.table=new PriorTable(newSalt());}
  async load(){
-  try{this.table=PriorTable.from(JSON.parse(await fs.readFile(this.file,'utf8')),this.newSalt);}
-  catch{this.table=new PriorTable(this.newSalt());}
+  this.table=PriorTable.from(await readCacheFile<PriorFile>(this.file,'eta',1,{maxBytes:MAX_BYTES}),this.newSalt);
  }
- /** Write the table: to a private temporary file in the same folder, then renamed over the old one. */
+ /** Write the table (user-caches writeCacheFile: a private temporary file in the same folder, then renamed over the old one). */
  async save(){
-  const temporary=`${this.file}.${process.pid}.tmp`;
-  try{
-   await fs.mkdir(path.dirname(this.file),{recursive:true});
-   await fs.writeFile(temporary,JSON.stringify(this.table.toJSON()),{mode:0o600});
-   await fs.rename(temporary,this.file);
-   this.table.markSaved();
-  }catch(error){await fs.rm(temporary,{force:true}).catch(()=>{});throw error;}
+  await writeCacheFile(this.file,'eta',this.table.toJSON());
+  this.table.markSaved();
  }
  /** Save if something changed and the last save was 30 s ago or more. Returns whether it wrote; never throws. */
  async maybeSave(now:number):Promise<boolean>{

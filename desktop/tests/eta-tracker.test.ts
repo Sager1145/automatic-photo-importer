@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -7,8 +8,9 @@ import {EtaTracker,overviewEta,stampEstimates,type EtaInput,type EtaContext} fro
 import {PriorStore} from '../eta-priors';
 import {deleteOriginals} from '../core/originals';
 import type {AppState,Job} from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/b'],copyMode:'single',basePath:'p',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/b'],copyMode:'single',basePath:'p',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
 const context:EtaContext={kind:'import',destinations:1,verify:true};
 const drives={source:{id:'SRC-UUID',transport:'storage',fsType:'exfat',external:true},destinations:[{id:'DST-UUID',transport:'storage',fsType:'exfat',external:true}]};
@@ -47,7 +49,7 @@ test('the job estimate is withheld while the job is new, and the step estimate u
 
 test('an unknown total gives no estimate, only a rate',()=>{
  const tracker=new EtaTracker(),source={...card,total:undefined,free:undefined};
- const job:AppState={preferences,sources:[source],jobs:[],history:[],platform:'darwin',scanProgress:{card:{files:0,bytes:0}}};
+ const job:AppState={preferences,sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),scanProgress:{card:{files:0,bytes:0}}};
  for(let t=0;t<=8;t++){job.scanProgress!.card={files:t*100,bytes:t*1e8};stampEstimates(job,tracker,t*1000);}
  assert.equal(job.scanProgress!.card!.eta,undefined);
  assert.ok(job.scanProgress!.card!.fileRate!>0);
@@ -55,7 +57,7 @@ test('an unknown total gives no estimate, only a rate',()=>{
 
 test('stopping removes the time left',()=>{
  const tracker=new EtaTracker(),running:Job={id:'j',source:card,phase:'copying',errors:[],backup:false,progress:{phase:'copying',completed:0,total:100,bytes:0,totalBytes:1e10,speed:0,file:''}};
- const state:AppState={preferences,sources:[card],jobs:[running],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:[running],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  for(let t=0;t<=30;t++){running.progress={...running.progress!,completed:t,bytes:t*1e8};stampEstimates(state,tracker,t*1000);}
  assert.ok(running.eta!>0);assert.ok(running.progress!.eta!>0);
  running.stopping='stop';
@@ -79,7 +81,7 @@ test('delete originals reads the source and every backup copy, and gets a time l
  assert.equal(seen.at(-1)![0],10000*3,'(1 + 2 backups) times the size');
  assert.equal(seen.at(-1)![1],10000*3);
  const tracker=new EtaTracker(),done:Job={id:'j',source:card,phase:'complete',errors:[],backup:false,verifiedOriginals:4};
- const state:AppState={preferences,sources:[card],jobs:[done],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:[done],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  tracker.plan('originals:j',{kind:'originals',backups:2});
  for(let s=0;s<=30;s++){done.deletingOriginals={completed:s,total:100,bytes:s*3e8,totalBytes:100*3e8};stampEstimates(state,tracker,s*1000);}
  assert.ok(done.deletingOriginals!.eta!>0,`eta ${done.deletingOriginals!.eta}`);

@@ -4,13 +4,12 @@ import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
-import {appendLines,holdLog,LINE_CAPS,maybeLstat,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
-import {checkAbort,code,contained,identity,regularHandle,rootUnchanged,sameBirth,sameStat} from './paths';
+import {appendLines,holdLog,LINE_CAPS,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
+import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,type StatRecord} from './paths';
 import {log,logDeletion} from '../logger';
 
 type Kind='stage'|'publication';
-interface Snapshot {dev:string;ino:string;size:string;mtime:string;ctime:string;}
-interface RecordData {kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:Snapshot;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];}
+interface RecordData {kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:StatRecord;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];}
 /** An open receipt in a store's receipt log: what it says and where it is. */
 export interface Receipt {rid:string;store:Store;record:RecordData;}
 export interface OwnedPartial extends Receipt {file:string;stat:BigIntStats;/** A receipt written before its file was created: no file was there. */absent?:boolean;/** findPublication: the file no longer shows the birth time of the receipt, only one the finished copy may have (never resumed, only finished when its bytes are equal). */tolerant?:boolean;}
@@ -30,8 +29,7 @@ const ridPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 interface ReceiptSet {store:Store;open:Map<string,RecordData>;}
 export type RecoveryIndex=Map<string,Promise<ReceiptSet>>;
 const recordKey=(record:Pick<RecordData,'kind'|'source'|'destination'|'sha256'>)=>JSON.stringify([record.kind,record.source,record.destination,record.sha256]);
-const snapshot=(s:BigIntStats):Snapshot=>({dev:String(s.dev),ino:String(s.ino),size:String(s.size),mtime:String(s.mtimeNs),ctime:String(s.ctimeNs)});
-const sourceMatches=(s:BigIntStats,r:Snapshot)=>JSON.stringify(snapshot(s))===JSON.stringify(r);
+const sourceMatches=(s:BigIntStats,r:StatRecord)=>JSON.stringify(statRecord(s))===JSON.stringify(r);
 const fileIdentity=(s:BigIntStats)=>`${s.dev}:${s.ino}:${s.birthtimeNs}`;
 /** exFAT names a file without a start cluster by a temporary (negative) inode, replaced when data
  * first reaches the disk or the volume is mounted again: such a receipt binds by device and birth time. */
@@ -59,7 +57,7 @@ const directUnbound=(record:RecordData,stat:BigIntStats|undefined)=>record.mode=
  * current one while the recorded root/source folder is still the same inode at the same path. */
 const sourceRebased=new WeakSet<RecordData>();
 export async function rebaseMount<T extends RecordData>(record:T):Promise<T>{
- const swap=(value:string,dev:string)=>value.replace(/^\d+:/,dev+':');
+ const swap=rebaseDevice;
  const out:T={...record,sourceStat:record.sourceStat&&{...record.sourceStat}};
  const root=await fs.lstat(record.root,{bigint:true}).catch(()=>undefined);
  if(root?.isDirectory()&&String(record.rootIdentity).split(':')[1]===String(root.ino)){const dev=String(root.dev);out.rootIdentity=swap(out.rootIdentity,dev);out.parentIdentity=swap(out.parentIdentity,dev);out.fileIdentity=swap(out.fileIdentity,dev);}
@@ -87,7 +85,7 @@ export function parseReceiptLine(text:string):{op:'open';rid:string;record:Recor
 /** The store's receipt segments, oldest first. */
 export async function receiptSegments(store:Store):Promise<string[]>{
  const folder=path.join(store.path,IMPORTS);
- return (await fs.readdir(folder).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;})).filter(name=>segmentPattern.test(name)).sort().map(name=>path.join(folder,name));
+ return (await readdirIfPresent(folder)).filter(name=>segmentPattern.test(name)).sort().map(name=>path.join(folder,name));
 }
 /** Stream every line of one segment. */
 export async function readSegment(file:string,onLine:(line:ReturnType<typeof parseReceiptLine>)=>void,signal?:AbortSignal):Promise<void>{
@@ -147,7 +145,7 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
  await contained(file,kind==='stage'?store.path:transfer.root);await contained(entry.source,transfer.source);
  const sourceStat=await fs.lstat(entry.source,{bigint:true});
  if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
- const record:RecordData={kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:snapshot(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId,...(direct?{mode:'direct' as const,size:String(direct.size),finalBirth:direct.finalBirth.map(String)}:{})};
+ const record:RecordData={kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:statRecord(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId,...(direct?{mode:'direct' as const,size:String(direct.size),finalBirth:direct.finalBirth.map(String)}:{})};
  const rid=randomUUID(),line=openLine(rid,record);
  if(Buffer.byteLength(line)>LINE_CAPS.receipt)throw new Error('Import receipt is too large');
  await appendReceipts(store,[line]);
@@ -226,7 +224,7 @@ async function scan(kind:Kind,entry:PlanEntry,root:string,index:RecoveryIndex,si
     if(!finish&&!await prefixMatches(record.file,entry.source,Number(stat.size),signal))continue;
     if(!sameStat(stat,await fs.lstat(record.file,{bigint:true}))||!sameStat(source,await fs.lstat(entry.source,{bigint:true})))continue;
     return {rid,store:set.store,record,file:record.file,stat,...(tolerant?{tolerant:true}:{})};
-   }catch(error){if((error as Error)?.name==='AbortError')throw error;/* Untrusted/unavailable records grant no overwrite permission. */}
+   }catch(error){if(isAbort(error))throw error;/* Untrusted/unavailable records grant no overwrite permission. */}
   }
  }
  return undefined;

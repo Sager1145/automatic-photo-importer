@@ -1,14 +1,16 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ErrorLog,clearErrors,driveName,gatherErrors} from '../error-log';
 import {text} from '../messages';
 import type {AppState,Job} from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const untitled={id:'untitled',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const};
 const folder={id:'folder',name:'photobackup',path:'/Volumes/A006/photobackup',transport:'folder' as const};
 const job=(extra:Partial<Job>):Job=>({id:'j1',source:untitled,phase:'error',errors:[],backup:false,...extra});
-const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[untitled,folder],jobs:[],history:[],platform:'darwin',...extra});
+const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[untitled,folder],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 
 test('the drive name comes from the mounted volume, else the source name',()=>{
  assert.equal(driveName('/Volumes/A006/photobackup/2022','photobackup'),'A006');
@@ -33,11 +35,11 @@ test('the log stamps when each error first appeared and keeps that time',()=>{
  const one=state({jobs:[job({errors:[text('A')]})]});
  const stamped=log.update(gatherErrors(one),first);
  const [a]=gatherErrors(one);
- assert.equal(stamped.at[a!.id],first.toISOString());
+ assert.equal(stamped.entries.find(e=>e.id===a!.id)!.at,first.toISOString());
  const two=state({jobs:[job({errors:[text('A'),text('B')]})]});
  const next=log.update(gatherErrors(two),later);
  const [,b]=gatherErrors(two);
- assert.equal(next.at[a!.id],first.toISOString());assert.equal(next.at[b!.id],later.toISOString());
+ const when=(id:string)=>next.entries.find(e=>e.id===id)!.at;assert.equal(when(a!.id),first.toISOString());assert.equal(when(b!.id),later.toISOString());
 });
 
 test('clearing hides one error or all of them without changing any job',()=>{
@@ -47,13 +49,13 @@ test('clearing hides one error or all of them without changing any job',()=>{
  const [app,a,b]=gatherErrors(value);
  log.update(gatherErrors(value));
  clearErrors(log,value,{ids:[a!.id]});
- assert.deepEqual(log.update(gatherErrors(value)).cleared,[a!.id]);
+ assert.deepEqual(gatherErrors(value).map(e=>e.id).filter(id=>!log.update(gatherErrors(value)).entries.some(e=>e.id===id)),[a!.id]);
  assert.deepEqual(value.jobs,before,'jobs keep their errors and phase');
  assert.ok(value.error,'clearing a job error leaves the app error');
  clearErrors(log,value,{ids:[app!.id]});
  assert.equal(value.error,undefined,'clearing the app error clears it at the source');
  clearErrors(log,value);
- assert.deepEqual(log.update(gatherErrors(value)).cleared.sort(),[a!.id,b!.id].sort());
+ assert.deepEqual(log.update(gatherErrors(value)).entries.map(e=>e.id),[],'every error is cleared, the app error is gone');void b;
  assert.deepEqual(value.jobs,before);
 });
 
@@ -61,10 +63,10 @@ test('an error that goes away and comes back is shown again with a new time',()=
  const log=new ErrorLog(),with_=state({destinationStatus:[{path:'/Volumes/A006',available:false,detail:'Not mounted'}]}),without=state();
  const [error]=gatherErrors(with_);
  log.update(gatherErrors(with_),new Date('2026-10-22T09:00:00Z'));clearErrors(log,with_,{ids:[error!.id]});
- assert.deepEqual(log.update(gatherErrors(with_)).cleared,[error!.id]);
+ assert.deepEqual(log.update(gatherErrors(with_)).entries,[]);
  log.update(gatherErrors(without));
  const back=log.update(gatherErrors(with_),new Date('2026-10-22T10:00:00Z'));
- assert.deepEqual(back.cleared,[]);assert.equal(back.at[error!.id],'2026-10-22T10:00:00.000Z');
+ assert.equal(back.entries.find(e=>e.id===error!.id)!.at,'2026-10-22T10:00:00.000Z');
 });
 
 test('All errors shows each error with its time and drive, a Clear button, and Clear all; cleared errors leave the count',async()=>{
@@ -91,7 +93,7 @@ test('All errors shows each error with its time and drive, a Clear button, and C
  }
  log.clear([errors[1]!.id!]);value.errorLog=log.update(gatherErrors(value));
  const left=collectErrors(value);assert.equal(left.length,2);
- const controls=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(TitlebarControls,{state:value,act:()=>{},errorCount:left.length,onErrors:()=>{}})}));
+ const controls=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(TitlebarControls,{state:value,act:()=>{},errorCount:left.length,onErrors:()=>{}})}));
  assert.ok(controls.includes('data-count="2"'));
  clearErrors(log,value);value.errorLog=log.update(gatherErrors(value));
  assert.equal(collectErrors(value).length,0);
@@ -122,7 +124,7 @@ test('sidebar sources and destinations with errors show a live count that opens 
   assert.ok(panel.includes(t('Errors for {name}',{name:'Untitled'}))&&panel.includes(t('Show all errors')),`${language}: filter is named and can be removed`);
  }
  clearErrors(log,value,{ids:[errors[0]!.id!]});clearErrors(log,value,{ids:[errors[1]!.id!]});value.errorLog=log.update(gatherErrors(value));errors=collectErrors(value);
- const sources=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
+ const sources=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
  assert.ok(!sources.includes('sidebar-errors'),'the badge goes once its errors are cleared');
 });
 
@@ -131,13 +133,13 @@ test('the error log follows real changes, not counts: an equal-length A→B repl
  const log=new ErrorLog(),cache=createErrorLogCache(log),value=state({jobs:[job({errors:[text('A')]})]});
  const t1=new Date('2026-10-23T09:00:00Z'),t2=new Date('2026-10-23T09:05:00Z'),t3=new Date('2026-10-23T09:10:00Z');
  const [a]=gatherErrors(value);cache.refresh(value,t1);clearErrors(log,value,{ids:[a!.id]});
- assert.deepEqual(cache.refresh(value,t1).cleared,[a!.id]);
+ assert.deepEqual(cache.refresh(value,t1).entries,[]);
  value.jobs[0]!.errors=[text('B')];
  const replaced=cache.refresh(value,t2),[b]=gatherErrors(value);
- assert.deepEqual(replaced.cleared,[],'A is gone, so its clear is forgotten');assert.deepEqual(replaced.at,{[b!.id]:t2.toISOString()},'B shows with its own time');
+ assert.deepEqual(replaced.entries.map(e=>[e.id,e.at]),[[b!.id,t2.toISOString()]],'A is gone and its clear forgotten; B shows with its own time');
  value.jobs[0]!.errors=[text('A')];
  const back=cache.refresh(value,t3);
- assert.deepEqual(back.cleared,[],'A is not hidden by its old clear');assert.deepEqual(back.at,{[a!.id]:t3.toISOString()},'A is new again');
+ assert.deepEqual(back.entries.map(e=>[e.id,e.at]),[[a!.id,t3.toISOString()]],'A is not hidden by its old clear and is new again');
 });
 
 test('appending, a group count, acknowledging and a phase error each rebuild the cached log once',async()=>{

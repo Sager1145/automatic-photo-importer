@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -5,12 +6,13 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
 import {TitlebarControls,ImportDesk,OrganizationCard} from '../renderer/RootApp';
 import type {AppState,Job,Language} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const progress={phase:'copying' as const,completed:3,total:10,bytes:1e6,totalBytes:4e6,speed:1e6,file:'A.JPG'};
 const job=(stopping?:Job['stopping'],extra:Partial<Job>={}):Job=>({id:'j',source,phase:'copying',errors:[],backup:false,progress,...(stopping?{stopping}:{}),...extra});
-const state=(jobs:Job[]):AppState=>({preferences,sources:[source],jobs,history:[],platform:'darwin'});
+const state=(jobs:Job[]):AppState=>({preferences,sources:[source],jobs,history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
 const render=<P extends object>(element:(props:P)=>ReturnType<typeof createElement>,props:P,language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(element,props)}));
 const titlebar=(jobs:Job[],language:Language='en')=>render(TitlebarControls,{state:state(jobs),act:()=>{},errorCount:0,onErrors:()=>{}},language);
 /** The opening tag of the element with this test id. */

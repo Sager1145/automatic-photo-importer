@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile, copyFile, readdir, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { Thumbnail } from '../shared';
 import { mediaKindForPath } from '../media-formats';
 
@@ -16,9 +17,8 @@ export interface ThumbnailDecoders {
   /** The JPEG embedded in the file, if it has one. */
   embedded(file: string): Promise<Buffer | undefined>;
 }
-const run = (command: string, args: string[], timeout = 30000) => new Promise<boolean>(resolve => {
-  execFile(command, args, { timeout }, error => resolve(!error));
-});
+const exec = promisify(execFile);
+const run = (command: string, args: string[], timeout = 30000) => exec(command, args, { timeout }).then(() => true, () => false);
 /** sips decodes through ImageIO, including camera RAW; it is built into macOS. */
 export const systemDecoders = (embedded: ThumbnailDecoders['embedded']): ThumbnailDecoders => ({
   async decode(file, output, size) {

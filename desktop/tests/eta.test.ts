@@ -1,9 +1,11 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EtaTracker, stampEstimates, type EtaInput } from '../eta';
 import { bucketSeconds } from '../eta-format';
 import { listingEstimate } from '../listing-estimate';
 import type { AppState, Job } from '../shared';
+import { defaultPreferences } from '../preferences';
 
 const MB = 1e6;
 const context = { kind: 'import' as const, destinations: 1, verify: true };
@@ -40,8 +42,8 @@ test('a job stores the model seconds, not a display bucket', () => {
   const tracker = new EtaTracker();
   const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true };
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { ...copying(0, 10e9), speed: 0, file: '' } };
-  const preferences = { language: 'en', appearance: 'system', textScale: 1, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', allowFolderSource: false, unknownRules: {} } as AppState['preferences'];
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const preferences = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: '', videoTemplate: '', unknownRules: {} } as AppState['preferences'];
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   const seen: number[] = [];
   for (let t = 0; t <= 40; t++) { job.progress = { ...copying(t * 37 * MB, 10e9, t * 3, 1000), speed: 0, file: '' }; stampEstimates(state, tracker, t * 1000); if (job.eta !== undefined) seen.push(job.eta); }
   assert.ok(seen.length > 10);

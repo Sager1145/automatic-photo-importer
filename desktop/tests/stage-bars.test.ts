@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -7,11 +8,12 @@ import {I18nProvider} from '../renderer/i18n';
 import {ImportDashboard,SidebarSources,SourceRow,SourceSteps,totalStageLayers} from '../renderer/RootApp';
 import {OrganizationProgress,ProgressDisplay,jobStageLayers} from '../renderer/progress';
 import type {AppState,Job,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
-const stateWith=(extra:Partial<AppState>):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',...extra});
-const render=(node:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:node}));
+const stateWith=(extra:Partial<AppState>):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
+const render=(node:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:node}));
 const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');
 const progress=(extra:Partial<Progress>={}):Progress=>({phase:'copying',completed:40,total:100,bytes:40,totalBytes:100,speed:1e6,file:'a.jpg',startedAt:new Date(0).toISOString(),...extra});
 const job=(phase:Job['phase'],extra:Partial<Progress>={},more:Partial<Job>={}):Job=>({id:'j'+Math.random(),source:card,phase,errors:[],backup:false,startedAt:new Date(Date.now()-60000).toISOString(),progress:progress(extra),...more});

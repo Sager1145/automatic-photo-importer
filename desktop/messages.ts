@@ -1,4 +1,5 @@
 import type {Language} from './shared';
+import {formatBytes,formatNumber} from './format';
 
 /** Text the main process shows the user: a catalog key plus parameters, translated by the renderer.
  * `text` carries raw text (low-level errors, file names, history from earlier versions) unchanged. */
@@ -7,6 +8,7 @@ export const backendMessages={
 
  'history.issuesSkipped':{en:'Skipped issues ({name}): {count}','zh-Hans':'已跳过的问题（{name}）：{count}','zh-Hant':'已略過的問題（{name}）：{count}',ja:'スキップした問題（{name}）：{count}'},
  'error.acknowledgeInvalid':{en:'These issues can no longer be skipped. Open All errors again.','zh-Hans':'这些问题已无法跳过。请重新打开“所有错误”。','zh-Hant':'這些問題已無法略過。請重新開啟「所有錯誤」。',ja:'これらの問題はスキップできなくなりました。「すべてのエラー」を開き直してください。'},
+ 'issue.unknownFormats':{en:'Unknown file formats','zh-Hans':'未知文件格式','zh-Hant':'未知檔案格式',ja:'不明なファイル形式'},
  'issue.group':{en:'{count} items need attention','zh-Hans':'{count} 项需要留意','zh-Hant':'{count} 項需要留意',ja:'{count} 件の確認が必要です'},
  'job.waiting':{en:'Waiting for an available slot','zh-Hans':'等待空闲的处理位置','zh-Hant':'等待空閒的處理位置',ja:'空きを待っています'},
  'job.waitingForImports':{en:'Waiting for imports to finish before organizing','zh-Hans':'等待导入完成后再整理','zh-Hant':'等待匯入完成後再整理',ja:'インポートの完了を待ってから整理します'},
@@ -39,6 +41,7 @@ export const backendMessages={
 'job.originalsDeleted':{en:'{count} originals deleted from the source ({size}), each checked against the backup · {kept} left in place · {folders} empty folders removed','zh-Hans':'已从来源删除 {count} 个原文件（{size}），均已与备份核对 · {kept} 个保留在原处 · 已移除 {folders} 个空文件夹','zh-Hant':'已從來源刪除 {count} 個原始檔案（{size}），均已與備份核對 · {kept} 個保留在原處 · 已移除 {folders} 個空資料夾',ja:'ソースから元のファイル {count} 件を削除しました（{size}、すべてバックアップと照合済み）· {kept} 件はそのまま残しています · 空のフォルダ {folders} 件を削除しました'},
  'error.originalsStale':{en:'These originals are no longer available to delete. Import the folder again first.','zh-Hans':'这些原文件已无法删除。请先重新导入该文件夹。','zh-Hant':'這些原始檔案已無法刪除。請先重新匯入該資料夾。',ja:'これらの元のファイルは削除できなくなりました。先にフォルダーをもう一度インポートしてください。'},
  'error.originalsBusy':{en:'Wait for this source to finish before deleting its originals.','zh-Hans':'请等此来源处理完成后再删除其原文件。','zh-Hant':'請等此來源處理完成後再刪除其原始檔案。',ja:'このソースの処理が終わってから元のファイルを削除してください。'},
+ 'error.originalsOnCard':{en:'Originals on a camera card or removable flash media are never deleted.','zh-Hans':'相机卡或可移动闪存介质上的原文件永远不会被删除。','zh-Hant':'相機卡或可移除快閃媒體上的原始檔永遠不會被刪除。',ja:'カメラカードやリムーバブルフラッシュメディア上の元ファイルは削除されません。'},
  'error.originalsDelete':{en:'{count} originals could not be checked or deleted and were left in place: {error}','zh-Hans':'有 {count} 个原文件无法检查或删除，已保留在原处：{error}','zh-Hant':'有 {count} 個原始檔案無法檢查或刪除，已保留在原處：{error}',ja:'{count} 件の元のファイルは確認または削除できず、そのまま残しています：{error}'},
  'history.recoveryDeleted':{en:'Organization recovery files deleted','zh-Hans':'已删除整理恢复文件','zh-Hant':'已刪除整理復原檔案',ja:'整理の復元用ファイルを削除しました'},
  'job.stepRestoring':{en:'Putting files back: {completed} of {total}','zh-Hans':'正在将文件放回原处：{completed}/{total}','zh-Hant':'正在將檔案放回原處：{completed}/{total}',ja:'ファイルを元に戻し中：{total} 件中 {completed} 件'},
@@ -102,6 +105,9 @@ export const backendMessages={
  'error.busy':{en:'Finish transfers or discard the current review first.','zh-Hans':'请先完成传输或放弃当前审核。','zh-Hant':'請先完成傳輸或捨棄目前的審核。',ja:'先に転送を完了するか、現在の確認を破棄してください。'},
  'error.busyBackupCheck':{en:'The app is busy. Try again when the current work finishes.','zh-Hans':'应用正忙。请在当前工作完成后再试。','zh-Hant':'應用程式忙碌中。請在目前工作完成後再試。',ja:'アプリは作業中です。現在の作業が終わってから、もう一度お試しください。'},
  'error.busyScan':{en:'Finish transfers or the current review before scanning.','zh-Hans':'请先完成传输或当前审核，然后再扫描。','zh-Hant':'請先完成傳輸或目前的審核，然後再掃描。',ja:'スキャンする前に、転送または現在の確認を完了してください。'},
+ 'blocked.organizeScan':{en:'Wait for the scan to finish before organizing.','zh-Hans':'请等扫描完成后再整理。','zh-Hant':'請等掃描完成後再整理。',ja:'スキャンが終わってから整理してください。'},
+ 'blocked.checkRunning':{en:'Another backup folder check is running.','zh-Hans':'另一个备份文件夹检查正在进行。','zh-Hant':'另一個備份資料夾檢查正在進行。',ja:'別のバックアップフォルダーの確認を実行中です。'},
+ 'blocked.checkWait':{en:'Wait for the current work to finish before checking.','zh-Hans':'请等当前工作完成后再检查。','zh-Hant':'請等目前工作完成後再檢查。',ja:'現在の作業が終わってから確認してください。'},
  'error.busyReview':{en:'Wait for transfers to finish or stop them before reviewing.','zh-Hans':'请等待传输完成或将其停止，然后再审核。','zh-Hant':'請等待傳輸完成或將其停止，然後再審核。',ja:'確認する前に、転送の完了を待つか停止してください。'},
  'error.busyResume':{en:'Wait for the other transfer or review to finish, then resume again.','zh-Hans':'请等待其他传输或审核完成，然后再次继续。','zh-Hant':'請等待其他傳輸或審核完成，然後再次繼續。',ja:'ほかの転送または確認が終わるのを待ってから、もう一度再開してください。'},
  'error.reviewOpen':{en:'Finish the current review first.','zh-Hans':'请先完成当前审核。','zh-Hant':'請先完成目前的審核。',ja:'先に現在の確認を完了してください。'},
@@ -155,7 +161,8 @@ export const backendMessages={
 } as const satisfies Record<string,Record<Language,string>>;
 
 export type MessageKey=keyof typeof backendMessages;
-export type MessageParam=string|number|Message|Message[];
+/** `{bytes}` is a size, formatted for the reader's language when the message is shown. */
+export type MessageParam=string|number|Message|Message[]|{bytes:number};
 export interface Message {key:MessageKey;params?:Record<string,MessageParam>;}
 
 export function message(key:MessageKey,params?:Record<string,MessageParam>):Message {return params?{key,params}:{key};}
@@ -166,7 +173,7 @@ export function joined(...parts:(Message|false|0|undefined)[]):Message {return {
 export function formatMessage(value:Message,language:Language):string {
  return backendMessages[value.key][language].replace(/\{(\w+)\}/g,(placeholder,name:string)=>{
   const param=value.params?.[name];
-  return param===undefined?placeholder:typeof param==='string'?param:typeof param==='number'?new Intl.NumberFormat(language).format(param):Array.isArray(param)?param.map(part=>formatMessage(part,language)).join(' · '):formatMessage(param,language);
+  return param===undefined?placeholder:typeof param==='string'?param:typeof param==='number'?formatNumber(param,language):Array.isArray(param)?param.map(part=>formatMessage(part,language)).join(' · '):'bytes' in param?formatBytes(param.bytes,language):formatMessage(param,language);
  });
 }
 
@@ -179,8 +186,18 @@ export function filePath(value:Message|undefined):string|undefined {
  const path=value?.params?.path;
  return value&&(value.key==='error.sourceChanged'||value.key==='error.fileFailed')&&typeof path==='string'?path:undefined;
 }
+/** The error code the screens explain (an errno, or ECHANGED / EVERIFY for the app's own changed-source and failed-verification errors). */
+function errnoOf(error:unknown):string|undefined{
+ if(!(error instanceof Error))return undefined;
+ const own=(error as {code?:unknown}).code;if(typeof own==='string'&&/^E[A-Z]+$/.test(own))return own;
+ if((error as {changedWhileReading?:boolean}).changedWhileReading||/source changed|scan again/i.test(error.message))return 'ECHANGED';
+ if(/verification failed|did not match|digest mismatch/i.test(error.message))return 'EVERIFY';
+ return undefined;
+}
 export function toMessage(error:unknown):Message {
- return error instanceof MessageError?message(error.key,error.params):text(error instanceof Error?error.message:String(error));
+ if(error instanceof MessageError)return message(error.key,error.params);
+ const result=text(error instanceof Error?error.message:String(error)),errno=errnoOf(error);
+ return errno?{...result,params:{...result.params!,errno}}:result;
 }
 /** A message read from settings.json; earlier versions saved plain English strings. */
 export function savedMessage(value:unknown):Message|undefined {

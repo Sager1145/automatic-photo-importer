@@ -74,3 +74,11 @@ test('a scan remembered before the current DJI camera names is not reused',async
  const {v:_v,kind:_kind,...stored}=JSON.parse(await fs.readFile(path.join(dir,name!),'utf8'));await fs.writeFile(path.join(dir,name!),JSON.stringify({...stored,version:2}));
  assert.equal(await loadScanMemory(f.store,'CARD-UUID',f.mount),undefined);
 });
+
+test('two overlapping rememberImported calls keep both entries',async t=>{
+ const f=await fixture(t);
+ const sha=(c:string)=>c.repeat(64),a=path.join(f.mount,'A.NEF'),b=path.join(f.mount,'B.NEF');
+ await Promise.all([rememberImported(f.store,'vol',f.mount,{[a]:{sha256:sha('a'),identity:'1:2:3:4:5'}}),rememberImported(f.store,'vol',f.mount,{[b]:{sha256:sha('b'),identity:'1:6:7:8:9'}})]);
+ const known=await loadImported(f.store,'vol',f.mount);
+ assert.equal(known(a,'1:2:3:4:5'),sha('a'));assert.equal(known(b,'1:6:7:8:9'),sha('b'));
+});

@@ -42,7 +42,7 @@ test('new bytes that still exceed the free space are refused before anything is 
  const {root,transfer}=await mostlyImported(t),before=await fs.readdir(root,{recursive:true});
  assert.throws(()=>allocateDestinations([transfer],[150],'single'),(error:unknown)=>{
   assert.ok(error instanceof MessageError);assert.equal(error.key,'error.destinationNeedsSpace');
-  assert.deepEqual(error.params,{index:1,needed:'200 B',free:'150 B',existing:'200 B'});
+  assert.deepEqual(error.params,{index:1,needed:{bytes:200},free:{bytes:150},existing:{bytes:200}});
   return true;
  });
  assert.deepEqual(await fs.readdir(root,{recursive:true}),before);

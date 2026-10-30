@@ -31,7 +31,7 @@ export interface QaHooks {
 export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
  const saved=new Map<keyof AppState,unknown>();
  const waiting=new Set<string>();
- let release:Promise<void>|undefined,open:(()=>void)|undefined;
+ let held:PromiseWithResolvers<void>|undefined;
  const hooks:QaHooks={
   beforeAction:undefined,
   peek:()=>state,
@@ -47,12 +47,12 @@ export function createQaHooks(state:AppState,emit:()=>void):QaHooks {
    saved.clear();hooks.inspect=undefined;hooks.beforeAction=undefined;emit();
   },
   hold(){
-   if(!release)release=new Promise(resolve=>{open=resolve;});
-   return()=>{open?.();release=undefined;open=undefined;};
+   if(!held)held=Promise.withResolvers<void>();
+   return()=>{held?.resolve();held=undefined;};
   },
   held:()=>waiting,
   async gate(jobId,signal){
-   const current=release;if(!current)return;
+   const current=held?.promise;if(!current)return;
    waiting.add(jobId);
    try{await new Promise<void>((resolve,reject)=>{const abort=()=>reject(signal.reason);if(signal.aborted)return abort();signal.addEventListener('abort',abort,{once:true});void current.then(()=>{signal.removeEventListener('abort',abort);resolve();});});}
    finally{waiting.delete(jobId);}

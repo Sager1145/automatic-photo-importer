@@ -8,8 +8,7 @@ import {plan} from '../core/index';
 import {checkFolderSettings,ruleOptions,rulesScope} from '../routing-options';
 import {validFolderName} from '../folder-template';
 import {validNoMetadataFolder} from '../no-metadata';
-import {routingChanged,rememberRouting} from '../platform/routing-memory';
-import {loadPlacement,placementId,rememberEntries} from '../platform/placement-memory';
+import {loadPlacement,placementId,placementScope,rememberEntries} from '../platform/placement-memory';
 import {libraryRoots} from '../platform/destination-roots';
 import {defaultPreferences} from '../preferences';
 import {MessageError} from '../messages';
@@ -28,17 +27,15 @@ test('one rules scope: every rule that decides a folder changes it, folders a la
   assert.equal(rulesScope(ruleOptions(elsewhere)),rulesScope(ruleOptions({...prefs,mediaLayout:'format'})));
 });
 
-test('routing and placement memories miss when only the unknown-file rules change',async t=>{
+test('the placement record misses when only the unknown-file rules change',async t=>{
   const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);
   const before=rulesScope(ruleOptions(prefs)),after=rulesScope(ruleOptions({...prefs,unknownRules:{dat:'other'}}));
-  await rememberRouting(store,['a'],before);
-  assert.equal(await routingChanged(store,['a'],before),false);
-  assert.equal(await routingChanged(store,['a'],after),true);
   await fs.writeFile(path.join(root,'A.JPG'),'bytes');
   const id=placementId('volume',root);
   await rememberEntries(store,id,before,root,[root],[{destination:path.join(root,'A.JPG'),size:5}]);
   assert.equal((await loadPlacement(store,id,before))?.size,1);
   assert.equal(await loadPlacement(store,id,after),undefined);
+  assert.equal(await placementScope(store,id),before);assert.notEqual(await placementScope(store,id),after);
 });
 
 test('a placement memory written under the earlier scope formula misses once',async t=>{
@@ -50,6 +47,16 @@ test('a placement memory written under the earlier scope formula misses once',as
   await fs.writeFile(path.join(store,'placement-memory',`${id}.json.gz`),gzipSync(JSON.stringify({v:5,kind:'placement',scope:old,dirs:[''],d:[0],n:['A.JPG'],s:[5],m:['1'],i:['2']})));
   assert.notEqual(rulesScope(r),old);
   assert.equal(await loadPlacement(store,id,rulesScope(r)),undefined);
+});
+
+test('memories from before edited-folder ancestry classification are checked again',async t=>{
+  const store=await temporary(t),root=path.join(store,'library');await fs.mkdir(root);await fs.writeFile(path.join(root,'A.JPG'),'bytes');
+  const {createHash}=await import('node:crypto'),r=ruleOptions(prefs);
+  const old=createHash('sha256').update(JSON.stringify([2,r.template,r.layout,r.videoTemplate??'',r.editedFolder??'',r.noMetadata,r.noMetadataFolder,Object.entries(r.unknownRules??{}).sort(([a],[b])=>a.localeCompare(b)),r.unknownDefault??''])).digest('hex').slice(0,32);
+  const id=placementId('volume',root);await rememberEntries(store,id,old,root,[root],[{destination:path.join(root,'A.JPG'),size:5}]);
+  const current=rulesScope(r);
+  assert.notEqual(await placementScope(store,id),current);
+  assert.equal(await loadPlacement(store,id,current),undefined);
 });
 
 test('remembered entries count only files beneath a library root, not the root itself',async t=>{

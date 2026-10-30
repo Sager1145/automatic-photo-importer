@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
@@ -6,8 +7,9 @@ import { createTranslator, I18nProvider, languages } from '../renderer/i18n';
 import { EtaTracker, stampEstimates } from '../eta';
 import { listingEstimate } from '../listing-estimate';
 import type { AppState, Job } from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 
 test('time left reads humanely in every language', async () => {
@@ -28,7 +30,7 @@ test('source cards, organization cards and the dashboard show time left, or that
   const { OrganizationProgress, formatRemaining } = await import('../renderer/progress');
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
-    const desk = (job: Job, extra: Partial<AppState> = {}) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', ...(job.eta !== undefined ? { etaTotal: { eta: job.eta } } : {}), ...extra }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
+    const desk = (job: Job, extra: Partial<AppState> = {}) => render(createElement(ImportDesk, { state: { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), ...(job.eta !== undefined ? { etaTotal: { eta: job.eta } } : {}), ...extra }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }));
     const copying: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 2 * 3600 + 15 * 60, progress: { phase: 'copying', completed: 50, total: 200, bytes: 1e9, totalBytes: 8e9, speed: 1e8, file: 'a', eta: 3600 + 30 * 60 } };
     const page = desk(copying);
     assert.ok(page.includes(t('{time} left', { time: formatRemaining(copying.eta!, t) })), `${language}: job time left on the card`);
@@ -47,7 +49,7 @@ test('source cards, organization cards and the dashboard show time left, or that
 test('estimates are stamped on running jobs and cleared when they stop', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, progress: { phase: 'copying', completed: 0, total: 100, bytes: 0, totalBytes: 10e9, speed: 0, file: '' } };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', scanProgress: { card: { files: 10, bytes: 1e9 } } };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), scanProgress: { card: { files: 10, bytes: 1e9 } } };
   for (let t = 0; t <= 20; t++) { job.progress = { ...job.progress!, completed: t * 2, bytes: t * 100e6 }; state.scanProgress!.card = { files: t * 100, bytes: t * 1e9, share: listingEstimate({ bytes: card.total! - card.free! }, { files: t * 100, bytes: t * 1e9 }).share }; stampEstimates(state, tracker, t * 1000); }
   assert.ok(job.progress!.eta! > 60 && job.progress!.eta! < 120, `copy step ${job.progress!.eta}`);
   assert.ok(job.eta! > job.progress!.eta!, 'the job adds verification');
@@ -60,7 +62,7 @@ test('estimates are stamped on running jobs and cleared when they stop', () => {
 test('a copy with already-verified files counts only the files being copied, with one time left per display', async () => {
   const { ImportDesk, ImportDashboard } = await import('../renderer/RootApp');
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false, startedAt: new Date().toISOString(), eta: 3600, progress: { phase: 'copying', completed: 24994, skipped: 21972, total: 43539, bytes: 12.7e9, totalBytes: 211.2e9, speed: 1e8, file: 'A.NEF', eta: 4800 } };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', etaTotal: { eta: 3600 } };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), etaTotal: { eta: 3600 } };
   for (const language of languages) {
     const t = createTranslator(language), render = (child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(I18nProvider, { language, children: child }));
     const page = render(createElement(ImportDesk, { state, act: () => {}, inspect: () => {}, onOrganization: () => {} } as never));
@@ -88,7 +90,7 @@ test('the window holds one time left per job: an upward jump is held, and every 
   const tr = createTranslator('en'), holds = new Map<string, InstanceType<typeof DisplayHold>>();
   t.mock.timers.enable({ apis: ['Date'], now: 0 });
   const job = (eta: number): Job => ({ id: 'o', source: { id: 'l', name: 'Library', path: '/b', transport: 'folder' }, phase: 'copying', organization: true, errors: [], backup: false, startedAt: new Date(0).toISOString(), eta, progress: { phase: 'copying', step: 'moving', completed: 3, total: 10, bytes: 0, totalBytes: 0, speed: 0, file: 'x', eta } });
-  const shown = (eta: number) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(EtaHolds.Provider, { value: holds, children: [createElement(OrganizationProgress, { key: 1, job: job(eta) }), createElement(OrganizationProgress, { key: 2, job: job(eta) })] }) }));
+  const shown = (eta: number) => renderToStaticMarkup(createElement(I18nProvider, { ...defaultPreferences, language:'en', children: createElement(EtaHolds.Provider, { value: holds, children: [createElement(OrganizationProgress, { key: 1, job: job(eta) }), createElement(OrganizationProgress, { key: 2, job: job(eta) })] }) }));
   const left = (seconds: number) => tr('{time} left', { time: formatRemaining(seconds, tr) });
   const count = (html: string, text: string) => html.split(text).length - 1;
   assert.equal(count(shown(600), left(600)), 2);

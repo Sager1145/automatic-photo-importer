@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { DuplicateGroup, DuplicateStrength, Progress } from '../shared';
 import { classify, groupId, type ResolvedGroup } from '../duplicate-rules';
 import { beginDuplicateRemoval, type OrganizationEntry, type ReorganizationResult } from './recovery';
-import { checkAbort, contained, digest, directory, identity, pathKey } from './paths';
+import { checkAbort, contained, digest, directory, exactStatKey, identity, isAbort, pathKey, posixRelative } from './paths';
 import { mapPool } from './devices';
 import type { DestinationIndex } from './destination-index';
 
@@ -59,13 +59,13 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   // whose stat no longer matches, or whose read-ahead failed, is simply hashed again where it is needed.
   // A checksum the library's index holds for the file's exact, provable stat (the scan's) is taken without a read;
   // the removal itself reads each file again before anything is set aside.
-  const statKey = (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => `${file}\0${found.dev}:${found.ino}:${found.size}:${found.mtimeNs}:${found.ctimeNs}`;
+  const statKey = (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => `${file}\0${exactStatKey(found)}`;
   const ahead = new Map<string, string>();
   const wanted = new Set<string>();
   for (const item of work) { wanted.add(abs(item.keep!)); for (const file of item.remove) { const source = abs(file.path); if (!never.has(source)) wanted.add(source); } }
   await mapPool([...wanted], DIGEST_AHEAD, async file => {
     checkAbort(signal);
-    try { const found = await stat(file); if (found) ahead.set(statKey(file, found), options.index?.cached(file, found) ?? await digest(file, signal)); } catch (error) { if ((error as Error)?.name === 'AbortError') throw error; }
+    try { const found = await stat(file); if (found) ahead.set(statKey(file, found), options.index?.cached(file, found) ?? await digest(file, signal)); } catch (error) { if (isAbort(error)) throw error; }
   });
   const digestOf = async (file: string, found: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) => ahead.get(statKey(file, found)) ?? await digest(file, signal);
   let groups = 0;
@@ -113,7 +113,7 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
         else {
           taken.add(from); taken.add(target);
           entries.push({ source: from, destination: target, digest: ownSha, size: Number(own.size), stat: own, move: true });
-          report.push({ ...line, size: Number(own.size), sha256: ownSha, result: 'carried', carriedTo: relativeTo(root, target) });
+          report.push({ ...line, size: Number(own.size), sha256: ownSha, result: 'carried', carriedTo: posixRelative(root, target) });
         }
       }
     }
@@ -126,7 +126,6 @@ export async function removeDuplicates(rootPath: string, resolved: ResolvedGroup
   if (result.errors.length) for (const line of report) if ((line.result === 'removed' || line.result === 'carried') && await fs.lstat(abs(line.file)).then(() => true, () => false)) { line.result = 'left'; line.reason = result.errors[0]; }
   return { id, root, result, groups, ...tally(), report };
 }
-const relativeTo = (root: string, file: string) => path.relative(root, file).split(path.sep).join('/');
 export type { DuplicateGroup };
 
 /** The groups and companions after a clean removal, without scanning the library again: removed files leave their

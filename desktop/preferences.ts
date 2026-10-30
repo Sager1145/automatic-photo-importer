@@ -1,13 +1,14 @@
 import {defaultLimits,clampCpuThreads,clampMemoryLimitMB,savedLimits} from './resource-limits';
 import type {DriveCameraRecord,MediaLayout,NoMetadataHandling,Preferences} from './shared';
-import {LOG_LEVELS,UNKNOWN_FILES_FOLDER} from './shared';
+import {DEFAULT_TEXT_SCALE,LOG_LEVELS,UNKNOWN_FILES_FOLDER} from './shared';
+import {DEFAULT_EDITED_FOLDER} from './folder-template';
 import {validNoMetadataFolder} from './no-metadata';
 import {stableDevices} from './device-selection';
 
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:'editied',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -70,7 +71,7 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   noMetadataFolder:validNoMetadataFolder(value.noMetadataFolder)?value.noMetadataFolder:validNoMetadataFolder(base.noMetadataFolder)?base.noMetadataFolder:UNKNOWN_FILES_FOLDER,
   conflictNaming:oneOf(value.conflictNaming,['folder','number'] as const,base.conflictNaming??'folder'),
   logLevel:oneOf(value.logLevel,LOG_LEVELS,base.logLevel??'normal'),
-  editedFolder:text(value.editedFolder,base.editedFolder??'editied'),
+  editedFolder:text(value.editedFolder,base.editedFolder),
   // The thread pool reads the saved limits by the same rule before anything starts; a limit not given keeps the base one, then this machine's default.
   maxCpuThreads:limits.maxCpuThreads??clampCpuThreads(base.maxCpuThreads),
   memoryLimitMB:limits.memoryLimitMB??clampMemoryLimitMB(base.memoryLimitMB),

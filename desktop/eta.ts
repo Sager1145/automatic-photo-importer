@@ -257,6 +257,10 @@ export function stampEstimates(state:AppState,tracker:EtaTracker,now:number){
  }
  state.etaTotal=overviewEta(running.map(item=>item.job),tracker);
  if(!state.etaTotal)delete state.etaTotal;
+ // Time left per destination drive: the jobs writing to it, sharing its speed (undefined while any is still estimating).
+ const destinationEta:Record<string,number>={};
+ for(const destination of writing.keys()){const eta=overviewEta(running.map(item=>item.job).filter(job=>tracker.destinationsOf(job.id).includes(destination)),tracker)?.eta;if(eta!==undefined)destinationEta[destination]=eta;}
+ if(Object.keys(destinationEta).length)state.destinationEta=destinationEta;else delete state.destinationEta;
  tracker.forget(live);
  void tracker.saveIfDue(now);
 }

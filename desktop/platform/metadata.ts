@@ -1,11 +1,12 @@
 import { ExifTool } from 'exiftool-vendored';
 import { ReadRawTask } from 'exiftool-vendored/dist/ReadRawTask';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import { availableParallelism, tmpdir } from 'node:os';
+import { stat } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import type { DuplicateExif, Exposure, Metadata, ShutterNote } from '../shared';
 import { djiProduct } from './dji-models';
 import { streams, STREAMS, ROUTING_BATCH } from '../core/devices';
+import { exactStatKey } from '../core/paths';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
 import { log } from '../logger';
 
@@ -252,23 +253,14 @@ export function metadataFromTags(tags:Record<string,unknown>, options:{details?:
   return result;
 }
 const previewLimit=20*1024*1024;
-const previewFolders=new Set<string>();
-/** Preview folders being read now, which the leftover cleanup must not remove. */
-export function previewFoldersInUse():string[] {return [...previewFolders];}
 /** The JPEG a camera embeds in a RAW (or HEIF) file, for when the system cannot decode the file itself. */
 export async function embeddedPreview(filename:string):Promise<Buffer|undefined> {
-  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-preview-'));previewFolders.add(scratch);
-  try {
-    for(const tag of ['JpgFromRaw','PreviewImage','OtherImage','ThumbnailImage'] as const) {
-      const output=path.join(scratch,`${tag}.jpg`);
-      try {
-        await exiftool().extractBinaryTag(tag,filename,output);
-        const info=await stat(output);if(info.size===0||info.size>previewLimit)continue;
-        const buffer=await readFile(output);
-        if(buffer[0]===0xff&&buffer[1]===0xd8)return buffer;
-      }catch{/* Missing embedded previews are normal. */}
-    }
-  }finally{await rm(scratch,{recursive:true,force:true});previewFolders.delete(scratch);}
+  for(const tag of ['JpgFromRaw','PreviewImage','OtherImage','ThumbnailImage'] as const) {
+    try {
+      const buffer=await exiftool().extractBinaryTagToBuffer(tag,filename);
+      if(buffer.length>0&&buffer.length<=previewLimit&&buffer[0]===0xff&&buffer[1]===0xd8)return buffer;
+    }catch{/* Missing embedded previews are normal. */}
+  }
 }
 // Routing reads only what camera, capture date, editor provenance, the summary card
 // (exposure, shutter count) and read errors need. Composite SubSec* tags pull in their own source tags.
@@ -308,7 +300,7 @@ export function carryRouting(from:string,reviewed:{dev:string;ino:string;size:st
   const cached=routingCache.get(`${path.resolve(from)}\0${reviewed.dev}:${reviewed.ino}:${reviewed.size}:${reviewed.mtime}:${reviewed.ctime}`);
   if(cached)remember(statKey(path.resolve(to),now),structuredClone(cached));
 }
-const statKey=(file:string,info:import('node:fs').BigIntStats)=>`${file}\0${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+const statKey=(file:string,info:import('node:fs').BigIntStats)=>`${file}\0${exactStatKey(info)}`;
 /** Routing results for files under `root`, keyed by path and exact stat, so a scan's
  * reads can be handed to the import that follows it (and remembered for the card). */
 export function routingEntriesUnder(root:string):[string,Metadata][] {

@@ -5,10 +5,51 @@ import os from 'node:os';
 import path from 'node:path';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,resumeOrganization} from '../core/index';
 import {organizeByCopy} from './fixtures/records';
+import type {MediaLayout} from '../shared';
 configureOrganizationRecovery('edited-organization-fixture-key-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'edited-organization-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));const source=path.join(base,'library'),target=path.join(source,'photobackup');await fs.mkdir(target,{recursive:true});const put=async(relative:string,contents='original')=>{const file=path.join(source,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,contents);return file;};return{base,source,target,put};}
 const metadata=async(file:string)=>({camera:'ILCE-7M5',date:'2025-06-26T13:50:35+08:00',edited:file.endsWith('.JPG')||file.endsWith('.ARW'),fields:{}});
+const originalMetadata=async()=>({camera:'ILCE-7M5',date:'2025-06-26T13:50:35+08:00',fields:{}});
+
+for(const layout of ['flat','format','type-format','photos-flat','videos-flat','video-root'] as MediaLayout[])test(`${layout}: organization preserves exports already in the edited folder without editor metadata`,async t=>{
+ const{source,target,put}=await fixture(t),editedFolder=layout==='video-root'?'Finished photos':'editied';
+ const edited=`photobackup/2025/202506/${editedFolder}/ILCE-7M5`;
+ for(const name of ['A.ARW','A.XMP','A.JPG','B.JPG','B.XMP'])await put(`${edited}/${name}`);
+ const videos=path.join(source,'videobackup');await fs.mkdir(videos);
+ const {plans:[transfer],failures}=await plan(source,[target],{...options,reorganize:true,layout,...(layout==='video-root'?{editedFolder}:{}),videoRoots:[videos]},originalMetadata);
+ assert.deepEqual(failures,[]);
+ assert.deepEqual(transfer.entries.map(entry=>path.basename(entry.source)).sort(),['A.ARW','A.XMP'],'JPEG exports and their sidecars stay in place');
+ const raw=transfer.entries.find(entry=>entry.source.endsWith('.ARW'))!,sidecar=transfer.entries.find(entry=>entry.source.endsWith('.XMP'))!;
+ assert.ok(!path.relative(target,raw.destination).split(path.sep).includes(editedFolder),'RAW remains an original');
+ assert.equal(path.dirname(sidecar.destination),path.dirname(raw.destination),'RAW sidecar follows its original');
+ if(layout==='flat'){
+  assert.deepEqual((await executeReorganization(transfer)).errors,[]);
+  for(const name of ['A.JPG','B.JPG','B.XMP'])assert.equal(await fs.readFile(path.join(source,edited,name),'utf8'),'original');
+  const again=await plan(source,[target],{...options,reorganize:true},originalMetadata);
+  assert.deepEqual(again.failures,[]);assert.deepEqual(again.plans[0].entries,[],'a second organization has nothing left to move');
+ }
+});
+
+test('an import source folder named editied does not classify unedited media as exports',async t=>{
+ const{source,base,put}=await fixture(t),target=path.join(base,'external');await fs.mkdir(target);
+ await put('editied/A.JPG');await put('editied/A.XMP');
+ const {plans:[transfer],failures}=await plan(source,[target],options,originalMetadata);
+ assert.deepEqual(failures,[]);
+ assert.deepEqual(transfer.entries.map(entry=>path.relative(target,entry.destination)).sort(),['2025/202506/ILCE-7M5/A.JPG','2025/202506/ILCE-7M5/A.XMP']);
+});
+
+test('a duplicate record is edited exactly when its file is routed as an edited export',async t=>{
+ const{source,base,put}=await fixture(t),target=path.join(base,'external');await fs.mkdir(target);
+ await put('editied/A.JPG','one');await put('other/A.JPG','two');
+ const {plans:[transfer],duplicates,failures}=await plan(source,[target],{...options,duplicates:true},originalMetadata);
+ assert.deepEqual(failures,[]);
+ assert.ok(transfer.entries.every(entry=>!path.relative(target,entry.destination).split(path.sep).includes('editied')),'a source folder name does not route an import to the edited folder');
+ assert.deepEqual(duplicates!.files.map(file=>file.edited),[false,false],'the records say the same');
+ const exported=await plan(source,[target],{...options,duplicates:true},async file=>({camera:'ILCE-7M5',date:'2025-06-26T13:50:35+08:00',edited:file.includes('other'),fields:{}}));
+ for(const file of exported.duplicates!.files)assert.equal(file.edited,file.path.includes('other'));
+ assert.ok(exported.plans[0].entries.every(entry=>entry.source.includes('other')===path.relative(target,entry.destination).split(path.sep).includes('editied')));
+});
 
 test('editor exports use monthly editable folder while RAW and its XMP remain originals',async t=>{
  const{source,target,put}=await fixture(t);await put('2025/wrong/DSC0001.ARW');await put('2025/wrong/DSC0001.XMP');await put('2025/wrong/DSC0001.JPG');

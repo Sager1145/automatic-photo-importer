@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
@@ -8,7 +9,7 @@ import { defaultPreferences } from '../preferences';
 import type { AppState, ResourceUse } from '../shared';
 
 const use = (patch: Partial<ResourceUse> = {}): ResourceUse => ({ threads: 5, memoryMB: 812, limitMB: 2048, cores: 10, totalMemMB: 16384, memoryMaxMB: 12288, defaultThreads: 5, defaultMemoryMB: 2048, ...patch });
-const state = (resources?: ResourceUse, prefs = {}): AppState => ({ preferences: { ...defaultPreferences, ...prefs }, sources: [], jobs: [], history: [], platform: 'darwin', destinationStatus: [], ...(resources ? { resources } : {}) } as AppState);
+const state = (resources?: ResourceUse, prefs = {}): AppState => ({ preferences: { ...defaultPreferences, ...prefs }, sources: [], jobs: [], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions(), destinationStatus: [], ...(resources ? { resources } : {}) } as AppState);
 const render = (value: AppState, language: 'en' | 'zh-Hans' | 'zh-Hant' | 'ja' = 'en') => renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(PerformanceSettings, { state: value, act: () => {} }) }));
 
 test('Performance shows both limits with their ranges, a live readout and a disabled Reset at the defaults', () => {

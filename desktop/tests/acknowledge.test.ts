@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -12,8 +13,9 @@ import {deleteOriginals} from '../core/originals';
 import {createTranslator,languages} from '../renderer/i18n';
 import {text} from '../messages';
 import type {AppState,Job} from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const card={id:'card',name:'Card',path:'/Volumes/Card',transport:'storage' as const};
 const failedJob=():Job=>{
  const job:Job={id:'j1',source:card,phase:'error',errors:[],backup:false,retryable:true};
@@ -21,7 +23,7 @@ const failedJob=():Job=>{
  for(let index=0;index<20;index++)recordIssue(job,{code:'staging-left',severity:'warning',path:`/b/${index}.partial`});
  return job;
 };
-const state=(job:Job):AppState=>({preferences,sources:[card],jobs:[job],history:[],platform:'darwin'});
+const state=(job:Job):AppState=>({preferences,sources:[card],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
 const badge=(job:Job)=>rowCounts(buildRows(gatherErrors(state(job))));
 
 test('skipping a group removes it from the badge and the panel, and a job with nothing left becomes complete',()=>{
@@ -81,7 +83,7 @@ test('the panel and the job card offer the skip buttons',async()=>{
  const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
  const {I18nProvider}=await import('../renderer/i18n');const {ActivityPanel,collectErrors}=await import('../renderer/RootApp');
  const job=failedJob(),value=state(job);value.errorLog=new ErrorLog().update(gatherErrors(value));
- const panel=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ActivityPanel,{state:value,errors:collectErrors(value),act:()=>{},onClose:()=>{}})}));
+ const panel=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ActivityPanel,{state:value,errors:collectErrors(value),act:()=>{},onClose:()=>{}})}));
  assert.ok(panel.includes('data-testid="error-group-skip"'));assert.ok(panel.includes('data-testid="job-skip-all"'));
  assert.equal(panel.includes('data-testid="error-group-skip"')&&(panel.match(/data-testid="error-group-skip"/g)??[]).length,1,'warnings have no Skip');
 });

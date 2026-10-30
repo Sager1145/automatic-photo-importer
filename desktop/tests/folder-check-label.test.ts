@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -7,11 +8,12 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
 import {Organization} from '../renderer/RootApp';
 import type {AppState,Language,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const,selected:true,total:1e12,free:2e11};
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const progress:Progress={phase:'planning',step:'checking',completed:10,total:100,bytes:0,totalBytes:0,speed:0,file:'a.jpg'};
-const render=(language:Language,checking:boolean)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(Organization,{state:{preferences:{...preferences,language},sources:[source],jobs:[],history:[],platform:'darwin',...(checking?{misplacedProgress:{'/Volumes/A006':progress}}:{})},act:()=>{},busy:false})}));
+const render=(language:Language,checking:boolean)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(Organization,{state:{preferences:{...preferences,language},sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...(checking?{misplacedProgress:{'/Volumes/A006':progress}}:{})},act:()=>{},busy:false})}));
 
 test('the destination card names the folder check while it runs, in every language',()=>{
   const expected:Record<Language,string>={en:'Checking A006 folder layout','zh-Hans':'正在检查 A006 的文件夹结构','zh-Hant':'正在檢查 A006 的資料夾結構',ja:'A006 のフォルダー構成を確認中'};

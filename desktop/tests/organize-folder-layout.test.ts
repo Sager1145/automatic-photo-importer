@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -8,7 +9,7 @@ import {defaultPreferences} from '../preferences';
 import type {AppState,Language} from '../shared';
 
 const NOTE="Organizing a folder in place cannot be used with a separate video folder. Change the media layout in Settings → Folders.";
-const state=(mediaLayout:'video-root'|'flat'):AppState=>({preferences:{...defaultPreferences,destinations:['/Volumes/A'],mediaLayout},sources:[],jobs:[],history:[],platform:'darwin'} as AppState);
+const state=(mediaLayout:'video-root'|'flat'):AppState=>({preferences:{...defaultPreferences,destinations:['/Volumes/A'],mediaLayout},sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()} as AppState);
 const page=(mediaLayout:'video-root'|'flat',language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(Organization,{state:state(mediaLayout),act:()=>{},busy:false})}));
 const section=(html:string)=>html.match(/<section[^>]*data-testid="organize-folder"[\s\S]*?<\/section>/)![0];
 const choose=(html:string)=>section(html).match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Choose folder…/)![0];

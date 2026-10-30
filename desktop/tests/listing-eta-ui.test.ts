@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -7,6 +8,7 @@ import {EtaTracker,type EtaInput} from '../eta';
 import {I18nProvider} from '../renderer/i18n';
 import {ImportDashboard,ImportDesk} from '../renderer/RootApp';
 import type {AppState,Language,Progress} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 test('a listing that passes its estimate keeps moving and never reaches 100%',()=>{
  // The real count passed an estimate of about 20k files: 19,693 then 22,812 found.
@@ -62,8 +64,8 @@ test('the byte fallback never claims days left when the count runs past the esti
 });
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const,selected:true,total:1e12,free:2e11};
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
-const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[source],jobs:[],history:[],platform:'darwin',...extra});
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 const render=(node:Parameters<typeof renderToStaticMarkup>[0],language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:node}));
 const desk=(value:AppState,language:Language='en')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}),language);
 const building:Progress={phase:'planning',step:'listing',completed:19693,total:0,bytes:5e11,totalBytes:0,speed:0,file:'a/b.jpg',share:.68};

@@ -1,6 +1,6 @@
 # 实际功能、接口与架构审查
 
-审查日期：2026-10-23；第一次基线 `daaabd8`。**本文已于修复完成后按 `main@6b3dcff` 更新**：第 3–7、9–11 节描述的是修复后的代码；R1–R13 的原始发现与处理结果见第 7 节。修复按 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md) 第 9 节（任务 A1–A17）执行，旧轮次的结论仍可从 Git 历史查阅。
+审查日期：2026-10-23；第一次基线 `daaabd8`。**第 12 节为 2026-10-29 复审与修复（基于 `d89394f`），与前文冲突处以第 12 节为准。** 第 1–11 节按 `main@6b3dcff` 更新：第 3–7、9–11 节描述的是修复后的代码；R1–R13 的原始发现与处理结果见第 7 节。修复按 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md) 第 9 节（任务 A1–A17）执行，旧轮次的结论仍可从 Git 历史查阅。
 
 **结论：一个功能一个实现。** 修复后：任务只有一条生命周期；实际文件结果只有一个出口，去重、落位记忆和删除原件都消费它；内容摘要只归 `DestinationIndex`；目录规则、名称校验、同名处理、目录清理、日志建立、错误身份、剩余时间、元数据解释各只有一处实现。没有新增通用 manager、repository 或 event bus。
 
@@ -144,7 +144,7 @@ flowchart TD
 | 导入后去重记录 | `recordDuplicates` 消费 `FileOutcome` | 只记录本次实际发布的结果；计划与扫描用同一成员过滤（非 Other、大于 0 字节、非伴随文件） |
 | 移除重复项与附属文件 | `removeDuplicates → beginDuplicateRemoval → recovery.run` | 审核决定保留者，确认身份/内容，处理伴随文件，保留撤销所需记录 |
 | 删除已备份来源原件 | `core/originals.deleteOriginals` | 独立显式操作，仅文件夹导入提供；资格来自实际结果，且须覆盖分配要求的全部目标（镜像两盘、顺序填盘为所分配的盘）；删除前重读各目标，源在 APFS/HFS+ 且身份未变时不重读；停止不丢已删结果 |
-| 目录清理 | `redundant-folders.removeEmptiedFolders`，由日志与删除原件调用 | 唯一实现：只删本次清空的目录，自下而上、同设备、不跟随链接；服务文件可删，`._` 仅当 `inspectAppleDouble` 判定只含记账信息；新日志签名记录清理范围 |
+| 目录清理 | `redundant-folders.removeEmptiedFolders`，由日志、删除原件与镜像移除调用 | 唯一实现：只删本次清空的目录，自下而上、同设备、不跟随链接；服务文件可删，`._` 仅当 `inspectAppleDouble` 判定只含记账信息；新日志签名记录清理范围 |
 | AppleDouble 清理 | `AppleDoubleCleaner/inspectAppleDouble` | 判断 `._` 内容；不确定项保留并报告警告；不是任意删除所有隐藏文件 |
 | 中断残留清理 | `findResidue/cleanResidue` | `resumable` 与 `kept` 分开计数；自动清理两者都保留；显式清理可处理更多残留 |
 
@@ -259,6 +259,102 @@ flowchart LR
 ## 11. 修复计划
 
 方案、利弊、迁移与验收记录在 [修复计划](superpowers/plans/2026-10-23-architecture-remediation.md)；第 9 节是合并后的任务表 A1–A17 与执行波次。同日的 [deep-interfaces](superpowers/plans/2026-10-23-deep-interfaces.md) 计划已并入其中。
+
+## 12. 2026-10-29 复审：一个功能一个 interface 一个 implementation
+
+基线：`codex/a006-edited-placement`（`d89394f` 加未提交的编辑导出落位改动）。方法同第 1 节：删除测试、同一事实是否两处维护、数据是否跨层往返后只用一小部分、seam 是否只有一个 adapter。四路审查：进程 seam 与界面、核心导入引擎、平台与缓存、需求对照（`docs/user-requirements.md`）。
+
+### 12.1 结论
+
+进程 seam 仍与第 3、4 节一致：`DesktopAPI` 8 个方法，`Action` 50 个变体，每个变体一个 main 实现、至少一个界面调用者。违规集中在 seam 之上和 core 内部：
+
+1. **同一规则多份实现且已分歧**：编辑导出判定（三份，已给出相反结果）、"目的地已有此文件"的收尾（两份，回执释放规则不同）、有界并发池（九份，失败行为两种）、"是否同一文件"（约十份）、目录清理（`drive-backup` 第四份）、整理路径判定（`organizedPath` 写死默认模板）、格式归类（两张表）、封存记录读写（四份）、缓存文件读写（五份两种风格）。
+2. **同一事实两个维护者**：`routing-memory` 与 `placement-memory` 都记录"该图库上次按哪套规则填充"，前者以 `dev:ino` 为键，换盘号即失效。
+3. **跨层往返**：扫描子进程把文件表发两遍（`Inventory.files` 与其投影 `Listing.files`）；"全部错误"在 main 计算后 renderer 再算一遍，靠两进程哈希一致维持 id；整张"早先整理已放置"路径表发到界面只为数一个数；格式/未知文件汇总在界面以三种谓词重算；按目的地剩余时间在界面用与模型相反的规则重算；"能否开始"在两进程各写一份且已不同；历史与错误分类在界面对英文文本跑正则，而 main 手里有结构化结果；字节数在 main 被写成固定英文 "x.x GB"。
+4. **假兜底**：`Preferences` 把规范化后必有的字段标为可选，导致 `?? 默认值` 在 RootApp/main 中各二三十处、默认值字面量重复（`'editied'`、`1.25`、`'Unknown files'`）；只被测试调用的旧格式读取器与无人调用的界面组件。
+
+### 12.2 需求对照
+
+`docs/user-requirements.md` 中的产品功能均有唯一归属（摄像头 PTP 仅 macOS，符合第 1 节平台说明）。代码中存在若干需求文档未列出的功能（移除重复项、删除已备份原件、撤销/释放、暂停/跳过/重试、ETA、诊断日志、性能设置等）；它们来自后续请求或已有设计文档（如 [remove-duplicates.md](remove-duplicates.md)），按第 1 节规则不从源码推断用户不要，**本轮不删除产品功能**，只收敛重复实现。
+
+**安全缺口（S1，P1）**：TEST-06/A006-08 要求永不删除相机存储卡上的文件。`deleteOriginals` 的资格只看 `transport==='folder'&&!stage`（`main.ts`）；在卡内选择的文件夹经 `resolveFolderSources` 成为 `transport:'folder'`，导入完成后会提供"删除原件"。作为目的地（`validateDestination` 的 `error.destinationOnCard`）与就地整理已拒绝卡卷，删除原件没有。处理：资格判定复用同一 `classifyMounted` 卡卷判定，卡上文件夹不提供删除原件，`deleteOriginals` 执行时再拒绝一次。
+
+### 12.3 发现与处理
+
+| ID | 级别 | 问题 | 违反 | 处理 |
+|---|---|---|---|---|
+| C1 | P1 | 编辑导出判定三份：路由 `isEdited` 只在整理时看 `editied/` 目录，计划的去重条目在导入时也看，库扫描另一套；同一文件路由为原片、去重记录为 edited | 一规则一实现 | `folder-template.ts` 导出 `DEFAULT_EDITED_FOLDER` 与 `inEditedFolder`；计划去重条目复用路由的 `isEdited`；字面量全部换常量 |
+| C2 | P2 | "目的地已有"收尾在直写与暂存两路各写一遍；`publish` 回执删除失败会把已持久化的文件报为失败 | 一规则一实现 | `settlePresent` + `releaseReceipts`（删除失败除中止外不影响结果） |
+| C3 | P2 | 九份有界并发池；部分在失败后其它 worker 继续读卡 | 一功能一实现 | 唯一 `devices.mapPool`（加可选 `signal`），删除 `pool`/`parallel` 与内联池 |
+| C4 | P2 | "同一文件"类型与辅助函数重复（`FileIdentity`/`StatRecord`、三份 `statKey`、`maybeStat`/`maybeLstat`） | 重复 | 合并到 `paths.ts`；`samePlaced` 与 `renamedIdentity` 的信任条件不同（两者都不可靠 / 任一不可靠），未经 exFAT 实测不合并，见 12.4 |
+| C5 | P2 | `organizedPath` 写死 `yyyy/yyyymm/…`，非默认模板时"保留已整理副本"失效 | 第二套路径规则 | 由 `folder-template` 按用户模板生成匹配器 |
+| C6 | P2 | `extensionClass` 与 `formatFolder` 两张格式表（hif/heic、mpg/mpeg 不一致） | 一规则一实现 | `extensionClass = formatFolder` |
+| C7 | P2 | 镜像移除自带目录清理循环与未校验 rename | 第四份目录清理 | `removeEmptiedFolders` + `renameChecked`；旧 `.mirror-removed` 迁移保留 |
+| C8 | P2 | 封存记录（目标索引、去重库、旧记录、恢复）原子读写四份 | 重复 | `app-store` 的 `readSealedRecord`/`replaceSealed` |
+| C9 | P2 | 恢复复制绕过设备槽位、内存调度与哈希线程；"不支持硬链接"错误码三份 | 绕过唯一 I/O 路径 | `streams.run` + `hasher()`；`LINK_UNSUPPORTED` 一份 |
+| C10 | P2 | 每个待定目标连续 lstat 两次 | 性能 | 第一次结果复用 |
+| C11 | P3 | 中止错误构造与 `isAbort` 多份；posix 相对路径、`Conflicts` 字面量、缺目录读取等小工具重复 | 重复 | 收归 `paths.ts`/常量 |
+| P1 | P2 | 缓存文件读写五份两种风格；`placement-memory` 主线程同步 gzip；`rememberImported` 读改写无队列 | 一功能一实现 | `user-caches` 唯一读写 adapter（异步 gzip、按文件串行） |
+| P2 | P2 | `routing-memory` 与 `placement-memory` 重复记录"上次规则"，前者键不稳 | 一事实一维护者 | 删除 `routing-memory`，规则作用域只记在落位记录头；计划钩子改传目的根路径；产品规则不变（导入后记录） |
+| P3 | P2 | 扫描子进程发送两份文件表 | 跨进程重复传输 | 只发 `Inventory`，两端用 `listingOf` 推导 `Listing` |
+| P4 | P3 | 内嵌预览经临时目录与"使用中"登记表 | 多余机制 | `extractBinaryTagToBuffer`，删除登记表与残留清理的 `inUse` |
+| P5 | P3 | `volumes.ts` 三份容量计算；`camera-bridge` 手写包含判断；死函数 `rememberingVerified` | 重复 / 死代码 | `folderCapacity` 唯一；`beneath`；删除 |
+| U1 | P1 | "全部错误"两进程各算一遍，id 靠跨进程哈希一致 | 两侧计算 | main 发送已合并、已排除清除项的条目；界面只翻译；"未知格式"提示移入 `gatherErrors` |
+| U2 | P2 | 整张 `duplicates.earlier` 发给界面只为计数 | 大数据跨层后缩成一个数 | 扫描结束时在组成员上标 `earlier`，删除该引用表字段 |
+| U3 | P2 | 三个字节格式化器，main 写死英文 "GB" | 错层格式化 | `MessageParam` 增加 `{bytes}`，由界面按语言格式化 |
+| U4 | P2 | 格式与未知文件汇总在界面以三种谓词重算 | 数据所在处不汇总 | `Inventory.formats/unknownFiles`，`systemKinds` 必有 |
+| U5 | P2 | 历史与错误分类对英文文本跑正则 | 结构化结果被丢弃后重建 | `HistoryEntry.outcome`；错误按 key 与 errno code 分类 |
+| U6 | P2 | "能否开始"两进程各一份且不同 | 一规则一实现 | `gates.ts` 一个 `blockedActions`，main 同时用于拒绝与发布；采用界面现有（更严格）规则，用户可见行为不变 |
+| U7 | P2 | 按目的地剩余时间界面取 max，与模型 `sharedDriveTotal` 相反 | 两侧不同规则 | main 发布 `destinationEta` |
+| U8 | P2 | `Preferences` 规范化后必有字段标为可选，默认值散落 | 假兜底 | 字段改必有，删除调用处兜底与重复字面量与已退役字段 |
+| U9 | P3 | 无调用者的 `ResidueMaintenance`、`migrateLoggedError`、`organizationCards`、`knownRules` 等；界面路径工具多份；"需要几块盘"规则 12 份；`retryJob`/`skip` 重排逻辑两份；`SidebarOldRecords` 重复后端文案 | 死代码 / 重复 | 删除或收为一处 |
+
+### 12.4 本轮不改（需产品决定或缺测量）
+
+- `Conflicts/<内容 id>` 用 `localeCompare` 排序（受系统语言影响）。改为码点顺序会让已存在冲突目录的 id 改变，需决定是否接受。
+- `recovery.matches`（只把 0 字节视为 inode 不可靠）与 `import-recovery.binds`（只认负 inode）比 `paths.unreliableIno` 窄，但都是失败即拒绝；放宽会让撤销/回执接受更多文件，属安全策略，需 exFAT 实测后决定。
+- 去重库中已按旧判定写入的 `edited` 记录没有规则版本，需决定是否清除。
+- `summary` 与 `exif` 是否可只留一个：需用测试样本确认全部标签与路由标签解析出的日期/机型一致。
+- `Review.plans` 整体发送与按盘的盘活动映射：未测 IPC 体积，不改。
+- 三个翻译分片文件并入 `i18n.tsx`：本分支正在向其中一个加行，合并后再做。
+- 两个 `syncDirectory`：备份用的严格版本与设置用的宽松版本是不同契约（Windows 不能对目录 fsync），保留。
+- 第三方库替换：评估了 fflate/yazl、plist、p-map/p-limit、lru-cache、write-file-atomic、zod、i18next、pino 等，均因丢失现有保证（目录 fsync、失败后等待在途写入、动态上限、1 Hz 热路径）或收益小而不引入；本轮改用标准库（`zlib.crc32`、`Map.groupBy`、`Promise.withResolvers`、`util.parseArgs`、`timers/promises`、`promisify(execFile)`）。
+
+### 12.5 函数级重叠扫描
+
+用 `rolldown/parseAst` 解析 `desktop/` 下全部非测试源码中的每个函数，局部名与字面量抽象后按 4-gram 相似度两两比较（脚本只在会话临时目录，不入库）。修复前 96 个文件 1929 个函数、646 对相似（Jaccard ≥ 0.6）、10 对完全相同（≥ 25 个 token）；修复后 1915 个函数、606 对、5 对。剩余相似对经逐一判定属于以下两类，不再合并：
+
+- **有意保留**：备份用严格 `syncDirectory` 与设置用宽松版本（Windows 目录不能 fsync）；持久化的 id/缓存哈希格式（合并会使已存缓存与确认失效）；`old-records.identityOf`（确认键刻意不含 dev/ctime）；`recovery.matches`/`import-recovery.binds`（失败即拒绝）；状态通道编码/解码互逆；各自错误契约不同的 `regular`。
+- **形似无关**：函数与其内部闭包（约 55 对）、进度对象字面量（约 30 对）、结构相同但用途不同的界面组件、不同单位的 clamp。
+
+由扫描新发现并已移除：`samePlaced`（两 inode 都不可靠才比出生时间）与参考规则 `sameStat`（任一不可靠即比）不一致，导致 exFAT 上可能跳过 `._` 清理，统一为 `paths.sameFileIgnoringCtime`；`DestinationIndex`/`DuplicateStore` 的加载与写回统一为 `loadRootRecord`/`RootRecordWriter`，`isStatRecord` 一份；存储目录"是否有内容"谓词读写两处统一；`exactStatKey`、`rebaseDevice` 各一份；`PathPreview` 内联副本。
+
+### 12.6 执行结果
+
+| ID | 结果 |
+|---|---|
+| S1 | 完成。`platform/volumes.onCameraCard`：卷未知、判定为卡、或目录无法读取（`layoutUnavailable`）都视为卡；导入完成时不提供，执行时再拒绝（`error.originalsOnCard`） |
+| C1 | 完成。去重记录与路由用同一 `isEdited`；`DEFAULT_EDITED_FOLDER`、`inEditedFolder` 在 `folder-template.ts` |
+| C2 | 完成。`settlePresent` 两路共用；`releaseReceipts` 删除失败除中止外不影响结果；发布尾部保持原顺序（先关创建回执），另两处仍先关自有回执 |
+| C3 | 完成。只剩 `devices.mapPool`（可选 `signal`），失败后等待在途工作再抛出 |
+| C4 | 部分。`StatRecord`/`statRecord`/`maybeLstat` 收归 `paths.ts`；输出不同的 `statKey`（出生时间回退）不合并，输出相同的改用 `exactStatKey` |
+| C5 | 完成。`templateMatcher` 按用户模板判定已整理路径；不再要求月目录以年份开头 |
+| C6 | 完成。`hif` 与 `heic`、`mpg` 与 `mpeg` 现在同组比较 |
+| C7 | 完成。镜像移除用 `removeEmptiedFolders` 与 `renameChecked`；旧 `.mirror-removed` 迁移保留 |
+| C8 | 部分。目标索引与去重库共用；旧记录与恢复清单的"存在则替换否则新建"语义不同，保留 |
+| C9–C11 | 完成 |
+| P1 | 完成。`user-caches` 的 `readCacheFile/writeCacheFile/serialized`；`eta-priors` 新增 1 MB 上限；同步 gzip 已去除 |
+| P2 | 完成。`routing-memory` 删除；落位记录头 `rulesClaimed` 只由完成且无错误的导入、无错位且无读取失败的检查、或作用域已一致时写入，旧版本写的记录头视为"需要查找"；记录头有内存缓存，计划时不再解压整份记录 |
+| P3–P5 | 完成（两套 plist 解析未合并：需 diskutil 全类型样本） |
+| U1–U9 | 完成 |
+
+有意的、用户可见的变化（除上表外均保持原行为）：
+
+- "能否开始"只由 `gates.ts` 判定，界面与 main 一致，因此比原界面略严：去重扫描期间设置页按钮也锁定（main 本来就拒绝）；恢复整理期间"检查目录布局"按钮直接禁用，而不是点击后报错；扫描期间整理的提示改为 `blocked.organizeScan`。`previewSource` 仍按原逻辑允许新审核替换已打开的审核，不经 `gates.ts`。
+- `samePlaced` 统一到参考规则后，exFAT 上一侧 inode 为合成值的已发布文件可按出生时间认定为同一文件。
+- 历史记录新增 `outcome`；升级前保存的记录在读取时按原界面的英文文本规则分类一次。
+
+验证（2026-10-29，本机）：`npm run typecheck` 通过；`npm run build` 通过；全量 `npm test` 1714 项：1712 通过、1 跳过、1 失败——失败项是 `problem-files.test.ts` 对 `findMisplaced` 结果做整体比较，未含新增的 `failures` 字段，已补上后该文件 7/7 通过（修复前基线有 1 项计时测试失败）。两轮独立审查（核心发布/恢复/落位/S1；错误/门控/偏好/界面）的 P2 发现均已修复。未做：真实相机卡、exFAT 硬件上的身份规则实测、Windows/Linux 实机、IPC 体积测量。
 
 ## Release note: files without metadata
 

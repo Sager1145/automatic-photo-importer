@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -5,10 +6,11 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
 import {Organization,TitlebarControls} from '../renderer/RootApp';
 import type {AppState,Job,Language} from '../shared';
+import { defaultPreferences } from '../preferences';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A','/Volumes/B'],copyMode:'mirror',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
-const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[source],jobs:[],history:[],platform:'darwin',...extra});
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A','/Volumes/B'],copyMode:'mirror',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 type Props=Parameters<typeof TitlebarControls>[0];
 const titlebar=(props:Partial<Props>,language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(TitlebarControls,{state:state(),act:()=>{},errorCount:2,onErrors:()=>{},...props})}));
 const ids=(html:string)=>[...html.matchAll(/data-testid="([^"]+)"/g)].map(match=>match[1]);
@@ -16,10 +18,9 @@ const button=(html:string,id:string)=>html.match(new RegExp(`<button[^>]*data-te
 
 test('each page shows its own top-bar buttons, and All errors on every page',()=>{
  assert.deepEqual(ids(titlebar({page:'desk'})),['global-start','global-stop','global-automatic','titlebar-overview','show-errors']);
- assert.deepEqual(ids(titlebar({page:'drives'})),['show-errors','refresh-drives']);
- assert.deepEqual(ids(titlebar({page:'organization'})),['show-errors']);
+ assert.deepEqual(ids(titlebar({page:'library'})),['show-errors']);
  assert.deepEqual(ids(titlebar({page:'settings'})),['show-errors']);
- assert.deepEqual(ids(titlebar({page:'history'})),['show-errors']);
+ assert.deepEqual(ids(titlebar({page:'activity'})),['show-errors']);
  assert.match(titlebar({page:'settings'}),/class="error-count" data-count="2"/);
 });
 
@@ -31,14 +32,14 @@ test('the desk is the default page, so the import controls stay where they were'
 test('Library keeps execution below the destination scope and All errors in the top bar',()=>{
  for(const organizationDestination of [1,5]) {
   assert.deepEqual(ids(titlebar({page:'library',organizationDestination})),['show-errors']);
-  const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:state(),act:()=>{},busy:false,selectedDestination:organizationDestination})}));
+  const html=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(Organization,{state:state(),act:()=>{},busy:false,selectedDestination:organizationDestination})}));
   assert.ok(html.indexOf('data-testid="organization-execute"')>html.indexOf('organization-scope'));
   assert.equal((html.match(/>Organize now</g)??[]).length,1);
  }
 });
 
 test('the content actions retain review locking and organization queue semantics',()=>{
- const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:value,act:()=>{},busy:true})}));
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(Organization,{state:value,act:()=>{},busy:true})}));
  const importing:Job={id:'j',source,phase:'copying',errors:[],backup:false};
  const copying=render(state({jobs:[importing]}));
  assert.match(copying,/<button[^>]*disabled[^>]*>(?:<svg[\s\S]*?<\/svg>)?Review changes…/);

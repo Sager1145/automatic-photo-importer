@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import type {Action,Inventory} from '../../../shared';
 import type {Check} from '../harness';
 import {syntheticJob} from '../synthetic';
+import {withFigures} from '../../../core/inventory';
 
 export const workspaceFlowChecks=():Check[]=>[
  {id:'import-activity-inventory',stage:'imports',title:'Activity keeps per-job inventory selection and opens the selected file metadata',covers:['information parity','Activity inventory selection','Activity metadata access'],skip:async h=>h.hooks?undefined:'needs QA state fixtures',run:async h=>{
   const sources=(await h.state()).sources.slice(0,2),previous=h.hooks!.inspect;
-  const inventory=(index:number):Inventory=>({files:[{path:sources[index]!.path+'/'+(index?'payload.bin':'photo.png'),relative:index?'payload.bin':'photo.png',size:123,kind:index?'Other':'Images',included:true}],media:1,companions:0,unknown:0,unknownExtensions:{},bytes:123,elapsedMs:0});
+  const inventory=(index:number):Inventory=>(withFigures({files:[{path:sources[index]!.path+'/'+(index?'payload.bin':'photo.png'),relative:index?'payload.bin':'photo.png',size:123,kind:index?'Other':'Images',included:true}],media:1,companions:0,unknown:0,unknownExtensions:{},bytes:123,elapsedMs:0}));
   h.hooks!.addJobs(sources.map((source,index)=>({...syntheticJob('inventory-'+index,{phase:'complete',source}),backup:true,inventory:inventory(index)})));
   h.hooks!.inspect=()=>({camera:'QA Camera',date:'2026-10-23T12:00:00Z',fields:{'EXIF:Model':'QA Camera'}});
   try{

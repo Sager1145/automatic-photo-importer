@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Heartbeat,pulses} from '../qa/ui/heartbeat';
@@ -6,7 +7,7 @@ import type {AppState} from '../shared';
 
 /** A job as the app makes it: synthetic ones (qa: ids) are never watched. */
 const real=(name:string,shape:Parameters<typeof syntheticJob>[1])=>({...syntheticJob(name,shape),id:'job-'+name});
-const state=(jobs:AppState['jobs'],extra:Partial<AppState>={}):AppState=>({preferences:{} as AppState['preferences'],sources:[],jobs,history:[],platform:'darwin',...extra});
+const state=(jobs:AppState['jobs'],extra:Partial<AppState>={}):AppState=>({preferences:{} as AppState['preferences'],sources:[],jobs,history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 
 test('a running job whose counter stays the same for more than the limit is a freeze, once',()=>{
  const beat=new Heartbeat(10000,1500),job=real('a',{phase:'copying',completed:3});

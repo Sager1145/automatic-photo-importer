@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -6,10 +7,11 @@ import {ActivityJobs,ActivityPanel,ImportDesk,Organization,OrganizationRecoveryP
 import {I18nProvider} from '../renderer/i18n';
 import {normalizePreferences} from '../preferences';
 import type {AppState,Job,Source} from '../shared';
+import {gated} from './gated';
 const media:Source={id:'card',name:'Media card',path:'/card',transport:'storage',selected:true};
 const files=Object.assign({id:'files',name:'Documents folder',path:'/docs',transport:'folder' as const,selected:true},{backup:true});
 const organization:Job={id:'organize',source:{id:'library:/backup',name:'Existing library',path:'/backup',transport:'folder'},phase:'copying',organization:true,backup:false,errors:[]};
-const state=(extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],showDashboard:false}),sources:[media,files],jobs:[],history:[],platform:'darwin',...extra});
+const state=(extra:Partial<AppState>={}):AppState=>gated({preferences:normalizePreferences({destinations:['/backup'],showDashboard:false}),sources:[media,files],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
 const desk=(value:AppState,mode:'media'|'files')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode}));
 test('three task destinations and a separate Settings anchor replace six primary pages',()=>{
@@ -26,6 +28,18 @@ test('Media and Files & folders expose the appropriate registered sources and pi
  assert.ok(m.indexOf('Choose media folders…') < m.indexOf('data-testid="source-cards"'));
  assert.doesNotMatch(m,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode"/);
  assert.match(f,/Back up<\/button>/);assert.match(f,/Scan media/);
+});
+test('an empty mode says where the other mode\'s connected sources are and switches to it',()=>{
+ let switched=0;
+ const only=(source:Source)=>state({sources:[source]});
+ const hint=(value:AppState,mode:'media'|'files',onOtherMode?:()=>void)=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode,onOtherMode}));
+ const m=hint(only(files),'media',()=>switched++);
+ assert.match(m,/data-testid="other-mode-sources"/);assert.match(m,/1 connected source is in Files &amp; folders\./);
+ assert.match(hint(only(media),'files',()=>{}),/1 connected source is in Media\./);
+ assert.doesNotMatch(hint(only(media),'media',()=>{}),/other-mode-sources/,'not shown when this mode has sources');
+ assert.doesNotMatch(hint(only(files),'media'),/other-mode-sources/,'not shown without a way to switch');
+ assert.match(hint(state({sources:[files,{...files,id:'files-2'}]}),'media',()=>{}),/2 connected sources are in Files &amp; folders\./);
+ assert.doesNotMatch(hint(state({sources:[]}),'media',()=>{}),/other-mode-sources/,'not shown when nothing is connected');
 });
 test('queued backup jobs stay in Files mode when the next source run is Media',()=>{
  const job:Job={id:'backup-job',source:media,phase:'queued',backup:true,errors:[]};

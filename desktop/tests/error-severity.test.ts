@@ -1,13 +1,16 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ErrorLog,clearErrors,gatherErrors,migrateLoggedError,severityOf} from '../error-log';
+import {ErrorLog,clearErrors,gatherErrors,severityOf} from '../error-log';
 import {backendMessages,message,text,type MessageKey} from '../messages';
 import type {AppState,Job} from '../shared';
+import {withFigures} from '../core/inventory';
+import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const card={id:'card',name:'Card',path:'/Volumes/Card',transport:'storage' as const};
 const job=(extra:Partial<Job>):Job=>({id:'j1',source:card,phase:'error',errors:[],backup:false,...extra});
-const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',...extra});
+const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 
 // Message keys that can reach All errors, with their severity. Any other key defaults to an error.
 const warnings:MessageKey[]=['error.userSkipped','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped'];
@@ -24,7 +27,7 @@ test('each known message key has the severity the table says',()=>{
 });
 
 test('gathered items carry a severity: metadata notes are warnings, failures are errors',()=>{
- const value=state({jobs:[job({errors:[text('ENOSPC'),message('inventory.emptyFile')],inventory:{issues:[{path:'/Volumes/Card/A.NEF',message:'Bad EXIF'}],files:[],media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0}})]});
+ const value=state({jobs:[job({errors:[text('ENOSPC'),message('inventory.emptyFile')],inventory:withFigures({issues:[{path:'/Volumes/Card/A.NEF',message:'Bad EXIF'}],files:[],media:0,companions:0,unknown:0,bytes:0,unknownExtensions:{},elapsedMs:0})})]});
  const found=gatherErrors(value).map(item=>`${item.kind}:${item.severity}`).sort();
  assert.deepEqual(found,['metadata:warning','source:error','source:warning']);
 });
@@ -36,29 +39,16 @@ test('clearing one severity never clears the other',()=>{
  assert.equal(errors.length,2);assert.equal(warns.length,2);
  log.update(all);
  clearErrors(log,value,{severity:'warning'});
- assert.deepEqual(log.update(gatherErrors(value)).cleared.sort(),warns.map(item=>item.id).sort(),'only warnings cleared');
+ assert.deepEqual(log.update(gatherErrors(value)).entries.map(item=>item.id).sort(),errors.map(item=>item.id).sort(),'only warnings cleared');
  assert.ok(value.error,'the app error is untouched');
  clearErrors(log,value,{ids:[errors[0]!.id],severity:'warning'});
- assert.equal(log.update(gatherErrors(value)).cleared.length,2,'a warning-scoped clear ignores an error id');
+ assert.equal(log.update(gatherErrors(value)).entries.length,2,'a warning-scoped clear ignores an error id');
  clearErrors(log,value,{severity:'error'});
  assert.equal(value.error,undefined);
- assert.equal(log.update(gatherErrors(value)).cleared.length,3,'the app error is gone, the rest are cleared');
+ assert.equal(log.update(gatherErrors(value)).entries.length,0,'the app error is gone, the rest are cleared');
  const other=new ErrorLog();other.update(all);
  clearErrors(other,value,{severity:'error'});
- assert.deepEqual(other.update(gatherErrors(value)).cleared.sort(),errors.filter(item=>item.kind!=='app').map(item=>item.id).sort(),'only errors cleared');
-});
-
-test('saved log state restores timestamps and cleared ids; old entries get a severity from their key',()=>{
- const value=state({jobs:[job({errors:[text('E1'),message('error.userSkipped')]})]});
- const first=new ErrorLog(),when=new Date('2026-10-22T09:00:00Z');
- const saved=first.update(gatherErrors(value),when);
- const restored=new ErrorLog(saved),next=restored.update(gatherErrors(value),new Date('2026-10-22T11:00:00Z'));
- assert.deepEqual(next.at,saved.at,'timestamps survive');
- const [old]=gatherErrors(state({jobs:[job({errors:[message('error.userSkipped')]})]}));
- const {severity:_removed,...legacy}=old!;
- assert.equal(migrateLoggedError(legacy).severity,'warning');
- assert.equal(migrateLoggedError({...legacy,message:text('EIO'),kind:'source'}).severity,'error');
- assert.equal(migrateLoggedError({...legacy,severity:'error'}).severity,'error','a stored severity is kept');
+ assert.deepEqual(other.update(gatherErrors(value)).entries.map(item=>item.id).sort(),warns.map(item=>item.id).sort(),'only errors cleared');
 });
 
 test('titlebar shows separate error and warning counts; the panel has two sections with their own actions',async()=>{
@@ -88,7 +78,7 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
  }
  // Warnings only: no red badge, just the indicator.
  const calm=state({jobs:[job({errors:[message('error.userSkipped')]})]});calm.errorLog=new ErrorLog().update(gatherErrors(calm));
- const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
+ const html=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
  assert.ok(!html.includes('sidebar-errors')&&html.includes('sidebar-warnings'));
 });
 
@@ -96,13 +86,13 @@ test('the dashboard counts the warnings All errors shows: a cleared warning is n
  const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
  const {I18nProvider}=await import('../renderer/i18n');
  const {ImportDashboard}=await import('../renderer/RootApp');
- const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
  const value=state({jobs:[job({errors:[message('error.userSkipped'),message('inventory.emptyFile')]})]});
  value.errorLog=new ErrorLog().update(gatherErrors(value));
  assert.match(render(value),/2 warnings/);
  const [first]=gatherErrors(value).filter(item=>item.severity==='warning');
- value.errorLog={...value.errorLog,cleared:[first!.id]};
+ value.errorLog={entries:value.errorLog!.entries.filter(item=>item.id!==first!.id)};
  assert.match(render(value),/1 warnings/);
- value.errorLog={...value.errorLog,cleared:gatherErrors(value).map(item=>item.id)};
+ value.errorLog={entries:[]};
  assert.doesNotMatch(render(value),/warnings/);
 });

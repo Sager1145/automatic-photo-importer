@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import type {DestinationStatus,Preferences,Source} from '../shared';
+import {requiredDestinations} from '../shared';
 import {makeParent,syncParents,within} from '../core/paths';
 import {checkBackupFolders} from '../routing-options';
 import {mountedVolumes,validateDestination,type MountedVolume} from './volumes';
@@ -21,7 +22,7 @@ export function libraryRoots(destination:string,prefs:Pick<Preferences,'basePath
  * `videoRoots` (video-root layout only) are the video backup folders, by position. */
 export async function destinationRoots(prefs:Preferences,sources:Source[],importing?:Source):Promise<{roots:string[];videoRoots?:string[];infos:DestinationStatus[];volumes:MountedVolume[]}>{
  const chosen=prefs.copyMode==='single'?prefs.destinations.slice(0,1):prefs.destinations.slice(0,2);
- if(chosen.length!==(prefs.copyMode==='single'?1:2))throw new MessageError('error.chooseDestinations');
+ if(chosen.length!==requiredDestinations(prefs))throw new MessageError('error.chooseDestinations');
  checkBackupFolders(prefs);
  const folders=backupFolders(prefs),video=folders.length>1;
  const volumes=await mountedVolumes(),infos=[],roots=[],videoRoots=[];

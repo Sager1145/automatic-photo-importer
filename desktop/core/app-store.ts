@@ -4,7 +4,7 @@ import path from 'node:path';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {APP_DATA_FOLDER} from './legacy-names';
 import {logDeletion} from '../logger';
-import {beneath,code,contained,pathKey,syncDirectory,unreliableIno} from './paths';
+import {beneath,checkAbort,code,contained,maybeLstat,pathKey,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey} from './paths';
 export {APP_DATA_FOLDER} from './legacy-names';
 
 /** Records v5: every record this app writes on a drive lives in one visible "Photo Importer Data" folder (the
@@ -73,7 +73,7 @@ export async function readLines(handle:fs.FileHandle,file:string,from:number,cap
   n++;
  };
  while(position<size){
-  if(options.signal?.aborted)throw new DOMException('Import stopped','AbortError');
+  checkAbort(options.signal);
   const {bytesRead}=await handle.read(buffer,0,Math.min(CHUNK,size-position),position);
   if(!bytesRead)break;
   let offset=0;
@@ -156,10 +156,28 @@ export async function writeNewFile(file:string,text:string):Promise<void>{
  await syncDirectory(path.dirname(file));
 }
 
+/** The verified payload of the sealed record in `file`, or undefined when it is not a regular file or is larger than `maxBytes`.
+ * Throws when it cannot be read, is not JSON or is not sealed by this Mac (callers start empty then). `read` supplies the text (progress). */
+export async function readSealedRecord(kind:SealKind,file:string,maxBytes:number,read:(file:string,size:number)=>Promise<string>=(name)=>fs.readFile(name,'utf8')):Promise<Record<string,unknown>|undefined>{
+ const stat=await fs.lstat(file);
+ if(!stat.isFile()||stat.size>maxBytes)return undefined;
+ return openV5(kind,JSON.parse(await read(file,stat.size)));
+}
+/** Replaces the sealed record at `target` in one step: written to an exclusive sibling `<prefix>-<uuid>.tmp`, synchronized, renamed over `target`, then the folder synchronized.
+ * A failure before the rename removes the sibling; a crash leaves either version (and a temp file the residue cleanup removes). */
+export async function replaceSealed(kind:SealKind,target:string,prefix:string,payload:Record<string,unknown>):Promise<void>{
+ const temporary=path.join(path.dirname(target),`${prefix}-${randomUUID()}.tmp`);
+ try{
+  const handle=await fs.open(temporary,'wx',0o600);
+  try{await handle.writeFile(JSON.stringify(sealV5(kind,payload)));await handle.sync();}finally{await handle.close();}
+  await fs.rename(temporary,target);
+ }catch(error){await fs.unlink(temporary).then(()=>logDeletion('store',temporary,'temporary sealed record of a write that failed','written by this call, never renamed into place'),()=>{});throw error;}
+ await syncDirectory(path.dirname(target));
+}
+
 // ---- Both-names rule ----
 /** Two names for one file, or a target that is not what was moved: nothing is unlinked, the user is told. */
 export class FirstAidError extends Error {readonly code='first-aid';constructor(message:string){super(message);this.name='FirstAidError';}}
-export const maybeLstat=async(file:string):Promise<BigIntStats|undefined>=>{try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return undefined;throw error;}};
 /** Where a rename stands, judged by both names: 'source' (not done), 'target' (done), 'both-same' (one file, two
  * names: stop), 'both' (two files: stop), 'none'. */
 export async function bothNames(source:string,target:string):Promise<'source'|'target'|'both-same'|'both'|'none'>{
@@ -168,7 +186,7 @@ export async function bothNames(source:string,target:string):Promise<'source'|'t
  return from?'source':to?'target':'none';
 }
 /** The same file after a rename: device, size and inode (birth time where the inode is unreliable). */
-export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>after.dev===before.dev&&after.size===before.size&&after.mtimeNs===before.mtimeNs&&(unreliableIno(before)||unreliableIno(after)?after.birthtimeNs===before.birthtimeNs:after.ino===before.ino);
+export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>sameFileIgnoringCtime(before,after);
 /** rename(2) under the both-names rule: the target must be absent first; afterwards the source must be gone
  * and the target must be the file that was moved (`expected`, by default the source's identity). 'retry': the
  * source is still there and the target absent (a fresh name may be tried where names are free-form). Anything
@@ -195,12 +213,13 @@ let destinations:string[]=[];
  * its records in that destination's store, on the same volume. */
 export function registerDestinations(paths:string[]):void {destinations=[...new Set(paths.filter(Boolean).map(item=>path.resolve(item)))];}
 export function registeredDestinations():string[] {return [...destinations];}
+/** A folder entry that is not Finder or temp-store bookkeeping, so counts as content. */
+const storeFolderEntry=(name:string)=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name);
 const storeCache=new Map<string,{key:string;store:Store}>();
-const statKey=(stat:BigIntStats)=>`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 /** The store's own record, sealed; read and checked against the folder it is in. Undefined when absent. */
 async function storeRecord(folder:string,base:string,baseStat:BigIntStats):Promise<Store|undefined>{
  const file=path.join(folder,'store.json'),stat=await maybeLstat(file);if(!stat)return undefined;
- const own=await fs.lstat(folder,{bigint:true}),key=`${statKey(stat)}:${baseStat.ino}:${own.ino}`;
+ const own=await fs.lstat(folder,{bigint:true}),key=`${exactStatKey(stat)}:${baseStat.ino}:${own.ino}`;
  const cached=storeCache.get(folder);if(cached&&cached.key===key&&cached.store.base===base)return {...cached.store,dev:baseStat.dev};
  if(!stat.isFile()||stat.size>BigInt(LINE_CAPS.header))throw new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);
  const handle=await openRegular(file);let value:unknown;
@@ -227,7 +246,7 @@ export async function storesFor(folder:string):Promise<Store[]>{
    const store=await storeRecord(candidate,current,here);
    if(store)found.push(store);
    // Not a store (a folder of the user's own, or one whose record is missing): skipped, never read or written.
-   else if((await fs.readdir(candidate)).some(name=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name)))console.warn(`Skipped ${candidate}: it has no store record, so it is not this app's records folder`);
+   else if((await fs.readdir(candidate)).some(name=>storeFolderEntry(name)))console.warn(`Skipped ${candidate}: it has no store record, so it is not this app's records folder`);
   }
   const parent=path.dirname(current);if(parent===current)break;current=parent;
  }
@@ -262,7 +281,7 @@ async function createStore(base:string):Promise<Store>{
  if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==baseStat.dev)throw new Error(`Unsafe ${APP_DATA_FOLDER} folder: ${folder}`);
  const existing=await storeRecord(folder,base,baseStat);if(existing)return existing;
  // Only an empty folder (a creation cut short) is adopted; one holding records without its own record is refused, as readers refuse it.
- if((await fs.readdir(folder)).some(name=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${folder}`);
+ if((await fs.readdir(folder)).some(name=>storeFolderEntry(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${folder}`);
  const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
  await writeNewFile(temporary,JSON.stringify(sealV5('store',{base,baseIdentity:`${baseStat.dev}:${baseStat.ino}`,minVersion:STORE_MIN_VERSION})));
  const file=path.join(folder,'store.json');

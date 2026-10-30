@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 import type { MirrorRemoval, PlanEntry, TransferPlan } from '../shared';
 import { ignoredName } from './inventory';
 import type { DestinationIndex } from './destination-index';
-import { beneath, checkAbort, code, contained, makeParent, pathKey, statKey, syncDirectory, syncParents } from './paths';
-import { hostKeyConfigured, openV5, sealV5 } from './app-store';
+import { beneath, checkAbort, code, contained, makeParent, pathKey, readdirIfPresent, statKey, syncDirectory, syncParents } from './paths';
+import { hostKeyConfigured, openV5, renameChecked, sealV5 } from './app-store';
+import { removeEmptiedFolders } from './redundant-folders';
 import { safeComponent } from '../folder-template';
-import { log, logDeletion } from '../logger';
+import { log } from '../logger';
 
 export const DRIVE_BACKUPS='Drive backups';
 export const DRIVE_MARKER='photo-importer-drive.json';
@@ -21,7 +22,7 @@ async function owner(folder:string):Promise<string|null|undefined> {
   try { stat=await fs.lstat(folder); } catch(error) { if(code(error)==='ENOENT') return undefined; throw error; }
   if(!stat.isDirectory()) return null;
   let text;
-  try { text=await fs.readFile(path.join(folder,marker),'utf8'); } catch(error) { if(code(error)==='ENOENT') return null; return null; }
+  try { text=await fs.readFile(path.join(folder,marker),'utf8'); } catch { return null; }
   try { return markerIdentity(JSON.parse(text)); } catch { return null; }
 }
 /** A marker's drive identity: the marker must carry this Mac's seal. */
@@ -35,7 +36,7 @@ export const markerText=(drive:{identity:string;name:string})=>JSON.stringify(ho
 export async function driveFolder(root:string,drive:Drive):Promise<string> {
   const name=safeComponent(drive.name.trim()||'Drive'),parent=path.join(root,DRIVE_BACKUPS);
   await contained(parent,root);
-  const existing=new Set(await fs.readdir(parent).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;}));
+  const existing=new Set(await readdirIfPresent(parent));
   let free:string|undefined;
   for(let index=1;index<1000;index++) {
     const candidate=index===1?name:`${name} ${index}`;
@@ -106,16 +107,17 @@ export async function moveMirrorRemovals(root:string,drive:NonNullable<TransferP
     checkAbort(signal);
     const target=path.join(held,path.relative(base,removal.path));await makeParent(target,root,rootIdentity);
     if(await fs.lstat(target).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;})) throw new Error(`Mirror holding path already exists: ${target}`);
-    await fs.rename(removal.path,target);
+    // The file that arrives is the one reviewed (its ctime moves with the rename, so the rest of its identity is compared).
+    const unchanged=(key:string)=>key.slice(0,key.lastIndexOf(':'));
+    if(await renameChecked(removal.path,target,after=>after.isFile()&&unchanged(statKey(after))===unchanged(removal.stat))!=='done') throw new Error(`Destination file could not be moved aside: ${removal.path}`);
     log('normal','mirror','moved-aside',{from:removal.path,to:target,bytes:removal.size,reason:'file no longer on the mirrored drive',proof:'reviewed removal whose stat was unchanged since review'});
-    await syncDirectory(path.dirname(removal.path));await syncParents(target,root);
+    await syncParents(target,root);
     parents.add(path.dirname(removal.path));
     movedBytes+=removal.size;onProgress?.(position+1,movedBytes,path.basename(removal.path));
   }
   // Mirror the source's folder layout: drop folders the moves left empty.
-  for(const folder of [...parents].sort((a,b)=>b.length-a.length))
-    for(let current=folder;beneath(current,base);current=path.dirname(current)) {
-      try { await fs.rmdir(current); logDeletion('mirror',current,'folder left empty after mirror removals moved its files aside','rmdir succeeded, which only removes empty folders'); } catch { break; }
-    }
+  const emptied=new Set<string>();
+  for(const folder of parents) for(let current=folder;beneath(current,base);current=path.dirname(current)) emptied.add(current);
+  await removeEmptiedFolders(root,emptied,{bookkeeping:false,area:'mirror',after:'mirror removals moved their files aside'});
   return removals.length;
 }

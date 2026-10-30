@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as fs from 'node:fs/promises';
@@ -7,8 +8,9 @@ import { plan as planDestinations, execute, configureOrganizationRecovery } from
 import { EtaTracker, stampEstimates } from '../eta';
 import { RateMeter } from '../rate-meter';
 import type { AppState, Job, Metadata, Progress } from '../shared';
+import { defaultPreferences } from '../preferences';
 
-const preferences: AppState['preferences'] = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', allowFolderSource: false, unknownRules: {} };
+const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 const MB = 1e6;
 
@@ -19,7 +21,7 @@ function simulate(sc: Scenario) {
   const tracker = new EtaTracker(), chunk = 1 << 20;
   const run = { bytes: 0, completed: 0, verifiedBytes: 0, hashedBytes: 0 };
   const job: Job = { id: 'j', source: card, phase: sc.phase, errors: [], backup: false };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   tracker.plan('j', { kind: 'import', verify: true, totals: { copying: { files: sc.files, bytes: sc.files * sc.size }, verifying: { files: sc.files, bytes: sc.files * sc.size } } });
   const total = sc.files * sc.size;
   let now = 0, lastEmit = -Infinity, nextTimer = 5000, nextActivity = 1050;
@@ -96,7 +98,7 @@ test('small-file steps show files per second together with MB/s', () => {
 test('metadata checking shows files per second and never MB/s', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'verifying', errors: [], backup: false };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   for (let t = 0; t <= 10; t++) {
     job.progress = { phase: 'planning', step: 'checking', completed: t * 40, total: 1000, bytes: t * 400e6, totalBytes: 10e9, speed: 0, file: 'f' };
     stampEstimates(state, tracker, 1e9 + t * 1000);
@@ -118,7 +120,7 @@ test('the overview Transfer speed and the Total line show the same rates, and pl
   assert.deepEqual(combinedSpeed([checking]), { speed: 0, fileRate: 42 }, 'checking alone shows its files/s');
   for (const language of languages) {
     const t = createTranslator(language);
-    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state: { preferences, sources: [card, other], jobs: [copying, planning], history: [], platform: 'darwin' }, act: () => {} }) }));
+    const page = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDashboard, { state: { preferences, sources: [card, other], jobs: [copying, planning], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() }, act: () => {} }) }));
     const metric = page.slice(page.indexOf(`${t('Transfer speed')}</dt>`), page.indexOf('</dd>', page.indexOf(`${t('Transfer speed')}</dt>`)));
     const total = page.slice(page.indexOf('data-testid="total-progress"'));
     assert.ok(metric.includes('12.4 MB/s'), `${language}: overview ${metric}`);
@@ -186,7 +188,7 @@ test('comparing after a long frozen start: two minutes into the movement the tim
   const files = 43539, perFile = 28.5e6, filesPerSecond = 561e6 / perFile;
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'verifying', errors: [], backup: false };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   tracker.plan('j', { kind: 'import', verify: true, totals: { comparing: { files, bytes: files * perFile, bytesKnown: false }, copying: { files: 0, bytes: 0 }, verifying: { files: 0, bytes: 0 } } });
   const frozen = 1800, moving = 120;
   let step: number | undefined, whole: number | undefined;
@@ -217,7 +219,7 @@ test('the speed window follows a steady rate, shows nothing for its first 2 s an
 test('a copy shows no speed until its window holds 2 s, and never the lifetime average from before the data moved', () => {
   const tracker = new EtaTracker();
   const job: Job = { id: 'j', source: card, phase: 'copying', errors: [], backup: false };
-  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin' };
+  const state: AppState = { preferences, sources: [card], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() };
   // The run's clock started 10 minutes ago (a long check of existing files); the transfer reports that lifetime average.
   const report = (seconds: number, bytes: number) => { job.progress = { phase: 'copying', completed: 1, total: 100, bytes, totalBytes: 1e9, speed: bytes / 600, file: 'f' }; stampEstimates(state, tracker, 1e9 + seconds * 1000); };
   report(0, 0);

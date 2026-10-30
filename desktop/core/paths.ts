@@ -5,16 +5,28 @@ import { hasher } from './hasher';
 import { streams } from './devices';
 import { volumeAt } from '../platform/volumes';
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+const exec=promisify(execFile);
 
 export function checkAbort(signal?:AbortSignal):void {
   if(signal?.aborted) throw new DOMException('Import stopped','AbortError');
 }
 export function isAbort(error:unknown):boolean { return error instanceof Error && error.name==='AbortError'; }
 export function code(error:unknown):string|undefined { return (error as NodeJS.ErrnoException)?.code; }
+/** Errors of link(2) that mean this file system has no hard links (or no more of them): exFAT, FAT, some network shares. */
+export const LINK_UNSUPPORTED=new Set(['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK']);
+/** Publishing a staged copy falls back to copying when the link cannot be made: no hard links, or another volume. A full link count (EMLINK) is not that. */
+export const linkRefused=(error:unknown):boolean=>{const name=code(error)??'';return name==='EXDEV'||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
 export function beneath(child:string,root:string):boolean {
   const relative=path.relative(root,child);
   return relative!=='' && relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative);
 }
+/** `file` relative to `root`, with posix separators (how records and the renderer name a library file). */
+export const posixRelative=(root:string,file:string):string=>path.relative(root,file).split(path.sep).join('/');
+/** The names in `dir`, or none when it is not there. */
+export const readdirIfPresent=(dir:string):Promise<string[]>=>fs.readdir(dir).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;});
 /** Inclusive containment: the root itself or anything beneath it. */
 export function within(child:string,root:string):boolean {return path.relative(root,child)===''||beneath(child,root);}
 export async function directory(selected:string):Promise<string> {
@@ -58,8 +70,7 @@ export function commitFolder(folder:string):Promise<void> {
   const queued=queuedCommits.get(folder);
   if(queued) return queued;
   const previous=runningCommits.get(folder);
-  let start!:()=>void;
-  const turn=new Promise<void>(resolve=>{start=resolve;});
+  const {promise:turn,resolve:start}=Promise.withResolvers<void>();
   const commit=turn.then(async()=>{
     // From here on this flush has started: later requests queue another, and what was marked lazily is covered.
     queuedCommits.delete(folder);lazyFolders.delete(folder);
@@ -168,6 +179,12 @@ export async function regularHandle(file:string) {
   return handle;
 }
 type Stat=import('node:fs').BigIntStats;
+/** The stat a cached record (a digest, a file's metadata, a receipt, a journal entry) is bound to: dev, inode, size, mtime and ctime as decimal strings. */
+export interface StatRecord {dev:string;ino:string;size:string;mtime:string;ctime:string;}
+export const isStatRecord=(value:unknown):value is StatRecord=>!!value&&typeof value==='object'&&['dev','ino','size','mtime','ctime'].every(key=>typeof (value as Record<string,unknown>)[key]==='string');
+export const statRecord=(stat:Stat):StatRecord=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtime:String(stat.mtimeNs),ctime:String(stat.ctimeNs)});
+/** lstat (bigint) of `file`, or undefined when it is not there. */
+export const maybeLstat=async(file:string):Promise<Stat|undefined>=>{try{return await fs.lstat(file,{bigint:true});}catch(error){if(code(error)==='ENOENT')return undefined;throw error;}};
 /** exFAT gives a zero-length file no start cluster, so its inode is synthetic (2^63 and up, negative when
  * read as signed) and changes whenever the vnode is recreated. Such an inode proves nothing either way. */
 export function unreliableIno(stat:Pick<Stat,'ino'|'size'>):boolean {return stat.size===0n || stat.ino<0n || stat.ino>=2n**63n;}
@@ -177,6 +194,11 @@ export function sameStat(a:Stat,b:Stat):boolean {
   // exFAT swaps an empty or fresh file's synthetic inode for the real one when it is first flushed: that alone is not another file.
   return unreliableIno(a)||unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
 }
+/** sameStat without the ctime test: a rename changes ctime only. */
+export function sameFileIgnoringCtime(a:Stat,b:Stat):boolean {
+  if(a.dev!==b.dev || a.size!==b.size || a.mtimeNs!==b.mtimeNs) return false;
+  return unreliableIno(a)||unreliableIno(b)?a.birthtimeNs===b.birthtimeNs:a.ino===b.ino;
+}
 /** exFAT (macOS FSKit) reports a birth time as whole seconds while the file is cached after the date helper set it,
  * and as the stored 10 ms value once re-read from disk. A recorded whole second therefore matches any value in that
  * same second; every other recorded value (APFS nanoseconds included) must match exactly, and so must any negative value. */
@@ -184,6 +206,10 @@ export function sameBirth(expected:bigint,found:bigint):boolean {
   if(expected===found) return true;
   return expected>=0n&&found>=0n&&expected%1_000_000_000n===0n&&found/1_000_000_000n===expected/1_000_000_000n;
 }
+/** dev:ino:size:mtimeNs:ctimeNs verbatim (the raw inode, whatever its reliability). */
+export const exactStatKey=(stat:Pick<Stat,'dev'|'ino'|'size'|'mtimeNs'|'ctimeNs'>):string=>`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+/** Re-point a `dev:...` identity at another device number. */
+export const rebaseDevice=(identity:string,dev:string):string=>identity.replace(/^\d+:/,dev+':');
 /** dev:ino:size:mtimeNs:ctimeNs - the identity a plan, review or receipt binds a file to (birth time instead of ino when the inode is unreliable). */
 export function statKey(stat:Stat):string {return `${stat.dev}:${unreliableIno(stat)?`birth${stat.birthtimeNs}`:stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;}
 /** `onBytes` hears each chunk as it is read, so a long file shows progress before it is done. */
@@ -225,12 +251,12 @@ export async function directCapable(root:string,_rootIdentity:string,exclusiveCo
     const volume=await volumeAt(root),uuid=volume?.volumeId;
     if(volume?.fsType!=='exfat') return false;
     const key=`${uuid??''}\0${exclusiveCopy}`;
-    const check=async()=>exclusiveCopy||(await new Promise<string>((resolve,reject)=>execFile('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000},(error,stdout)=>error?reject(error):resolve(stdout.trim()))))==='1';
+    const check=async()=>exclusiveCopy||(await exec('/usr/bin/getconf',['LINK_MAX',root],{timeout:30000})).stdout.trim()==='1';
     if(!uuid) return check();
     let found=directVolumes.get(key);
     if(!found){found=check();directVolumes.set(key,found);found.catch(()=>directVolumes.delete(key));}
     return found;
   };
   try { return await answer(); }
-  catch { await new Promise(resolve=>setTimeout(resolve,500)); return answer().catch(()=>false); }
+  catch { await sleep(500); return answer().catch(()=>false); }
 }

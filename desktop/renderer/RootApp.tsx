@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import {createStateReceiver} from '../state-channel';
-import {driveName,gatherErrors,pathOf,type Severity} from '../error-log';
+import {driveName,pathOf,type Severity} from '../error-log';
 import {buildRows,rowCounts,type ErrorRow} from '../error-groups';
 import {errorTotal} from '../job-issues';
 import { createTranslator, I18nProvider, useTranslation, localeNames, formatNumber as numberIn, formatSpeed } from './i18n';
@@ -15,7 +15,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, BackupMode, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, Preferences, Progress, Source, SourceCameraInfo } from '../shared';
-import { isRunning } from '../shared';
+import { basename, within } from './paths';
+import { DEFAULT_TEXT_SCALE, isRunning, requiredDestinations } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
@@ -50,7 +51,7 @@ export function WorkspaceTabs<T extends string>({ label, value, items, onChange,
 }
 /** Destinations are checked in the background after launch: one with no status yet is still being checked, and only a finished check that reports it unavailable makes it offline. */
 export function destinationReadiness(state: Pick<AppState, 'preferences' | 'destinationStatus'>) {
-  const required = state.preferences.copyMode === 'single' ? 1 : 2;
+  const required = requiredDestinations(state.preferences);
   const chosen = state.preferences.destinations.slice(0, required);
   const statusOf = (path: string) => state.destinationStatus?.find(disk => disk.path === path);
   return {
@@ -95,7 +96,6 @@ function PathPreview({ label, parts, testId }: { label: string; parts: string[];
   return <div className="folder-preview" data-testid={testId}><span><Icon icon={Folder} size={17} />{label}</span><div>{parts.map((part, index) => <span key={`${index}-${part}`}>{index > 0 && <Icon icon={ChevronRight} size={13} />}<span>{part}</span></span>)}</div></div>;
 }
 function driveBackupFolder(basePath: string): string { return [...basePath.split(/[\\/]/).filter(Boolean), 'Drive backups', '<drive name>'].join('/'); }
-function filename(path: string): string { return path.split(/[\\/]/).filter(Boolean).pop() ?? path; }
 function Switch({ checked, onChange, label, detail, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; detail?: string; disabled?: boolean }) {
   return <label className={`switch-row ${disabled ? 'is-disabled' : ''}`}>
     <span className="switch-copy"><span>{label}</span>{detail && <small>{detail}</small>}</span>
@@ -107,8 +107,7 @@ const formatColors:Record<string,string>={NEF:'#a78bda',ARW:'#e87982',CR3:'#8bbd
 const formatSegmentCache=new WeakMap<Inventory,{kind:string;size:number;color:string}[]>();
 function formatSegments(inventory:Inventory){
   const cached=formatSegmentCache.get(inventory);if(cached)return cached;
-  const formats=new Map<string,number>();
-  for(const file of inventory.files)if(file.kind!=='Other'){const format=filename(file.path).match(/\.([^.]*)$/)?.[1].toUpperCase()??file.kind;formats.set(format,(formats.get(format)??0)+Math.max(0,file.size));}
+  const formats=new Map(Object.entries(inventory.formats).map(([format,entry])=>[format,Math.max(0,entry.bytes)]));
   const usedColors=new Set<string>();
   const segments=[...formats].sort(([a],[b])=>a.localeCompare(b)).filter(([,size])=>size>0).map(([kind,size])=>{
     let hue=[...kind].reduce((hash,char)=>(hash*31+char.charCodeAt(0))>>>0,0)%360;
@@ -189,7 +188,7 @@ export function interfaceChangeKind(previous: AppState, next: AppState): Interfa
   const a = previous.preferences, b = next.preferences;
   if (a.language !== b.language || a.appearance !== b.appearance || a.accent !== b.accent) return 'crossfade';
   // Cards and rows that come, go or move: drives, organizations, the overview, destination slots, the review.
-  const layout = (state: AppState) => [state.sources.map(source => source.id).join('|'), [...new Set(state.jobs.map(job => `${job.organization ? 'organization' : 'source'}:${job.source.id}`))].sort().join('|'), state.preferences.sourceLayout ?? 'list', state.preferences.showDashboard !== false, state.preferences.copyMode, state.preferences.destinations.join('|'), state.review?.id ?? !!state.busyReview].join('\n');
+  const layout = (state: AppState) => [state.sources.map(source => source.id).join('|'), [...new Set(state.jobs.map(job => `${job.organization ? 'organization' : 'source'}:${job.source.id}`))].sort().join('|'), state.preferences.sourceLayout, state.preferences.showDashboard, state.preferences.copyMode, state.preferences.destinations.join('|'), state.review?.id ?? !!state.busyReview].join('\n');
   return layout(previous) !== layout(next) ? 'layout' : undefined;
 }
 
@@ -256,7 +255,7 @@ export default function RootApp() {
     const keydown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
       if (event.key.toLowerCase() === 'r') { event.preventDefault(); window.importer.action({ type: 'refresh' }).catch(error => setConnectionError(String(error))); }
-      if (event.shiftKey && event.key.toLowerCase() === 's' && state && !state.review && !state.busyReview && state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2)) { event.preventDefault(); window.importer.action({ type: 'start' }).catch(error => setConnectionError(String(error))); }
+      if (event.shiftKey && event.key.toLowerCase() === 's' && state && !state.review && !state.busyReview && state.preferences.destinations.length >= requiredDestinations(state.preferences)) { event.preventDefault(); window.importer.action({ type: 'start' }).catch(error => setConnectionError(String(error))); }
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
@@ -268,7 +267,7 @@ export default function RootApp() {
   useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const dark = preferences?.appearance === 'dark' || (preferences?.appearance !== 'light' && systemDark);
   useLayoutEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; document.documentElement.dataset.accent = preferences?.accent ?? 'coral'; }, [dark, preferences?.accent]);
-  useEffect(() => { document.documentElement.style.setProperty('--text-scale', String(preferences?.textScale ?? 1.25)); }, [preferences?.textScale]);
+  useEffect(() => { document.documentElement.style.setProperty('--text-scale', String(preferences?.textScale ?? DEFAULT_TEXT_SCALE)); }, [preferences?.textScale]);
   const rawAct = useCallback<Dispatch>(action => {
     window.importer.action(action).then(() => setConnectionError('')).catch(error => setConnectionError(error instanceof Error ? error.message : String(error)));
   }, []);
@@ -293,7 +292,7 @@ export default function RootApp() {
   const hasState = !!state;
   useLayoutEffect(() => { if (hasState) markAppReady(); }, [hasState]);
   if (!state) return <div className="connection-screen"><img src="./icon.png" alt="" /><h1>{t("Photo Importer")}</h1><p>{connectionError || t("Opening your camera workbench…")}</p>{connectionError && <Button icon={RefreshCw} onClick={() => location.reload()}>{t("Retry")}</Button>}</div>;
-  const busy = pageBusy(state);
+  const busy = !!state.blocked?.scan;
   const reviewOwner = reviewWorkspace(state);
   const errors = collectErrors(state, [connectionError, ...inspectionErrors].filter(Boolean).map(detail => { let at = localErrorTimes.current.get(detail); if (!at) { at = new Date().toISOString(); localErrorTimes.current.set(detail, at); } return { detail, at }; }));
   // The badge counts rows (groups needing attention), from the summaries; paths are never iterated.
@@ -326,7 +325,7 @@ export default function RootApp() {
           <div className="import-mode-header"><WorkspaceTabs panelId="import-workspace-panel" label={t("Import mode")} value={importMode} items={[{id:'media',label:t("Media"),testId:'import-mode-media'},{id:'files',label:t("Files & folders"),testId:'import-mode-files'}]} onChange={setImportMode} /><p className="workspace-description">{importMode === 'media' ? t("File by date and camera rules.") : t("Keep the original folder structure.")}</p></div>
           <section role="tabpanel" id="import-workspace-panel" aria-labelledby={`tab-import-mode-${importMode}`}>
           {reviewOwner?.page === 'desk' && reviewOwner.mode === importMode && <ReviewPanel state={state} act={act} inspect={inspect} />}
-          <ImportDesk state={state} act={act} mode={importMode} needsChoice={dismissedDrives} inspect={inspect} onOrganization={openOrganization} onSettings={() => openSettings('storage')} onFolderRules={() => openSettings('folders')} onPerformance={() => openSettings('performance')} onActivity={() => navigate('activity', () => setActivityTab('jobs'))} /></section>
+          <ImportDesk state={state} act={act} mode={importMode} needsChoice={dismissedDrives} inspect={inspect} onOrganization={openOrganization} onSettings={() => openSettings('storage')} onFolderRules={() => openSettings('folders')} onPerformance={() => openSettings('performance')} onOtherMode={() => animateInterfaceChange(() => setImportMode(importMode === 'media' ? 'files' : 'media'))} onActivity={() => navigate('activity', () => setActivityTab('jobs'))} /></section>
         </>}
         {page === 'library' && <>
           <WorkspaceTabs panelId="library-workspace-panel" label={t("Library tools")} value={libraryTool} items={[{id:'organize',label:t("Organize"),testId:'library-organize'},{id:'duplicates',label:t("Duplicates"),testId:'library-duplicates'}]} onChange={setLibraryTool} />
@@ -391,7 +390,7 @@ function MiniSteps({ states, kinds, paused = false }: { states: StepState[]; kin
 
 export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state: AppState; onOpen: (sourceId: string) => void; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch }) {
   const { t } = useTranslation();
-  const verifyOff = state.preferences.verifyCopies === false;
+  const verifyOff = !state.preferences.verifyCopies;
   // A library or folder with a job running (an organization, a folder backup) is a source here too, while it runs.
   const running = state.jobs.filter(job => (isRunning(job) || job.phase === 'queued') && !state.sources.some(source => source.id === job.source.id)).map(job => job.source);
   const listed = [...state.sources, ...running.filter((source, index) => running.findIndex(other => other.id === source.id) === index)];
@@ -412,20 +411,19 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
 export type DestinationStatusKind = 'checking' | 'offline' | 'idle' | 'receiving' | 'checking-files' | 'verifying' | 'folder-check' | 'organizing' | 'cleaning';
 export interface DestinationActivity { kind: DestinationStatusKind; completed: number; total: number; bytes: number; totalBytes: number; speed: number; fileRate: number; eta?: number; sources: string[]; fraction?: number; /** checking-files: the step the bar is drawn in. */layer?: StepKind; /** Every job writing here is pausing: the bar shows the paused color. */paused?: boolean }
 const destinationPriority: DestinationStatusKind[] = ['receiving', 'checking-files', 'verifying', 'organizing', 'folder-check', 'cleaning'];
-function insideFolder(path: string, root: string): boolean { const base = root.replace(/[\\/]+$/, ''); return path === root || path === base || path.startsWith(base + '/') || path.startsWith(base + '\\'); }
 export function destinationActivity(state: AppState, path: string): DestinationActivity {
   const empty = { completed: 0, total: 0, bytes: 0, totalBytes: 0, speed: 0, fileRate: 0, sources: [] as string[] };
   const status = state.destinationStatus?.find(item => item.path === path);
   if (!status) return { kind: 'checking', ...empty };
   if (!status.available) return { kind: 'offline', ...empty };
-  const required = state.preferences.copyMode === 'single' ? 1 : 2;
+  const required = requiredDestinations(state.preferences);
   const chosen = state.preferences.destinations.slice(0, required).includes(path);
   type Part = { kind: DestinationStatusKind; progress?: Progress; eta?: number; source?: string; paused?: boolean };
   const parts: Part[] = [];
   for (const job of state.jobs) {
     if (!isRunning(job)) continue;
     const step = job.progress?.step, tidy = step === 'tidying' || step === 'stashing' || step === 'releasing' || step === 'removing';
-    if (job.organization) { if (insideFolder(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
+    if (job.organization) { if (within(job.source.path, path)) parts.push({ kind: tidy ? 'cleaning' : 'organizing', progress: job.progress, eta: job.eta ?? job.progress?.eta, paused: jobPaused(job) }); continue; }
     if (!chosen || job.phase === 'discovering') continue;
     // Progress left over from an earlier run (planning figures on a job already copying) says nothing about what the job does now; without any, the job's phase decides.
     const progress = job.progress && job.phase === 'copying' && job.progress.phase === 'planning' ? undefined : job.progress;
@@ -433,7 +431,7 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     parts.push({ kind: tidy ? 'cleaning' : stage === 'planning' ? 'checking-files' : stage === 'verifying' ? 'verifying' : 'receiving', progress, eta: job.eta ?? progress?.eta, source: job.source.name, paused: jobPaused(job) });
   }
   const duplicates = state.duplicates;
-  if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && insideFolder(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
+  if (duplicates?.root && (duplicates.status === 'removing' || duplicates.status === 'scanning') && within(duplicates.root, path)) parts.push({ kind: 'organizing', progress: duplicates.progress, eta: duplicates.progress?.eta });
   if (state.misplacedProgress?.[path]) parts.push({ kind: 'folder-check', progress: state.misplacedProgress[path], eta: state.misplacedProgress[path].eta });
   if (state.residue?.progress) parts.push({ kind: 'cleaning', progress: state.residue.progress, eta: state.residue.progress.eta });
   const kind = destinationPriority.find(item => parts.some(part => part.kind === item));
@@ -451,7 +449,7 @@ export function destinationActivity(state: AppState, path: string): DestinationA
     sum.speed += progress.speed; sum.fileRate += progress.fileRate ?? 0;
   }
   const fraction = sum.totalBytes > 0 && sum.bytes > 0 ? sum.bytes / sum.totalBytes : sum.total > 0 ? sum.completed / sum.total : undefined;
-  return { kind, ...sum, eta: etas.length && etas.every(item => item !== undefined) ? Math.max(...(etas as number[])) : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)), ...(same.length && same.every(part => part.paused) ? { paused: true } : {}) };
+  return { kind, ...sum, eta: same.some(part => part.source) ? state.destinationEta?.[path] : etas.length && etas.every(item => item !== undefined) ? etas[0] : undefined, fraction: fraction === undefined ? undefined : Math.min(1, Math.max(0, fraction)), ...(same.length && same.every(part => part.paused) ? { paused: true } : {}) };
 }
 /** A destination's status in the sidebar: a coloured label, and while it works a thin bar, the counts, speed, time left and which sources write to it. Never a file name. */
 function SidebarDestinationStatus({ activity, path }: { activity: DestinationActivity; path: string }) {
@@ -480,12 +478,12 @@ function SidebarDestinationStatus({ activity, path }: { activity: DestinationAct
 
 export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { state: AppState; errors?: DisplayError[]; onErrors?: (target: ErrorTarget) => void; act?: Dispatch; onOpen?: (path: string) => void }) {
   const { t } = useTranslation();
-  const count = state.preferences.copyMode === 'single' ? 1 : 2;
+  const count = requiredDestinations(state.preferences);
   const destinations = state.preferences.destinations.slice(0, count);
   return <section className="sidebar-section" aria-labelledby="sidebar-destinations"><h2 id="sidebar-destinations">{t("Destinations")}</h2>
     {destinations.length ? <ul>{destinations.map(path => {
       const status = state.destinationStatus?.find(item => item.path === path);
-      const online = status?.available !== false, name = filename(path) || path;
+      const online = status?.available !== false, name = basename(path) || path;
       const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
         <SidebarDestinationStatus activity={destinationActivity(state, path)} path={path} />
@@ -501,7 +499,7 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
 function SidebarOldRecords({ state, path, act }: { state: AppState; path: string; act?: Dispatch }) {
   const { t } = useTranslation();
   if (!state.oldRecords?.includes(path)) return null;
-  const text = t("Old records from an earlier version are on {drive}. Use records-migrator-v5 to convert them; they were left untouched.", { drive: filename(path) || path });
+  const text = t(message('error.oldRecords', { drive: basename(path) }));
   return <div className="sidebar-old-records" data-testid="sidebar-old-records"><small className="sidebar-capacity-text sidebar-old-records-text" title={text}>{text}</small>{act && <Button kind="quiet" data-testid="old-records-acknowledge" aria-label={t("Acknowledge old records")} title={t("Acknowledge old records")} onClick={() => act({ type: 'acknowledgeOldRecords', drive: path })}>{t("Acknowledge old records")}</Button>}</div>;
 }
 function sourceInventories(state: AppState) {
@@ -537,36 +535,31 @@ function SidebarErrors({ errors, target, onErrors }: { errors?: DisplayError[]; 
 type ErrorExplanation = { title: string; hint?: string };
 // Turns a raw technical message into a plain title and a next step. Keys are translated at render time.
 export function explainError(message: Message, kind: ErrorKind = 'app', language: Language = 'en'): ErrorExplanation {
-  const text = formatMessage(message, 'en').toLowerCase();
   if (kind === 'format') return { title: "Unknown file formats" };
-  if (/enospc|no space|not enough space|disk full/.test(text)) return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination." };
-  if (/eacces|eperm|permission|not permitted|operation not allowed/.test(text)) return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security." };
-  if (/source changed|scan again/.test(text)) return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import." };
-  if (/verification failed|did not match|checksum|digest mismatch/.test(text)) return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept." };
-  if (message.key === 'error.mirrorReview') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive." };
-  if (/enoent|enodev|enxio|disconnected|offline|not mounted|no such file/.test(text)) return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again." };
-  if (/eio|i\/o error|input\/output|read error|write error/.test(text)) return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader." };
-  if (/timed? ?out|etimedout/.test(text)) return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this." };
+  const cause = errorCause(message);
+  if (cause === 'space') return { title: "Not enough space on the destination.", hint: "Free up space or choose another destination." };
+  if (cause === 'permission') return { title: "macOS didn't allow access to this location.", hint: "Check the drive's permissions, or allow the app in Privacy & Security." };
+  if (cause === 'changed') return { title: "Files on the drive changed during the import.", hint: "Scan the drive again, then import." };
+  if (cause === 'verify') return { title: "A copy didn't match the original.", hint: "Import again. The mismatched copy isn't kept." };
+  if (cause === 'mirror') return { title: "Mirror needs your review before moving files.", hint: "Open Review on this drive." };
+  if (cause === 'missing') return { title: "The drive was disconnected or a file is missing.", hint: "Reconnect the drive and try again." };
+  if (cause === 'io') return { title: "The drive reported a read or write error.", hint: "Check the card or drive, or try another reader." };
+  if (cause === 'timeout') return { title: "The operation took too long.", hint: "Try again. A slow or failing drive can cause this." };
   if (kind === 'metadata') return { title: "Couldn't read photo details.", hint: "The file is still copied; its date may come from the file instead." };
   return { title: formatMessage(message, language).split(/(?<=\.)\s|(?<=。)/)[0]! };
 }
-// The main process rebuilds errorLog exactly when the errors change, so the same errorLog object means the same errors.
-let gathered: { log: AppState['errorLog']; errors: ReturnType<typeof gatherErrors> } | undefined;
-function loggedErrors(state: AppState) {
-  if (!state.errorLog || gathered?.log !== state.errorLog) gathered = { log: state.errorLog, errors: gatherErrors(state) };
-  return gathered.errors;
+/** What went wrong, from the message key or, for raw text, the error code main attached (see toMessage). */
+const causeByKey: Record<string, string> = { 'error.sourceChanged': 'changed', 'error.mirrorReview': 'mirror', 'error.sourceDisconnected': 'missing' };
+const causeByErrno: Record<string, string> = { ENOSPC: 'space', EACCES: 'permission', EPERM: 'permission', ECHANGED: 'changed', EVERIFY: 'verify', ENOENT: 'missing', ENODEV: 'missing', ENXIO: 'missing', EIO: 'io', ETIMEDOUT: 'timeout' };
+function errorCause(message: Message): string | undefined {
+  if (message.key === 'text') { const errno = message.params?.errno; return typeof errno === 'string' ? causeByErrno[errno] : undefined; }
+  const own = causeByKey[message.key]; if (own) return own;
+  const inner = message.params?.error; return inner && typeof inner === 'object' && !Array.isArray(inner) && 'key' in inner ? errorCause(inner) : undefined;
 }
 export function collectErrors(state: AppState, extra: (string | LocalError | undefined)[] = []): DisplayError[] {
   const result: DisplayError[] = [];
   for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', severity: 'error', ...(local.at ? { at: local.at } : {}) }); }
-  const cleared = new Set(state.errorLog?.cleared ?? []);
-  for (const error of loggedErrors(state)) { const at = state.errorLog?.at[error.id]; if (!cleared.has(error.id)) result.push({ ...error, ...(at ? { at } : {}) }); }
-  const t = createTranslator(state.preferences.language);
-  for (const {source,inventory,backup} of sourceInventories(state)) {
-    if (!backup && (state.preferences.unknownDefault ?? 'skip') === 'ask' && Object.keys(inventory.unknownExtensions).some(extension => !Object.hasOwn({...state.preferences.unknownRules,...state.sessionUnknownRules}, extension))) {
-      result.push({source:source.name,drive:driveName(source.path,source.name),message:text(t("Unknown file formats")),kind:'format',severity:'warning',sourceId:source.id,formatSourceId:source.id});
-    }
-  }
+  result.push(...(state.errorLog?.entries ?? []));
   return result;
 }
 
@@ -614,26 +607,23 @@ function ErrorToast({ errors, hidden, onView }: { errors: DisplayError[]; hidden
 }
 
 /** Copying, planning a review, showing one, or scanning sources: pages lock the settings these depend on. */
-function pageBusy(state: AppState): boolean { return state.jobs.some(job => isRunning(job)) || !!state.busyReview || !!state.review || !!state.scanningSources?.length; }
-function organizeBusy(state: AppState): boolean { return !!state.review || !!state.busyReview || !!state.scanningSources?.length || state.jobs.some(job => job.organization && (isRunning(job) || job.phase === 'queued')); }
 function organizationDestinationIndex(preferences: Preferences, selected: number): number { return preferences.destinations[selected] ? selected : 0; }
 
 /** Each page's own actions, then All errors on every page. */
-export function TitlebarControls({state, act, page = 'desk', organizationDestination = 0, errorCount, warningCount = 0, onErrors, errorLevel}: {state: AppState; act: Dispatch; page?: Page | 'drives' | 'organization' | 'duplicates' | 'history'; organizationDestination?: number; errorCount: number; warningCount?: number; onErrors: () => void; errorLevel?: 'error' | 'warning'}) {
+export function TitlebarControls({state, act, page = 'desk', organizationDestination = 0, errorCount, warningCount = 0, onErrors, errorLevel}: {state: AppState; act: Dispatch; page?: Page; organizationDestination?: number; errorCount: number; warningCount?: number; onErrors: () => void; errorLevel?: 'error' | 'warning'}) {
   const { t, formatNumber } = useTranslation();
   const errorsButton = <Button icon={CircleAlert} data-testid="show-errors" title={t("All errors")} aria-label={t("All errors")} onClick={onErrors}><span className="titlebar-label">{t("All errors")}</span><span key={errorCount} className="error-count" data-count={errorCount} data-level={errorLevel} aria-label={t("{count} errors", {count:formatNumber(errorCount)})}>{formatNumber(errorCount)}</span>{warningCount > 0 && <span key={`w${warningCount}`} className="error-count warning-count" data-testid="warning-count" data-count={warningCount} aria-label={t("{count} warnings", {count:formatNumber(warningCount)})}>{formatNumber(warningCount)}</span>}</Button>;
-  if (page === 'drives') return <div className="titlebar-actions" aria-label={t("Drive controls")}>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" data-testid="refresh-drives" title={t("Refresh drives")} aria-label={t("Refresh drives")} onClick={() => act({type:'refresh'})} /></div>;
   if (page !== 'desk') return <div className="titlebar-actions">{errorsButton}</div>;
   const scanning = !!state.scanningSources?.length;
   const canStop = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued' || job.paused));
-  const configured = state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2);
+  const configured = state.preferences.destinations.length >= requiredDestinations(state.preferences);
   const selectedCount = state.sources.filter(sourceSelected).length;
   const running = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued'));
   // Every running job is winding down after Stop or Pause: the controls say so, disabled, until it has.
   const live = state.jobs.filter(job => isRunning(job));
   const winding = live.length > 0 && live.every(job => job.stopping) && !state.jobs.some(job => job.phase === 'queued') && !scanning && !state.review && !state.busyReview;
   const stopping = winding && live.some(job => job.stopping === 'stop');
-  const showing = state.preferences.showDashboard !== false;
+  const showing = state.preferences.showDashboard;
   return <div className="titlebar-actions" aria-label={t("Import controls")}>{running ? <Button kind="primary" icon={Pause} data-testid="global-start" disabled={winding} aria-busy={winding || undefined} onClick={() => act({type:'pause'})}>{winding ? (stopping ? t("Stopping…") : t("Pausing…")) : t("Pause imports")}</Button> : <Button kind="primary" icon={Play} data-testid="global-start" title={t("Starts all selected media and folder sources. Existing jobs keep their modes.")} disabled={!configured || !selectedCount || scanning || !!state.review || !!state.busyReview} onClick={() => act({type:'start'})}>{selectedCount !== state.sources.length ? t("Start all selected ({count})", { count: formatNumber(selectedCount) }) : t("Start all selected")}</Button>}<Button icon={Square} data-testid="global-stop" title={t("Stops queued, paused and running media imports and file backups. Scans, reviews and library tools continue.")} disabled={!canStop || stopping} aria-busy={stopping || undefined} onClick={() => act({type:'stop',scope:'imports'})}>{stopping ? t("Stopping…") : t("Stop imports")}</Button><Button className="automatic-button" icon={state.preferences.automatic ? Check : Radio} data-testid="global-automatic" aria-pressed={state.preferences.automatic} onClick={() => act({type:'preferences',patch:{automatic:!state.preferences.automatic}})}>{t("Automatic")}</Button><Button className="automatic-button" icon={Gauge} data-testid="titlebar-overview" aria-pressed={showing} title={t("Show or hide the import overview")} onClick={() => act({type:'preferences',patch:{showDashboard:!showing}})}>{t("Overview")}</Button>{errorsButton}<Button kind="quiet" icon={RefreshCw} className="refresh-button" title={t("Refresh connected sources")} aria-label={t("Refresh connected sources")} onClick={() => act({type:'refresh'})} /></div>;
 }
 
@@ -776,32 +766,33 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
   // What the files count counts depends on the step every running job is on.
   const doing = new Set(active.map(job => { const p = job.progress; return !p ? 'processed' : p.phase === 'planning' ? 'checked' : p.phase === 'verifying' ? 'verified' : p.renames ? 'moved' : 'copied'; }));
   const filesLabel = doing.size === 1 ? ({ checked: "Files checked", verified: "Files verified", moved: "Files moved", copied: "Files copied", processed: "Files processed" } as const)[[...doing][0] as 'checked'] : "Files processed";
-  const warnings = collectErrors(state).filter(error => error.severity === 'warning').length;
+  // Warnings come only from the log main publishes (local window errors are errors), so this is the title badge's count.
+  const warnings = (state.errorLog?.entries ?? []).filter(error => error.severity === 'warning').length;
   const lead = active.find(job => job.progress);
   // Jobs run side by side, so the longest one sets the time left; queued sources are not counted yet.
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
   const raw = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined, remaining = useHeld()('total', raw);
-  const requiredDestinations = state.preferences.copyMode === 'single' ? 1 : 2;
-  const configured = state.preferences.destinations.length >= requiredDestinations;
+  const needDestinations = requiredDestinations(state.preferences);
+  const configured = state.preferences.destinations.length >= needDestinations;
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
   // Drives in use: those of running jobs and the destinations they write to; with nothing running, every connected drive.
-  const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, requiredDestinations)] : Object.keys(state.driveActivity ?? {}));
+  const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, needDestinations)] : Object.keys(state.driveActivity ?? {}));
   const organizationJobs = jobs.filter(job => job.organization);
   const organizing = active.length > 0 && active.every(job => job.organization);
   // Every job's whole work (checking, copying, verifying) moves the total, each weighted by its size; 100% only when all are complete.
-  const verify = state.preferences.verifyCopies !== false;
+  const verify = state.preferences.verifyCopies;
   const overall = overviewFraction(latestJobs);
   // No job, no planned bytes: only "No transfer planned" is shown, with an empty bar and no percentage.
   const nothingPlanned = !(total > 0 && transferred > 0) && !lead?.progress && !active.length && overall === undefined;
   const doneFiles = (job: Job) => job.progress ? (doing.size === 1 && doing.has('copied') ? copyBasis(job.progress).completed : job.progress.completed) : 0;
   return (<section className="import-dashboard" aria-label={t("Import dashboard")}>
-      <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2><Button kind="quiet" icon={EyeOff} className="dashboard-hide" aria-label={t("Hide the import overview")} title={t("Hide the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: false } })} /></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{state.preferences.verifyCopies === false && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
+      <div className="dashboard-heading"><div className="dashboard-title"><h2>{t("Import overview")}</h2></div><span className={`status-pill ${active.length ? 'status-working' : ''}`}><Icon icon={active.length ? (organizing ? FolderCog : ArrowDownToLine) : state.review ? Eye : Pause} size={15}/>{active.length ? t(organizing ? "Organizing" : "Transfers running") : state.review ? t("Review pending") : t("Idle")}</span>{!state.preferences.verifyCopies && <span className="status-pill status-caution" data-testid="verification-off"><Icon icon={ShieldOff} size={14}/>{t("Verification after copy is off")}</span>}</div>
       <dl className="dashboard-metrics">
         <div><dt><Icon icon={Camera} size={16}/>{t("Connected sources")}</dt><dd data-metric="sources">{state.sources.length}</dd></div>
         <div><dt><Icon icon={Layers3} size={16}/>{t("Active / queued")}</dt><dd>{active.length} <span>/ {queued.length}</span></dd><small className="metric-optional">{t("Limit: {count} simultaneous", { count: formatNumber(state.preferences.parallel) })}</small></div>
         <div><dt><Icon icon={Gauge} size={16}/>{t("Transfer speed")}</dt><dd>{speed > 0 ? <Speed value={speed} /> : fileRate > 0 ? <FileRate value={fileRate} /> : '—'}</dd><small className="metric-optional">{active.length ? t("Combined active sources") : t("No active transfers")}</small></div>
         <div><dt><Icon icon={CheckCheck} size={16}/>{t(filesLabel)}</dt><dd>{latestJobs.reduce((sum,job)=>sum+doneFiles(job),0).toLocaleString(language)}</dd><small>{warnings > 0 ? t("{complete} sources complete · {errors} need attention · {warnings} warnings", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length), warnings: formatNumber(warnings) }) : t("{complete} sources complete · {errors} need attention", { complete: formatNumber(latestJobs.filter(job=>job.phase==='complete').length), errors: formatNumber(latestJobs.filter(job=>job.phase==='error').length) })}</small></div>
-        <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {requiredDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : checkingDestinations ? t("Checking destinations…") : t("Choose a backup destination")}</small></div>
+        <div><dt><Icon icon={HardDrive} size={16}/>{t("Destinations ready")}</dt><dd data-metric="destinations">{readyDestinations.length} / {needDestinations}</dd><small className="metric-optional">{readyDestinations.length ? t("{size} free across destinations", { size: bytes(readyDestinations.reduce((sum,disk)=>sum+(disk.free??0),0)) }) : checkingDestinations ? t("Checking destinations…") : t("Choose a backup destination")}</small></div>
         {driveTotal && <div><dt><Icon icon={Activity} size={16}/>{t("Drive activity")}</dt><dd data-metric="drive-activity">{Math.round(driveTotal.utilization)}%</dd><small className="metric-optional" title={t("Whole disk, all apps; may include metadata and receipts")}>{t("Read {read} · Write {write}", { read: formatSpeed(driveTotal.readBps, language), write: formatSpeed(driveTotal.writeBps, language) })}</small></div>}
       </dl>
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
@@ -811,7 +802,7 @@ export function ImportDashboard({state, act}: {state: AppState; act: Dispatch}) 
         speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, scaledRange(state.etaTotal && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined, raw!, remaining)) }) : undefined}
         step={stepKind(lead?.progress)} stages={totalStageLayers(latestJobs, verify)} paused={totalPaused(latestJobs)} />
-      {(!configured || readyDestinations.length < requiredDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= requiredDestinations) || (configured && checkingDestinations && readyDestinations.length < requiredDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(requiredDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<requiredDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
+      {(!configured || readyDestinations.length < needDestinations || !!state.review) && <div className="dashboard-next-step"><Icon icon={(state.review && configured && readyDestinations.length >= needDestinations) || (configured && checkingDestinations && readyDestinations.length < needDestinations) ? Info : CircleAlert} size={17}/><p>{!configured ? t(needDestinations === 2 ? "{count} sources connected. Choose two backup destinations to enable imports." : "{count} sources connected. Choose a backup destination to enable imports.", { count: formatNumber(state.sources.length) }) : readyDestinations.length<needDestinations ? t(checkingDestinations ? "Checking destinations…" : "A destination is offline. Reconnect it to import.") : t("Apply or discard the review.")}</p>{!configured && <Button icon={Plus} onClick={()=>act({type:'chooseDestination',index:state.preferences.destinations[0]?1:0})}>{t("Choose destination")}</Button>}</div>}
       {organizationJobs.length > 0 && <ul className="progress-jobs">{organizationJobs.map(job => <li key={job.id}><div className="progress-job-heading"><strong>{t("Library organization")}</strong><span className="progress-job-place" title={organizationPlace(job, true)}>{organizationPlace(job)}</span></div><span className="progress-job-status">{organizationStatus(job, t)}</span><OrganizationProgress job={job} act={act} showFile={false} /></li>)}</ul>}
     </section>);
 }
@@ -868,11 +859,11 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey}:{stat
   const copyModes: Record<CopyMode, string> = { single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") };
   const categories: { id: SettingsCategory; icon: LucideIcon; title: string; summary: string }[] = [
     { id: 'general', icon: Settings2, title: t("General"), summary: `${localeNames[p.language] ?? p.language} · ${Math.round(p.textScale * 100)}%` },
-    { id: 'storage', icon: HardDrive, title: t("Storage"), summary: p.destinations.length ? `${p.destinations.map(path => filename(path)).join(' + ')} · ${copyModes[p.copyMode]}` : t("Not set") },
+    { id: 'storage', icon: HardDrive, title: t("Storage"), summary: p.destinations.length ? `${p.destinations.map(path => basename(path)).join(' + ')} · ${copyModes[p.copyMode]}` : t("Not set") },
     { id: 'folders', icon: FolderCog, title: t("Folders"), summary: samplePath(p.template).join(' / ') },
-    { id: 'defaults', icon: ArrowDownToLine, title: t("Import defaults"), summary: `${p.automatic ? t("Automatic") : t("Manual")} · ${p.verifyCopies !== false ? t("Verify each copy after copying") : t("Copying")}` },
+    { id: 'defaults', icon: ArrowDownToLine, title: t("Import defaults"), summary: `${p.automatic ? t("Automatic") : t("Manual")} · ${p.verifyCopies ? t("Verify each copy after copying") : t("Copying")}` },
     { id: 'files', icon: FileQuestion, title: t("File handling"), summary: t("Metadata and file rules") },
-    { id: 'devices', icon: Usb, title: t("Devices"), summary: t("{count} remembered", { count: formatNumber(Object.keys(p.rememberedDevices ?? {}).length) }) },
+    { id: 'devices', icon: Usb, title: t("Devices"), summary: t("{count} remembered", { count: formatNumber(Object.keys(p.rememberedDevices).length) }) },
     { id: 'performance', icon: Gauge, title: t("Performance"), summary: t("{count} at once", { count: formatNumber(p.parallel) }) },
   ];
   const lockTip = busy ? t("Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.") : undefined;
@@ -885,7 +876,7 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey}:{stat
         <div className="settings-row readability-settings"><label htmlFor="text-size">{t("Text size")}</label><div className="text-size-control"><input id="text-size" aria-label={t("Text size")} type="range" min="100" max="200" step="5" value={Math.round(p.textScale*100)} onChange={event=>act({type:'preferences',patch:{textScale:Number(event.target.value)/100}})} /><strong>{Math.round(p.textScale * 100)}%</strong>{p.textScale !== 1.25 && <Button kind="quiet" onClick={()=>act({type:'preferences',patch:{textScale:1.25}})}>{t("Reset text size")}</Button>}</div><small className="settings-row-note">{t("Large sizes shrink to fit small windows.")}</small></div>
         <div className="settings-row"><span>{t("Appearance")}</span><AppearanceControls preferences={p} act={act}/></div>
       </div></section>
-      <SettingsSection title={t("Import desk")} icon={Gauge}><div data-testid="show-dashboard"><Switch checked={p.showDashboard !== false} onChange={showDashboard => act({ type: 'preferences', patch: { showDashboard } })} label={t("Show the import overview")} detail={t("Totals, speed and progress at the top of the Import desk.")} /></div></SettingsSection>
+      <SettingsSection title={t("Import desk")} icon={Gauge}><div data-testid="show-dashboard"><Switch checked={p.showDashboard} onChange={showDashboard => act({ type: 'preferences', patch: { showDashboard } })} label={t("Show the import overview")} detail={t("Totals, speed and progress at the top of the Import desk.")} /></div></SettingsSection>
     </>,
     storage: <>{lockNote('storage')}<fieldset className="settings-fieldset" disabled={busy} title={lockTip} aria-describedby={lockId('storage')}>
       <SettingsSection title={t("Backup location")} icon={HardDrive}><DestinationBay state={state} act={act} configure /><TextPreference label={t("Backup folder")} value={p.basePath} placeholder="photobackup" onSave={basePath => act({ type: 'preferences', patch: { basePath } })} description={t("Leave empty to use the drive itself.")} /></SettingsSection>
@@ -898,8 +889,8 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey}:{stat
       </SettingsSection>
       <fieldset className="settings-fieldset" disabled={busy} title={lockTip} aria-describedby={lockId('defaults')}>
         <SettingsSection title={t("Copying")} icon={ShieldCheck}>
-          <Switch checked={p.verifyCopies !== false} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
-          <Switch checked={p.skipFileErrors !== false} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
+          <Switch checked={p.verifyCopies} onChange={verifyCopies => act({ type: 'preferences', patch: { verifyCopies } })} label={t("Verify each copy after copying")} detail={t("Reads each copy back to confirm it. Off is faster.")} />
+          <Switch checked={p.skipFileErrors} onChange={skipFileErrors => act({ type: 'preferences', patch: { skipFileErrors } })} label={t("Skip files with errors and continue")} detail={t("A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.")} />
         </SettingsSection>
         <SettingsSection title={t("Drive backups")} icon={Copy}><BackupModeControl preferences={p} act={act} /></SettingsSection>
       </fieldset>
@@ -907,7 +898,7 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey}:{stat
     files: <>{lockNote('files')}<fieldset className="settings-fieldset" disabled={busy} title={lockTip} aria-describedby={lockId('files')}>
       <SettingsSection title={t("Files without metadata")} icon={FileQuestion}><NoMetadataSettings preferences={p} act={act} /></SettingsSection>
       <SettingsSection title={t("Other file rules")} icon={FileQuestion}><FileRules preferences={p} act={act} /></SettingsSection>
-      <SettingsSection title={t("Problem files")} icon={FileQuestion}><div data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles !== false} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div><Switch checked={p.removeAppleDouble !== false} onChange={removeAppleDouble => act({ type: 'preferences', patch: { removeAppleDouble } })} label={t("Remove macOS ._ files")} detail={t("Deletes the hidden ._ files macOS leaves beside copied and organized files on exFAT and FAT drives, only when they hold no tags or other data.")} /></SettingsSection>
+      <SettingsSection title={t("Problem files")} icon={FileQuestion}><div data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div><Switch checked={p.removeAppleDouble !== false} onChange={removeAppleDouble => act({ type: 'preferences', patch: { removeAppleDouble } })} label={t("Remove macOS ._ files")} detail={t("Deletes the hidden ._ files macOS leaves beside copied and organized files on exFAT and FAT drives, only when they hold no tags or other data.")} /></SettingsSection>
     </fieldset></>,
     devices: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /></>,
     performance: <>
@@ -959,7 +950,7 @@ function RememberedDriveDetails({ id, name, cameras }: { id: string; name: strin
 
 export function IgnoredDrives({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
   const { t, language } = useTranslation();
-  const devices = Object.entries(preferences.ignoredDevices ?? {}).sort(([, a], [, b]) => b.ignoredAt.localeCompare(a.ignoredAt));
+  const devices = Object.entries(preferences.ignoredDevices).sort(([, a], [, b]) => b.ignoredAt.localeCompare(a.ignoredAt));
   return <SettingsSection title={t("Ignored drives")} icon={EyeOff}>
     <div className="saved-rules remembered-devices" data-testid="ignored-devices">{devices.length ? devices.map(([id, device]) => <div key={id}><span className="extension-name">{device.name}</span><span className="muted">{t("Ignored {date}", { date: formatWhen(device.ignoredAt, language) })}</span><Button kind="quiet" icon={RotateCcw} aria-label={t("Stop ignoring {name}", { name: device.name })} onClick={() => forgetDevice(act, id)}>{t("Stop ignoring")}</Button></div>) : <p className="muted">{t("No ignored drives.")}</p>}</div>
   </SettingsSection>;
@@ -1020,7 +1011,7 @@ export function DeleteRecoveryConfirm({ step, root, size, onCancel, onConfirm }:
 // What to do with files that have no capture date, no camera and no known origin, or unreadable metadata.
 export function NoMetadataSettings({ preferences: p, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
-  const current = p.noMetadataHandling ?? 'keep', folder = p.noMetadataFolder ?? 'Unknown files';
+  const current = p.noMetadataHandling, folder = p.noMetadataFolder;
   const [draft, setDraft] = useState(folder);
   useEffect(() => setDraft(folder), [folder]);
   const choices: { value: NonNullable<Preferences['noMetadataHandling']>; label: string; detail: string }[] = [
@@ -1028,7 +1019,7 @@ export function NoMetadataSettings({ preferences: p, act }: { preferences: Prefe
     { value: 'folder', label: t("Move to a folder"), detail: t("Organized or copied into one folder directly under your library, keeping their subfolders.") },
     { value: 'fileDate', label: t("Use file date"), detail: t("Filed by the file's modified date, in a camera folder with the folder name below.") },
   ];
-  const valid = validNoMetadataFolder(draft, [p.editedFolder ?? '', p.basePath, p.videoBasePath ?? '']);
+  const valid = validNoMetadataFolder(draft, [p.editedFolder, p.basePath, p.videoBasePath]);
   return <div className="backup-mode" data-testid="no-metadata-settings">
     <span className="field-label">{t("Files with unknown metadata")}</span>
     <div className="segmented" role="group" aria-label={t("Files with unknown metadata")}>{choices.map(choice => <button key={choice.value} type="button" aria-pressed={current === choice.value} onClick={() => act({ type: 'preferences', patch: { noMetadataHandling: choice.value } })}>{choice.label}</button>)}</div>
@@ -1039,7 +1030,7 @@ export function NoMetadataSettings({ preferences: p, act }: { preferences: Prefe
 
 function UnknownDefaultControl({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
-  const current = preferences.unknownDefault ?? 'skip';
+  const current = preferences.unknownDefault;
   const choices: { value: NonNullable<Preferences['unknownDefault']>; label: string; detail: string }[] = [
     { value: 'skip', label: t("Skip automatically"), detail: t("Unknown files are not copied.") },
     { value: 'other', label: t("Copy to Other files folder"), detail: t("Copied to an Other files folder.") },
@@ -1055,7 +1046,7 @@ function UnknownDefaultControl({ preferences, act }: { preferences: Preferences;
 // A file whose name is taken at the destination by a file with other content (imports, drive backups and organizing).
 export function ConflictNamingSettings({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
-  const current = preferences.conflictNaming ?? 'folder';
+  const current = preferences.conflictNaming;
   const choices: { value: ConflictNaming; label: string; detail: string }[] = [
     { value: 'folder', label: t("Conflicts folder"), detail: t("Saved with its own name in a Conflicts folder inside the camera folder, one subfolder per file.") },
     { value: 'number', label: t("Add a number"), detail: t("Saved beside the other file with a number: IMG_0001 (1).JPG, then (2). Its sidecars get the same number.") },
@@ -1068,7 +1059,7 @@ export function ConflictNamingSettings({ preferences, act }: { preferences: Pref
 
 function BackupModeControl({ preferences, act }: { preferences: Preferences; act: Dispatch }) {
   const { t } = useTranslation();
-  const mode = preferences.backupMode ?? 'additive';
+  const mode = preferences.backupMode;
   const mirrorBlocked = preferences.copyMode === 'sequential';
   const modes: { value: BackupMode; label: string; detail: string }[] = [
     { value: 'additive', label: t("Additive"), detail: t("Deleted files stay in the backup.") },
@@ -1078,7 +1069,7 @@ function BackupModeControl({ preferences, act }: { preferences: Preferences; act
     <div className="segmented" role="group" aria-label={t("Drive backup mode")}>{modes.map(item => <button key={item.value} type="button" aria-pressed={mode === item.value} disabled={item.value === 'mirror' && mirrorBlocked && mode !== 'mirror'} onClick={() => act({ type: 'preferences', patch: { backupMode: item.value } })}>{item.label}</button>)}</div>
     <p className="settings-explanation">{modes.find(item => item.value === mode)!.detail}</p>
     {mirrorBlocked && <p className="inline-note"><Icon icon={Info} size={14} />{t("Mirror doesn't work with “Fill first, then second”.")}</p>}
-    <div className="folder-preview"><span><Icon icon={Folder} size={17} />{t("Drive backups are saved here on each destination")}</span><div>{driveBackupFolder(preferences.basePath).split('/').map((part, index) => <span key={`${index}-${part}`}>{index > 0 && <Icon icon={ChevronRight} size={13} />}<span>{part}</span></span>)}</div></div>
+    <PathPreview label={t("Drive backups are saved here on each destination")} parts={driveBackupFolder(preferences.basePath).split('/')} />
   </div>;
 }
 
@@ -1089,7 +1080,7 @@ function AppearanceControls({ preferences, act }: { preferences: Preferences; ac
   </div><div className="accent-row"><span>{t("Accent")}</span><div role="group" aria-label={t("Accent color")}>{(['coral', 'ocean', 'forest'] as Accent[]).map(accent => <button type="button" key={accent} aria-label={t(`${accent[0].toUpperCase() + accent.slice(1)} accent`)} aria-pressed={preferences.accent === accent} className={`accent-button accent-${accent}`} onClick={() => act({ type: 'preferences', patch: { accent } })}><span>{preferences.accent === accent && <Icon icon={Check} size={13} />}</span></button>)}</div></div></section>;
 }
 
-export function ImportDesk({ state, act, inspect, onOrganization, onSettings, onFolderRules, onPerformance, onActivity, mode = 'media', needsChoice = [] }: { mode?: ImportMode; onPerformance?: () => void; onFolderRules?: () => void; onActivity?: () => void; state: AppState; act: Dispatch; inspect: (path: string) => void; onOrganization: () => void; onSettings: () => void; needsChoice?: string[] }) {
+export function ImportDesk({ state, act, inspect, onOrganization, onSettings, onFolderRules, onPerformance, onActivity, onOtherMode, mode = 'media', needsChoice = [] }: { mode?: ImportMode; onOtherMode?: () => void; onPerformance?: () => void; onFolderRules?: () => void; onActivity?: () => void; state: AppState; act: Dispatch; inspect: (path: string) => void; onOrganization: () => void; onSettings: () => void; needsChoice?: string[] }) {
   const { t, formatNumber } = useTranslation();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const jobs = state.jobs.filter(job => !job.organization && (job.backup ? 'files' : 'media') === mode);
@@ -1098,12 +1089,14 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, on
   const startOrder = state.queueOrder ?? [];
   const selectedJob = jobs.find(job => job.id === selectedJobId && !job.organization) ?? jobs.find(job => job.inventory && !job.organization);
   const latestJobs = jobs.filter((job,index)=>!job.organization && jobs.findIndex(item=>item.source.id===job.source.id)===index);
-  const idleSources = state.sources.filter(source => sourceImportMode(source) === mode && !jobs.some(job => job.source.id === source.id));
+  const modeSources = state.sources.filter(source => sourceImportMode(source) === mode);
+  // Sources of the other mode: the empty state says where they are, so an empty list never reads as "nothing connected".
+  const otherSources = state.sources.length - modeSources.length;
+  const idleSources = modeSources.filter(source => !jobs.some(job => job.source.id === source.id));
   // Organizations read a drive or folder too: each one's latest run is a card, ahead of the drives.
-  const organizationCards: Job[] = [];
-  const configured = state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2);
+  const configured = state.preferences.destinations.length >= requiredDestinations(state.preferences);
   const scanning = (state.scanningSources?.length ?? 0) > 0;
-  const reviewBusy = pageBusy(state) || state.duplicates?.status === 'scanning' || state.duplicates?.status === 'removing';
+  const reviewBusy = !!state.blocked?.review;
   // Starting one drive queues behind the others; only an open review blocks it.
   const startBlocked = !!state.busyReview || !!state.review;
   const unanswered = (id: string) => needsChoice.includes(id) && newDeviceIds(state).includes(id);
@@ -1112,18 +1105,17 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, on
   const cards = [...latestJobs.map(job => ({ id: job.source.id, job, source: job.source })), ...idleSources.map(source => ({ id: source.id, job: undefined as Job | undefined, source }))].sort((a, b) => position(a.id) - position(b.id));
   const movable = (card: typeof cards[number], index: number) => index > 0 && sourceSelected(card.source) && (!card.job || card.job.phase === 'queued' || (card.job.phase === 'stopped' && !!card.job.paused));
   return <div className="desk-page">
-    {state.preferences.showDashboard !== false && <ImportDashboard state={state} act={act} />}
+    {state.preferences.showDashboard && <ImportDashboard state={state} act={act} />}
     <div className="workbench-columns"><div className="source-workspace">
-      <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions"><span className="parallel-summary" data-testid="parallel-summary" title={t("Current copies finish before a lower limit takes effect.")}>{t("Drives at once: {count}/10", { count: formatNumber(state.preferences.parallel) })}{onPerformance && <Button kind="quiet" icon={Settings2} aria-label={t("Performance")} onClick={onPerformance} />}</span><Button icon={FolderPlus} aria-label={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} title={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} disabled={!configured || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: mode === 'files' })}>{t("Add folder…")}</Button>{state.preferences.showDashboard === false && <Button kind="quiet" icon={Gauge} data-testid="show-dashboard-desk" aria-label={t("Show the import overview")} title={t("Show the import overview")} onClick={() => act({ type: 'preferences', patch: { showDashboard: true } })} />}<div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout ?? 'list') === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div><span className="connected-count">{t("{count} connected", { count: state.sources.filter(source => sourceImportMode(source) === mode).length })}</span>{<Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scan' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button>}</div></div>
-        <div className={`source-ledger source-layout-${state.preferences.sourceLayout ?? 'list'}`} data-testid="source-cards">
-          {latestJobs.length === 0 && organizationCards.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{mode === 'files' ? t("Choose folders to back up.") : t("Connect camera storage or a memory card.")}</h3><p>{mode === 'files' ? t("Keep the original folder structure.") : t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span></div>}
-          {organizationCards.map(job => <OrganizationCard key={job.id} job={job} act={act} />)}
-          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow activity={state.driveActivity?.[source.id]} drive={driveContext(job.source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === job.source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(job.source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} originalsSize={state.originalsSize} /> : <SourceRow drive={driveContext(source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(source.id)} knownRules={state.preferences.unknownRules} verifyOff={state.preferences.verifyCopies === false} />; })}
+      <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions"><span className="parallel-summary" data-testid="parallel-summary" title={t("Current copies finish before a lower limit takes effect.")}>{t("Drives at once: {count}/10", { count: formatNumber(state.preferences.parallel) })}{onPerformance && <Button kind="quiet" icon={Settings2} aria-label={t("Performance")} onClick={onPerformance} />}</span><Button icon={FolderPlus} aria-label={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} title={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} disabled={!configured || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: mode === 'files' })}>{t("Add folder…")}</Button><div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout) === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div>{<Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scan' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button>}</div></div>
+        <div className={`source-ledger source-layout-${state.preferences.sourceLayout}`} data-testid="source-cards">
+          {latestJobs.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{mode === 'files' ? t("Choose folders to back up.") : t("Connect camera storage or a memory card.")}</h3><p>{mode === 'files' ? t("Keep the original folder structure.") : t("Connect a memory card or camera to start.")}</p><span className="inline-note"><Icon icon={Radio} size={14} />{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</span>{otherSources > 0 && onOtherMode && <div className="source-empty-other" data-testid="other-mode-sources"><span>{otherSources === 1 ? (mode === 'files' ? t("1 connected source is in Media.") : t("1 connected source is in Files & folders.")) : mode === 'files' ? t("{count} connected sources are in Media.", { count: formatNumber(otherSources) }) : t("{count} connected sources are in Files & folders.", { count: formatNumber(otherSources) })}</span><Button kind="quiet" icon={ArrowRight} onClick={onOtherMode}>{mode === 'files' ? t("Media") : t("Files & folders")}</Button></div>}</div>}
+          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow activity={state.driveActivity?.[source.id]} drive={driveContext(job.source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === job.source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(job.source.id)} verifyOff={!state.preferences.verifyCopies} originalsSize={state.originalsSize} /> : <SourceRow drive={driveContext(source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(source.id)} verifyOff={!state.preferences.verifyCopies} />; })}
 
         </div>
       </section>
       {selectedJob?.inventory && <InventoryPanel inventory={selectedJob.inventory} sourceName={selectedJob.source.name} backup={selectedJob.backup} inspect={inspect} act={act} />}
-      {mode === 'files' && <section className="backup-action"><fieldset className="workspace-policy" disabled={settingsLocked(state) || pageBusy(state)}><BackupModeControl preferences={state.preferences} act={act} /></fieldset></section>}
+      {mode === 'files' && <section className="backup-action"><fieldset className="workspace-policy" disabled={settingsLocked(state) || !!state.blocked?.scan}><BackupModeControl preferences={state.preferences} act={act} /></fieldset></section>}
       {onActivity && <Button kind="quiet" icon={Activity} onClick={onActivity}>{t("View all jobs in Activity")}</Button>}
 
     </div><DestinationBay state={state} act={act} onOrganization={onOrganization} onSettings={onSettings} onFolderRules={onFolderRules} /></div>
@@ -1135,7 +1127,7 @@ type ListingProgress = NonNullable<AppState['scanProgress']>[string];
 function selectionKnown(source: Source): boolean { return source.selected !== undefined; }
 export function sourceSelected(source: Source): boolean { return source.selected !== false; }
 function newDeviceIds(state: AppState): string[] { return state.newDevices ?? []; }
-function rememberedDevices(preferences: Preferences) { return preferences.rememberedDevices ?? {}; }
+function rememberedDevices(preferences: Preferences) { return preferences.rememberedDevices; }
 function selectSource(act: Dispatch, sourceId: string, selected: boolean) { act({ type: 'selectSource', sourceId, selected }); }
 function forgetDevice(act: Dispatch, deviceId: string) { act({ type: 'forgetDevice', deviceId }); }
 
@@ -1271,7 +1263,7 @@ function importStatus(job: Job, t: ReturnType<typeof createTranslator>): string 
 }
 /** What an organization reads: "A006 › photobackup + videobackup", or the full path. */
 export function organizationPlace(job: Job, full = false): string {
-  const place = full ? job.source.path : filename(job.source.path) || job.source.path;
+  const place = full ? job.source.path : basename(job.source.path) || job.source.path;
   return job.folders?.length ? `${place} › ${job.folders.join(' + ')}` : place;
 }
 /** The step an organization is on, for its status label. */
@@ -1353,7 +1345,7 @@ function SkipFileNotice({ job, act }: { job: Job; act: Dispatch }) {
   const retry = job.retryable ? <Button icon={RotateCcw} data-testid="retry-button" title={t("Run this job again, including files that had errors")} onClick={() => act({ type: 'retryJob', jobId: job.id })}>{t("Retry")}</Button> : null;
   if (!job.skippablePath) return <div className="source-choice" data-testid="retry-job"><p><Icon icon={CircleAlert} size={14} />{t("This job ended with errors.")}</p><div className="rule-actions">{retry}{skipAll}</div></div>;
   const file = job.skippablePath;
-  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: file.split(/[\\/]/).pop() ?? file })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: job.id })}>{t("Skip all")}</Button></div></div>;
+  return <div className="source-choice" data-testid="skip-file"><p title={file}><Icon icon={CircleAlert} size={14} />{t("{file} stopped this job.", { file: basename(file) })}<RevealButton path={file} act={act} /></p><div className="rule-actions">{retry}{skipAll}<Button icon={ChevronRight} data-testid="skip-file-button" title={t("Leave this file out and run the job again")} onClick={() => act({ type: 'skip', jobId: job.id, path: file })}>{t("Skip")}</Button><Button kind="primary" icon={Play} data-testid="skip-all-button" title={t("Run again, skipping files with errors")} onClick={() => act({ type: 'skip', all: true, jobId: job.id })}>{t("Skip all")}</Button></div></div>;
 }
 
 /** Files checked (or read) before anything is written: import and organization reviews, the backup folder check. */
@@ -1398,11 +1390,11 @@ export function OrganizeFolderLayoutNote() {
 // A drive or folder that holds a backup destination: planning leaves the backup folder out.
 function containsBackup(source: Source, destinations: string[]): boolean {
   if (!source.path) return false;
-  const root = source.path.replace(/[\\/]+$/, '');
-  return destinations.some(destination => destination === root || destination.startsWith(root + '/') || destination.startsWith(root + '\\'));
+  const root = source.path;
+  return destinations.some(destination => within(destination, root));
 }
 
-export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, knownRules, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, startBlocked = false, organizeBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; startBlocked?: boolean; organizeBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo; knownRules?: Preferences['unknownRules'] }) {
+export function SourceRow({ reviewing = false, reviewProgress, drive, source, job, queuePosition, selected, onSelect, act, configured, reviewBusy, inventory, scanning, listing, cameraInfo, verifyOff = false, containsBackup: holdsBackup = false, backupFolder, startBlocked = false, organizeBlocked = false, needsChoice = false, canMoveUp = false, originalsSize, activity }: { activity?: DriveActivity; reviewing?: boolean; reviewProgress?: Progress; originalsSize?: AppState['originalsSize']; drive?: DriveContext; canMoveUp?: boolean; verifyOff?: boolean; containsBackup?: boolean; backupFolder?: string; startBlocked?: boolean; organizeBlocked?: boolean; needsChoice?: boolean; source: Source; job?: Job; queuePosition?: number; selected?: boolean; onSelect?: () => void; act: Dispatch; configured: boolean; reviewBusy?: boolean; inventory?: Inventory; scanning?: boolean; listing?: ListingProgress; cameraInfo?: SourceCameraInfo }) {
   const { language, t, formatNumber, formatBytes: bytes } = useTranslation();
   const held = useHeld();
   const [detailsOpen, setDetailsOpen] = useState(false), detailsId = `source-details-${useId()}`;
@@ -1480,11 +1472,10 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
   const { t, formatNumber } = useTranslation();
   const systemKinds = useMemo(() => {
     const kinds = new Map<string, { vendor: string; label: string; count: number }>();
-    for (const file of inventory.files) if (file.system && !kinds.has(file.system.id)) kinds.set(file.system.id, { vendor: file.system.vendor, label: file.system.label, count: inventory.systemKinds?.[file.system.id] ?? inventory.files.filter(item => item.system?.id === file.system!.id).length });
+    for (const file of inventory.files) if (file.system && !kinds.has(file.system.id)) kinds.set(file.system.id, { vendor: file.system.vendor, label: file.system.label, count: inventory.systemKinds[file.system.id] ?? 0 });
     return [...kinds.values()].sort((a, b) => b.count - a.count);
   }, [inventory]);
-  const unknown = useMemo(() => inventory.files.filter(file => file.kind === 'Other' && !file.companionOf && !file.system && (file.included || file.size > 0)), [inventory]);
-  const copied = unknown.filter(file => file.included).length, skipped = unknown.length - copied;
+  const { copied, skipped } = inventory.unknownFiles, unknown = { length: copied + skipped };
   const emptyPrimary = (inventory.skipped ?? []).filter(item => item.reason === 'emptyPrimary');
   const system = inventory.system ?? 0, empty = inventory.empty ?? 0;
   if (!system && !unknown.length && !empty && !emptyPrimary.length) return null;
@@ -1500,24 +1491,21 @@ export function SkippedFilesNotice({ inventory }: { inventory: Inventory }) {
     <summary><Icon icon={Info} size={14} /><span>{summary}</span><Icon icon={ChevronDown} size={14} /></summary>
     <div className="skipped-files-content">
       {systemKinds.length > 0 && <div><h4>{t("Camera system files")}</h4><p>{t("Index files the camera writes. Not needed.")}</p><dl>{systemKinds.map(kind => <div key={`${kind.vendor}-${kind.label}`}><dt>{kind.label}<small>{kind.vendor}</small></dt><dd>{formatNumber(kind.count)}</dd></div>)}</dl></div>}
-      {empty > 0 && <div><h4>{t(message('inventory.emptyFile'))}</h4><dl>{(inventory.skipped ?? []).filter(item => item.reason === 'empty').slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
-      {emptyPrimary.length > 0 && <div><h4>{t(message('inventory.emptyPrimaryFile'))}</h4><dl>{emptyPrimary.slice(0, 20).map(item => <div key={item.path}><dt>{filename(item.path)}</dt></div>)}</dl></div>}
+      {empty > 0 && <div><h4>{t(message('inventory.emptyFile'))}</h4><dl>{(inventory.skipped ?? []).filter(item => item.reason === 'empty').slice(0, 20).map(item => <div key={item.path}><dt>{basename(item.path)}</dt></div>)}</dl></div>}
+      {emptyPrimary.length > 0 && <div><h4>{t(message('inventory.emptyPrimaryFile'))}</h4><dl>{emptyPrimary.slice(0, 20).map(item => <div key={item.path}><dt>{basename(item.path)}</dt></div>)}</dl></div>}
       {unknown.length > 0 && <div><h4>{t("Unknown files")}</h4><p>{t("Not photos or videos. Change this in Settings.")}</p><dl>{Object.entries(inventory.unknownExtensions).sort(([, a], [, b]) => b - a).map(([extension, count]) => <div key={extension}><dt className="extension-name">{extension ? `.${extension}` : t("No extension")}</dt><dd>{formatNumber(count)}</dd></div>)}</dl></div>}
     </div>
   </details>;
 }
 
-function SourceMediaSummary({ source, inventory, scanning }: { source: Source; inventory?: Inventory; scanning?: boolean; cameraInfo?: SourceCameraInfo }) {
+function SourceMediaSummary({ source, inventory, scanning }: { source: Source; inventory?: Inventory; scanning?: boolean }) {
   const { t, formatNumber, formatBytes: bytes } = useTranslation();
   const summary = useMemo(() => {
     const photos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};
     const videos = {count:0, size:0, formats:new Map<string,{count:number;size:number}>()};
-    for (const file of inventory?.files ?? []) {
-      if (file.kind === 'Other') continue;
-      const group = file.kind === 'Videos' ? videos : photos;
-      const extension = filename(file.path).match(/\.([^.]*)$/)?.[1].toUpperCase() || '';
-      const format = group.formats.get(extension) ?? {count:0,size:0};
-      group.count++; group.size += file.size; format.count++; format.size += file.size; group.formats.set(extension,format);
+    for (const [extension, entry] of Object.entries(inventory?.formats ?? {})) {
+      const group = entry.video ? videos : photos;
+      group.count += entry.files; group.size += entry.bytes; group.formats.set(extension, { count: entry.files, size: entry.bytes });
     }
     return {photos,videos};
   }, [inventory]);
@@ -1534,9 +1522,9 @@ export function DestinationBay({ state, act, onOrganization, onSettings, onFolde
     const path = preferences.destinations[index];
     const status = state.destinationStatus?.find(item => item.path === path);
     const busy = state.jobs.some(job => isRunning(job)) || !!state.review || !!state.busyReview;
-    const wait = checkWait(state, path);
-    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? filename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />{state.driveActivity?.[path] && <DriveActivityMeter activity={state.driveActivity[path]} />}<div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span></div>}{path && state.misplacedFiles?.[path]?.missing && !state.misplacedProgress?.[path] && <p className="destination-note" data-testid="destination-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p>}{path && wait && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && status?.available && <small className="destination-note" role="status">{t(wait)}</small>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}<div className="destination-check-actions">{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (isRunning(job) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button>}{path && state.misplacedProgress?.[path] && <Button kind="quiet" icon={X} data-testid={`destination-stop-backup-check-${index}`} onClick={() => act({ type: 'stopBackupCheck' })}>{t("Stop")}</Button>}{path && status?.available && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && <Button kind="primary" icon={FolderCog} className="destination-check" data-testid={`destination-check-backup-folder-${index}`} disabled={!!wait || busy || state.jobs.some(job => job.organization && job.phase === 'queued')} onClick={() => act({ type: 'checkBackupFolder', destinationIndex: index })}>{t("Check folder layout")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div></div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
-  })}</div>{(onSettings || onFolderRules || onOrganization) && <div className="bay-actions">{onFolderRules && <Button icon={FolderCog} onClick={onFolderRules}>{t("Edit folder rules")}</Button>}{onSettings && <Button icon={Settings2} onClick={onSettings}>{t("Change destinations")}</Button>}{onOrganization && <Button icon={FolderCog} onClick={onOrganization}>{t("Folder organization")}</Button>}</div>}</aside>;
+    const wait = state.blocked?.backupCheck;
+    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? basename(path) || path : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}><bdi>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</bdi></p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />{state.driveActivity?.[path] && <DriveActivityMeter activity={state.driveActivity[path]} />}<div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span></div>}{path && state.misplacedFiles?.[path]?.missing && !state.misplacedProgress?.[path] && <p className="destination-note" data-testid="destination-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p>}{path && wait && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && status?.available && <small className="destination-note" role="status">{t(message(wait))}</small>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}<div className="destination-check-actions">{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <Button kind="quiet" icon={FolderCog} disabled={busy || state.jobs.some(job => job.organization && (isRunning(job) || job.phase === 'queued'))} onClick={() => act({ type: 'organizeBackup', destinationIndex: index })}>{t("Organize")}</Button>}{path && state.misplacedProgress?.[path] && <Button kind="quiet" icon={X} data-testid={`destination-stop-backup-check-${index}`} onClick={() => act({ type: 'stopBackupCheck' })}>{t("Stop")}</Button>}{path && status?.available && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && <Button icon={FolderCog} className="destination-check" data-testid={`destination-check-backup-folder-${index}`} disabled={!!wait || busy || state.jobs.some(job => job.organization && job.phase === 'queued')} onClick={() => act({ type: 'checkBackupFolder', destinationIndex: index })}>{t("Check folder layout")}</Button>}{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div></div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
+  })}</div>{(onSettings || onFolderRules || onOrganization) && <div className="bay-actions">{onSettings && <Button icon={Settings2} onClick={onSettings}>{t("Change destinations")}</Button>}{onFolderRules && <Button icon={FolderCog} onClick={onFolderRules}>{t("Edit folder rules")}</Button>}{onOrganization && <Button icon={FolderCog} onClick={onOrganization}>{t("Folder organization")}</Button>}</div>}</aside>;
 }
 
 export const InventoryPanel = memo(function InventoryPanel({ inventory, sourceName, backup, inspect, act }: { inventory: Inventory; sourceName: string; backup: boolean; inspect: (path: string) => void; act: Dispatch }) {
@@ -1548,13 +1536,13 @@ export const InventoryPanel = memo(function InventoryPanel({ inventory, sourceNa
   const kinds = useMemo(() => [...new Set(inventory.files.map(file => file.kind))], [inventory]);
   return <section className="inventory-panel"><CardHeader icon={Files} title={backup ? t("Folder backup inventory") : t("Source inventory")} detail={sourceName}><span className="card-meta">{bytes(inventory.bytes)}</span></CardHeader><div className="inventory-summary"><span><Icon icon={FileImage} size={15} />{t("{count} photos & videos", { count: formatNumber(inventory.media) })}</span><span><Icon icon={Layers3} size={15} />{t("{count} companions", { count: formatNumber(inventory.companions) })}</span>{inventory.unknown > 0 && <button type="button" onClick={() => setRulesOpen(value => !value)} aria-expanded={rulesOpen}><Icon icon={FileQuestion} size={15} />{t("{count} other files", { count: inventory.unknown })}<Icon icon={Settings2} size={14} /></button>}</div>{rulesOpen && <UnknownRules extensions={inventory.unknownExtensions} act={act} />}
     <div className="inventory-toolbar"><div className="select-wrap"><select aria-label={t("Filter inventory files")} value={filter} onChange={event => setFilter(event.target.value)}><option value="all">{t("All files")}</option><option value="included">{t("Included files")}</option>{kinds.map(kind => <option key={kind} value={kind}>{t(kind)}</option>)}</select><Icon icon={ChevronDown} size={14} /></div><input type="search" aria-label={t("Search inventory files")} placeholder={t("Find a file…")} value={query} onChange={event => setQuery(event.target.value)} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></div>
-    <div className="file-table-scroll"><table className="file-table"><thead><tr><th scope="col">{t("File")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("Size")}</th><th scope="col">{t("Import")}</th></tr></thead><tbody>{visible.slice(0, 500).map(file => <tr key={file.path}><td><button className="file-preview-button" type="button" onClick={() => inspect(file.path)} title={t("Show metadata for {name}", { name: file.relative })}><Icon icon={file.kind === 'Other' ? Files : FileImage} size={15} /><span>{file.relative}</span></button>{file.companionOf && <span className="companion-label">{t("Companion to {name}", { name: filename(file.companionOf) })}</span>}</td><td>{t(file.kind)}</td><td>{bytes(file.size)}</td><td><span className={`file-inclusion ${file.included ? 'included' : ''}`}><Icon icon={file.included ? Check : Pause} size={13} />{file.included ? t("Included") : t("Ignored")}</span></td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{t("No files match this filter.")}</p>}</div>{visible.length > 500 && <p className="inline-note">{t("Showing 500 matches. Search to narrow.")}</p>}</section>;
+    <div className="file-table-scroll"><table className="file-table"><thead><tr><th scope="col">{t("File")}</th><th scope="col">{t("Type")}</th><th scope="col">{t("Size")}</th><th scope="col">{t("Import")}</th></tr></thead><tbody>{visible.slice(0, 500).map(file => <tr key={file.path}><td><button className="file-preview-button" type="button" onClick={() => inspect(file.path)} title={t("Show metadata for {name}", { name: file.relative })}><Icon icon={file.kind === 'Other' ? Files : FileImage} size={15} /><span>{file.relative}</span></button>{file.companionOf && <span className="companion-label">{t("Companion to {name}", { name: basename(file.companionOf) })}</span>}</td><td>{t(file.kind)}</td><td>{bytes(file.size)}</td><td><span className={`file-inclusion ${file.included ? 'included' : ''}`}><Icon icon={file.included ? Check : Pause} size={13} />{file.included ? t("Included") : t("Ignored")}</span></td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{t("No files match this filter.")}</p>}</div>{visible.length > 500 && <p className="inline-note">{t("Showing 500 matches. Search to narrow.")}</p>}</section>;
 });
 
 export function UnknownFilesPrompt({ sourceName, inventory, knownRules = {}, act }: { sourceName: string; inventory: Inventory; knownRules?: Preferences['unknownRules']; act: Dispatch }) {
   const { t, formatNumber } = useTranslation();
   const unresolved = Object.fromEntries(Object.entries(inventory.unknownExtensions).filter(([extension]) => !Object.hasOwn(knownRules, extension)));
-  const signature = useMemo(() => JSON.stringify(inventory.files.filter(file => file.kind === 'Other' && !file.companionOf).map(file => [file.path, file.size])), [inventory]);
+  const signature = useMemo(() => JSON.stringify(inventory.unknownExtensions), [inventory]);
   const [dismissed, setDismissed] = useState<string>();
   const [expanded, setExpanded] = useState(false);
   const [remember, setRemember] = useState(true);
@@ -1577,8 +1565,8 @@ function UnknownRules({ extensions, act }: { extensions: Record<string, number>;
 export function PerformanceSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatNumber } = useTranslation();
   const p = state.preferences, use = state.resources;
-  const cores = use?.cores ?? Math.max(p.maxCpuThreads ?? 1, 16), memoryMax = use ? use.memoryMaxMB : Math.max(p.memoryLimitMB ?? 512, 16384);
-  const threads = p.maxCpuThreads ?? use?.defaultThreads ?? 2, memory = p.memoryLimitMB ?? use?.defaultMemoryMB ?? 2048;
+  const cores = use?.cores ?? Math.max(p.maxCpuThreads, 16), memoryMax = use ? use.memoryMaxMB : Math.max(p.memoryLimitMB, 16384);
+  const threads = p.maxCpuThreads, memory = p.memoryLimitMB;
   const atDefaults = !use || (threads === use.defaultThreads && memory === use.defaultMemoryMB);
   return <>
     <div className="settings-row"><label htmlFor="settings-cpu-threads">{t("CPU threads")}</label><div className="text-size-control"><input id="settings-cpu-threads" data-testid="settings-cpu-threads" type="range" min={1} max={cores} step={1} value={Math.min(threads, cores)} onChange={event => act({ type: 'preferences', patch: { maxCpuThreads: Number(event.target.value) } })} /><strong>{t("{count} threads", { count: formatNumber(threads) })}</strong></div><p className="settings-row-note">{t("The most threads each kind of work (checksums, reading photo details, thumbnails) uses at once; it is a limit per task, not a total. Lower it to keep the Mac responsive. Applies to the next import; file reading adjusts after you restart the app.")}</p></div>
@@ -1590,7 +1578,7 @@ export function PerformanceSettings({ state, act }: { state: AppState; act: Disp
 /** The diagnostic log: how much it records (applies at once, even while jobs run), where it is, and how to hand it over. */
 export function DiagnosticsSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatBytes } = useTranslation();
-  const level: LogLevel = state.preferences.logLevel ?? 'normal', info = state.logInfo;
+  const level: LogLevel = state.preferences.logLevel, info = state.logInfo;
   const labels: Record<LogLevel, string> = { off: t("Off"), normal: t("Normal"), detailed: t("Detailed"), trace: t("Trace") };
   const explanations: Record<LogLevel, string> = { off: t("Nothing is recorded."), normal: t("Records settings changes, job phases, every file the app deletes, and errors."), detailed: t("Also records each file's steps and decisions, drives, memory and timing."), trace: t("Also records every routing decision and journal entry. Large; for troubleshooting.") };
   return <>
@@ -1614,16 +1602,11 @@ function TextPreference({ label, value, onSave, placeholder, description }: { la
   return <div className="field-label"><label className="field-label">{label}<input value={draft} placeholder={placeholder} onFocus={() => { focused.current = true; }} onChange={event => setDraft(event.target.value)} onBlur={event => { focused.current = false; const next=event.currentTarget.value; setDraft(next); if (next !== value) onSave(next); }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></label>{description && <small>{description}</small>}</div>;
 }
 /** Why Check folder layout cannot start now: another destination's check, or other work (the backend refuses the same cases). */
-function checkWait(state: AppState, destination: string | undefined): 'Another backup folder check is running.' | 'Wait for the current work to finish before checking.' | undefined {
-  if (Object.keys(state.misplacedProgress ?? {}).some(path => path !== destination)) return 'Another backup folder check is running.';
-  if (state.jobs.some(job => isRunning(job) || job.phase === 'queued') || !!state.review || !!state.busyReview || state.duplicates?.status === 'scanning' || state.duplicates?.status === 'removing') return 'Wait for the current work to finish before checking.';
-  return undefined;
-}
 function misplacedText(count: number, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string): string {
   return count === 1 ? t("1 file outside your folder structure") : t("{count} files outside your folder structure", { count: formatNumber(count) });
 }
 // Checks only when the user clicks: finds files placed outside the folder structure inside the backup folder, then offers to move them into place.
-export function BackupCheck({ state, act, busy, organizeBusy, destinationIndex }: { state: AppState; act: Dispatch; busy: boolean; organizeBusy: boolean; destinationIndex: number }) {
+export function BackupCheck({ state, act, destinationIndex }: { state: AppState; act: Dispatch; destinationIndex: number }) {
   const { t, formatNumber, formatBytes, language } = useTranslation();
   const destination = state.preferences.destinations[destinationIndex];
   const found = state.misplacedFiles?.[destination];
@@ -1631,22 +1614,22 @@ export function BackupCheck({ state, act, busy, organizeBusy, destinationIndex }
   const running = !!state.misplacedProgress?.[destination];
   const status = state.destinationStatus?.find(item => item.path === destination);
   const away = status?.available !== true;
-  const wait = checkWait(state, destination) ?? (busy || organizeBusy ? 'Wait for the current work to finish before checking.' as const : undefined);
+  const wait = state.blocked?.backupCheck;
   const blocked = !!wait || running || away;
   const noFolder = !!found?.missing;
   const check = (kind: 'primary' | 'secondary', label: string) => <Button kind={kind} icon={FolderCog} data-testid="check-backup-folder" disabled={blocked} onClick={() => act({ type: 'checkBackupFolder', destinationIndex })}>{label}</Button>;
   return <section className="organization-action backup-check" aria-labelledby="backup-check-heading" data-testid="backup-check"><CardHeader icon={FolderCog} id="backup-check-heading" title={t("Backup folder")} detail={t("The folder layout is checked only when you click Check folder layout.")} />
     <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{[destination.replace(/[\\/]$/, ''), state.preferences.basePath].filter(Boolean).join('/')}{state.preferences.mediaLayout === 'video-root' && <><br />{[destination.replace(/[\\/]$/, ''), state.preferences.videoBasePath].filter(Boolean).join('/')}</>}</dd></div></dl>
     <p className="inline-note">{t("Organize: move, source removed")}</p>
-    {state.misplacedProgress?.[destination] && <p className="folder-check-label" data-step="folder-check" data-testid="folder-check-label" role="status">{t("Checking {drive} folder layout", { drive: driveName(destination, destination.split(/[\\/]/).filter(Boolean).pop() ?? destination) })}</p>}
+    {state.misplacedProgress?.[destination] && <p className="folder-check-label" data-step="folder-check" data-testid="folder-check-label" role="status">{t("Checking {drive} folder layout", { drive: driveName(destination, basename(destination)) })}</p>}
     {state.misplacedProgress?.[destination] && <OperationProgress progress={state.misplacedProgress[destination]} label={t("Backup folder check progress")} testId="misplaced-progress" holdKey={`misplaced:${destination}`} />}
     {running && <Button kind="quiet" icon={X} data-testid="stop-backup-check" onClick={() => act({ type: 'stopBackupCheck' })}>{t("Stop")}</Button>}
     {noFolder && !running && <p className="backup-check-note" data-testid="backup-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p>}
     {found && !noFolder && (misplaced ? <p className="misplaced-files" data-testid="misplaced-files" role="status"><Icon icon={CircleAlert} size={15} /><span>{misplacedText(found.count, t, formatNumber)} · {formatBytes(found.bytes)}</span></p> : <p className="misplaced-files is-clean" role="status"><Icon icon={CheckCircle2} size={15} /><span>{t("Backup folder is in order.")}</span></p>)}
     {found && !noFolder && <p className="backup-check-note" data-testid="checked-at">{t("Checked {time}", { time: formatWhen(found.checkedAt, language) })}</p>}
     {noFolder && !running ? null : !found && !running ? <div className="backup-check-prompt" data-testid="backup-check-prompt"><p>{t("Check whether every file in this backup is in the folder your rules give it.")}</p>{check('primary', t("Check folder layout"))}</div> : <div className="backup-check-actions">{check('secondary', running ? t("Checking…") : t("Check again"))}</div>}
-    {!away && wait && !running && <p className="backup-check-note" role="status">{t(wait)}</p>}
-    <div className="rule-actions"><Button kind={misplaced ? 'primary' : 'secondary'} icon={FolderCog} disabled={organizeBusy || noFolder} onClick={() => act({ type: 'organizeBackup', destinationIndex })}>{t("Organize backup")}</Button></div>
+    {!away && wait && !running && <p className="backup-check-note" role="status">{t(message(wait))}</p>}
+    <div className="rule-actions"><Button kind={misplaced ? 'primary' : 'secondary'} icon={FolderCog} disabled={!!state.blocked?.organize || noFolder} onClick={() => act({ type: 'organizeBackup', destinationIndex })}>{t("Organize backup")}</Button></div>
     {away && <p className="backup-check-note" role="status">{status?.available === false ? t("Reconnect this drive to check its folder layout.") : t("Checking destination…")}</p>}
   </section>;
 }
@@ -1658,18 +1641,18 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
   const selectedFolders = destination ? state.organizationFolders?.[destination] : undefined;
   const targetFolder = destination ? [destination.replace(/[\\/]$/, ''), p.basePath].filter(Boolean).join('/') : '';
   const runningOrganization = state.jobs.find(job => job.organization && (isRunning(job) || job.phase === 'queued'));
-  const organizing = organizeBusy(state);
-  const organizeOptions = state.organizeOptions ?? { removeEmptyFolders: true, releaseDuplicates: true };
+  const organizing = !!state.blocked?.organize;
+  const organizeOptions = state.organizeOptions;
   return <div className="organization-page">
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
     {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
-    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")} />{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}{p.mediaLayout === 'video-root' && <><br />{[destination.replace(/[\\/]$/, ''), p.videoBasePath].filter(Boolean).join('/')}</>}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={organizeOptions.removeEmptyFolders} disabled={busy} onChange={removeEmptyFolders => act({ type: 'organizeOptions', removeEmptyFolders })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div className="organization-option" data-testid="release-duplicates"><Switch checked={organizeOptions.releaseDuplicates} disabled={busy} onChange={releaseDuplicates => act({ type: 'organizeOptions', releaseDuplicates })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div><p className="inline-note" data-testid="organize-default"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p>{destination && <div className="organization-scope"><div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button>{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}</div><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}<div className="rule-actions organization-execute" data-testid="organization-execute"><Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></div>{onFolderRules && <Button kind="quiet" icon={Settings2} onClick={onFolderRules}>{t("Edit folder rules")}</Button>}</section>
+    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Existing files, new structure")} detail={t("Move existing files into your folder structure.")} />{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{p.destinations.map((path,index) => <option key={path} value={index}>{path}</option>)}</select></label>}{destination ? <dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{destination}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}{p.mediaLayout === 'video-root' && <><br />{[destination.replace(/[\\/]$/, ''), p.videoBasePath].filter(Boolean).join('/')}</>}</dd></div></dl> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={organizeOptions.removeEmptyFolders} disabled={busy} onChange={removeEmptyFolders => act({ type: 'organizeOptions', removeEmptyFolders })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div className="organization-option" data-testid="release-duplicates"><Switch checked={organizeOptions.releaseDuplicates} disabled={busy} onChange={releaseDuplicates => act({ type: 'organizeOptions', releaseDuplicates })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div><p className="inline-note" data-testid="organize-default"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p>{destination && <div className="organization-scope"><div className="organization-scope-row"><p>{selectedFolders ? t("Only the selected folders will be scanned.") : t("All folders on this destination will be scanned.")}</p><div className="rule-actions">{selectedFolders && <Button kind="quiet" disabled={busy} onClick={() => act({ type: 'resetOrganizationFolders', destinationIndex })}>{t("Use whole destination")}</Button>}<Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button></div></div>{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</div>}<div className="rule-actions organization-execute" data-testid="organization-execute">{onFolderRules && <Button kind="quiet" icon={Settings2} className="organization-rules" onClick={onFolderRules}>{t("Edit folder rules")}</Button>}<Button icon={Eye} disabled={busy || !destination} onClick={() => act({ type: 'previewOrganization', destinationIndex })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} disabled={organizing || !destination} onClick={() => act({ type: 'organize', destinationIndex })}>{t("Organize now")}</Button></div></section>
     <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")} />{p.mediaLayout === 'video-root' && <OrganizeFolderLayoutNote />}<p className="inline-note"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p><div className="rule-actions"><Button icon={FolderOpen} disabled={organizing || p.mediaLayout === 'video-root'} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></div></section>
 
     </div>
     <div className="organization-column">
-    {destination && <BackupCheck state={state} act={act} busy={busy} organizeBusy={organizing} destinationIndex={destinationIndex} />}
+    {destination && <BackupCheck state={state} act={act} destinationIndex={destinationIndex} />}
     {onRecovery && <Button icon={RotateCcw} onClick={onRecovery}>{t("Recovery & maintenance")}</Button>}
     </div>
 
@@ -1688,9 +1671,9 @@ export function ActivityJobs({ state, act, inspect = () => {} }: { state: AppSta
   const [selectedJobId, setSelectedJobId] = useState<string>();
   const selectedJob = state.jobs.find(job => job.id === selectedJobId && !job.organization) ?? state.jobs.find(job => job.inventory && !job.organization);
   const selectedInventory = selectedJob && (selectedJob.inventory ?? state.sourceInventories?.[selectedJob.source.id]);
-  const reviewBusy = pageBusy(state) || state.duplicates?.status === 'scanning' || state.duplicates?.status === 'removing';
+  const reviewBusy = !!state.blocked?.review;
   return <div className="activity-jobs" data-testid="activity-job-list">
-    <div className="rule-actions"><Button icon={Square} data-testid="activity-stop-all" title={t("Stops imports, scans and organizing, and discards the open review.")} disabled={!state.scanningSources?.length && !state.review && !state.busyReview && !state.jobs.some(job => isRunning(job) || job.phase === 'queued' || job.paused)} onClick={() => act({type:'stop'})}>{t("Stop all")}</Button></div>
+    <div className="rule-actions activity-jobs-bar">{!state.jobs.length && <p className="inline-note">{t("No jobs yet.")}</p>}<Button icon={Square} data-testid="activity-stop-all" title={t("Stops imports, scans and organizing, and discards the open review.")} disabled={!state.scanningSources?.length && !state.review && !state.busyReview && !state.jobs.some(job => isRunning(job) || job.phase === 'queued' || job.paused)} onClick={() => act({type:'stop'})}>{t("Stop all")}</Button></div>
     {state.jobs.length ? state.jobs.map(job => {
       if (job.organization) return <OrganizationCard key={job.id} job={job} act={act} />;
       const source = job.source, position = state.sources.findIndex(item => item.id === source.id);
@@ -1703,11 +1686,11 @@ export function ActivityJobs({ state, act, inspect = () => {} }: { state: AppSta
         reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress}
         containsBackup={containsBackup(source,state.preferences.destinations)} backupFolder={state.preferences.basePath}
         canMoveUp={position > 0 && sourceSelected(source) && (job.phase === 'queued' || (job.phase === 'stopped' && !!job.paused))}
-        configured={state.preferences.destinations.length >= (state.preferences.copyMode === 'single' ? 1 : 2)}
+        configured={state.preferences.destinations.length >= requiredDestinations(state.preferences)}
         reviewBusy={reviewBusy} startBlocked={!!state.review || !!state.busyReview}
-        originalsSize={state.originalsSize} knownRules={state.preferences.unknownRules}
-        organizeBlocked={state.preferences.mediaLayout === 'video-root'} verifyOff={state.preferences.verifyCopies === false} />;
-    }) : <p className="inline-note">{t("No jobs yet.")}</p>}
+        originalsSize={state.originalsSize}
+        organizeBlocked={state.preferences.mediaLayout === 'video-root'} verifyOff={!state.preferences.verifyCopies} />;
+    }) : null}
     {selectedJob && selectedInventory && <InventoryPanel inventory={selectedInventory} sourceName={selectedJob.source.name} backup={selectedJob.backup} inspect={inspect} act={act} />}
   </div>;
 }
@@ -1729,7 +1712,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t } = useTranslation();
   const p = state.preferences;
   const folders = (folder: string) => folder.split(/[\\/]/).filter(Boolean), videoRoot = p.mediaLayout === 'video-root';
-  const editedFolder = p.editedFolder ?? 'editied';
+  const editedFolder = p.editedFolder;
   return <div className="folder-settings" data-testid="folder-settings">
       <SettingsSection title={t("Folder structure")} icon={FolderCog}>
         {videoRoot && <h4 className="path-builder-heading">{t("Photo folders")}</h4>}
@@ -1755,9 +1738,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
 function HistoryPage({ state, onDesk }: { state: AppState; onDesk: () => void }) {
   const { t, language } = useTranslation();
   return <div className="history-page"><div className="page-toolbar"><span className="session-count">{t("{count} sessions", { count: state.history.length })}</span></div>{state.history.length === 0 ? <div className="history-empty"><div><Icon icon={History} size={38} /></div><h3>{t("Your collection starts here.")}</h3><p>{t("Finished operations appear here.")}</p><Button kind="primary" icon={ArrowDownToLine} onClick={onDesk}>{t("Go to Import")}</Button></div> : <ol className="history-timeline">{state.history.map(record => {
-    const title = formatMessage(record.title, 'en'), detail = formatMessage(record.detail, 'en');
-    const attention = /attention|error|fail/i.test(title) || /\b[1-9][\d,]* errors?\b/i.test(detail);
-    const stopped = /stop|cancel/i.test(title + ' ' + detail);
+    const attention = record.outcome === 'attention', stopped = record.outcome === 'stopped';
     const date = new Date(record.date);
     return <li key={record.id} className={attention ? 'history-attention' : stopped ? 'history-stopped' : ''}><span className="timeline-glyph"><Icon icon={attention ? CircleAlert : stopped ? Pause : CheckCircle2} size={21} /></span><article><div className="history-record-heading"><h3>{t(record.title)}</h3><time dateTime={record.date}>{Number.isNaN(date.valueOf()) ? record.date : new Intl.DateTimeFormat(language, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)}</time></div><p>{t(record.detail)}</p><span className="history-record-state"><Icon icon={attention ? CircleAlert : stopped ? Pause : ShieldCheck} size={13} />{attention ? t("Needs attention") : stopped ? t("Stopped by user") : t("Session recorded")}</span></article></li>;
   })}</ol>}</div>;
@@ -1781,7 +1762,7 @@ export function MetadataDialog({ preview, onClose, act }: { preview: Preview; on
   const exposure = formatExposure(metadata?.exposure, language);
   const fields = Object.entries(preview.fields ?? {}).filter(([key, value]) => key.split(':').at(-1)!=='Error' && `${key} ${metadataText(value)}`.toLowerCase().includes(query.toLowerCase()));
   return <dialog className="metadata-dialog" ref={dialog} aria-labelledby="metadata-heading" onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="dialog-heading"><div><span className="dialog-kicker"><Icon icon={FileImage} size={15} />{t("File metadata")}</span><h2 id="metadata-heading">{filename(preview.path)}</h2></div><Button kind="quiet" icon={X} data-testid="metadata-close" aria-label={t("Close metadata")} onClick={close} /></div>
+    <div className="dialog-heading"><div><span className="dialog-kicker"><Icon icon={FileImage} size={15} />{t("File metadata")}</span><h2 id="metadata-heading">{basename(preview.path)}</h2></div><Button kind="quiet" icon={X} data-testid="metadata-close" aria-label={t("Close metadata")} onClick={close} /></div>
     <div className="metadata-content">
       <section className="metadata-inspector" aria-label={t("Capture information")}>
         <div className="metadata-file"><span title={preview.path}>{preview.path}</span><Button kind="quiet" icon={ExternalLink} aria-label={t("Show this file in file manager")} onClick={() => act({ type: 'reveal', path: preview.path })} /></div>
@@ -1905,5 +1886,5 @@ export function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dis
   const pageSize = 100;
   const lastPage = Math.max(0, Math.ceil(visible.length / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
-  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t(review.backup ? "{name}: backup preview" : "{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p><p className="review-mode" data-testid="review-mode"><strong>{review.kind === 'reorganize' ? t("Organize: move, source removed") : t(review.backup ? "Backup: copy, source untouched" : "Import: copy, source untouched")}</strong>{review.kind === 'reorganize' && review.options && <> · {review.options.removeEmptyFolders ? t("Emptied source folders are removed") : t("Emptied source folders are kept")} · {review.options.releaseDuplicates ? t("Confirmed duplicates are released") : t("Confirmed duplicates are kept for undo")}</>}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div>{review.kind === 'import' && driveContext(review.source, state.sources, state.destinationStatus)?.onDestination && <SameDriveNotice sourceId={review.source.id} act={act} organizeBlocked={state.preferences.mediaLayout === 'video-root'} />}<div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><NoMetadataNotice review={review} act={act} busy={!!state.busyReview || state.jobs.some(job => ['discovering', 'verifying', 'copying'].includes(job.phase))} /><ProblemFilesReview review={review} act={act} busy={!!state.busyReview} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: filename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
+  return <section className="review-panel" aria-labelledby="review-heading"><div className="review-heading"><div><span className="review-kicker"><Icon icon={Eye} size={16} />{t(review.kind === 'reorganize' ? "Review before reorganizing" : "Review before copying")}</span><h2 id="review-heading">{review.kind === 'reorganize' ? t("Review your new folder structure") : t(review.backup ? "{name}: backup preview" : "{name}: import preview", { name: review.source.name })}</h2><p>{review.kind === 'reorganize' ? t("Nothing moves until you apply.") : t("Copying starts when you apply.")}</p><p className="review-mode" data-testid="review-mode"><strong>{review.kind === 'reorganize' ? t("Organize: move, source removed") : t(review.backup ? "Backup: copy, source untouched" : "Import: copy, source untouched")}</strong>{review.kind === 'reorganize' && review.options && <> · {review.options.removeEmptyFolders ? t("Emptied source folders are removed") : t("Emptied source folders are kept")} · {review.options.releaseDuplicates ? t("Confirmed duplicates are released") : t("Confirmed duplicates are kept for undo")}</>}</p></div><span className="status-pill"><Icon icon={CheckCircle2} size={14} />{t("Ready to review")}</span></div><div className="review-summary"><span>{t(review.kind === 'reorganize' ? "{count} files to organize" : "{count} copies to write", { count: formatNumber(changed.length) })}</span><span>{t("{count} already verified", { count: formatNumber(verified) })}</span><span>{t(review.kind === 'reorganize' ? "{size} to organize" : "{size} to copy", { size: bytes(changed.reduce((sum, entry) => sum + entry.size, 0)) })}</span>{review.backup && <span className="small-tag">{t("Folder backup")}</span>}</div>{review.kind === 'import' && driveContext(review.source, state.sources, state.destinationStatus)?.onDestination && <SameDriveNotice sourceId={review.source.id} act={act} organizeBlocked={state.preferences.mediaLayout === 'video-root'} />}<div className="review-destinations">{review.plans.map((plan, index) => <div key={`${index}-${plan.root}`}><Icon icon={HardDrive} size={14} /><span>{review.plans.length > 1 ? t("Destination {count}: ", { count: index + 1 }) : ''}{[plan.root, ...(plan.videos ? [plan.videos.root] : [])].join(' · ')}</span></div>)}</div><MirrorRemovals review={review} /><NoMetadataNotice review={review} act={act} busy={!!state.busyReview || state.jobs.some(job => ['discovering', 'verifying', 'copying'].includes(job.phase))} /><ProblemFilesReview review={review} act={act} busy={!!state.busyReview} /><div className="review-toolbar"><label><Icon icon={Files} size={15} /><span>{t("{count} files", { count: formatNumber(visible.length) })}</span></label><input type="search" placeholder={t("Find a source, destination or checksum…")} aria-label={t("Search reviewed files")} value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} /></div><div className="review-table-scroll"><table className="review-table"><thead><tr><th scope="col">{review.kind === 'reorganize' ? t("Existing path") : t("Source")}</th><th scope="col">{review.kind === 'reorganize' ? t("New path") : t("Destination")}</th><th scope="col">{t("Type / size")}</th><th scope="col">{t("Action")}</th><th scope="col">{t("Checksum")}</th></tr></thead><tbody>{visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(entry => <tr key={`${entry.destinationIndex}-${entry.id}`}><td><button type="button" className="review-source-button" onClick={() => inspect(entry.source)} title={t("Show metadata for {name}", { name: basename(entry.source) })}><Icon icon={entry.kind === 'Other' ? Files : FileImage} size={14} /><span>{entry.source}</span></button></td><td><span className="review-destination-path">{entry.destination}</span></td><td><span>{t(entry.kind)}</span><small>{bytes(entry.size)}</small></td><td><span className={`file-inclusion ${entry.skip ? 'included' : ''}`}><Icon icon={entry.skip ? CheckCheck : review.kind === 'reorganize' ? ArrowRight : Copy} size={13} />{entry.skip ? t("Keep verified") : review.kind === 'reorganize' ? t("Organize") : t("Copy")}</span></td><td>{entry.digest ? <span className="review-checksum" title={entry.digest}>{entry.digest.slice(0, 12)}{entry.digest.length > 12 ? '…' : ''}</span> : <span className="review-checksum review-checksum-pending">{t("Computed during copy")}</span>}</td></tr>)}</tbody></table>{visible.length === 0 && <p className="table-empty">{entries.length === 0 ? t("No files need to be processed.") : t("No files match this search.")}</p>}</div>{visible.length > pageSize && <div className="review-pagination"><span>{t("Files {start}–{end} of {total}", { start: formatNumber(currentPage * pageSize + 1), end: formatNumber(Math.min((currentPage + 1) * pageSize, visible.length)), total: formatNumber(visible.length) })}</span><div><Button disabled={currentPage === 0} onClick={() => animateInterfaceChange(() => setPage(currentPage - 1))}>{t("Previous")}</Button><Button disabled={currentPage === lastPage} onClick={() => animateInterfaceChange(() => setPage(currentPage + 1))}>{t("Next")}</Button></div></div>}<div className="review-footer"><span><Icon icon={ShieldCheck} size={16} /></span><div><Button disabled={state.busyReview} onClick={() => act({ type: 'discardReview' })}>{t("Discard review")}</Button><Button kind="primary" icon={review.kind === 'reorganize' ? ArrowRight : Copy} disabled={state.busyReview || (entries.length === 0 && !review.plans.some(plan => plan.removals?.length))} onClick={() => act({ type: 'applyReview' })}>{review.kind === 'reorganize' ? t("Apply reviewed organization") : t("Copy reviewed files")}</Button></div></div></section>;
 }
