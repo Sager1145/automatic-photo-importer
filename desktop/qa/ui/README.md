@@ -114,3 +114,27 @@ to the renderer). Checks use it to:
 ## Layer and timing regression additions
 
 The containment check reads the generated transition group stacking and finite durations (maximum 300 ms). Rapid navigation checks the final selected page after callbacks finish and opens a sheet mid-transition. The toast-over-sheet check uses real mouse input for Dismiss and View in both opening orders, and closes the sheet while the toast remains alive. Theme contrast now uses 4.5:1 for normal text and 3:1 for large text without the old warning-badge exception. See `docs/ui-audit-2026-10-23.md`.
+
+## Real library browser checks
+
+```sh
+npm run codex:test -- --ui-only --only='^browser'
+# after an already verified build:
+npm run codex:test -- --no-build --ui-only --only='^browser'
+```
+
+The `browser` selection automatically enables `--browser-fixtures`. Fixture setup copies 24 genuine PNG/JPEG images into the temporary destination photo root and writes camera/date/exposure tags with ExifTool **before** Electron launches. JPEG generation uses macOS `sips`; these checks currently require macOS. The application scans those files through `catalogRefresh` and real catalog IPC. No UI catalog rows are inserted directly into SQLite.
+
+The checks exercise native trusted drag/drop events, keyboard composition, repeated fields, exact/range/bucket selections, custom preset save/rename/delete and renderer reload persistence, real thumbnails, independent organization navigation, real folders, long paths, light/dark themes at 1000px and 125%/200% text. `browser-media-before.json`, `browser-media-after.json` and `browser-read-only.json` compare the six sources and both destinations (paths, bytes, size, mtime/ctime and organization preferences). Atime is excluded because ordinary reads may update it. Browser-only runs do not apply an organization.
+
+`browser-*.png` and `browser-layout.json` record screenshots, active option rows, mounted hierarchy blocks/columns and available renderer heap metrics. Renderer reload persistence does not prove a packaged-app restart; package verification is recorded separately.
+
+For final-source packaged macOS verification, the same checks can run the actual executable and reuse the first disposable profile on a second launch:
+
+```sh
+npm run codex:test -- --no-build --ui-only --only='^browser' --app='/absolute/path/Automatic Photo Importer.app/Contents/MacOS/Automatic Photo Importer'
+# Use the fixture root printed by the first run. Preserve its first artifacts before rerunning.
+npm run codex:test -- --no-build --ui-only --only='^browser' --app='/absolute/path/Automatic Photo Importer.app/Contents/MacOS/Automatic Photo Importer' --reuse-fixtures='/absolute/temporary/fixture-root'
+```
+
+The follow-up browser check first asserts new aperture/ISO/shutter photographic bucket defaults and labels, then explicitly switches to exact mode. Fixture 023 includes genuine f/1.8, ISO 125 and 1/60-second tags before the read-only snapshot. `browser-photographic-defaults.json`, `browser-native-drags.jsonl` and `browser-locales.json` record these observations. Four-locale screenshots are `browser-locale-{en,zh-Hans,zh-Hant,ja}.png`.

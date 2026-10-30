@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Inventory} from '../../../shared';
 import type {Check} from '../harness';
+import {clippedControls} from '../probes';
 import {syntheticJob} from '../synthetic';
 import {withFigures} from '../../../core/inventory';
 
@@ -63,7 +64,9 @@ export const capacityLayoutChecks=():Check[]=>[{
      else{await h.nav('Settings');await h.settingsTab('storage');}
      const result=await h.probe(capacityGeometry),context={width,height,language,textScale,view};
      measurements.push({...context,...result});
-     if(!result.surfaces.length||result.failures.length||view!=='settings'&&formats.some(format=>!result.legend.includes(format)))failures.push({...context,...result});
+     // Activity's Queue rows are compact and show no capacity bars: there it must only be free of clipped content.
+     const queueClipped=view==='activity'?await h.probe(clippedControls):[];
+     if(view==='activity'?result.failures.length||queueClipped.length:!result.surfaces.length||result.failures.length||view!=='settings'&&formats.some(format=>!result.legend.includes(format)))failures.push({...context,...result,queueClipped});
      if(width===1000&&textScale===2&&(language==='en'||language==='zh-Hans')){
       await h.js("(document.querySelector('article[data-source-id=\"fixture:1\"] .storage-capacity')||document.querySelector('.storage-capacity'))?.scrollIntoView({block:'center'})");
       await h.shot(`capacity-${view}-${language}-1000-200`);

@@ -62,7 +62,7 @@ export function useAnimatedClose(element: RefObject<HTMLElement | null>, onClose
   },[element,onClose]);
 }
 /** The skeleton every confirmation shares: a sheet with a title, a body and Cancel / danger buttons. A 'second' step opens with Cancel focused, so Return never confirms by accident. */
-export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
+export function ConfirmSheet({ step, title, confirmLabel, confirmIcon = Trash2, confirmKind = 'danger', confirmDisabled, testId, confirmTestId, onCancel, onConfirm, children }: { step?: 'first' | 'second'; title: string; confirmLabel: string; confirmIcon?: LucideIcon; confirmKind?: 'primary' | 'danger'; confirmDisabled?: boolean; testId: string; confirmTestId?: string; onCancel: () => void; onConfirm: () => void; children: ReactNode }) {
   const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null), heading = useId();
   const close = useAnimatedClose(dialog, onCancel);
@@ -70,7 +70,7 @@ export function ConfirmSheet({ step, title, confirmLabel, confirmDisabled, testI
   return <dialog className="activity-dialog confirm-dialog" ref={dialog} aria-labelledby={heading} data-testid={testId} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><h2 id={heading}>{title}</h2></div>
     <div className="activity-content">{children}</div>
-    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind="danger" icon={Trash2} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
+    <div className="dialog-footer">{step === 'second' ? <Button autoFocus data-autofocus onClick={close}>{t("Cancel")}</Button> : <Button onClick={close}>{t("Cancel")}</Button>}<Button kind={confirmKind} icon={confirmIcon} data-testid={confirmTestId} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel}</Button></div>
   </dialog>;
 }
 export function ReleaseConfirm({ size, root, onCancel, onConfirm }: { size: string; root: string; onCancel: () => void; onConfirm: () => void }) {
@@ -85,4 +85,15 @@ export function nextConfirmStep(step: DeleteRecoveryStep, choice: 'open' | 'conf
   if (choice === 'open') return { step: step === 'closed' ? 'first' : step, delete: false };
   if (step === 'first') return { step: 'second', delete: false };
   return { step: 'closed', delete: step === 'second' };
+}
+
+/** Closes a <details> menu on a click outside it or on Escape (focus returns to its summary); the summary stays keyboard-operable. */
+export function useDismissableDetails(ref: RefObject<HTMLDetailsElement | null>) {
+  useEffect(() => {
+    const close = (event: Event) => { const el = ref.current; if (el?.open && !(event.target instanceof Node && el.contains(event.target))) el.open = false; };
+    const key = (event: KeyboardEvent) => { const el = ref.current; if (event.key === 'Escape' && el?.open) { el.open = false; el.querySelector('summary')?.focus(); } };
+    document.addEventListener('pointerdown', close, true);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', close, true); document.removeEventListener('keydown', key); };
+  }, [ref]);
 }

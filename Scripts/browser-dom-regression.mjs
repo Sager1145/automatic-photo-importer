@@ -1,0 +1,18 @@
+import {mkdtemp,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+import {spawn} from 'node:child_process';
+const require=createRequire(import.meta.url),repo=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const temporary=await mkdtemp(path.join(tmpdir(),'photo-browser-dom-'));
+const {build}=require('esbuild');
+await build({entryPoints:[path.join(repo,'desktop/tests/browser-dom-fixture.tsx')],bundle:true,platform:'browser',format:'iife',outfile:path.join(temporary,'bundle.js'),jsx:'automatic',define:{'process.env.NODE_ENV':'"development"'}});
+await writeFile(path.join(temporary,'index.html'),'<html><body><script src="bundle.js"></script></body></html>');
+await writeFile(path.join(temporary,'main.cjs'),`const {app,BrowserWindow}=require('electron');
+app.setPath('userData',${JSON.stringify(path.join(temporary,'profile'))});
+app.whenReady().then(async()=>{const window=new BrowserWindow({show:false});await window.loadFile(${JSON.stringify(path.join(temporary,'index.html'))});const started=Date.now();const timer=setInterval(async()=>{const result=await window.webContents.executeJavaScript('window.browserDOMResult');if(result){clearInterval(timer);console.log(JSON.stringify(result,null,2));app.exit(result.passed?0:1);}else if(Date.now()-started>15000){clearInterval(timer);console.error('Browser DOM regression timed out');app.exit(1);}},25);});`);
+const environment={...process.env};delete environment.ELECTRON_RUN_AS_NODE;
+console.log(`Browser DOM artifacts: ${temporary}`);
+const child=spawn(require('electron'),[path.join(temporary,'main.cjs')],{cwd:repo,env:environment,stdio:'inherit'});
+const code=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});process.exitCode=code??1;

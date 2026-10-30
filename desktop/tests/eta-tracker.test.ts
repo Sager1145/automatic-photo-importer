@@ -127,7 +127,7 @@ test('jobs sharing a destination drive finish together sooner only when the driv
  assert.equal(overviewEta([a,b],tracker),undefined,'undefined while a job is still estimating');
 });
 
-test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time left falls as files match',()=>{
+test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time left falls with the time spent, the share found identical counted from the start',()=>{
  const tracker=new EtaTracker(),files=43000,bytes=500e9,sameSize=200e9;
  tracker.plan('j',{kind:'import',verify:true,publish:'link',...drives});
  let t=0;
@@ -140,5 +140,73 @@ test('comparing 43k files (500 GB) moves the job fraction every 5 s and the time
  }
  for(let i=1;i<fractions.length;i++)assert.ok(fractions[i]!>fractions[i-1]!,`fraction at sample ${i}: ${fractions[i-1]} -> ${fractions[i]}`);
  for(let i=1;i<etas.length;i++)assert.ok(etas[i]!<=etas[i-1]!,`eta at sample ${i}: ${etas[i-1]} -> ${etas[i]}`);
- assert.ok(etas.at(-1)!<etas[0]!*0.8,`eta ${etas[0]} -> ${etas.at(-1)}`);
+ // The share found identical stands for the files still to compare from the first samples on, so the time left falls with the time spent:
+ // 290 s of comparing between the first sample and the last.
+ assert.ok(Math.abs(etas[0]!-etas.at(-1)!-290)<30,`eta ${etas[0]} -> ${etas.at(-1)}`);
+});
+
+// Recorded 2026-10-24: a folder of 6,759 planned files (2,110 already in the backup, 20.0 GB to copy) to an exFAT drive written directly.
+// At 1:46 the copy count read 3,490 of 4,649 files (it then left out the 2,110 being confirmed as the copy went) and 15 GB of 20 GB, but the job showed 7% and about 13 min left: the model still
+// planned an exFAT verify step that a direct copy never runs (it checks each file in place as it copies).
+test('a direct copy to exFAT plans no verify step: the job percent and time left follow the copy counts',async()=>{
+ const {overviewFraction}=await import('../renderer/RootApp');
+ const {cardFraction,copyBasis}=await import('../renderer/progress');
+ const total=6759,skipped=2110,totalBytes=20032300690;
+ const tracker=new EtaTracker();
+ tracker.plan('j',{kind:'import',verify:true,...drives,publish:tracker.predictPublish(drives.destinations),totals:{copying:{files:total-skipped,bytes:totalBytes},verifying:{files:total,bytes:totalBytes}}});
+ const job:Job={id:'j',source:card,phase:'verifying',errors:[],backup:false,progress:{phase:'planning',step:'existing',completed:0,total,bytes:0,totalBytes:0,speed:0,file:''}};
+ const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin'};
+ // Confirming the files already on the drive: about 4 s.
+ for(let t=0;t<=4;t++){job.progress={...job.progress!,completed:Math.round(6287*t/4)};stampEstimates(state,tracker,t*1000);}
+ // Copying, as logged every 5 s from 08:08:01.9 (completed files, bytes); the progress between them is interpolated each second.
+ const logged:[number,number][]=[[34,397938893],[216,2176764504],[424,3895583514],[600,5717159537],[784,7214368276],[1076,7605324344],[1413,7605324344],[1753,7605324344],[2089,7605324344],[2448,7605324344],[2737,7605324344],[3077,8195114656],[3245,9838477429],[3373,11452902090],[3517,12868051383],[3879,13638258024],[4343,14025964993],[4758,14329316111],[4994,14496662394],[5262,14678906897],[5495,14873610246],[5853,15160326622]];
+ job.phase='copying';
+ let previous:[number,number]=[0,0],now=5000;
+ for(const point of logged){
+  for(let step=1;step<=5;step++){
+   const completed=Math.round(previous[0]+(point[0]-previous[0])*step/5),bytes=previous[1]+(point[1]-previous[1])*step/5;
+   job.progress={phase:'copying',completed,total,bytes,totalBytes,speed:0,file:'',work:{files:completed,bytes,totalFiles:total,totalBytes,direct:{files:total,bytes:totalBytes,present:skipped}}};
+   stampEstimates(state,tracker,now);now+=1000;
+  }
+  previous=point;
+ }
+ // 08:09:46: 18 s before the copy (and the job) ended.
+ const basis=copyBasis(job.progress!),files=basis.completed/basis.total,data=job.progress!.bytes/totalBytes;
+ assert.equal(basis.completed,5853);assert.equal(basis.total,total);
+ const percent=cardFraction(job)!;
+ assert.equal(percent,files,'the card reads its counter: files copied or confirmed');
+ // The model's share of the whole job (what the time left is measured against) has no verify step left to add.
+ for(const [name,value] of [['files',files],['bytes',data]] as const)assert.ok(Math.abs(job.fraction!-value)<0.1,`job share ${Math.round(job.fraction!*100)}% vs ${name} ${Math.round(value*100)}%`);
+ assert.equal(overviewFraction([job]),percent,'the overview reads the same number');
+ assert.ok(job.eta!>0&&job.eta!<120,`time left ${job.eta} s, not the ~13 min a verify step would add`);
+});
+
+// Recorded 2026-10-24 21:09: 6,759 files (40.9 GB) checked, then compared with an exFAT drive that already held every one. Checking and
+// comparing took about 1½ min each and the import after them 1½ min, but the time left read "about 15–60 min" while checking and
+// "about 10–40 min" while comparing: it counted every file as copied, then verified, on a drive written directly with no verify step.
+test('checking and comparing do not count files as copied before comparing has measured how many are new',()=>{
+ const tracker=new EtaTracker(),id='r';
+ tracker.plan(id,{kind:'import',...drives,publish:tracker.predictPublish(drives.destinations),direct:tracker.predictDirect(drives.destinations,'darwin')});
+ const logged:[number,string,number,number,number,number][]=[[585,'checking',64,6759,645723256,40890450976],[590,'checking',688,6759,6465819101,40890450976],[595,'checking',1392,6759,12971178360,40890450976],[600,'checking',2112,6759,19992968183,40890450976],[605,'checking',2816,6759,27248704367,40890450976],[610,'checking',3520,6759,33541652892,40890450976],[615,'checking',4240,6759,34693645589,40890450976],[620,'checking',5056,6759,35287081286,40890450976],[625,'checking',5824,6759,35890489120,40890450976],[630,'checking',6576,6759,39349318165,40890450976],[635,'candidates',297,1614,0,0],[640,'candidates',755,1614,0,0],[645,'candidates',1353,1614,0,0],[650,'comparing',58,6759,623788806,37800850158],[655,'comparing',569,6759,5263063431,37800850158],[660,'comparing',1323,6759,12382405124,37800850158],[665,'comparing',1771,6759,16800692369,37800850158],[670,'comparing',2143,6759,20271197431,37800850158],[675,'comparing',2553,6759,24267566896,37800850158],[680,'comparing',2933,6759,28355551090,37800850158],[685,'comparing',3417,6759,32544558195,37800850158],[690,'comparing',6599,6759,36522821603,37800850158],[695,'comparing',6759,6759,37800850158,37800850158]];
+ const results=new Map<number,ReturnType<EtaTracker['observe']>>();
+ let previous:typeof logged[number]|undefined;
+ for(const point of logged){
+  const [at,step,completed,total,bytes,totalBytes]=point,from=previous&&previous[1]===step?previous:undefined;
+  for(let second=from?from[0]+1:at;second<=at;second++){
+   const share=from?(second-from[0])/(at-from[0]):1,done=Math.round((from?.[2]??0)+(completed-(from?.[2]??0))*share),read=(from?.[4]??0)+(bytes-(from?.[4]??0))*share;
+   // Every file compared was already on the drive.
+   const progress:EtaInput={phase:'planning',step,completed:done,total,bytes:read,totalBytes,...(step==='comparing'?{matched:done,matchedBytes:read}:{})};
+   results.set(second,tracker.observe(id,progress,context,second*1000));
+  }
+  previous=point;
+ }
+ for(const second of [600,620,630]){
+  const result=results.get(second)!;
+  assert.equal(result.job,undefined,`at ${second} s the job's time is not claimed while copies are only assumed`);
+  assert.ok(result.step!==undefined&&result.step<120,`checking's own time left at ${second} s: ${result.step}`);
+ }
+ for(const second of [660,675,690]){
+  const job=results.get(second)!.job;
+  assert.ok(job!==undefined&&job<240,`at ${second} s the job's time left is ${job} s (it took about 2 min more)`);
+ }
 });

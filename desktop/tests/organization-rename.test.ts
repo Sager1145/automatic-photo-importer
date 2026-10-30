@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
+import {nativeCameraHelperPath} from '../platform/camera-bridge';
 import * as core from '../core/index';
 import {sameHardLink,sameFile,movedFileIdentity} from '../core/recovery';
 import {journalFileFor,journalFolderFor,journalLines,organizeByCopy} from './fixtures/records';
@@ -22,6 +23,64 @@ async function fixture(t:test.TestContext,count=1){
 }
 const prepare=async(root:string)=>(await core.plan(root,[root],options,metadata)).plans[0]!;
 const recoveryFiles=async(root:string,id:string)=>{const found:string[]=[],base=await journalFolderFor(root,id);const walk=async(folder:string)=>{for(const entry of await fs.readdir(folder,{withFileTypes:true})){const file=path.join(folder,entry.name);if(entry.isDirectory())await walk(file);else found.push(path.relative(base,file));}};await walk(path.join(base,'originals')).catch(()=>{});return found;};
+
+async function refuseExclusiveRename(t:test.TestContext,root:string){
+ if(process.platform!=='darwin')return;
+ const real=await nativeCameraHelperPath();assert.ok(real);
+ const helper=path.join(root,'linkless-helper.cjs'),previous=process.env.IMPORTER_NATIVE_BRIDGE;
+ await fs.writeFile(helper,`#!${process.execPath}\nif(process.argv[2]==='--rename-exclusive'){process.stdout.write('{"errno":45}');process.exit(1);}const child=require('node:child_process').spawnSync(${JSON.stringify(real)},process.argv.slice(2),{stdio:['ignore','inherit','inherit',3]});process.exit(child.status??1);\n`,{mode:0o700});
+ process.env.IMPORTER_NATIVE_BRIDGE=helper;
+ t.after(()=>{if(previous===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=previous;});
+}
+
+for(const kind of ['rename','copy'] as const)test(`undo restores a ${kind} organization when neither links nor exclusive rename are supported`,async t=>{
+ const f=await fixture(t),p=await prepare(f.root);
+ const result=kind==='copy'?await organizeByCopy(p):await core.executeReorganization(p);assert.deepEqual(result.errors,[]);
+ const [job]=await core.getOrganizationRecovery(f.root,{verifyContents:false});
+ await refuseExclusiveRename(t,f.root);
+ t.mock.method(fs,'link',async()=>{throw Object.assign(new Error('no links'),{code:'ENOTSUP'});});syncBuiltinESMExports();
+ try{
+  assert.equal((await core.undoOrganization(f.root,job!.id)).restored,1);
+  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');
+  await assert.rejects(fs.lstat(f.destination()),{code:'ENOENT'});
+ }finally{t.mock.restoreAll();syncBuiltinESMExports();}
+});
+
+for(const kind of ['rename','copy'] as const)for(const when of ['mid-copy','after-source-unlink','changed-partial'] as const)test(`a ${kind} Undo copy interrupted ${when} preserves bytes and can be checked safely`,async t=>{
+ const f=await fixture(t),bytes=Buffer.alloc(2*1024*1024,0x61);await fs.writeFile(f.original,bytes);
+ const p=await prepare(f.root);assert.deepEqual((kind==='copy'?await organizeByCopy(p):await core.executeReorganization(p)).errors,[]);
+ const [job]=await core.getOrganizationRecovery(f.root,{verifyContents:false});
+ const from=kind==='rename'?f.destination():path.join(await journalFolderFor(f.root,job!.id),(await recoveryFiles(f.root,job!.id))[0]!);
+ await refuseExclusiveRename(t,f.root);
+ const script=path.join(f.root,'undo-crash.mjs');
+ await fs.writeFile(script,`import filesystem from 'node:fs/promises';
+ import {syncBuiltinESMExports} from 'node:module';
+ import {undoOrganization,configureOrganizationRecovery} from ${JSON.stringify(path.resolve('desktop/core/index.ts'))};
+ configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+ const to=${JSON.stringify(f.original)},from=${JSON.stringify(from)},when=${JSON.stringify(when)};
+ const open=filesystem.open,unlink=filesystem.unlink;
+ filesystem.link=async()=>{throw Object.assign(new Error('no links'),{code:'ENOTSUP'});};
+ filesystem.open=async(file,...args)=>{const handle=await open(file,...args);if(file===to&&args[0]==='wx'&&when!=='after-source-unlink'){const write=handle.write.bind(handle);handle.write=async(buffer,offset,length,position)=>{await write(buffer,offset,Math.min(7,length),position);process.exit(91);};}return handle;};
+ filesystem.unlink=async(file)=>{const result=await unlink(file);if(file===from&&when==='after-source-unlink')process.exit(91);return result;};
+ syncBuiltinESMExports();
+ await undoOrganization(${JSON.stringify(f.root)},${JSON.stringify(job!.id)});process.exit(0);`);
+ const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});
+ assert.equal(child.status,91,child.stderr);
+ const pending=(await core.getOrganizationRecovery(f.root,{verifyContents:false}))[0]!;assert.equal(pending.status,'pending');assert.equal(pending.undoable,true);
+ t.mock.method(fs,'link',async()=>{throw Object.assign(new Error('no links'),{code:'ENOTSUP'});});syncBuiltinESMExports();
+ try{
+  if(when==='changed-partial'){
+   await fs.writeFile(f.original,'foreign');
+   await assert.rejects(core.undoOrganization(f.root,job!.id),/occupied|changed/i);
+   assert.equal(await fs.readFile(f.original,'utf8'),'foreign');assert.deepEqual(await fs.readFile(from),bytes);
+  }else{
+   await core.undoOrganization(f.root,job!.id);
+   assert.deepEqual(await fs.readFile(f.original),bytes);
+   await assert.rejects(fs.lstat(f.destination()),{code:'ENOENT'});
+   assert.deepEqual(await core.getOrganizationRecovery(f.root),[]);
+  }
+ }finally{t.mock.restoreAll();syncBuiltinESMExports();}
+});
 
 test('a same-volume organization renames the original into place without copying or keeping a duplicate',async t=>{
  const f=await fixture(t),before=await fs.lstat(f.original,{bigint:true});
@@ -70,6 +129,54 @@ test('a destination appearing during the move is never overwritten',async t=>{
  assert.equal(result.moved,0);assert.match(result.errors.join('\n'),/appeared|changed/i);
  assert.equal(await fs.readFile(f.destination(),'utf8'),'someone else');
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');
+});
+
+test('full recheck hashes renamed files even when their size and modified date still match',async t=>{
+ const f=await fixture(t);
+ assert.deepEqual((await core.executeReorganization(await prepare(f.root))).errors,[]);
+ const [job]=await core.getOrganizationRecovery(f.root,{verifyContents:false});
+ const before=await fs.stat(f.destination());
+ await fs.writeFile(f.destination(),'corrupt! original 0');
+ await fs.utimes(f.destination(),before.atime,before.mtime);
+ assert.equal((await fs.stat(f.destination())).size,before.size);
+ const checked=await core.resumeOrganization(f.root,job!.id,undefined,undefined,{full:true});
+ assert.match(checked.errors.join('\n'),/changed|verification/i);
+ assert.equal(await fs.readFile(f.destination(),'utf8'),'corrupt! original 0');
+});
+
+for(const undo of [false,true])test(`a destination racing a linkless ${undo?'undo':'organization'} is never overwritten`,async t=>{
+ const f=await fixture(t),p=await prepare(f.root);
+ let id:string|undefined;
+ if(undo){assert.deepEqual((await core.executeReorganization(p)).errors,[]);id=(await core.getOrganizationRecovery(f.root,{verifyContents:false}))[0]!.id;}
+ const from=undo?f.destination():f.original,to=undo?f.original:f.destination();
+ const link=fs.link.bind(fs),lstat=fs.lstat.bind(fs);let refused=false,injected=false;
+ t.mock.method(fs,'link',async(source:string,target:string)=>{if(source===from&&target===to){refused=true;throw Object.assign(new Error('no hard links'),{code:'ENOTSUP'});}return link(source,target);});
+ t.mock.method(fs,'lstat',async(...args:Parameters<typeof fs.lstat>)=>{
+  try{return await lstat(...args);}catch(error){
+   if(String(args[0])===to&&refused&&!injected&&(error as NodeJS.ErrnoException).code==='ENOENT'){injected=true;await fs.writeFile(to,'concurrent writer');}
+   throw error;
+  }
+ });syncBuiltinESMExports();
+ try{
+  if(undo)await assert.rejects(core.undoOrganization(f.root,id!));
+  else assert.ok((await core.executeReorganization(p)).errors.length>0,'the racing destination must be reported');
+  assert.ok(injected,'the other writer arrived after the final absence check');
+  assert.equal(await fs.readFile(to,'utf8'),'concurrent writer');
+  assert.equal(await fs.readFile(from,'utf8'),'precious original 0');
+ }finally{t.mock.restoreAll();syncBuiltinESMExports();}
+});
+
+test('linkless organization and undo keep the same inode without making retained copies',{skip:process.platform!=='darwin'},async t=>{
+ const f=await fixture(t),before=await fs.lstat(f.original,{bigint:true}),p=await prepare(f.root),link=fs.link.bind(fs);
+ t.mock.method(fs,'link',async(from:string,to:string)=>{if(from===f.original||from===f.destination())throw Object.assign(new Error('no links'),{code:'ENOTSUP'});return link(from,to);});syncBuiltinESMExports();
+ try{
+  const moved=await core.executeReorganization(p);assert.deepEqual(moved.errors,[]);assert.equal(moved.moved,1);assert.equal(moved.retained,0);assert.equal(moved.copied,0);
+  assert.equal((await fs.lstat(f.destination(),{bigint:true})).ino,before.ino);
+  const [job]=await core.getOrganizationRecovery(f.root,{verifyContents:false});
+  assert.equal((await core.undoOrganization(f.root,job!.id)).restored,1);
+  assert.equal((await fs.lstat(f.original,{bigint:true})).ino,before.ino);
+  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');
+ }finally{t.mock.restoreAll();syncBuiltinESMExports();}
 });
 
 test('a cross-device move falls back to the verified copy that keeps the original for undo',async t=>{
@@ -133,10 +240,10 @@ for(const when of ['after-intent','after-link','after-rename'] as const)test(`a 
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
  import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(module)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
- const original=${JSON.stringify(f.original)},root=${JSON.stringify(f.root)},when=${JSON.stringify(when)};
- const link=filesystem.link,unlink=filesystem.unlink,rename=filesystem.rename;
+ const original=${JSON.stringify(f.original)},destination=${JSON.stringify(f.destination())},root=${JSON.stringify(f.root)},when=${JSON.stringify(when)};
+ const link=filesystem.link,unlink=filesystem.unlink,open=filesystem.open;
  filesystem.link=async(from,to)=>{if(from===original&&when==='after-intent')process.exit(91);if(from===original&&when==='after-rename')throw Object.assign(new Error('no links'),{code:'ENOTSUP'});const result=await link(from,to);if(from===original&&when==='after-link')process.exit(91);return result;};
- filesystem.rename=async(from,to)=>{const result=await rename(from,to);if(from===original&&when==='after-rename')process.exit(91);return result;};
+ filesystem.open=async(file,...args)=>{if(file===destination&&when==='after-rename')process.exit(91);return open(file,...args);};
  const {plans:[p]}=await plan(root,[root],${JSON.stringify(options)},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
  await executeReorganization(p,undefined,undefined);process.exit(0);`);
  const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});

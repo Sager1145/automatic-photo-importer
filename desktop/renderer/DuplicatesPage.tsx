@@ -184,7 +184,7 @@ export function Pagination({ page, pages, onPage }: { page: number; pages: numbe
 
 type Filter = 'all' | 'manual' | 'auto';
 
-export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; act: Dispatch; onRecovery?: () => void }) {
+export function DuplicatesPage({ state, act }: { state: AppState; act: Dispatch }) {
   const { t, formatNumber, formatBytes } = useTranslation();
   const dup = state.duplicates ?? { scopes: [], status: 'idle' as const, revision: 0, groups: 0, files: 0 };
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
@@ -217,7 +217,6 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
   const { details, retry } = useFileDetails(dup.root, dup.revision, useMemo(() => visible.flatMap(entry => entry.item.group.files), [visible]));
   const decide = (id: string, keep: string) => setDecisions(current => ({ ...current, [id]: keep }));
   const keepSuggested = () => setDecisions(current => ({ ...current, ...Object.fromEntries(plan.resolved.filter(item => item.needsDecision).map(item => [item.group.id, item.suggested])) }));
-  const removed = (state.organizationRecovery ?? []).filter(job => job.kind === 'duplicates' && job.root === dup.root);
   const running = dup.root ? state.jobs.find(job => job.organization && job.source.id === `duplicates:${dup.root}` && isLive(job)) : undefined;
   const { summary } = plan;
   const choose = (choice: 'open' | 'confirm' | 'cancel') => {
@@ -242,7 +241,7 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
       <LevelSelector level={level} onChange={setLevel} disabled={locked} />
       <div className="rule-actions">
         <Button kind="primary" icon={ScanSearch} data-testid="duplicates-scan" disabled={!dup.root || busy} onClick={() => act({ type: 'duplicatesScan' })}>{scanned ? t("Scan again") : t("Scan for duplicates")}</Button>
-        <Button icon={Square} data-testid="duplicates-stop" disabled={dup.status !== 'scanning'} onClick={() => act({ type: 'duplicatesStop' })}>{t("Stop")}</Button>
+        {dup.status === 'scanning' && <Button icon={Square} data-testid="duplicates-stop" onClick={() => act({ type: 'duplicatesStop' })}>{t("Stop")}</Button>}
       </div>
       {dup.status === 'scanning' && <div role="status" aria-live="polite"><OperationProgress progress={dup.progress} label={t("Duplicate scan progress")} testId="duplicates-progress" /></div>}
     </section>
@@ -278,7 +277,6 @@ export function DuplicatesPage({ state, act, onRecovery }: { state: AppState; ac
       </section>
     </>}
     {dup.root && dup.status === 'idle' && !scanned && !running && <p className="inline-note" data-testid="duplicates-not-scanned"><Icon icon={Info} size={14} />{t("Scan to look for duplicates in this library.")}</p>}
-    {onRecovery ? <Button icon={RotateCcw} onClick={onRecovery}>{t("Recovery & maintenance")}</Button> : dup.root && <RemovedDuplicates jobs={removed} act={act} busy={busy} />}
     {confirm !== 'closed' && <DuplicatesConfirm key={confirm} step={confirm} summary={summary} name={dup.name ?? ''} onCancel={() => choose('cancel')} onConfirm={() => choose('confirm')} />}
   </div>;
 }

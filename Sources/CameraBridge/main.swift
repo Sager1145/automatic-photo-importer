@@ -91,8 +91,37 @@ struct NativeCameraBridge {
         }
     }
 
+    /// Parent directories arrive as fd 3/4 and the reviewed source as fd 5. Only
+    /// a single component is accepted; no pathname resolution crosses this boundary.
+    static func renameExclusive() -> Never {
+        func fail(_ error: Int32) -> Never {
+            emit(["errno": Int(error)])
+            FileHandle.standardError.write(Data((String(cString: strerror(error)) + "\n").utf8))
+            exit(1)
+        }
+        let args = CommandLine.arguments
+        func component(_ name: String) -> Bool {
+            !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.utf8.contains(0)
+        }
+        guard args.count == 4, component(args[2]), component(args[3]) else { fail(EINVAL) }
+        var fromParent = Darwin.stat(), toParent = Darwin.stat(), held = Darwin.stat(), named = Darwin.stat()
+        guard fstat(3, &fromParent) == 0, fstat(4, &toParent) == 0, fstat(5, &held) == 0 else { fail(errno) }
+        guard (fromParent.st_mode & S_IFMT) == S_IFDIR, (toParent.st_mode & S_IFMT) == S_IFDIR,
+              (held.st_mode & S_IFMT) == S_IFREG else { fail(EINVAL) }
+        guard fstatat(3, args[2], &named, AT_SYMLINK_NOFOLLOW) == 0 else { fail(errno) }
+        guard (named.st_mode & S_IFMT) == S_IFREG, named.st_dev == held.st_dev, named.st_ino == held.st_ino,
+              named.st_size == held.st_size, named.st_mtimespec.tv_sec == held.st_mtimespec.tv_sec,
+              named.st_mtimespec.tv_nsec == held.st_mtimespec.tv_nsec,
+              named.st_ctimespec.tv_sec == held.st_ctimespec.tv_sec,
+              named.st_ctimespec.tv_nsec == held.st_ctimespec.tv_nsec else { fail(ESTALE) }
+        guard renameatx_np(3, args[2], 4, args[3], UInt32(RENAME_EXCL)) == 0 else { fail(errno) }
+        emit(["renamed": true])
+        exit(0)
+    }
+
     static func main() {
         if CommandLine.arguments.dropFirst().first == "--set-file-times" { setFileTimes() }
+        if CommandLine.arguments.dropFirst().first == "--rename-exclusive" { renameExclusive() }
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
         Task { @MainActor in await serve() }

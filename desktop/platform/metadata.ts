@@ -142,13 +142,35 @@ function lensModel(entries:TagEntries):string|undefined {
     if(/[\p{L}]/u.test(lens)&&!/^(?:unknown(?: lens)?|not (?:available|recorded)|n\/a)$/i.test(lens))return lens;
   }
 }
+/** EXIF 0x8827 is only 16 bits. Its saturated value cannot identify a real ISO.
+ * ExifTool Exif.pm documents 0x8830 as the selector for the 32-bit sensitivity
+ * tags (0x8831-0x8833). Preserve an unsaturated ISO first, then prefer ISOSpeed,
+ * REI and SOS only where the declared SensitivityType includes that quantity. */
+function captureISO(entries:TagEntries):number|undefined {
+  const positive=(name:string):number|undefined=>{
+    for(const value of standardValues(entries,name)){
+      if(typeof value!=='number'&&(typeof value!=='string'||!value.trim()))continue;
+      const number=Number(value);
+      if(Number.isFinite(number)&&number>0&&!(name==='ISO'&&number===65535))return number;
+    }
+  };
+  const iso=positive('ISO');if(iso!==undefined)return iso;
+  const sensitivity=Number(standardValues(entries,'SensitivityType')[0]);
+  const fields:Record<number,string[]>={
+    1:['StandardOutputSensitivity'],2:['RecommendedExposureIndex'],3:['ISOSpeed'],
+    4:['RecommendedExposureIndex','StandardOutputSensitivity'],5:['ISOSpeed','StandardOutputSensitivity'],
+    6:['ISOSpeed','RecommendedExposureIndex'],7:['ISOSpeed','RecommendedExposureIndex','StandardOutputSensitivity'],
+  };
+  for(const name of fields[sensitivity]??['ISOSpeed']){const value=positive(name);if(value!==undefined)return value;}
+}
 function exposureSummary(entries:TagEntries):Exposure|undefined {
   const result:Exposure={};
   const values=(name:string)=>standardValues(entries,name);
   const lens=lensModel(entries);if(lens)result.lens=lens;
+  const iso=captureISO(entries);if(iso!==undefined)result.iso=iso;
   // With -n, these decoded tags already use physical capture units. APEX
   // ShutterSpeedValue/ApertureValue and numeric LensID are different data.
-  for(const [field,name] of [['aperture','FNumber'],['iso','ISO'],['exposureTime','ExposureTime'],['focalLength','FocalLength'],['exposureCompensation','ExposureCompensation']] as const){
+  for(const [field,name] of [['aperture','FNumber'],['exposureTime','ExposureTime'],['focalLength','FocalLength'],['exposureCompensation','ExposureCompensation']] as const){
     for(const value of values(name)){
       if(typeof value!=='number'&&(typeof value!=='string'||!value.trim()))continue;
       const number=typeof value==='number'?value:Number(value);
@@ -272,7 +294,7 @@ const routingTags=[
   'Encoder','LensModel','ContentIdentifier','Error','Warning',
   'SerialNumber','BodySerialNumber','InternalSerialNumber','CameraSerialNumber','ShutterCount','MechanicalShutterCount','ShutterCount2','ShutterCount3','ImageNumber','FileNumber',
   'ExifImageWidth','ExifImageHeight','ImageWidth','ImageHeight','SourceImageWidth','SourceImageHeight',
-  'ExposureTime','FNumber','ISO','ExposureCompensation','FocalLength','ImageCount','ExifToolVersion',
+  'ExposureTime','FNumber','ISO','SensitivityType','ISOSpeed','RecommendedExposureIndex','StandardOutputSensitivity','ExposureCompensation','FocalLength','ImageCount','ExifToolVersion',
 ].map(tag=>'-'+tag);
 /** Routing results for this session, keyed by the file's exact stat identity. */
 const routingCache=new Map<string,Metadata>();
@@ -301,6 +323,10 @@ export function carryRouting(from:string,reviewed:{dev:string;ino:string;size:st
   if(cached)remember(statKey(path.resolve(to),now),structuredClone(cached));
 }
 const statKey=(file:string,info:import('node:fs').BigIntStats)=>`${file}\0${exactStatKey(info)}`;
+/** Read-only reuse of the exact source stat used by a completed import. Never reads the file. */
+export function cachedRouting(file:string,identity:string):Metadata|undefined {
+ const value=routingCache.get(`${path.resolve(file)}\0${identity}`);return value?structuredClone(value):undefined;
+}
 /** Routing results for files under `root`, keyed by path and exact stat, so a scan's
  * reads can be handed to the import that follows it (and remembered for the card). */
 export function routingEntriesUnder(root:string):[string,Metadata][] {

@@ -24,7 +24,7 @@ export function recordIssue(job:Job,issue:ExecutionIssue){
  const index=indexOf(job),key=issue.severity+'|'+issue.code;
  let group=index.groups.get(key);
  if(!group){group={code:issue.code,severity:issue.severity,count:0,items:[]};entryId(job,group);index.groups.set(key,group);(job.groups??=[]).push(group);}
- group.count++;markChanged(job.groups!);
+ group.count++;if(issue.reason){const reasons=group.reasons??={};reasons[issue.reason]=(reasons[issue.reason]??0)+1;}markChanged(job.groups!);
  if(group.items.length<MAX_GROUP_ITEMS){
   const detail=issue.destination?issue.detail?`Destination ${issue.destination}: ${issue.detail}`:`Destination ${issue.destination}`:issue.detail;
   group.items.push(detail?{path:issue.path,detail}:{path:issue.path});markChanged(group.items);
@@ -57,7 +57,7 @@ export function throttled(emit:()=>void,interval:number|(()=>number)=100,now:()=
 /** Unknown files an import did not copy / an organization left (kept-no-metadata) or filed under the unknown folder (filed-no-metadata): warnings, never failures. */
 export function noMetadataIssues(summary:NoMetadataSummary):ExecutionIssue[]{
  const code=summary.handling==='keep'?'kept-no-metadata':'filed-no-metadata',why={noDate:'No capture date',noCamera:'No camera',unreadable:'Metadata could not be read'};
- return summary.files.map((file):ExecutionIssue=>({code,severity:'warning',path:file.path,detail:why[file.reason]}));
+ return summary.files.map((file):ExecutionIssue=>({code,severity:'warning',path:file.path,detail:why[file.reason],reason:file.reason}));
 }
 
 /** The "._" files an import or organization kept, and those (or folders) it could not look at or remove, as warnings: they never fail a job. */

@@ -466,3 +466,61 @@ test('a family whose files were left finished by a kill gets its dates from the 
   }
   await assertNothingOwned(env.root);
 });
+
+test('a direct copy says in its copy progress that it checks in place, and no verify step follows',async t=>{
+  const env=await ready(t);if(!env) return;
+  const {executeDestinations}=await import('../core/destinations');
+  const planned=(await plan(env.card,[env.root],options,metadata)).plans[0]!,bytes=planned.entries.reduce((sum,entry)=>sum+entry.size,0);
+  const seen:import('../shared').Progress[]=[];
+  const result=await executeDestinations([planned],{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index,value)=>{seen.push(value);},settled:()=>{}});
+  assert.deepEqual(result.errors,[]);
+  const copying=seen.filter(item=>item.phase==='copying'&&!item.step);
+  assert.ok(copying.length>0);
+  // The time-left model counts these files as checked once copied: it plans no verify step for them.
+  assert.deepEqual(copying.at(-1)!.work?.direct,{files:FILES,bytes,present:0});
+  assert.deepEqual(seen.filter(item=>item.phase==='verifying'&&!item.step),[],'no verify step');
+  // Again: every file is already there and is confirmed as the copy goes, so it is work of the copy, counted in completed, not skipped before it.
+  const again=(await plan(env.card,[env.root],options,metadata)).plans[0]!,repeat:import('../shared').Progress[]=[];
+  assert.equal(again.entries.filter(entry=>entry.skip).length,FILES);
+  await executeDestinations([again],{signal:new AbortController().signal,reorganize:false,validate:async()=>{},progress:(_index,value)=>{repeat.push(value);},settled:()=>{}});
+  const last=repeat.filter(item=>item.phase==='copying'&&!item.step).at(-1)!;
+  assert.equal(last.skipped,undefined);
+  assert.deepEqual(last.work?.direct,{files:FILES,bytes:0,present:FILES});
+  assert.equal(last.completed,FILES);
+});
+
+for(const timing of ['after-review','while-confirming'] as const) test(`a direct import rejects a changed source ${timing} instead of reporting its old backup verified`,async t=>{
+  const env=await ready(t);if(!env) return;
+  const source=path.join(base,`changed-source-${counter}`);await fs.mkdir(source);
+  const file=path.join(source,'A.JPG'),original=Buffer.alloc(4096,1),changed=Buffer.alloc(4096,2);
+  await fs.writeFile(file,original);
+  const initial=(await plan(source,[env.root],options,metadata)).plans[0]!;
+  assert.deepEqual(await execute(initial),{copied:1,skipped:0,errors:[]});
+  const reviewed=(await plan(source,[env.root],options,metadata)).plans[0]!,entry=reviewed.entries[0]!;
+  assert.equal(entry.skip,true);assert.ok(entry.digest);
+  const outcomes:FileOutcome[]=[];let injected=timing==='after-review';
+  if(injected) await fs.writeFile(file,changed);
+  // Mutate only after the existing destination has been compared with the old planned checksum.
+  // syncFile flushes a confirmed destination before directFamily emits its successful outcome.
+  const open=fsPatchable.open.bind(fsPatchable);
+  if(timing==='while-confirming') {
+    t.mock.method(fsPatchable,'open',async(...args:Parameters<typeof fsPatchable.open>)=>{
+      const handle=await open(...args);
+      if(String(args[0])===entry.destination) {
+        const sync=handle.sync.bind(handle);
+        t.mock.method(handle,'sync',async()=>{if(!injected){injected=true;await fs.writeFile(file,changed);}return sync();});
+      }
+      return handle;
+    });
+    syncBuiltinESMExports();
+    t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
+  }
+  const result=await execute(reviewed,undefined,undefined,{onFileOutcome:outcome=>outcomes.push(outcome)});
+  t.mock.restoreAll();syncBuiltinESMExports();
+  assert.equal(injected,true);
+  assert.equal(result.copied,0);assert.equal(result.skipped,0);
+  assert.ok(result.errors.some(error=>/Source changed/.test(error)),result.errors.join(' | '));
+  assert.deepEqual(outcomes,[],'no verified outcome is emitted for the stale source');
+  assert.deepEqual(await fs.readFile(file),changed,'changed source stays untouched');
+  assert.deepEqual(await fs.readFile(entry.destination),original,'existing backup stays untouched');
+});

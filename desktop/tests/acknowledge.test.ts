@@ -83,7 +83,25 @@ test('the panel and the job card offer the skip buttons',async()=>{
  const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
  const {I18nProvider}=await import('../renderer/i18n');const {ActivityPanel,collectErrors}=await import('../renderer/RootApp');
  const job=failedJob(),value=state(job);value.errorLog=new ErrorLog().update(gatherErrors(value));
- const panel=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ActivityPanel,{state:value,errors:collectErrors(value),act:()=>{},onClose:()=>{}})}));
+ const panel=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ActivityPanel,{state:value,errors:collectErrors(value),act:()=>{}})}));
  assert.ok(panel.includes('data-testid="error-group-skip"'));assert.ok(panel.includes('data-testid="job-skip-all"'));
  assert.equal(panel.includes('data-testid="error-group-skip"')&&(panel.match(/data-testid="error-group-skip"/g)??[]).length,1,'warnings have no Skip');
+});
+
+test('old records are a warning row in Issues with Acknowledge, and the sidebar shows only the warning mark',async()=>{
+ const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {I18nProvider}=await import('../renderer/i18n');const {ActivityPanel,SidebarDestinations,collectErrors}=await import('../renderer/RootApp');
+ const value:AppState={...state({id:'j',source:card,phase:'complete',errors:[],backup:false}),oldRecords:['/Volumes/A006']};
+ const logged=(next:AppState)=>({...next,errorLog:new ErrorLog().update(gatherErrors(next))});
+ const withLog=logged(value),errors=collectErrors(withLog),old=errors.filter(error=>error.oldDrive);
+ assert.equal(old.length,1);assert.equal(old[0]!.severity,'warning');assert.equal(old[0]!.drive,'A006');
+ assert.deepEqual(gatherErrors(value).filter(error=>error.oldDrive).map(error=>[error.id,error.code,error.kind,error.severity,error.message]),[['old-records:/Volumes/A006','error.oldRecords','destination','warning',{key:'error.oldRecords',params:{drive:'A006'}}]],'gatherErrors is the one source of the old-records issue');
+ assert.deepEqual(gatherErrors({...value}).map(error=>error.id),gatherErrors(value).map(error=>error.id),'the id is stable');
+ const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
+ const panel=render(createElement(ActivityPanel,{state:withLog,errors,act:()=>{}}));
+ assert.match(panel,/data-testid="old-records-acknowledge"/);assert.match(panel,/Old records from an earlier version are on A006\./);
+ assert.doesNotMatch(panel,/data-testid="error-clear"/);
+ const sidebar=render(createElement(SidebarDestinations,{state:withLog,errors,onErrors:()=>{}}));
+ assert.doesNotMatch(sidebar,/sidebar-old-records|old-records-acknowledge|records-migrator/);assert.match(sidebar,/data-testid="sidebar-warnings"/);
+ assert.deepEqual(collectErrors(logged({...value,oldRecords:[]})).filter(error=>error.oldDrive),[]);
 });

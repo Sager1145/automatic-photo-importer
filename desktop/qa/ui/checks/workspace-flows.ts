@@ -11,7 +11,8 @@ export const workspaceFlowChecks=():Check[]=>[
   h.hooks!.addJobs(sources.map((source,index)=>({...syntheticJob('inventory-'+index,{phase:'complete',source}),backup:true,inventory:inventory(index)})));
   h.hooks!.inspect=()=>({camera:'QA Camera',date:'2026-10-23T12:00:00Z',fields:{'EXIF:Model':'QA Camera'}});
   try{
-   await h.nav('Jobs');
+   // The Queue is compact; inventories open from the Import card.
+   await h.nav('Files & folders');
    await h.click('article[data-source-id="'+sources[1]!.id+'"] [data-testid=drive-details-toggle]');await h.settle();
    await h.click('article[data-source-id="'+sources[1]!.id+'"] .inventory-open');await h.settle();
    await h.until('second job inventory selected',"document.querySelector('.inventory-panel')?.textContent.includes('payload.bin')");
@@ -38,11 +39,11 @@ export const workspaceFlowChecks=():Check[]=>[
   await h.js("{const tab=document.querySelector('[data-testid=import-mode-files]');tab.focus();tab.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));}");await h.settle();
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=import-mode-media]')===document.activeElement&&document.activeElement.getAttribute('aria-selected')==='true'"),true);
   for(let repeat=0;repeat<2;repeat++){
-   await h.nav('Import desk');await h.js("[...document.querySelectorAll('.bay-actions button')].find(b=>b.textContent==='Change destinations').click()");await h.settle();
+   await h.nav('Import desk');await h.js("[...document.querySelectorAll('.destination-strip-policy button')].find(b=>b.textContent==='Change').click()");await h.settle();
    assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-storage]')?.getAttribute('aria-selected')==='true'&&document.activeElement.id==='settings-tab-storage'"),true,'destination link selects and focuses Storage');
    await h.settingsTab('files');
   }
-  await h.nav('Import desk');await h.js("[...document.querySelectorAll('.bay-actions button')].find(b=>b.textContent==='Edit folder rules').click()");await h.settle();
+  await h.nav('Organization');await h.js("[...document.querySelectorAll('.organization-action button')].find(b=>b.textContent==='Edit folder rules').click()");await h.settle();
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-folders]')?.getAttribute('aria-selected')==='true'"),true);
  }},
  {id:'nav-stop-scopes',stage:'navigation',title:'Import and Activity dispatch their named Stop scopes without changing job ownership',covers:['Stop imports UI scope','Stop all UI scope','mixed jobs'],skip:async h=>h.hooks&&'beforeAction' in h.hooks?undefined:'needs QA action guard',run:async h=>{
@@ -52,8 +53,10 @@ export const workspaceFlowChecks=():Check[]=>[
    h.hooks!.addJobs([{...syntheticJob('scope-media',{phase:'stopped',paused:true}),backup:false},{...syntheticJob('scope-backup',{phase:'stopped',paused:true}),backup:true},syntheticJob('scope-library',{phase:'copying',organization:true})]);
    await h.nav('Import desk');await h.click('[data-testid=global-stop]');await h.waitFor('imports scope received',()=>seen.length===1);
    assert.deepEqual(seen[0],{type:'stop',scope:'imports'});
-   await h.nav('Jobs');await h.click('[data-testid=activity-stop-all]');await h.waitFor('global scope received',()=>seen.length===2);
+   await h.click('[data-testid=global-stop-menu] summary');await h.click('[data-testid=global-stop-everything]');await h.waitFor('everything scope received',()=>seen.length===2);
    assert.deepEqual(seen[1],{type:'stop'});
+   await h.nav('Jobs');await h.click('[data-testid=activity-stop-all]');await h.waitFor('queue stop all received',()=>seen.length===3);
+   assert.deepEqual(seen[2],{type:'stop'});
   }finally{h.hooks!.beforeAction=previous;}
  }},
 ];

@@ -27,21 +27,22 @@ const known:Metadata={camera:'Cam',date:'2022-05-06T12:00:00Z',fields:{}};
 
 test('one builder gives every caller the same rules, and each rule changes the routing and placement scopes',()=>{
   const rules=ruleOptions(defaultPreferences);
-  assert.equal(rules.noMetadata,'keep');assert.equal(rules.noMetadataFolder,'Unknown files');
+  assert.equal(rules.noMetadata,'folder');assert.equal(rules.noMetadataFolder,'Unknown files');
   assert.equal(ruleOptions(defaultPreferences,true).noMetadata,'fileDate');
   const scopes=(prefs:typeof defaultPreferences,fileDate=false)=>rulesScope(ruleOptions(prefs,fileDate));
   const original=scopes(defaultPreferences);
-  for(const changed of [{...defaultPreferences,noMetadataHandling:'folder' as const},{...defaultPreferences,noMetadataFolder:'Other name'}])assert.notDeepEqual(scopes(changed),original);
+  for(const changed of [{...defaultPreferences,noMetadataHandling:'keep' as const},{...defaultPreferences,noMetadataFolder:'Other name'}])assert.notDeepEqual(scopes(changed),original);
   assert.notDeepEqual(scopes(defaultPreferences,true),original);
 });
 
-test('the folder check built from the shared rules does not flag unknown files, legacy Unknown Camera ones included',async t=>{
+test('the folder check built from the shared rules leaves unknown files alone under keep, and flags them under folder until they are in the Unknown files folder',async t=>{
   const f=await fixture(t);
   await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_1.JPG');await f.put(f.library,'old/SNAP_2.PNG');await f.put(f.library,'old/IMG_3.JPG');
   const meta=async(file:string):Promise<Metadata>=>/NOCAM/.test(file)?{date:'2021-03-04T10:00:00Z',fields:{}}:/SNAP/.test(file)?{fields:{}}:known;
   const flat={...defaultPreferences,mediaLayout:'flat' as const};
   const check=(prefs:typeof defaultPreferences)=>findMisplaced(f.library,f.library,ruleOptions({...prefs,mediaLayout:'flat'}),meta);
-  assert.deepEqual((await check(flat)).files,['old/IMG_3.JPG']);
+  const keep={...flat,noMetadataHandling:'keep' as const};
+  assert.deepEqual((await check(keep)).files,['old/IMG_3.JPG']);
   const folder={...flat,noMetadataHandling:'folder' as const};
   assert.deepEqual((await check(folder)).files.sort(),['2021/202103/Unknown Camera/NOCAM_1.JPG','old/IMG_3.JPG','old/SNAP_2.PNG']);
   await f.put(f.library,'Unknown files/old/SNAP_2.PNG');await fs.rm(path.join(f.library,'old/SNAP_2.PNG'));
@@ -143,4 +144,17 @@ test('a started job asks first only when nothing else holds the review, and wait
   assert.equal(unknownDecision({...ask,reviewOpen:true}),'defer','a review is already open: no second one over it');
   assert.equal(unknownDecision({...ask,othersRunning:true}),'defer','another job is running: a review cannot start over it');
   assert.equal(unknownDecision({...ask,reviewOpen:true,automatic:true}),'run');
+});
+
+test('a per-run preference override changes where unknown files go: the folder under the library, or nowhere',async t=>{
+  const f=await fixture(t);
+  await f.put(f.source,'DCIM/SNAP.PNG');await f.put(f.source,'DCIM/IMG_1.JPG');
+  const meta=async(file:string):Promise<Metadata>=>file.endsWith('SNAP.PNG')?{fields:{}}:known;
+  const planWith=(noMetadataHandling:'keep'|'folder'|'fileDate',useFileDate=false)=>{const {unknownRules,unknownDefault:_d,...rules}=ruleOptions({...defaultPreferences,mediaLayout:'flat',noMetadataHandling},useFileDate);return plan(f.source,[f.library],{...rules,backup:false,unknownRules},meta);};
+  const folder=await planWith('folder');
+  assert.equal(entries(folder).find(entry=>entry.source.endsWith('SNAP.PNG'))?.destination,path.join(f.library,'Unknown files/DCIM/SNAP.PNG'));
+  const keep=await planWith('keep');
+  assert.deepEqual(names(keep),['IMG_1.JPG']);assert.equal(keep.noMetadata?.handling,'keep');
+  const dated=await planWith('keep',true);
+  assert.equal(dated.noMetadata,undefined);assert.ok(names(dated).includes('SNAP.PNG'));
 });

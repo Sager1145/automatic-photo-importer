@@ -116,24 +116,22 @@ test('the stage palette keeps neighbouring stages apart in hue and for color-bli
  }
 });
 
-const steps=['checking','comparing','existing','copying','verifying:link'];
-const shares=(...values:number[])=>steps.map((step,index)=>({step,share:values[index]!}));
-
-test('a job bar is as long as the percent: 2% never fills a layer',()=>{
- const planning=job('verifying',{phase:'planning',step:'checking',completed:2,total:100,bytes:0,totalBytes:0},{fraction:.02,cost:{done:2,total:100},stageShares:shares(.02,.02,.02,.02,.02)});
+test('a job bar is as long as its counter: 2 of 100 files checked never fills a layer',()=>{
+ // The whole-job share the main process sends is not drawn: the row's counter decides.
+ const planning=job('verifying',{phase:'planning',step:'checking',completed:2,total:100,bytes:0,totalBytes:0},{fraction:.5});
  const layers=jobStageLayers(planning);
  assert.ok(layers.length>=1);
  for(const layer of layers)assert.ok(layer.fraction<=.02+1e-9,`layer ${layer.kind} ${layer.fraction}`);
 });
 
-test('a finished first stage stays under the next colour, and the layers are cumulative cost shares',()=>{
- const copying=job('copying',{},{fraction:.278,cost:{done:27.8,total:100},stageShares:shares(.1,.12,.13,.278,.278)});
+test('a finished first stage stays full under the next colour, which is as far as the copy counter',()=>{
+ const copying=job('copying',{phase:'copying',completed:278,total:1000,bytes:2.78e9,totalBytes:10e9},{fraction:.9});
  const layers=jobStageLayers(copying);
  assert.deepEqual(layers.map(layer=>layer.kind),['scan','copy']);
- assert.ok(Math.abs(layers[0]!.fraction-.13)<1e-9);
+ assert.equal(layers[0]!.fraction,1);
  assert.ok(Math.abs(layers[1]!.fraction-.278)<1e-9);
  const total=totalStageLayers([copying]);
- assert.ok(Math.abs(total[0]!.fraction-.13)<1e-9&&Math.abs(total[1]!.fraction-.278)<1e-9);
+ assert.ok(total[0]!.fraction===1&&Math.abs(total[1]!.fraction-.278)<1e-9);
 });
 
 test('the Drive details toggle keeps stage telemetry visible and controls its detail panel',()=>{

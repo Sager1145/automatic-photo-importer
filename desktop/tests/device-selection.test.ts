@@ -121,3 +121,13 @@ test('device history records completed scans and verified imports per device',()
  recordDeviceHistory(history,folder,'import','2026-10-21T10:00:00.000Z');
  assert.deepEqual(history,{'6A1F-UUID-CARD':{name:'NIKON Z F',lastScanCompleted:'2026-10-21T09:00:00.000Z',lastImportVerified:'2026-10-21T10:00:00.000Z'}});
 });
+
+test('a source dropped from the app leaves the selection and both announcement lists',()=>{
+ const selection=new DeviceSelection();
+ const folder:Source={id:'folder:/a',name:'A',path:'/a',transport:'folder'};
+ selection.apply([folder],{});
+ selection.newDevices.push(folder.id);selection.reconnectedDevices.push(folder.id);
+ selection.drop(folder.id);
+ assert.deepEqual([selection.newDevices,selection.reconnectedDevices],[[],[]]);
+ assert.equal(selection.apply([folder],{})[0]!.selected,true,'chosen again later, it starts from its defaults');
+});

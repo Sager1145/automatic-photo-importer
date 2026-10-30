@@ -37,7 +37,7 @@ test('with no result the backup card prompts for the check and the button dispat
     const page=card(html(language,createElement(Organization,{state:stateOf(),act:()=>{},busy:false})));
     assert.ok(page.includes('data-testid="backup-check-prompt"')&&page.includes(t('Check whether every file in this backup is in the folder your rules give it.')),`${language}: prompt`);
     const check=button(page,'check-backup-folder');
-    assert.ok(/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: primary, enabled`);
+    assert.ok(/button-secondary/.test(check)&&!/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: secondary (Organize now is the card's primary action), enabled`);
     assert.ok(!page.includes('segmented')&&!page.includes('aria-pressed')&&page.includes(t('The folder layout is checked only when you click Check folder layout.')),`${language}: no mode control`);
     const node=find(tree(language,BackupCheck,{state:stateOf(),act:(action:Action)=>actions.push(action),destinationIndex:0}),'check-backup-folder');
     assert.ok(node,`${language}: button found`);node!.props.onClick();
@@ -57,14 +57,12 @@ test('while checking the button is disabled and reads Checking, and the live lab
   }
 });
 
-test('a result with misplaced files makes Organize primary and Check again secondary; a clean one only offers Check again',async()=>{
+test('a result with misplaced files shows the count and Check again secondary; a clean one only offers Check again',async()=>{
   const {Organization}=await import('../renderer/RootApp');
   for(const language of languages){
     const t=createTranslator(language);
     const found=card(html(language,createElement(Organization,{state:stateOf({misplacedFiles:{'/Volumes/A006':result}}),act:()=>{},busy:false})));
-    assert.ok(/<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?Organize backup|<button[^>]*button-primary[^>]*>(?:(?!<\/button>)[\s\S])*?/.test(found)&&found.includes('data-testid="misplaced-files"'),`${language}: misplaced`);
-    const organize=found.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?<\/button>/g)?.find(item=>item.includes(t('Organize backup')))??'';
-    assert.ok(/button-primary/.test(organize),`${language}: Organize backup primary`);
+    assert.ok(found.includes('data-testid="misplaced-files"')&&!found.includes(t('Organize backup')),`${language}: misplaced count, no separate Organize button in the check`);
     const again=button(found,'check-backup-folder');
     assert.ok(/button-secondary/.test(again)&&again.includes(t('Check again')),`${language}: Check again secondary`);
     assert.ok(!found.includes('data-testid="backup-check-prompt"'),`${language}: no prompt with a result`);
@@ -100,19 +98,22 @@ test('Settings no longer has the Off, Ask, Automatic check control',async()=>{
   }
 });
 
-test('the Import desk destination slot offers a secondary Check folder layout button (Start stays the only primary action), keeps Organize for misplaced files, and is quiet when clean',async()=>{
-  const {DestinationBay}=await import('../renderer/RootApp');
-  const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationBay,{state,act:()=>{}}));
+test('the Import desk destination strip prompts with a secondary button (Start stays the only primary action on the page) until a result exists, then shows the result and a Library link',async()=>{
+  const {DestinationStrip}=await import('../renderer/RootApp');
+  const slot=(language:Language,state:AppState)=>html(language,createElement(DestinationStrip,{state,act:()=>{}}));
   for(const language of languages){
     const t=createTranslator(language),actions:Action[]=[];
     const none=slot(language,stateOf()),check=button(none,'destination-check-backup-folder-0');
     assert.ok(/button-secondary/.test(check)&&!/button-primary/.test(check)&&check.includes(t('Check folder layout'))&&!/disabled/.test(check),`${language}: secondary`);
-    find(tree(language,DestinationBay,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
+    find(tree(language,DestinationStrip,{state:stateOf(),act:(action:Action)=>actions.push(action)}),'destination-check-backup-folder-0')!.props.onClick();
     assert.deepEqual(actions,[{type:'checkBackupFolder',destinationIndex:0}]);
     const found=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':result}}));
-    assert.ok(found.includes('data-testid="destination-misplaced"')&&!found.includes('destination-check-backup-folder-0'),`${language}: Organize stays`);
+    assert.ok(found.includes('data-testid="destination-misplaced"')&&!found.includes('destination-check-backup-folder-0')&&!found.includes('>'+t('Organize')+'<'),`${language}: result replaces the button`);
+    assert.ok(!found.includes(t('Open in Library')),`${language}: link only where Library can open`);
+    const linked=html(language,createElement(DestinationStrip,{state:stateOf({misplacedFiles:{'/Volumes/A006':result}}),act:()=>{},onLibrary:()=>{}}));
+    assert.ok(linked.includes(t('Open in Library')),`${language}: Open in Library`);
     const clean=slot(language,stateOf({misplacedFiles:{'/Volumes/A006':{...result,count:0}}}));
-    assert.ok(!clean.includes('destination-check-backup-folder-0')&&!clean.includes('data-testid="destination-misplaced"'),`${language}: nothing when clean`);
+    assert.ok(!clean.includes('destination-check-backup-folder-0')&&!clean.includes('data-testid="destination-misplaced"')&&clean.includes('data-testid="destination-in-order"')&&clean.includes(t('Backup folder is in order.')),`${language}: in order when clean`);
     const running=slot(language,stateOf({misplacedProgress:{'/Volumes/A006':progress}}));
     assert.ok(!running.includes('destination-check-backup-folder-0'),`${language}: not while running`);
     const offline=slot(language,stateOf({destinationStatus:[{...online[0]!,available:false}]}));
@@ -139,29 +140,29 @@ const missing={count:0,bytes:0,checkedAt:'2026-10-23T10:00:00Z',missing:true as 
 const runningJob=[{id:'j',source:{id:'s',name:'Card',path:'/Volumes/CARD',transport:'folder'},phase:'copying',errors:[],backup:false}] as unknown as AppState['jobs'];
 
 test('a missing backup folder shows a quiet note and no prompt or check button, in the card and in the destination slot',async()=>{
-  const {Organization,DestinationBay}=await import('../renderer/RootApp');
+  const {Organization,DestinationStrip}=await import('../renderer/RootApp');
   for(const language of languages){
     const t=createTranslator(language),note=t('No backup folder yet. The first import creates it.');
     const state=stateOf({misplacedFiles:{'/Volumes/A006':missing}});
     const page=card(html(language,createElement(Organization,{state,act:()=>{},busy:false})));
     assert.ok(page.includes(note)&&!page.includes('backup-check-prompt')&&!page.includes('data-testid="check-backup-folder"')&&!page.includes('Backup folder is in order')&&!page.includes('data-testid="misplaced-files"'),`${language}: card`);
-    const slot=html(language,createElement(DestinationBay,{state,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state,act:()=>{}}));
     assert.ok(slot.includes(note)&&!slot.includes('destination-check-backup-folder-0')&&!slot.includes('data-testid="destination-misplaced"'),`${language}: slot`);
   }
 });
 
 test('while checking a Stop button dispatches stopBackupCheck, in the card and in the destination slot',async()=>{
-  const {BackupCheck,DestinationBay}=await import('../renderer/RootApp');
+  const {BackupCheck,DestinationStrip}=await import('../renderer/RootApp');
   const state=stateOf({misplacedProgress:{'/Volumes/A006':progress}});
   for(const language of languages){
     const t=createTranslator(language);
-    for(const [component,props,id] of [[BackupCheck,{destinationIndex:0},'stop-backup-check'],[DestinationBay,{},'destination-stop-backup-check-0']] as const){
+    for(const [component,props,id] of [[BackupCheck,{busy:false,organizeBusy:false,destinationIndex:0},'stop-backup-check'],[DestinationStrip,{},'destination-stop-backup-check-0']] as const){
       const actions:Action[]=[];
       const node=find(tree(language,component as any,{...props,state,act:(action:Action)=>actions.push(action)}),id);
       assert.ok(node,`${language}: ${id}`);node!.props.onClick();
       assert.deepEqual(actions,[{type:'stopBackupCheck'}]);
     }
-    const slot=html(language,createElement(DestinationBay,{state,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state,act:()=>{}}));
     assert.ok(slot.includes(t('Stop')),`${language}: label`);
     const running=card(html(language,createElement(BackupCheck,{state,act:()=>{},destinationIndex:0})));
     assert.ok(button(running,'check-backup-folder').includes(t('Checking…'))&&/disabled/.test(button(running,'check-backup-folder')),`${language}: Checking…`);
@@ -169,7 +170,7 @@ test('while checking a Stop button dispatches stopBackupCheck, in the card and i
 });
 
 test('the check is disabled with a one-line reason while an import runs or another destination is checking',async()=>{
-  const {BackupCheck,DestinationBay}=await import('../renderer/RootApp');
+  const {BackupCheck,DestinationStrip}=await import('../renderer/RootApp');
   const two={...preferences,destinations:['/Volumes/A006','/Volumes/B'],copyMode:'mirror' as const};
   const status=[...online,{path:'/Volumes/B',available:true,volumeId:'b',total:1,free:1}];
   for(const language of languages){
@@ -177,7 +178,7 @@ test('the check is disabled with a one-line reason while an import runs or anoth
     const importing=stateOf({jobs:runningJob});
     const a=card(html(language,createElement(BackupCheck,{state:importing,act:()=>{},destinationIndex:0})));
     assert.ok(/disabled/.test(button(a,'check-backup-folder'))&&a.includes(t('Wait for the current work to finish before checking.')),`${language}: import reason`);
-    const slot=html(language,createElement(DestinationBay,{state:importing,act:()=>{}}));
+    const slot=html(language,createElement(DestinationStrip,{state:importing,act:()=>{}}));
     assert.ok(/disabled/.test(button(slot,'destination-check-backup-folder-0'))&&slot.includes(t('Wait for the current work to finish before checking.')),`${language}: slot import`);
     const other=stateOf({preferences:two,destinationStatus:status,misplacedProgress:{'/Volumes/B':progress}});
     const b=card(html(language,createElement(BackupCheck,{state:other,act:()=>{},destinationIndex:0})));
@@ -196,4 +197,34 @@ test('a result shows when it was checked',async()=>{
     const page=card(html(language,createElement(Organization,{state:stateOf({misplacedFiles:{'/Volumes/A006':result}}),act:()=>{},busy:false})));
     assert.ok(page.includes(t('Checked {time}',{time:formatWhen(result.checkedAt,language)})),`${language}: checked`);
   }
+});
+
+test('Settings Storage destinations have no check, Organize or Stop buttons, but link the misplaced count to Library',async()=>{
+  const {DestinationBay}=await import('../renderer/RootApp');
+  for(const language of languages){
+    const t=createTranslator(language);
+    const bay=(extra:Partial<AppState>,onLibrary?:()=>void)=>html(language,createElement(DestinationBay,{state:stateOf(extra),act:()=>{},configure:true,onLibrary}));
+    for(const markup of [bay({}),bay({misplacedFiles:{'/Volumes/A006':result}}),bay({misplacedProgress:{'/Volumes/A006':progress}})])
+      assert.ok(!markup.includes('destination-check-backup-folder')&&!markup.includes('destination-stop-backup-check')&&!markup.includes(`>${t('Organize')}<`),`${language}: no operation buttons`);
+    const found=bay({misplacedFiles:{'/Volumes/A006':result}},()=>{});
+    assert.ok(found.includes('data-testid="destination-misplaced"')&&found.includes(t('Open in Library'))&&found.includes(t('Change…')),`${language}: count, Library link and Change stay`);
+    assert.ok(!bay({misplacedFiles:{'/Volumes/A006':result}}).includes(t('Open in Library')),`${language}: link only where Library can open`);
+  }
+});
+
+
+test('shared catalog placement agrees with the read-only check for a custom template and owned directories',async t=>{
+  const fs=await import('node:fs/promises'),path=await import('node:path'),os=await import('node:os');
+  const {findMisplaced,inventory}=await import('../core/index'),{evaluateRoutes,classifyPlacement}=await import('../core/folder-rules');
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'catalog-layout-')));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const names=['Trips/Camera/2024/02 February/A (2).JPG','wrong/B.JPG','Trips/Camera/Conflicts/content/C.JPG','Problem files/Empty/D.JPG'];
+  for(const name of names){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),'image');}
+  const options={template:'Trips/{camera}/{year}/{monthName}',layout:'flat' as const},metadata=async()=>({camera:'Camera',date:'2024-02-03T12:00:00',fields:{}});
+  const checked=await findMisplaced(root,root,options,metadata);
+  assert.deepEqual(checked.files,['wrong/B.JPG']);
+  const listing=await inventory(root),infos=new Map(),mtimes=new Map();
+  for(const file of listing.files){infos.set(file.path,await metadata());mtimes.set(file.path,(await fs.stat(file.path)).mtime);}
+  const routes=evaluateRoutes({sourceRoot:root,files:listing.files,scanned:listing.files,metadata:infos,mtimes,roots:[{root,role:'photos'}],options:{...options,reorganize:true}});
+  const misplaced=routes.filter(route=>classifyPlacement({route,actual:{root:'photos',relativePath:route.file.relative},rulesScope:'current'}).status==='misplaced');
+  assert.deepEqual(misplaced.map(route=>route.file.relative),checked.files);
 });

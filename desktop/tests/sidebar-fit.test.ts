@@ -22,3 +22,15 @@ test('once the sidebar has grown, a line that now fits shows the full text',()=>
 test('with no drives the sidebar keeps its minimum width',()=>{
  assert.deepEqual(sidebarFit({lines:[],chrome:90,minimum:190,maximum:320}),{width:190,compact:[]});
 });
+
+test('each line can bring its own chrome: a name beside its buttons needs more room around it than a capacity line',()=>{
+ // A 100 px name in a row with 160 px of icon and buttons needs 260; a 180 px capacity line with 60 px of margins needs 240.
+ const fit=sidebarFit({lines:[{natural:180,available:190,chrome:60},{natural:100,available:90,chrome:160}],chrome:60,minimum:190,maximum:360,current:250});
+ assert.equal(fit.width,260);
+ assert.deepEqual(fit.compact,[false,false]);
+});
+
+test('fractional measurements round the width up, so the line that set it fits',()=>{
+ const fit=sidebarFit({lines:[{natural:120.3,available:100,chrome:80}],chrome:60,minimum:190,maximum:360,current:180});
+ assert.equal(fit.width,201);assert.deepEqual(fit.compact,[false]);
+});

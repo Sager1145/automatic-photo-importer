@@ -8,7 +8,7 @@ import {stableDevices} from './device-selection';
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'keep',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -67,9 +67,12 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   ignoredDevices:value.ignoredDevices===undefined?{...base.ignoredDevices}:stableDevices(records<{name:string;ignoredAt:string}>(value.ignoredDevices,['name','ignoredAt'])),
   deviceHistory:value.deviceHistory===undefined?{...base.deviceHistory}:stableDevices(history(value.deviceHistory)),
   unknownRules:{...(value.unknownRules&&typeof value.unknownRules==='object'?value.unknownRules as Preferences['unknownRules']:base.unknownRules)},
-  noMetadataHandling:oneOf(value.noMetadataHandling,noMetadataModes,base.noMetadataHandling??'keep'),
+  noMetadataHandling:oneOf(value.noMetadataHandling,noMetadataModes,base.noMetadataHandling??'folder'),
   noMetadataFolder:validNoMetadataFolder(value.noMetadataFolder)?value.noMetadataFolder:validNoMetadataFolder(base.noMetadataFolder)?base.noMetadataFolder:UNKNOWN_FILES_FOLDER,
   conflictNaming:oneOf(value.conflictNaming,['folder','number'] as const,base.conflictNaming??'folder'),
+  autoEject:flag(value.autoEject,base.autoEject===true),
+  deleteOriginalsFolders:flag(value.deleteOriginalsFolders,base.deleteOriginalsFolders!==false),
+  deleteOriginalsCards:flag(value.deleteOriginalsCards,base.deleteOriginalsCards===true),
   logLevel:oneOf(value.logLevel,LOG_LEVELS,base.logLevel??'normal'),
   editedFolder:text(value.editedFolder,base.editedFolder),
   // The thread pool reads the saved limits by the same rule before anything starts; a limit not given keeps the base one, then this machine's default.

@@ -14,9 +14,19 @@ const organization:Job={id:'organize',source:{id:'library:/backup',name:'Existin
 const state=(extra:Partial<AppState>={}):AppState=>gated({preferences:normalizePreferences({destinations:['/backup'],showDashboard:false}),sources:[media,files],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 const render=(child:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:child}));
 const desk=(value:AppState,mode:'media'|'files')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode}));
-test('three task destinations and a separate Settings anchor replace six primary pages',()=>{
+test('an empty mode says where the other mode\'s connected sources are and switches to it',()=>{
+ const only=(...sources:Source[])=>state({sources});
+ const hint=(value:AppState,mode:'media'|'files',onOtherMode?:()=>void)=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{},mode,onOtherMode}));
+ assert.match(hint(only(files),'media',()=>{}),/1 connected source is in Files &amp; folders\./);
+ assert.match(hint(only(media),'files',()=>{}),/1 connected source is in Media\./);
+ assert.match(hint(only(files,{...files,id:'files-2'}),'media',()=>{}),/2 connected sources are in Files &amp; folders\./);
+ assert.doesNotMatch(hint(only(media),'media',()=>{}),/other-mode-sources/,'not shown when this mode has sources');
+ assert.doesNotMatch(hint(only(files),'media'),/other-mode-sources/,'not shown without a way to switch');
+ assert.doesNotMatch(hint(state({sources:[]}),'media',()=>{}),/other-mode-sources/,'not shown when nothing is connected');
+});
+test('browser and task destinations with a separate Settings anchor replace six primary pages',()=>{
  const html=render(createElement(WorkspaceNavigation,{page:'library',onNavigate:()=>{}}));
- assert.deepEqual([...html.matchAll(/data-page="(.*?)"/g)].map(match=>match[1]),['desk','library','activity','settings']);
+ assert.deepEqual([...html.matchAll(/data-page="(.*?)"/g)].map(match=>match[1]),['desk','browser','library','activity','settings']);
  assert.match(html,/settings-navigation/);assert.match(html,/Library tools/);assert.doesNotMatch(html,/data-page="drives"/);
  assert.match(html,/<button[^>]*data-page="library"[^>]*aria-current="page"/);
 });
@@ -26,7 +36,7 @@ test('Media and Files & folders expose the appropriate registered sources and pi
  assert.match(f,/data-source-id="files"/);assert.doesNotMatch(f,/data-source-id="card"/);
  assert.match(m,/Choose media folders…/);assert.match(f,/Back up drives or folders…/);
  assert.ok(m.indexOf('Choose media folders…') < m.indexOf('data-testid="source-cards"'));
- assert.doesNotMatch(m,/data-testid="backup-mode"/);assert.match(f,/data-testid="backup-mode"/);
+ assert.doesNotMatch(f,/data-testid="backup-mode"/);
  assert.match(f,/Back up<\/button>/);assert.match(f,/Scan media/);
 });
 test('an empty mode says where the other mode\'s connected sources are and switches to it',()=>{
@@ -51,13 +61,13 @@ test('queued backup jobs stay in Files mode when the next source run is Media',(
 });
 test('organization scope, affected roots and consequences precede one execution area',()=>{
  const value=state({preferences:normalizePreferences({destinations:['/backup'],mediaLayout:'video-root'}),organizationFolders:{'/backup':['2024','2025']}});
- const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{},onRecovery:()=>{}}));
+ const html=render(createElement(Organization,{state:value,act:()=>{},busy:false,onFolderRules:()=>{}}));
  const execute=html.indexOf('data-testid="organization-execute"');
  assert.ok(execute>html.indexOf('<li>2025</li>'));assert.ok(execute>html.indexOf('Organize: move, source removed'));
  assert.ok(execute>html.indexOf('/backup/videobackup'));assert.equal((html.match(/>Organize now</g)??[]).length,1);
  assert.equal((html.match(/>Review changes…</g)??[]).length,1);
  assert.doesNotMatch(html,/collect-problem-files-setting/);assert.doesNotMatch(html,/organization-recovery-heading/);
- assert.match(html,/Edit folder rules/);assert.match(html,/Recovery &amp; maintenance/);
+ assert.match(html,/data-testid="organization-execute"><button[^>]*organization-rules[^>]*>.*?Edit folder rules<\/button><button[^>]*data-testid="review-changes"/);assert.doesNotMatch(html,/Recovery &amp; maintenance/);
  const top=render(createElement(TitlebarControls,{state:value,act:()=>{},page:'library',errorCount:0,onErrors:()=>{}}));
  assert.doesNotMatch(top,/Organize now|Scan for duplicates|Review changes/);assert.match(top,/show-errors/);
 });
@@ -74,7 +84,7 @@ test('Activity retains all mixed job controls and recovery actions independently
  assert.match(locked,/<button[^>]*data-testid="delete-recovery"[^>]*disabled/);
 });
 test('Activity Issues embeds the complete issue resolution view without a modal',()=>{
- const html=render(createElement(ActivityPanel,{embedded:true,state:state(),errors:[],act:()=>{},onClose:()=>{}}));
+ const html=render(createElement(ActivityPanel,{state:state(),errors:[],act:()=>{}}));
  assert.match(html,/activity-issues/);assert.doesNotMatch(html,/<dialog/);assert.match(html,/No errors to show/);assert.match(html,/No warnings to show/);
 });
 
@@ -90,4 +100,10 @@ test('Review stays disabled in both modes while any transfer, organization or du
    for(const review of reviews) assert.match(review,/disabled/,`${mode}: review locked across workspaces`);
   }
  }
+});
+
+test('the drive backup mode sits in the Files & folders header, with Change',async()=>{
+ const {BackupModeLine}=await import('../renderer/RootApp');
+ const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(BackupModeLine,{mode:'additive',onChange:()=>{}})}));
+ assert.match(html,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
 });

@@ -102,9 +102,9 @@ test('Delete originals asks twice, names count and size, and only the second con
   const buttons=two.match(/<button[^>]*>(?:(?!<\/button>).)*<\/button>/g)!;
   assert.equal(buttons.length,2);assert.match(buttons[0]!,/data-autofocus/);assert.match(buttons[1]!,/button-danger/);assert.ok(buttons[1]!.includes(t('Delete permanently')));
  }
- // Not offered before the import finished, for cards, or when nothing was verified.
+ // Not offered before the import finished, for cameras, or when nothing was verified.
  assert.equal(render(createElement(DeleteOriginals,{job:{...job,phase:'copying'},act:()=>{}})),'');
- assert.equal(render(createElement(DeleteOriginals,{job:{...job,source:{...job.source,transport:'storage'}},act:()=>{}})),'');
+ assert.equal(render(createElement(DeleteOriginals,{job:{...job,source:{...job.source,transport:'camera'}},act:()=>{}})),'');
  assert.equal(render(createElement(DeleteOriginals,{job:{...job,verifiedOriginals:undefined},act:()=>{}})),'');
  // Nothing to confirm until the count is known, or when it is zero.
  const measuring=render(createElement(OriginalsConfirm,{step:'first',name:'Shoot',onCancel:()=>{},onConfirm:()=>{}}));
