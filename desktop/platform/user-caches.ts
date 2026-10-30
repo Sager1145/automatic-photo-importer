@@ -3,6 +3,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import {randomUUID} from 'node:crypto';
 import {promisify} from 'node:util';
+import { unlinkEntry } from '../core/paths';
 /** Records v5 for this Mac's own caches in the app's data folder: the stored value is {v:5,kind,...}. A cache in any
  * other shape is not read; it is rebuilt as if there were none. */
 export type CacheKind='listing'|'scan'|'imported'|'placement'|'eta';
@@ -30,7 +31,7 @@ export async function writeCacheFile(file:string,kind:CacheKind,value:Record<str
  const text=JSON.stringify(cacheRecord(kind,value)),body=options.gzip?await gzip(text,{level:1}):text,temporary=`${file}.${randomUUID()}.tmp`;
  await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});
  try{await fs.writeFile(temporary,body,{mode:0o600});await fs.rename(temporary,file);}
- catch(error){await fs.unlink(temporary).catch(()=>{});throw error;}
+ catch(error){await unlinkEntry(temporary).catch(()=>{});throw error;}
 }
 const chains=new Map<string,Promise<unknown>>();
 /** Runs `work` after every earlier call for the same path has settled, so read-modify-write updates of one file never interleave. A rejection reaches only its own caller. */

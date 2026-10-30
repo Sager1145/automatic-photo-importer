@@ -4,7 +4,7 @@ import path from 'node:path';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {APP_DATA_FOLDER} from './legacy-names';
 import {logDeletion} from '../logger';
-import {beneath,checkAbort,code,contained,maybeLstat,pathKey,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey} from './paths';
+import {beneath,checkAbort,code,contained,maybeLstat,pathKey,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey,unlinkEntry,isOwnRealpath} from './paths';
 export {APP_DATA_FOLDER} from './legacy-names';
 
 /** Records v5: every record this app writes on a drive lives in one visible "Photo Importer Data" folder (the
@@ -171,7 +171,7 @@ export async function replaceSealed(kind:SealKind,target:string,prefix:string,pa
   const handle=await fs.open(temporary,'wx',0o600);
   try{await handle.writeFile(JSON.stringify(sealV5(kind,payload)));await handle.sync();}finally{await handle.close();}
   await fs.rename(temporary,target);
- }catch(error){await fs.unlink(temporary).then(()=>logDeletion('store',temporary,'temporary sealed record of a write that failed','written by this call, never renamed into place'),()=>{});throw error;}
+ }catch(error){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'temporary sealed record of a write that failed','written by this call, never renamed into place'),()=>{});throw error;}
  await syncDirectory(path.dirname(target));
 }
 
@@ -273,7 +273,7 @@ export function ensureStore(base:string):Promise<Store>{
  return made;
 }
 async function createStore(base:string):Promise<Store>{
- if(path.resolve(base)!==base||await fs.realpath(base)!==base)throw new Error(`Unsafe records location: ${base}`);
+ if(path.resolve(base)!==base||!await isOwnRealpath(base))throw new Error(`Unsafe records location: ${base}`);
  const baseStat=await fs.lstat(base,{bigint:true});if(!baseStat.isDirectory())throw new Error(`Unsafe records location: ${base}`);
  const folder=path.join(base,APP_DATA_FOLDER);
  try{await fs.mkdir(folder,{mode:0o700});await syncDirectory(base);}catch(error){if(code(error)!=='EEXIST')throw error;}
@@ -285,7 +285,7 @@ async function createStore(base:string):Promise<Store>{
  const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
  await writeNewFile(temporary,JSON.stringify(sealV5('store',{base,baseIdentity:`${baseStat.dev}:${baseStat.ino}`,minVersion:STORE_MIN_VERSION})));
  const file=path.join(folder,'store.json');
- if(await maybeLstat(file)){await fs.unlink(temporary).then(()=>logDeletion('store',temporary,'store record written by a creation another one beat','written by this call'),()=>{});}
+ if(await maybeLstat(file)){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'store record written by a creation another one beat','written by this call'),()=>{});}
  else if(await renameChecked(temporary,file)!=='done')throw new Error(`Unable to create ${file}`);
  const store=await storeRecord(folder,base,baseStat);if(!store)throw new Error(`Unable to create ${file}`);
  return store;
@@ -295,7 +295,7 @@ export async function storeFor(library:string):Promise<Store>{return ensureStore
 /** The store is still the folder recorded, in place, on the base's device, not a link. */
 export async function storeUnchanged(store:Store):Promise<void>{
  const base=await fs.lstat(store.base,{bigint:true}),folder=await fs.lstat(store.path,{bigint:true});
- if(!base.isDirectory()||base.isSymbolicLink()||base.ino!==store.baseIno||folder.ino!==store.ino||!folder.isDirectory()||folder.isSymbolicLink()||folder.dev!==base.dev||await fs.realpath(store.path)!==store.path)throw new Error(`${APP_DATA_FOLDER} changed; scan again: ${store.path}`);
+ if(!base.isDirectory()||base.isSymbolicLink()||base.ino!==store.baseIno||folder.ino!==store.ino||!folder.isDirectory()||folder.isSymbolicLink()||folder.dev!==base.dev||!await isOwnRealpath(store.path))throw new Error(`${APP_DATA_FOLDER} changed; scan again: ${store.path}`);
 }
 /** `file` is inside the store, with no link on the way. */
 export async function inStore(file:string,store:Store):Promise<void>{await contained(file,store.path);}

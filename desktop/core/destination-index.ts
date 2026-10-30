@@ -34,7 +34,7 @@ export async function loadRootRecord(root:string,rootIdentity:string,fileName:st
 export class RootRecordWriter {
   private dirty=false;
   private writing:Promise<void>=Promise.resolve();
-  constructor(private readonly root:string,private readonly rootIdentity:string,private readonly fileName:string,private readonly kind:Parameters<typeof replaceSealed>[0]) {}
+  constructor(private readonly root:string,private readonly rootIdentity:string,private readonly fileName:string,private readonly kind:Parameters<typeof replaceSealed>[0],private readonly extra:Record<string,unknown>={}) {}
   mark():void {this.dirty=true;}
   flush(payload:()=>Record<string,unknown>):Promise<void> {
     const write=this.writing.then(async()=>{
@@ -44,7 +44,7 @@ export class RootRecordWriter {
       let target:string;
       try { target=await indexTarget(this.root,this.fileName); } catch(error) { this.dirty=true; throw error; }
       // A cache is replaced in one step; a crash leaves either version (and a temp file the cleanup removes after an hour).
-      try { await replaceSealed(this.kind,target,this.kind,{rootIdentity:this.rootIdentity,files:payload()}); } catch(error) { this.dirty=true; throw error; }
+      try { await replaceSealed(this.kind,target,this.kind,{...this.extra,rootIdentity:this.rootIdentity,files:payload()}); } catch(error) { this.dirty=true; throw error; }
     });
     this.writing=write.catch(()=>{});
     return write;

@@ -104,3 +104,13 @@ The whole stress suite took 1,596 s (26.6 min). The organize test alone took 13.
 - **Small-file copies are dominated by per-file cost.** The new engine copies small files about 4 times faster than before (32 vs 125 ms per file). That cost is still mostly fixed overhead per file, not bytes.
 - **Memory grows with the plan.** Peak RSS reached 657 MB while planning and checking 30,000 files. That is fine for a card, but it grows linearly with very large libraries.
 - **Not covered:** physical cards, cameras over USB (PTP/MTP), network shares and FAT32 were not exercised. The Electron smoke test with `--large=N` was not timed in this run.
+
+## Hardware exFAT end-to-end test
+
+`Scripts/test-hardware-exfat.mts` runs import, re-import, conflict, organization, undo, finalize, duplicate removal and an interrupted organization on real external exFAT volumes:
+
+```
+node --import tsx Scripts/test-hardware-exfat.mts --source=/Volumes/A006 --library=/Volumes/Untitled [--keep] [--files=N]
+```
+
+It only writes inside one `photo-importer-hw-test-<ISO time>` folder it creates on each volume (a guard rejects every other path), keeps app data in a fresh temporary folder, and removes only those folders at the end unless `--keep` is given. Metadata comes from a synthetic table, so no camera files are needed. It prints a PASS/FAIL/SKIP line per check, per-scenario timings and the exFAT inode observations, and exits non-zero on any failure.

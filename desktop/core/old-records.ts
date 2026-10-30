@@ -6,7 +6,7 @@ import {hostKeyConfigured,openRegular,openV5,renameChecked,requireHostKey,sealV5
 import {halfConvertedJournals} from './recovery';
 import {logDeletion} from '../logger';
 import {isOldPointerName,isOldReceiptName,LEGACY_RECOVERY_FOLDER,OLD_JOURNAL_ID,RECOVERY_FOLDER} from './legacy-names';
-import {beneath,maybeLstat,syncDirectory} from './paths';
+import {beneath,maybeLstat,syncDirectory,unlinkEntry} from './paths';
 import {MessageError} from '../messages';
 
 /** Records v5 left every earlier format behind. What an earlier version wrote on a drive is never read beyond
@@ -131,7 +131,7 @@ export async function acknowledgeOldRecords(root:string):Promise<number>{
   if(await maybeLstat(target)){await fs.rename(temporary,target);await syncDirectory(store.path);}
   else if(await renameChecked(temporary,target)!=='done')throw new Error(`Unable to write ${target}`);
  }catch(error){
-  await fs.unlink(temporary).then(()=>logDeletion('store',temporary,'temporary reviewed list of a write that failed','written by this call, never renamed into place'),()=>{});
+  await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'temporary reviewed list of a write that failed','written by this call, never renamed into place'),()=>{});
   throw error;
  }
  return fresh.length;

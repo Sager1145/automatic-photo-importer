@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readCacheFile, serialized, writeCacheFile } from './user-caches';
-import { beneath } from '../core/paths';
+import { beneath, unlinkEntry } from '../core/paths';
 import { mapPool } from '../core/devices';
 
 /** What the last folder check (or an import) knew about a destination library: which files sit where the folder
@@ -49,7 +49,7 @@ export async function loadPlacement(store:string,id:string,scope:string):Promise
   return memory;
 }
 /** Forgets the library's record altogether (no rules are recorded for it afterwards). */
-export const forgetPlacement=(store:string,id:string)=>serialized(fileFor(store,id),async()=>{headers.delete(fileFor(store,id));await fs.unlink(fileFor(store,id)).catch(()=>{});});
+export const forgetPlacement=(store:string,id:string)=>serialized(fileFor(store,id),async()=>{headers.delete(fileFor(store,id));await unlinkEntry(fileFor(store,id)).catch(()=>{});});
 // Writers of one file take turns, so an import and a check never overwrite each other's update.
 function mutate(store:string,id:string,scope:string,change:(current:Placement)=>Placement,fresh=false):Promise<void> {
   const target=fileFor(store,id);

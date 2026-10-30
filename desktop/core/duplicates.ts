@@ -33,6 +33,9 @@ const MAX_BYTES=256*1024*1024;
 /** What the store keeps of a media file: its kind, edited state and EXIF fingerprint, bound to the stat they were read under.
  * Content digests are not kept here: the destination index owns them. */
 export interface FileRecord {stat:StatRecord;kind:MediaKind;edited:boolean;exif?:DuplicateExif;}
+/** Version of what the stored fields mean; bump it when that changes (v2: `edited` follows the file's metadata and its
+ * edited folder, no longer the old folder-name rule). A record of another version is ignored and replaced by the next scan. */
+export const DUPLICATES_RULES=2;
 const milliseconds=(value:bigint)=>Number(value)/1e6;
 
 /** Records of a library's media files, so a scan does not read the metadata of an unchanged file again. A record
@@ -40,11 +43,12 @@ const milliseconds=(value:bigint)=>Number(value)/1e6;
 export class DuplicateStore {
   files=new Map<string,FileRecord>();
   private readonly writer:RootRecordWriter;
-  constructor(readonly root:string,readonly rootIdentity:string) {this.writer=new RootRecordWriter(root,rootIdentity,DUPLICATES_FILE,'duplicates');}
+  constructor(readonly root:string,readonly rootIdentity:string) {this.writer=new RootRecordWriter(root,rootIdentity,DUPLICATES_FILE,'duplicates',{rules:DUPLICATES_RULES});}
   static async load(root:string,rootIdentity:string):Promise<DuplicateStore> {
     const store=new DuplicateStore(root,rootIdentity);
     const data=await loadRootRecord(root,rootIdentity,DUPLICATES_FILE,'duplicates',MAX_BYTES);
-    if(data) store.take(data.files as Record<string,unknown>);
+    if(data&&data.rules===DUPLICATES_RULES) store.take(data.files as Record<string,unknown>);
+    else if(data) store.mark();
     return store;
   }
   /** Take the stored records; any other field a record carries is ignored. */

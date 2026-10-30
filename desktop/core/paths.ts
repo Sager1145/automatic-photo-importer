@@ -27,6 +27,41 @@ export function beneath(child:string,root:string):boolean {
 export const posixRelative=(root:string,file:string):string=>path.relative(root,file).split(path.sep).join('/');
 /** The names in `dir`, or none when it is not there. */
 export const readdirIfPresent=(dir:string):Promise<string[]>=>fs.readdir(dir).catch(error=>{if(code(error)==='ENOENT')return [] as string[];throw error;});
+/**
+ * Measured on macOS with exFAT (two SSDs): a name stored precomposed (NFC: cameras, Windows, most non-Mac tools; accents, Japanese
+ * dakuten kana, Hangul) is listed by readdir decomposed (NFD). With the listed name open, lstat, rename and utimes work, but
+ * unlink and rmdir fail with ENOENT; the NFC form works. These two try the plain operation and, only on ENOENT, retry on the other
+ * normalization form of the last component, and only when lstat shows both names are the same entry (same device and inode, same kind).
+ * Anything else rethrows the original error; no other error code is retried.
+ */
+export interface EntryOps {lstat(file:string):Promise<{dev:bigint;ino:bigint;isDirectory():boolean}>;unlink(file:string):Promise<void>;rmdir(folder:string):Promise<void>;}
+const realOps:EntryOps={lstat:file=>fs.lstat(file,{bigint:true}),unlink:file=>fs.unlink(file),rmdir:folder=>fs.rmdir(folder)};
+/** The same entry under the other normalization form of its last component, or undefined when the two forms are the same string. */
+export function alternateName(entry:string):string|undefined {
+  const name=path.basename(entry),other=name===name.normalize('NFC')?name.normalize('NFD'):name.normalize('NFC');
+  return other===name?undefined:path.join(path.dirname(entry),other);
+}
+/** The alternate path when it names the very entry `entry` does (same dev and ino, same kind), else undefined. */
+export async function sameEntryAlternate(entry:string,folder:boolean,ops:EntryOps=realOps):Promise<string|undefined> {
+  const other=alternateName(entry);
+  if(!other) return undefined;
+  try {
+    const [a,b]=await Promise.all([ops.lstat(entry),ops.lstat(other)]);
+    return a.dev===b.dev&&a.ino===b.ino&&a.isDirectory()===folder&&b.isDirectory()===folder?other:undefined;
+  } catch { return undefined; }
+}
+async function removeEntry(entry:string,folder:boolean,ops:EntryOps):Promise<void> {
+  const run=folder?ops.rmdir:ops.unlink;
+  try { await run(entry); }
+  catch(error) {
+    if(code(error)!=='ENOENT') throw error;
+    const other=await sameEntryAlternate(entry,folder,ops);
+    if(!other) throw error;
+    await run(other);
+  }
+}
+export const unlinkEntry=(file:string,ops:EntryOps=realOps):Promise<void>=>removeEntry(file,false,ops);
+export const rmdirEntry=(folder:string,ops:EntryOps=realOps):Promise<void>=>removeEntry(folder,true,ops);
 /** Inclusive containment: the root itself or anything beneath it. */
 export function within(child:string,root:string):boolean {return path.relative(root,child)===''||beneath(child,root);}
 export async function directory(selected:string):Promise<string> {
@@ -39,8 +74,18 @@ export async function identity(root:string):Promise<string> {
   if(!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe destination directory: ${root}`);
   return `${stat.dev}:${stat.ino}`;
 }
+export interface RealpathOps {lstat(file:string):Promise<{dev:bigint;ino:bigint;isDirectory():boolean;isFile():boolean;isSymbolicLink():boolean}>;realpath(file:string):Promise<string>;}
+const realpathOps:RealpathOps={lstat:file=>fs.lstat(file,{bigint:true}),realpath:file=>fs.realpath(file)};
+/** True when `real` (default: realpath of `file`) is `file` itself. macOS exFAT lists precomposed (NFC) names decomposed (NFD) but realpath returns the stored NFC form, so an exact string check fails for a listed path.
+ * A difference of Unicode normalization alone is accepted only when both spellings are the very same entry (same dev, ino and kind); on normalization-sensitive filesystems (ext4) NFC and NFD are different entries and are refused. ENOENT from realpath propagates. */
+export async function isOwnRealpath(file:string,real?:string,ops:RealpathOps=realpathOps):Promise<boolean> {
+  real??=await ops.realpath(file);
+  if(real===file)return true;
+  if(real.normalize('NFC')!==file.normalize('NFC'))return false;
+  try{const a=await ops.lstat(file),b=await ops.lstat(real);return a.dev===b.dev&&a.ino===b.ino&&a.isDirectory()===b.isDirectory()&&a.isFile()===b.isFile()&&a.isSymbolicLink()===b.isSymbolicLink();}catch{return false;}
+}
 export async function rootUnchanged(root:string,expected:string):Promise<void> {
-  if(await identity(root)!==expected || await fs.realpath(root)!==root) throw new Error(`Destination identity changed; scan again: ${root}`);
+  if(await identity(root)!==expected || !await isOwnRealpath(root)) throw new Error(`Destination identity changed; scan again: ${root}`);
 }
 /** Strict directory durability: unsupported filesystems must not acknowledge a backup. */
 export async function syncDirectory(folder:string):Promise<void> {
@@ -125,7 +170,8 @@ export async function contained(file:string,root:string):Promise<void> {
   }
   // One resolution of the deepest existing component covers every ancestor: a component
   // replaced by a link after its own check still resolves outside `root` here.
-  if(deepest) try { if(!beneath(await fs.realpath(deepest),root)) throw new Error(`Unsafe resolved path: ${deepest}`); } catch(error) { if(code(error)!=='ENOENT') throw error; }
+  // The root is resolved only when the resolved path is not beneath it as given (exFAT resolves a listed NFD name to NFC).
+  if(deepest) try { const real=await fs.realpath(deepest); if(!beneath(real,root)&&!beneath(real,await fs.realpath(root))) throw new Error(`Unsafe resolved path: ${deepest}`); } catch(error) { if(code(error)!=='ENOENT') throw error; }
 }
 /** With rootIdentity, every folder is created only while the root is still that volume: a drive
  * unmounted mid-run leaves an empty mount folder on the system disk, and nothing may be written there.
@@ -163,7 +209,7 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
     }
   } catch(error) {
     // Only when the volume left: removing a fresh folder after any other error could fail another job's file in it.
-    if(rootIdentity&&await rootUnchanged(root,rootIdentity).then(()=>false,()=>true)) for(const folder of created.reverse()) await fs.rmdir(folder).catch(()=>undefined);
+    if(rootIdentity&&await rootUnchanged(root,rootIdentity).then(()=>false,()=>true)) for(const folder of created.reverse()) await rmdirEntry(folder).catch(()=>undefined);
     throw error;
   }
   await contained(file,root);

@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { isOwnRealpath, type RealpathOps } from '../core/paths';
+const nfc='/v/café',nfd='/v/café';
+const ops=(ino:Record<string,bigint>,kind:Record<string,string>={}):RealpathOps=>({realpath:async f=>f,lstat:async f=>{if(ino[f]===undefined)throw Object.assign(new Error('x'),{code:'ENOENT'});const k=kind[f]??'dir';return {dev:1n,ino:ino[f]!,isDirectory:()=>k==='dir',isFile:()=>k==='file',isSymbolicLink:()=>k==='link'};}});
+test('exactly equal needs no lookup',async()=>{assert.equal(await isOwnRealpath('/v/a','/v/a',ops({})),true);});
+test('normalization-equal with the same dev and ino is the same entry',async()=>{assert.equal(await isOwnRealpath(nfd,nfc,ops({[nfd]:5n,[nfc]:5n})),true);});
+test('normalization-equal with a different ino is another entry',async()=>{assert.equal(await isOwnRealpath(nfd,nfc,ops({[nfd]:5n,[nfc]:6n})),false);});
+test('normalization-equal with a different kind or missing entry is refused',async()=>{assert.equal(await isOwnRealpath(nfd,nfc,ops({[nfd]:5n,[nfc]:5n},{[nfc]:'file'})),false);assert.equal(await isOwnRealpath(nfd,nfc,ops({[nfd]:5n})),false);});
+test('a difference beyond normalization is refused',async()=>{assert.equal(await isOwnRealpath('/v/a','/w/a',ops({'/v/a':1n,'/w/a':1n})),false);});

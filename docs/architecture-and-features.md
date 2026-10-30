@@ -311,9 +311,8 @@ flowchart LR
 
 ### 12.4 本轮不改（需产品决定或缺测量）
 
-- `Conflicts/<内容 id>` 用 `localeCompare` 排序（受系统语言影响）。改为码点顺序会让已存在冲突目录的 id 改变，需决定是否接受。
-- `recovery.matches`（只把 0 字节视为 inode 不可靠）与 `import-recovery.binds`（只认负 inode）比 `paths.unreliableIno` 窄，但都是失败即拒绝；放宽会让撤销/回执接受更多文件，属安全策略，需 exFAT 实测后决定。
-- 去重库中已按旧判定写入的 `edited` 记录没有规则版本，需决定是否清除。
+前三项已在 12.7 处理。
+
 - `summary` 与 `exif` 是否可只留一个：需用测试样本确认全部标签与路由标签解析出的日期/机型一致。
 - `Review.plans` 整体发送与按盘的盘活动映射：未测 IPC 体积，不改。
 - 三个翻译分片文件并入 `i18n.tsx`：本分支正在向其中一个加行，合并后再做。
@@ -355,6 +354,37 @@ flowchart LR
 - 历史记录新增 `outcome`；升级前保存的记录在读取时按原界面的英文文本规则分类一次。
 
 验证（2026-10-29，本机）：`npm run typecheck` 通过；`npm run build` 通过；全量 `npm test` 1714 项：1712 通过、1 跳过、1 失败——失败项是 `problem-files.test.ts` 对 `findMisplaced` 结果做整体比较，未含新增的 `failures` 字段，已补上后该文件 7/7 通过（修复前基线有 1 项计时测试失败）。两轮独立审查（核心发布/恢复/落位/S1；错误/门控/偏好/界面）的 P2 发现均已修复。未做：真实相机卡、exFAT 硬件上的身份规则实测、Windows/Linux 实机、IPC 体积测量。
+
+### 12.7 第三轮：确定的冲突目录名、去重记录版本、exFAT 实盘
+
+在两块真实 exFAT 外置 SSD（A006 与 Untitled，USB，macOS）上测量与测试；所有写入都在测试自建的沙箱文件夹内，结束后只删除该沙箱，测试前后对卷根与 `Photo Importer Data` 全部条目（名称、大小、修改时间、inode）做快照比对。
+
+**exFAT 实测事实**（`Scripts/probe-exfat-identity.mts`、`Scripts/probe-exfat-names.mts`，两块盘结果一致）：
+
+| 现象 | 结果 |
+|---|---|
+| 新建文件的 inode | 首次写入数据并 fsync 前为负数（临时）；之后为正数，并在关闭、改时间、改名、移动中保持不变 |
+| 空文件的 inode | 一直为负数，每次改时间、改名、移动都变 |
+| 出生时间 | 所有步骤都不变 |
+| 硬链接 | 不支持（ENOTSUP） |
+| 磁盘上为组合形式（NFC）的名称（相机、Windows 写入；含重音、日文浊音假名、韩文） | `readdir` 返回分解形式（NFD）；用此名 `open/lstat/rename/utimes` 正常，`unlink/rmdir` 返回 ENOENT，`realpath` 返回 NFC |
+
+**据此的修复（均不放宽安全检查）**：
+
+| 问题 | 处理 |
+|---|---|
+| `Conflicts/<内容 id>` 随系统语言排序 | 新 id 按码点顺序；若按旧顺序算出的 `Conflicts/<旧 id>` 已存在则继续使用，已有冲突目录不改名、不重复复制 |
+| 去重库中按旧判定写入的 `edited` | 记录加 `rules:2`；旧记录读取时视为空并标记待写，下次扫描重读元数据并覆盖文件 |
+| exFAT 上的独占发布身份（整理时 exFAT 一律走此路径） | 原先只在空文件阶段记录身份（临时 inode），崩溃后无法认出自己的半成品，只能拒绝；现在首块数据 fsync 后追加一条真实 inode 记录。"属于自己"仍要求 dev+inode 完全相同 |
+| `recovery.matches`、`import-recovery.binds` | 实测证明它们的判定正确（临时 inode 确为负数，非空文件同步后 inode 稳定，出生时间稳定），不改 |
+| NFC 名称的删除与目录删除 | `paths.unlinkEntry/rmdirEntry`：只在 ENOENT 时、且另一种规范化形式与原路径 `lstat` 为同一 dev+inode 和同一类型时才对其执行；全部 36 处删除改用它。此前删除原件会报错、目录清理与 `._` 清理会静默留下 |
+| NFC 名称的 realpath 比对 | `paths.isOwnRealpath`：字符串相同，或只差规范化且两者 `lstat` 为同一 dev+inode 和类型；替换约 10 处精确比较；包含判断改为两侧都取 realpath。不直接比较规范化后的字符串：在区分规范化的文件系统（Linux ext4）上两种形式是不同目录 |
+
+**实盘端到端测试**（`Scripts/test-hardware-exfat.mts`）：导入（含 0 字节、MB 级、配对与伴随文件、码点与本地化排序不同的名称）→ 再导入不重复 → 同名不同内容进入 `Conflicts/<id>/` 且重跑不重复 → 改模板整理 → 撤销恢复原样 → 再整理并释放 → 去重扫描/移除/撤销 → 中途停止后续作 → NFC 名称的导入、删除原件、目录清理与 `._` 清理。每步校验 SHA-256 与文件数。结果：A006→Untitled、Untitled→A006、A006→A006、Untitled→Untitled 四种组合各 61 项全部通过；两块盘沙箱外条目前后完全一致（A006 4837 项、Untitled 25 项）；沙箱均已删除。图书馆位于 A006 时需用本机恢复密钥（`--host-key`，只读取不输出）：A006 根目录的 `Photo Importer Data` 由本机写入，用其它密钥时核心按设计拒绝使用它（失败即拒绝）。
+
+验证：`npm run typecheck`、`npm run build` 通过；全量 `npm test` 1731 项：1730 通过、0 失败、1 跳过。实盘修复后的最终代码另在 Untitled→A006 上重跑 61/61 通过。
+
+第一次实盘运行暴露的两处测试脚本问题（沙箱清理遇 NFC 名称失败、macOS 在卷根为沙箱生成 `._` 文件）都只涉及测试自建的文件，已在当场清除并修正脚本。
 
 ## Release note: files without metadata
 

@@ -14,7 +14,7 @@ import {captureTimestamp,parseCapture} from '../capture-time';
 import { formatFolder, layoutFolders } from '../media-formats';
 import { destinationParts } from './allocation';
 import { CONFLICTS_FOLDER, DEFAULT_EDITED_FOLDER, editedTemplate, expandTemplate, inEditedFolder, safeComponent, templateValues, validateRelative, validFolderName } from '../folder-template';
-import { beneath, linkRefused, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, sameBirth, sameFileIgnoringCtime, sameStat, statKey, syncDirectory, syncParents, syncFile } from './paths';
+import { beneath, linkRefused, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, sameBirth, sameFileIgnoringCtime, sameStat, statKey, syncDirectory, syncParents, syncFile , unlinkEntry } from './paths';
 export { inventory } from './inventory';
 import { mapPool, streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
@@ -122,12 +122,29 @@ function groups(entries:PlanEntry[]):PlanEntry[][] {
 // Conflicts/<content id> retains original names and camera/media grouping; numbering instead
 // names attempt n `<name> (n)` in place. Allocation metadata (the policy too) is serialized with
 // the plan so review roundtrips and resumed imports allocate alike if another writer arrives after planning.
-function target(entry:PlanEntry,attempt:number,family:PlanEntry[],digests?:Map<string,string>):string {
+function target(entry:PlanEntry,attempt:number,family:PlanEntry[],ids?:Map<string,string>):string {
   const original=entry.allocation??{destination:entry.destination,folder:path.dirname(entry.destination)};
   if(!attempt)return original.destination;
   if(entry.allocation?.conflictNaming==='number')return path.join(path.dirname(original.destination),numbered(entry,attempt,family));
-  const content=createHash('sha256').update(JSON.stringify(family.map(member=>[path.basename(member.source),digests!.get(member.id)!]).sort((a,b)=>a[0]!.localeCompare(b[0]!)||a[1]!.localeCompare(b[1]!)))).digest('hex').slice(0,16);
-  return path.join(original.folder,CONFLICTS_FOLDER,content+(attempt>1?'-'+attempt:''),path.relative(original.folder,original.destination));
+  return path.join(original.folder,CONFLICTS_FOLDER,ids!.get(original.folder)!+(attempt>1?'-'+attempt:''),path.relative(original.folder,original.destination));
+}
+/** The family's Conflicts folder name: a digest of its (name, SHA-256) pairs in codepoint order, the same on every system language. */
+const familyId=(family:PlanEntry[],digests:Map<string,string>,compare:(a:string,b:string)=>number)=>createHash('sha256').update(JSON.stringify(family.map(member=>[path.basename(member.source),digests.get(member.id)!]).sort((a,b)=>compare(a[0]!,b[0]!)||compare(a[1]!,b[1]!)))).digest('hex').slice(0,16);
+/** Libraries made before the id was locale-independent hold folders named by the process locale's order: such a folder that exists keeps its name, so nothing is renamed and earlier copies are found. */
+async function conflictIds(family:PlanEntry[],digests:Map<string,string>,root:string):Promise<Map<string,string>> {
+  const ids=new Map<string,string>(),id=familyId(family,digests,(a,b)=>a<b?-1:a>b?1:0),legacy=familyId(family,digests,(a,b)=>a.localeCompare(b));
+  for(const entry of family) {
+    const folder=(entry.allocation??{folder:path.dirname(entry.destination)}).folder;
+    if(ids.has(folder))continue;
+    let chosen=id;
+    if(legacy!==id) {
+      const old=path.join(folder,CONFLICTS_FOLDER,legacy);
+      await contained(old,root);
+      try { if((await fs.lstat(old)).isDirectory())chosen=legacy; } catch(error) { if(code(error)!=='ENOENT'&&code(error)!=='ENOTDIR')throw error; }
+    }
+    ids.set(folder,chosen);
+  }
+  return ids;
 }
 const NAME_BYTES=255;
 const originalName=(entry:PlanEntry)=>path.basename(entry.allocation?.destination??entry.destination);
@@ -160,10 +177,11 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
     // Conflict folders are named by content, so only then is the whole family hashed.
     const digests=attempt&&family[0]!.allocation?.conflictNaming!=='number'?new Map<string,string>():undefined;
     if(digests) for(const member of family) digests.set(member.id,await resolve(member));
+    const ids=digests&&await conflictIds(family,digests,root);
     const proposed=new Map<string,PlanEntry>(), allocation=[];
     let conflict=false;
     for(const entry of family) {
-      const destination=target(entry,attempt,family,digests), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
+      const destination=target(entry,attempt,family,ids), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
       const same=reserved===undefined?undefined:reserved.size===entry.size && await resolve(reserved)===await resolve(entry);
       if(same===false) {log('detailed','plan','destination-check',{source:entry.source,destination,decision:'conflict',reason:`another file in this plan is filed at ${destination} with different content`,attempt});conflict=true;break;}
       const reviewed=known?.get(key),exists=reviewed===undefined?await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal):reviewed||null;
@@ -871,7 +889,7 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
   try{output=recovered?await openPartial(recovered,transfer.root):await fs.open(file,'wx',0o600);}catch(error){claimedStages.delete(file);throw error;}
   claimedStages.add(file);
   let outputStat;
-  try{outputStat=await output.stat({bigint:true});}catch(error){await output.close().catch(()=>{});claimedStages.delete(file);if(!recovered){await fs.unlink(file).then(()=>logDeletion('staging',file,'staging file whose identity could not be read','created by this call with exclusive open (wx) a moment ago, nothing was written',{error}),()=>{});}throw error;}
+  try{outputStat=await output.stat({bigint:true});}catch(error){await output.close().catch(()=>{});claimedStages.delete(file);if(!recovered){await unlinkEntry(file).then(()=>logDeletion('staging',file,'staging file whose identity could not be read','created by this call with exclusive open (wx) a moment ago, nothing was written',{error}),()=>{});}throw error;}
   log('detailed','exec','stage-open',{source:entry.source,stage:file,resumedBytes:Number(outputStat.size),recovered:!!recovered,destination:entry.destination});
   return {target,output,initialSize:Number(outputStat.size),staged:{file,dev:outputStat.dev,ino:outputStat.ino,birthtime:outputStat.birthtimeNs,record:recovered,recovery,scope:recovered?.store.path??staging.store.path,target:path.dirname(entry.destination)}};
 }
@@ -984,7 +1002,7 @@ export async function cleanStage(staged:Staged,root:string,sync:boolean|'lazy'=t
     const exact=current.dev===staged.dev&&current.ino===staged.ino&&sameBirth(staged.birthtime,current.birthtimeNs);
     // A temporary (negative) inode is replaced by the real one on exFAT; device and birth time still name the file.
     const temporary=staged.ino<0n&&current.dev===staged.dev&&sameBirth(staged.birthtime,current.birthtimeNs)&&current.nlink===1n;
-    if(exact||temporary) {await fs.unlink(staged.file);logDeletion('staging',staged.file,'staging file of a copy (published, stopped or failed)',exact?`same device and inode as when this app created it (${staged.dev}:${staged.ino}) and birth time matches`:`temporary exFAT inode replaced by the real one: same device and birth time, single link`,{bytes:Number(current.size)});if(sync==='lazy')dirtyFolder(path.dirname(staged.file));if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
+    if(exact||temporary) {await unlinkEntry(staged.file);logDeletion('staging',staged.file,'staging file of a copy (published, stopped or failed)',exact?`same device and inode as when this app created it (${staged.dev}:${staged.ino}) and birth time matches`:`temporary exFAT inode replaced by the real one: same device and birth time, single link`,{bytes:Number(current.size)});if(sync==='lazy')dirtyFolder(path.dirname(staged.file));if(staged.record)await clearPartialRecord(staged.record,root,staged.recovery,sync);}
     else{
       const detail=`expected ${staged.dev}:${staged.ino}:${staged.birthtime} found ${current.dev}:${current.ino}:${current.birthtimeNs}`;
       log('normal','exec','clean-stage-left',{path:staged.file,reason:'identity differs',expected:{dev:String(staged.dev),ino:String(staged.ino),birthtime:String(staged.birthtime)},found:{dev:String(current.dev),ino:String(current.ino),birthtime:String(current.birthtimeNs)}});
@@ -1004,7 +1022,7 @@ async function releaseStaleStage(entry:PlanEntry,root:string,recovery:RecoveryIn
     // findPartial has already shown a shorter stage to be a byte prefix of the source; a whole one must also hash to the published checksum.
     if(stale.stat.size>BigInt(entry.size)||stale.stat.size===BigInt(entry.size)&&await digest(stale.file,signal)!==entry.digest) return;
     if(!sameStat(stale.stat,await fs.lstat(stale.file,{bigint:true}))) return;
-    await fs.unlink(stale.file);
+    await unlinkEntry(stale.file);
     logDeletion('staging',stale.file,'complete staged copy left by an interrupted run, now released',`this app's signed receipt for the same source and destination; ${stale.stat.size} bytes equal the plan size; SHA-256 equals the published checksum ${entry.digest}; unchanged until removal`,{bytes:entry.size});
     await clearPartialRecord(stale,root,recovery);
   } finally { claimedStages.delete(stale.file); }
@@ -1231,7 +1249,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       if(stat.birthtimeNs<=0n) {
         // No birth time to bind by: take back what was just made (this descriptor and this process created it) and use staging.
         const named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-        if(named&&sameStat(stat,named)&&stat.nlink===1n){await fs.unlink(destination);logDeletion('copy',destination,'direct-copy name created a moment ago on a volume that reports no creation date; taking it back to use staging','created by this call with exclusive open (wx), same descriptor and inode, single link, nothing written',{bytes:Number(stat.size)});}
+        if(named&&sameStat(stat,named)&&stat.nlink===1n){await unlinkEntry(destination);logDeletion('copy',destination,'direct-copy name created a moment ago on a volume that reports no creation date; taking it back to use staging','created by this call with exclusive open (wx), same descriptor and inode, single link, nothing written',{bytes:Number(stat.size)});}
         await clearPartialRecord(creating,root,recovery).catch(()=>{});
         throw NOT_DIRECT;
       }
@@ -1306,7 +1324,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       if(check!==streamed) {
         // Only a file this run created with O_EXCL and still holds is ever removed; a resumed one may hold bytes that are not ours.
         const held=await output.stat({bigint:true}),named=await fs.lstat(destination,{bigint:true}).catch(()=>undefined);
-        if(member.created&&named&&sameStat(held,named)&&held.nlink===1n){await fs.unlink(destination);logDeletion('copy',destination,'direct copy that failed its read-back against the source; removed','this run created the name with O_EXCL and still holds the same inode (single link); its bytes did not match the source checksum',{bytes:Number(held.size),streamed,readBack:check});await release({...entry,digest:streamed},destination,member.owned);}
+        if(member.created&&named&&sameStat(held,named)&&held.nlink===1n){await unlinkEntry(destination);logDeletion('copy',destination,'direct copy that failed its read-back against the source; removed','this run created the name with O_EXCL and still holds the same inode (single link); its bytes did not match the source checksum',{bytes:Number(held.size),streamed,readBack:check});await release({...entry,digest:streamed},destination,member.owned);}
         throw new Error(`Destination verification failed: ${destination}`);
       }
     }

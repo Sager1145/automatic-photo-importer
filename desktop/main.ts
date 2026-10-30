@@ -19,7 +19,7 @@ import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {within,isAbort} from './core/paths';
+import {within,isAbort,unlinkEntry,isOwnRealpath} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
@@ -234,7 +234,7 @@ async function writeReport(jobId:string,name:string,value:unknown){
 }
 async function initializeRecoveryKey(){
  const directory=app.getPath('userData');await fs.mkdir(directory,{recursive:true});const keyPath=path.join(directory,'organization-recovery.key');
- try{await fs.lstat(keyPath);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;const temporary=keyPath+'.'+randomUUID()+'.new';const file=await fs.open(temporary,'wx',0o600);try{await file.writeFile(randomBytes(32));await file.sync();}finally{await file.close();}try{await fs.link(temporary,keyPath);await syncDirectory(directory);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}finally{await fs.unlink(temporary);}}
+ try{await fs.lstat(keyPath);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;const temporary=keyPath+'.'+randomUUID()+'.new';const file=await fs.open(temporary,'wx',0o600);try{await file.writeFile(randomBytes(32));await file.sync();}finally{await file.close();}try{await fs.link(temporary,keyPath);await syncDirectory(directory);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}finally{await unlinkEntry(temporary);}}
  const info=await fs.lstat(keyPath);if(!info.isFile()||info.isSymbolicLink())throw new Error('The organization recovery key is unavailable.');const key=await fs.readFile(keyPath);if(key.length!==32)throw new Error('The organization recovery key is invalid.');configureOrganizationRecovery(key);
 }
 /** History saved before entries carried their outcome: classified once from the English text, as the history page used to. */
@@ -1068,7 +1068,7 @@ async function action(input:Action):Promise<void>{
    const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');
    const root=state.preferences.destinations[index];if(!root)throw new MessageError('error.chooseDestination');
    const result=await dialog.showOpenDialog(window!,{title:'Choose folders to organize',defaultPath:root,properties:['openDirectory','multiSelections']});
-   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(actual!==path.resolve(file)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[root]=selected;state.organizeOptions=freshOrganizeOptions();await save();}break;
+   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(!await isOwnRealpath(path.resolve(file),actual)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[root]=selected;state.organizeOptions=freshOrganizeOptions();await save();}break;
   }
   case 'organizeOptions':{
    // This run's choices; a run, or choosing folders again, puts them back to on.

@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { mediaKindForPath } from '../media-formats';
 import { sidecars } from './inventory';
-import { code, contained, markFolderChanged, sameStat } from './paths';
+import { code, contained, markFolderChanged, sameStat , unlinkEntry } from './paths';
 import { log, logDeletion } from '../logger';
 
 /**
@@ -195,7 +195,7 @@ export class AppleDoubleCleaner {
       if(!verdict.safe){this.keep(sidecar);return;}
       // Unchanged since it was read, so what is removed is what was judged.
       if(!sameStat(before,await fs.lstat(sidecar,{bigint:true}))){this.keep(sidecar);return;}
-      await fs.unlink(sidecar);
+      await unlinkEntry(sidecar);
       logDeletion('appledouble',sidecar,count==='removed'?'AppleDouble sidecar beside its media file':'orphan AppleDouble sidecar: its main file is gone',`inspectAppleDouble: safe (bookkeeping attributes only); ${before.size} bytes; unchanged between reading and removal; lstat of the main file ${count==='removed'?'found a plain file':'found nothing'}`,{bytes:Number(before.size),kind:count});
       this.report[count]++;
       markFolderChanged(path.dirname(sidecar));

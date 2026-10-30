@@ -7,7 +7,7 @@ import { assessReceipt, closeReceipts, IMPORTS, openReceipts, readSegment, recei
 import { deleteOrganizationRecovery, deletingPattern, endedJournal, isRecoveryName, journalTerminal, ORGANIZATIONS, POINTERS, removeTree, storeJournals, storePointerLeftover } from './recovery';
 import { log, logDeletion } from '../logger';
 import { LIBRARIES } from './destination-index';
-import { checkAbort, code, contained, digest, isAbort, maybeLstat, sameStat } from './paths';
+import { checkAbort, code, contained, digest, isAbort, maybeLstat, sameStat , unlinkEntry, rmdirEntry } from './paths';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
@@ -278,12 +278,12 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
         if(item.kind==='folder'||item.kind==='temporary'||item.stat?.isDirectory()) {
           if(!now.isDirectory()||now.dev!==item.stat?.dev||now.ino!==item.stat?.ino) continue;
           // Only folders found empty, or this app's own temporary and set-aside journal folders, are removed whole.
-          if(item.kind==='folder') await fs.rmdir(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
+          if(item.kind==='folder') await rmdirEntry(item.path); else await removeTree(item.path,options.signal,()=>options.onProgress?.(handled,doomed.length,handledBytes,doomedBytes,path.basename(item.path)));
           logDeletion('residue',item.path,residueReason(item.kind),item.kind==='folder'?'directory is still the one found by the scan (same device and inode) and rmdir only removes empty folders':`directory is still the one found by the scan (same device and inode) and is this app's own ${item.kind==='temporary'?'temporary':'set-aside'} folder, not in use`,{kind:item.kind,bytes:item.bytes,folder:true});
         } else {
           if(!now.isFile()||!item.stat||!sameStat(now,item.stat)) continue;
           if(item.kind==='sidecar'&&!await bookkeepingSidecar(item.path)) continue;
-          await fs.unlink(item.path);
+          await unlinkEntry(item.path);
           logDeletion('residue',item.path,residueReason(item.kind),item.kind==='sidecar'?'still the file found (same device, inode, size and times) and holds only bookkeeping':'file is still the one found by the scan: same device, inode, size and modification time',{kind:item.kind,bytes:item.bytes});
         }
         close(item);

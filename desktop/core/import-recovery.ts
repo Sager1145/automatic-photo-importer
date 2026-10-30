@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
 import {appendLines,holdLog,LINE_CAPS,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
-import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,type StatRecord} from './paths';
+import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,unlinkEntry,type StatRecord} from './paths';
 import {log,logDeletion} from '../logger';
 
 type Kind='stage'|'publication';
@@ -299,7 +299,7 @@ export async function removeSegmentIfDone(store:Store,file:string,signal?:AbortS
   const before=await fs.lstat(file,{bigint:true});
   if((await receiptSegments(store))[0]!==file)return false;
   const now=await fs.lstat(file,{bigint:true});if(!sameStat(before,now))return false;
-  await contained(file,store.path);await fs.unlink(file);
+  await contained(file,store.path);await unlinkEntry(file);
   logDeletion('residue',file,'receipt log segment every receipt of which is closed','oldest segment, not the one appends go to; read again while no append could start: every receipt it opens is closed, none it closes is opened later, no line fails its seal',{bytes:Number(now.size)});
   return true;
  });

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
-import { beneath, code, contained, identity, sameStat, syncDirectory } from './paths';
+import { beneath, code, contained, identity, sameStat, syncDirectory , unlinkEntry, rmdirEntry } from './paths';
 import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
 import { log, logDeletion } from '../logger';
 
@@ -58,12 +58,12 @@ export async function removeEmptiedFolders(root:string,folders:Iterable<string>,
       }
       if(!empty) continue;
       for(const [file,why] of found) {
-        await fs.unlink(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
+        await unlinkEntry(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
         logDeletion(options.area,file,`${why} in a folder emptied by ${options.after}`,'the folder held nothing else; the file is bookkeeping, not user content',{folder});
       }
       // Anything that appeared since the listing keeps the folder; rmdir refuses a folder that is not empty.
       if((await fs.readdir(folder)).length) continue;
-      try { await fs.rmdir(folder); } catch(error) { if(['ENOTEMPTY','EEXIST','ENOENT'].includes(code(error)??'')) continue; throw error; }
+      try { await rmdirEntry(folder); } catch(error) { if(['ENOTEMPTY','EEXIST','ENOENT'].includes(code(error)??'')) continue; throw error; }
       logDeletion(options.area,folder,`folder left with no files after ${options.after}`,'rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
       await syncDirectory(path.dirname(folder));
       removed++;

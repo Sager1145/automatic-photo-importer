@@ -7,6 +7,7 @@ import { plan } from '../core/index';
 import { overlappingLibraries, scanDuplicates, recordPlanDuplicates, duplicateStore, dropDuplicateStores, DUPLICATES_PREFIX } from '../core/duplicates';
 import { destinationIndex, dropDestinationIndexes, indexTarget, provablySame } from '../core/destination-index';
 import { statRecord } from '../core/paths';
+import { replaceSealed } from '../core/app-store';
 import type { BigIntStats } from 'node:fs';
 import { identity, statKey } from '../core/paths';
 import { ignoredName, inventory } from '../core/inventory';
@@ -143,6 +144,31 @@ test('a second scan reads no metadata and no file again, and a changed file is r
   await write(root, 'b/two.JPG', 'now different!');
   const changed = await scanDuplicates(root, await deps());
   assert.equal(counter.reads, 3); assert.equal(changed.groups.length, 0);
+});
+test('a record without the current rules version is ignored and replaced by the next scan, even when no file changed', async t => {
+  const base = await library(t), root = path.join(base, 'library');
+  await write(root, 'a/one.JPG', 'identical one'); await write(root, 'b/two.JPG', 'identical one');
+  const counter = { reads: 0 };
+  const deps = async () => ({ metadata: reader({}, counter), index: await destinationIndex(root, await identity(root)) });
+  await scanDuplicates(root, await deps());
+  const current = await storedRecord(root);
+  assert.equal(current.rules, 2); assert.equal(Object.keys(current.files).length, 2);
+  dropDuplicateStores(); dropDestinationIndexes();
+  await scanDuplicates(root, await deps());
+  assert.equal(counter.reads, 2, 'a current record is trusted');
+  // The record as an earlier version wrote it: no rules field (its `edited` came from the old folder-name rule).
+  const old = { rootIdentity: current.rootIdentity, files: Object.fromEntries(Object.entries(current.files as Record<string, object>).map(([name, record]) => [name, { ...record, edited: true }])) };
+  await replaceSealed('duplicates', await indexTarget(root, 'duplicates.json'), 'duplicates', old);
+  assert.equal((await storedRecord(root)).rules, undefined);
+  dropDuplicateStores(); dropDestinationIndexes();
+  const store = await duplicateStore(root, await identity(root));
+  assert.equal(store.files.size, 0, 'the old record yields no entries');
+  dropDuplicateStores(); dropDestinationIndexes();
+  const again = await scanDuplicates(root, await deps());
+  assert.equal(counter.reads, 4, 'the metadata is read again');
+  assert.ok(again.groups.every(group => group.files.every(item => !item.edited)));
+  const replaced = await storedRecord(root);
+  assert.equal(replaced.rules, 2); assert.ok(Object.values(replaced.files as Record<string, { edited: boolean }>).every(record => !record.edited));
 });
 test('a failed metadata read is not remembered: the next full scan reads that file again', async t => {
   const base = await library(t), root = path.join(base, 'library');

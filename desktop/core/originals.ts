@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import path from 'node:path';
-import { beneath, checkAbort, code, contained, digest, statKey } from './paths';
+import { beneath, checkAbort, code, contained, digest, statKey , unlinkEntry } from './paths';
 import { removeEmptiedFolders } from './redundant-folders';
 import { mapPool } from './devices';
 import { log, logDeletion } from '../logger';
@@ -111,7 +111,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       // The file read for the checksum must still be the one removed.
       const after=await regular(file.source);
       if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs||known&&after.ctimeNs!==before.ctimeNs) return {kept:'changed'};
-      await fs.unlink(file.source);
+      await unlinkEntry(file.source);
       logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} ${known?'not re-read at the source: unchanged since the import read it (identity + ctime); re-read':'re-read now at the source and'} at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
       return {deleted:true};
     } catch(error) {
