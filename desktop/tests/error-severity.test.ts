@@ -78,7 +78,7 @@ test('titlebar shows separate error and warning counts; the panel has two sectio
  }
  // Warnings only: no red badge, just the indicator.
  const calm=state({jobs:[job({errors:[message('error.userSkipped')]})]});calm.errorLog=new ErrorLog().update(gatherErrors(calm));
- const html=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
+ const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:calm,onOpen:()=>{},errors:collectErrors(calm),onErrors:()=>{}})}));
  assert.ok(!html.includes('sidebar-errors')&&html.includes('sidebar-warnings'));
 });
 
@@ -86,7 +86,7 @@ test('the dashboard counts the warnings All errors shows: a cleared warning is n
  const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
  const {I18nProvider}=await import('../renderer/i18n');
  const {ImportDashboard}=await import('../renderer/RootApp');
- const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:value,act:()=>{}})}));
  const value=state({jobs:[job({errors:[message('error.userSkipped'),message('inventory.emptyFile')]})]});
  value.errorLog=new ErrorLog().update(gatherErrors(value));
  assert.match(render(value),/2 warnings/);

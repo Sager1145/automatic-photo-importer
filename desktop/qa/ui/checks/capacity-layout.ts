@@ -5,6 +5,7 @@ import type {Inventory} from '../../../shared';
 import type {Check} from '../harness';
 import {clippedControls} from '../probes';
 import {syntheticJob} from '../synthetic';
+import {formatFolder} from '../../../media-formats';
 import {withFigures} from '../../../core/inventory';
 
 /** Check painted text fragments, not only their flex boxes (ellipsis can conceal overflowing text). */
@@ -50,6 +51,8 @@ export const capacityLayoutChecks=():Check[]=>[{
  skip:async h=>h.hooks?undefined:'needs QA injection hook',run:async h=>{
   await h.media([{name:'prefers-reduced-motion',value:'reduce'}]);
   const formats=['NEF','ARW','CR3','JPG','JPEG','PNG','HEIC','HEIF','MP4','MOV','MTS','TIFF'];
+  // The legend shows formats as routing classifies them (JPG and JPEG are one format, as are HEIC and HEIF).
+  const legendFormats=[...new Set(formats.map(format=>formatFolder(`frame.${format}`)))];
   const inventory:Inventory=withFigures({files:formats.map((format,i)=>({path:`/qa/frame-${i}.${format}`,relative:`frame-${i}.${format}`,size:1024**3,kind:'Images',included:true})),media:formats.length,companions:0,unknown:0,bytes:formats.length*1024**3,unknownExtensions:{},elapsedMs:100});
   const state=await h.state(),sources=state.sources.map(source=>({...source,total:987.6*1024**3,free:123.4*1024**3}));
   h.hooks!.set('sources',sources);h.hooks!.set('sourceInventories',{...state.sourceInventories,'fixture:1':inventory});
@@ -66,7 +69,7 @@ export const capacityLayoutChecks=():Check[]=>[{
      measurements.push({...context,...result});
      // Activity's Queue rows are compact and show no capacity bars: there it must only be free of clipped content.
      const queueClipped=view==='activity'?await h.probe(clippedControls):[];
-     if(view==='activity'?result.failures.length||queueClipped.length:!result.surfaces.length||result.failures.length||view!=='settings'&&formats.some(format=>!result.legend.includes(format)))failures.push({...context,...result,queueClipped});
+     if(view==='activity'?result.failures.length||queueClipped.length:!result.surfaces.length||result.failures.length||view!=='settings'&&legendFormats.some(format=>!result.legend.includes(format)))failures.push({...context,...result,queueClipped});
      if(width===1000&&textScale===2&&(language==='en'||language==='zh-Hans')){
       await h.js("(document.querySelector('article[data-source-id=\"fixture:1\"] .storage-capacity')||document.querySelector('.storage-capacity'))?.scrollIntoView({block:'center'})");
       await h.shot(`capacity-${view}-${language}-1000-200`);

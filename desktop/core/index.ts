@@ -998,7 +998,7 @@ const claimDirect=(key:string)=>{const {promise:done,resolve:release}=Promise.wi
 const unclaimDirect=(key:string)=>{const claim=claimedDirect.get(key);claimedDirect.delete(key);claim?.release();};
 const NOT_DIRECT=Symbol('not-direct');
 const syntheticIno=(stat:import('node:fs').BigIntStats)=>stat.ino<0n||stat.ino>=2n**63n;
-interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;/** This run created the name with O_EXCL: only then may it ever remove the file. */created:boolean;}
+interface DirectMember {entry:PlanEntry;destination:string;output:Awaited<ReturnType<typeof fs.open>>;owned:OwnedPartial;initial:number;synthetic:boolean;fields:DirectFields;claim:string;closed:boolean;/** This run created the name with O_EXCL: only then may it ever remove the file. */created:boolean;/** Streaming began: from then on a partial is left to its receipt and resumed, never taken back here. */started?:boolean;}
 async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,signal:AbortSignal|undefined,hooks:{bytes:(count:number)=>void;done:(entry:PlanEntry)=>void}):Promise<'done'|'staged'> {
   const {transfer,recovery,result}=run,index=run.index!,root=transfer.root,sums=new Map<string,string>(),members:DirectMember[]=[];
   const sourceUnchanged=async(entry:PlanEntry)=>{
@@ -1099,6 +1099,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
   },keys,signal);
   const copy=async(member:DirectMember)=>{
     const {entry,destination,output}=member,publicationEntry={...entry,destination};
+    member.started=true;
     let streamed='',sourceStat!:import('node:fs').BigIntStats;
     // Phase 2: only stream slots. Nothing here takes the publication lock or calls digest().
     await streams.run([entry.source,destination],async chunk=>{
@@ -1180,7 +1181,20 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     if(error===NOT_DIRECT) return 'staged';
     throw error;
   } finally {
-    for(const member of members) {unclaimDirect(member.claim);if(!member.closed)await member.output.close().catch(()=>{});}
+    for(const member of members) {
+      // The family stopped before this member received a byte: its empty name is ours alone to take back, and only while it is still the file we made.
+      if(!member.started&&!member.closed&&member.created&&member.initial===0) {
+        try {
+          const held=await member.output.stat({bigint:true}),named=await fs.lstat(member.destination,{bigint:true}).catch(()=>undefined);
+          if(named&&held.size===0n&&held.nlink===1n&&sameStat(held,named)) {
+            await unlinkEntry(member.destination);
+            logDeletion('copy',member.destination,'direct copy abandoned before any byte was written (the family failed); empty name removed','this run created the name with O_EXCL and still holds the same inode (single link); nothing was written',{bytes:0});
+            await release(member.entry,member.destination,member.owned);
+          }
+        } catch(error) { if(isAbort(error)) log('detailed','copy','abandon-aborted',{destination:member.destination}); }
+      }
+      unclaimDirect(member.claim);if(!member.closed)await member.output.close().catch(()=>{});
+    }
   }
 }
 export interface ExecutionResult {copied:number;skipped:number;/** Files verified where an earlier folder rule filed them, not at the route now wanted. */routed?:number;removed?:number;errors:string[];/** Cleanup leftovers and other notes that left the data safe; never failures. */warnings?:ExecutionIssue[];appleDouble?:AppleDoubleReport;}

@@ -87,3 +87,38 @@ test('500 files read with the check concurrency go out in batches averaging at l
   assert.equal(sizes.reduce((sum,size)=>sum+size,0),500);
   assert.ok(mean>=14,`mean batch ${mean.toFixed(1)} over ${sizes.length} requests`);
 });
+
+test('background reads queue behind foreground ones, and aborting drops the undispatched',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'routing-lanes-'));
+  t.after(async()=>{setRoutingBatch(16);await closeMetadata();await fs.rm(root,{recursive:true,force:true});});
+  const names=Array.from({length:80},(_,index)=>path.join(root,`IMG_${String(index).padStart(3,'0')}.JPG`)),back=new Set(names.slice(0,60));
+  await Promise.all(names.map((file,index)=>fs.writeFile(file,`photo ${index}`)));
+  setRoutingBatch(4);
+  const batches:string[][]=[],releases:(()=>void)[]=[];
+  t.mock.method(ExifTool.prototype,'enqueueTask',async function(this:ExifTool,task:()=>{args:string[]}){
+    const files=(task() as {args:string[]}).args.filter(arg=>arg.startsWith(root));
+    batches.push(files);await new Promise<void>(resolve=>releases.push(resolve));
+    return files.map(name=>({SourceFile:name}));
+  } as never);
+  const settle=()=>new Promise(resolve=>setTimeout(resolve,80));
+  const stop=new AbortController();
+  const background=names.slice(0,60).map(file=>metadata(file,{details:false,background:true,signal:stop.signal}).then(()=>'done',error=>(error as Error).name));
+  await settle();
+  const initial=batches.length;
+  assert.ok(initial>=1&&initial<15,`background dispatch is limited by device capacity (${initial} batches)`);
+  const foreground=names.slice(60).map(file=>metadata(file,{details:false}));
+  await settle();
+  assert.equal(batches.length,initial,'a full device does not start more work');
+  releases.shift()!();await settle();
+  assert.equal(batches.length,initial+1);
+  assert.ok(batches.at(-1)!.every(file=>!back.has(file)),'the freed slot goes to foreground reads');
+  stop.abort();await settle();
+  const dispatched=batches.flat().filter(file=>back.has(file)).length;
+  while(releases.length){releases.shift()!();await settle();}
+  await Promise.all(foreground);
+  const outcomes=await Promise.all(background);
+  assert.ok(names.slice(60).every(file=>batches.flat().includes(file)),'every foreground file was read');
+  assert.equal(batches.flat().filter(file=>back.has(file)).length,dispatched,'nothing from the background was dispatched after the abort');
+  assert.equal(outcomes.filter(outcome=>outcome==='AbortError').length,60-dispatched,'undispatched background reads reject with AbortError');
+  assert.equal(outcomes.filter(outcome=>outcome==='done').length,dispatched);
+});

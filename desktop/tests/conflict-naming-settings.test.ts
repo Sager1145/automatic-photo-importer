@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement} from 'react';
@@ -26,7 +27,7 @@ test('the Settings control shows both choices, explains the chosen one, and is t
 
 test('Same name, different content sits in Settings File handling, not Folders',async()=>{
  const {SettingsPage}=await import('../renderer/RootApp');
- const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SettingsPage,{state:{preferences:{...defaultPreferences,destinations:['/backup']},sources:[],jobs:[],history:[],platform:'darwin'},act:()=>{},busy:false})}));
+ const markup=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SettingsPage,{state:{preferences:{...defaultPreferences,destinations:['/backup']},sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()},act:()=>{},busy:false})}));
  const panel=(id:string)=>markup.split(`data-testid="settings-panel-${id}"`)[1]?.split('role="tabpanel"')[0]??'';
  assert.ok(panel('files').includes('data-testid="conflict-naming-settings"')&&!panel('folders').includes('conflict-naming-settings'));
  assert.ok(panel('files').includes('Files without date or camera')&&panel('files').includes('Unrecognized file types'));

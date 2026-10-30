@@ -9,14 +9,14 @@ import {exclusiveRename} from '../platform/exclusive-rename';
 import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,type RecoveryIndex} from './import-recovery';
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
-import type { AppleDoubleCleaner, AppleDoubleReport } from './appledouble';
+import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES, type AppleDoubleReport } from './appledouble';
 import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath } from './paths';
+import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -63,7 +63,9 @@ const jobFolder=(m:Manifest)=>where(m).folder;
 const scopeOf=(m:Manifest)=>where(m).scope;
 /** One lock per journal, by library and id, wherever its records are. */
 const lockKey=(root:string,id:string)=>{if(!uuid.test(id))throw new Error('Invalid recovery identifier');return `${root}\0${id}`;};
-interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,StatRecord[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
+/** A stat recorded when an exclusive output was created; birthtimeNs is absent in journals written before it was recorded. */
+interface ExclusiveRecord extends StatRecord {birthtimeNs?:string}
+interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,ExclusiveRecord[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
  renameIntent:Set<number>;renamed:Map<number,StatRecord>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoCopy:Set<number>;undoReady:Map<number,StatRecord>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
  /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;}
 /** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
@@ -127,7 +129,7 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
    state.handedOff.set(index,handOff as HandOff);
   }
   if(record.event==='renamed'||record.event==='timed'){const stat=record.stat as StatRecord;if(!isStatRecord(stat))throw new Error('Invalid moved file identity');state.renamed.set(index,stat);state.dated.set(index,new Set([...(state.dated.get(index)??[]),stat.mtime]));}
-  if(record.event==='exclusive-created'){const stat=record.stat as StatRecord;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');state.exclusive.set(index,[...(state.exclusive.get(index)??[]),stat]);}
+  if(record.event==='exclusive-created'){const stat=record.stat as StatRecord;if(!stat||typeof stat.dev!=='string'||typeof stat.ino!=='string')throw new Error('Invalid recovery publication identity');const birth=typeof record.birthtimeNs==='string'&&/^\d+$/.test(record.birthtimeNs)?record.birthtimeNs:undefined;state.exclusive.set(index,[...(state.exclusive.get(index)??[]),birth?{...stat,birthtimeNs:birth}:stat]);}
  };
 }
 /** Identities recorded under an earlier mount are read as this mount's, like the manifest's. */
@@ -366,20 +368,24 @@ async function exclusivePublication(staged:string,entry:Entry,index:number,m:Man
  const output=await fs.open(entry.destination,'wx',0o600);
  try {
   await output.sync();await syncParents(entry.destination,m.root);
-  const created=statRecord(await output.stat({bigint:true}));
-  await checkpoint(m,'exclusive-created',index,{stat:created});
+  const first=await output.stat({bigint:true}),created=statRecord(first);
+  await checkpoint(m,'exclusive-created',index,{stat:created,birthtimeNs:String(first.birthtimeNs)});
   // exFAT gives an empty file a temporary inode that changes until its first data is synced; the stable one is recorded too, so a later process still recognizes the partial as owned.
   let settled=false;
   // A stream slot on each device and the memory governor, like every other whole-file copy.
   await streams.run([staged,entry.destination],async chunk=>{
    const input=await regularHandle(staged);
-   try {const buffer=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}if(!settled){settled=true;await output.sync();const now=statRecord(await output.stat({bigint:true}));if(now.dev!==created.dev||now.ino!==created.ino)await checkpoint(m,'exclusive-created',index,{stat:now});}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();}finally{await input.close();}
+   try {const buffer=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}if(!settled){settled=true;await output.sync();const settledStat=await output.stat({bigint:true}),now=statRecord(settledStat);if(now.dev!==created.dev||now.ino!==created.ino)await checkpoint(m,'exclusive-created',index,{stat:now,birthtimeNs:String(settledStat.birthtimeNs)});}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();}finally{await input.close();}
   },signal);
  }finally{await output.close();}
 }
+/** Whether a file at an exclusive output's path is the partial this organization created: the recorded device and inode, or, for a temporary (negative) recorded inode, the same device and birth time of a lone regular file no larger than the entry. */
+function ownedPartial(records:ExclusiveRecord[]|undefined,current:import('node:fs').BigIntStats,entry:Entry):boolean {
+ return (records??[]).some(stat=>stat.dev===String(current.dev)&&(stat.ino===String(current.ino)||(stat.ino.startsWith('-')&&!!stat.birthtimeNs&&sameBirth(BigInt(stat.birthtimeNs),current.birthtimeNs)&&current.nlink===1n&&current.isFile()&&current.size<=BigInt(entry.size))));
+}
 async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:string,state:JournalState,signal?:AbortSignal):Promise<boolean> {
  const current=await fs.lstat(entry.destination,{bigint:true});if(!current.isFile()||current.size>BigInt(entry.size))return false;
- const owned=(state.exclusive.get(index)??[]).some(stat=>stat.dev===String(current.dev)&&stat.ino===String(current.ino));
+ const owned=ownedPartial(state.exclusive.get(index),current,entry);
  if(!owned)return false;
  const partial=await regularHandle(entry.destination),original=await regularHandle(input);
  try {
@@ -1178,7 +1184,7 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
 export interface OrganizationFinalization {removed:number;bytes:number;finalized:number;handedOff:number;}
 /** Finalize and undo first check every entry, then change them: `completed` is the entry being
  * handled, 1-based, out of `total` journal entries. */
-export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'deleting'|'history'|'later'|'measuring';completed:number;total:number;file:string;}
+export interface OrganizationProgress {step:'checking'|'releasing'|'restoring'|'tidying'|'deleting'|'history'|'later'|'measuring';completed:number;total:number;file:string;}
 /** Explicitly release verified retained duplicates; never delete ordinary source paths.
  * All finalized entries become target-based, allowing a separate explicit
  * dedupe to remove unrelocated duplicate source paths. This call never does so.
@@ -1247,7 +1253,7 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    result.finalized++;
   }
   // The closing bookkeeping repeats the last report, so the finished count never looks frozen.
-  tick();await removeSiblingPointers(m);tick();
+  tick();await tidyOriginals(m,'releasing the kept originals',signal,report);tick();await removeSiblingPointers(m);tick();
   await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:result.handedOff?undefined:0,status:'complete'});tick();
   return result;
  });
@@ -1395,6 +1401,11 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    } else {
     const saved=await savedOriginal(m,index,state);
     if(saved){if(await maybeLstat(entry.source)&&!state.undoCopy.has(index))throw occupied(entry.source);await restore(saved,entry.source,index,entry);result.restored++;tick();}
+    // An exclusive copy cut off before it published leaves a truncated partial at the library path: remove it once the original is back, but only when it is the file this journal created.
+    if(!state.published.has(index)&&state.exclusive.has(index)&&await maybeLstat(entry.source)){
+     const partial=await maybeLstat(entry.destination);
+     if(partial&&ownedPartial(state.exclusive.get(index),partial,entry)){await unlinkEntry(entry.destination);logDeletion('undo',entry.destination,'incomplete copy this organization created, removed by Undo',`the file is the partial this journal recorded creating (same device, and inode or birth time); the original is at ${entry.source}`,{bytes:Number(partial.size)});await syncParents(entry.destination,m.root);result.removed++;}
+    }
     // Only a copy this organization published is removed, and only once the reviewed
     // original is verified at its own path, so the copy is never the last one.
     if(state.published.has(index)&&await maybeLstat(entry.destination)&&await maybeLstat(entry.source)){
@@ -1407,7 +1418,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    tick();log('trace','undo','entry-undone',{index,source:entry.source,destination:entry.destination});await checkpoint(m,'undone',index);state.undone.add(index);
   }
   // The closing bookkeeping repeats the last report, so the finished count never looks frozen.
-  tick();await checkpoint(m,'undo-complete');tick();await removeSiblingPointers(m);tick();
+  tick();await tidyOriginals(m,'Undo',signal,report);tick();await checkpoint(m,'undo-complete');tick();await removeSiblingPointers(m);tick();
   await summary(m,{files:m.entries.length,completed:m.entries.length,retainedFiles:0,retainedBytes:0,status:'undone'});tick();
   return result;
  });
@@ -1425,6 +1436,51 @@ const journalFile=new RegExp(`^(?:journal\\.jsonl|journal-${UUID_PATTERN}\\.tmp|
  * reads mostly wait on the device. The main process has a 16-thread libuv pool (threadpool.ts), so they do not starve the listing beside. */
 export async function journalReaderCount(folder:string):Promise<number> {
  return STREAMS[await streams.kind(folder).catch(()=>'unknown' as const)]*2;
+}
+/** Whether `file` (a "._" entry) holds nothing but macOS bookkeeping; anything unreadable counts as real data. */
+async function bookkeepingOnly(file:string):Promise<boolean>{
+ try{
+  const stat=await fs.lstat(file,{bigint:true});
+  if(!stat.isFile()||stat.size>BigInt(APPLEDOUBLE_MAX_BYTES))return false;
+  const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try{return inspectAppleDouble(await handle.readFile()).safe;}finally{await handle.close();}
+ }catch{return false;}
+}
+/** Files under a job's originals folder that are kept originals: macOS "._" sidecars holding only bookkeeping are not. Never ignores a file that is not a "._" one. */
+async function retainedFiles(folder:string,signal?:AbortSignal):Promise<number>{
+ let files=0;
+ const walk=async(current:string):Promise<void>=>{
+  const entries=await fs.readdir(current,{withFileTypes:true});
+  await mapPool(entries,await journalReaderCount(current),async entry=>{
+   const file=path.join(current,entry.name);
+   if(entry.isDirectory())await walk(file);
+   else if(entry.name.startsWith('._')&&entry.name.length>2&&entry.isFile()&&await bookkeepingOnly(file))return;
+   else if(await maybeLstat(file))files++;
+  },signal);
+ };
+ await walk(folder);
+ return files;
+}
+/** After kept originals were removed: the emptied slot and index folders under the job's originals folder go (bottom-up; macOS "._" sidecars are judged by inspectAppleDouble, so one holding real data keeps its folder), then the orphaned bookkeeping "._<index>" files beside them. Never fails the operation. */
+async function tidyOriginals(m:Manifest,after:string,signal?:AbortSignal,report?:(progress:OrganizationProgress)=>void):Promise<void>{
+ try{
+  const originals=path.join(jobFolder(m),'originals');await contained(originals,scopeOf(m));
+  // Only this organization's own entries: their index folders (and the slot folders in them), never the rest of the store.
+  const wanted=new Set(m.entries.map((_,index)=>String(index))),folders:string[]=[];
+  for(const index of await readdirIfPresent(originals)){
+   if(!wanted.has(index))continue;
+   checkAbort(signal);
+   const indexFolder=path.join(originals,index),stat=await maybeLstat(indexFolder);
+   if(!stat?.isDirectory())continue;
+   for(const slot of await fs.readdir(indexFolder))if((await maybeLstat(path.join(indexFolder,slot)))?.isDirectory())folders.push(path.join(indexFolder,slot));
+   folders.push(indexFolder);
+   if(folders.length%50===0)report?.({step:'tidying',completed:0,total:folders.length+1,file:index});
+  }
+  const total=folders.length+1;report?.({step:'tidying',completed:0,total,file:path.basename(originals)});
+  await removeEmptiedFolders(originals,folders,{signal,area:'release',after,onFolders:(done,_total,folder)=>report?.({step:'tidying',completed:done,total,file:path.basename(folder)})});
+  await new AppleDoubleCleaner().sweep(originals,[originals],signal);
+  report?.({step:'tidying',completed:total,total,file:path.basename(originals)});
+ }catch(error){if(isAbort(error))throw error;log('normal','release','folder-kept',{path:jobFolder(m),code:code(error)??'error',error});}
 }
 /** Files and bytes under `folder`; links are counted, not followed. `onFiles` hears the running count. */
 async function tally(folder:string,signal?:AbortSignal,onFiles?:(files:number,estimate:number)=>void):Promise<{files:number;bytes:number}>{
@@ -1575,7 +1631,7 @@ export async function endedJournal(root:string,id:string):Promise<string[]|undef
  try{
   const m=await readManifest(root,id),state=await readEvents(m,undefined,undefined,false);
   if(!ended(state))return undefined;
-  if((await tally(path.join(jobFolder(m),'originals'),undefined).catch(error=>{if(code(error)==='ENOENT')return {files:0,bytes:0};throw error;})).files)return undefined;
+  if(await retainedFiles(path.join(jobFolder(m),'originals')).catch(error=>{if(code(error)==='ENOENT')return 0;throw error;}))return undefined;
   return await dependents(m);
  }catch{return undefined;}
 }

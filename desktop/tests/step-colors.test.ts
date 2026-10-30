@@ -13,7 +13,7 @@ import { defaultPreferences } from '../preferences';
 const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
 const stateWith=(extra:Partial<AppState>):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
-const render=(node:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:node}));
+const render=(node:ReturnType<typeof createElement>)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:node}));
 const renameJob=(extra:Partial<Progress>={}):Job=>({id:'r',source:{id:'library:/Volumes/A006/photobackup',name:'Existing library',path:'/Volumes/A006/photobackup',transport:'folder'},phase:'copying',errors:[],backup:false,startedAt:new Date(Date.now()-60000).toISOString(),
  progress:{phase:'copying',step:'moving',completed:29145,total:29145,bytes:0,totalBytes:539.1e9,speed:0,fileRate:85,file:'ZFC_8484.JPG',eta:5,startedAt:new Date(0).toISOString(),renames:true,...extra}});
 const css=readFileSync(new URL('../renderer/styles.css',import.meta.url),'utf8');

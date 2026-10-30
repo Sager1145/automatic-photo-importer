@@ -207,9 +207,15 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
     }
   }
   const byPath=new Map(files.map(file=>[file.path,file]));
+  // A companion of a companion (GoPro THM -> LRV -> MP4) is filed with the root original, never the middle link.
+  const rootOriginal=(file:InventoryFile):InventoryFile|undefined=>{
+    let cur=byPath.get(file.companionOf??'');
+    for(let hops=0;cur?.companionOf&&hops<16;hops++) {const next=byPath.get(cur.companionOf);if(!next||next.path===file.path)break;cur=next;}
+    return cur;
+  };
   for(const file of files) if(!options.backup && file.companionOf) {
     // Video companions, <name>.<ext>.xmp and NKSC_PARAM edits travel in their original's family.
-    const primary=liveRoot.get(file.path)??byPath.get(file.companionOf);
+    const primary=liveRoot.get(file.path)??rootOriginal(file);
     if(primary && (primary.kind==='Videos' || liveRoot.has(file.path) || stem(primary.path)!==stem(file.path))) {primaryFor.set(file.path,primary);familyFor.set(file.path,familyFor.get(primary.path)!);}
   }
   // GoPro splits a long recording into chapters GXzzxxxx/GHzzxxxx (zz the chapter, xxxx the
@@ -304,7 +310,7 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
     else {
       // Companions (sidecars, video metadata, NX Studio edits) are filed with their original.
-      const original=file.companionOf?liveRoot.get(file.path)??byPath.get(file.companionOf)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
+      const original=file.companionOf?liveRoot.get(file.path)??rootOriginal(file)??file:file,nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
       const lead=chapterLead.get(file.path),route:Metadata=lead?{...info,date:infos.get(lead.path)?.date}:info;
       // An empty companion has no capture metadata of its own. Its primary also
       // supplies the fallback date, so differing mtimes cannot split the family.

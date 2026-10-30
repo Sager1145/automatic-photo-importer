@@ -132,7 +132,7 @@ test('the folder name must be one safe folder name',async t=>{
 
 test('rules from preferences that omit the handling file unknown files in a folder by default',()=>{
   const {noMetadataHandling,...rest}=defaultPreferences;void noMetadataHandling;
-  assert.equal(ruleOptions(rest).noMetadata,'folder');
+  assert.equal(ruleOptions(rest as unknown as Parameters<typeof ruleOptions>[0]).noMetadata,'folder');
   assert.equal(ruleOptions({...rest,noMetadataHandling:'keep'}).noMetadata,'keep');
 });
 

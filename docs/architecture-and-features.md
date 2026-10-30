@@ -386,6 +386,42 @@ flowchart LR
 
 第一次实盘运行暴露的两处测试脚本问题（沙箱清理遇 NFC 名称失败、macOS 在卷根为沙箱生成 `._` 文件）都只涉及测试自建的文件，已在当场清除并修正脚本。
 
+### 12.8 第四轮：合并 main 与全功能实盘测试（2026-10-30）
+
+**合并**：`main` 的 29 个提交（分类预览/目录、`folder-rules.ts`、界面改版、弹出）合入本分支（`2783f64`）。每条规则仍只有一处实现：编辑导出判定为 `folder-rules.isEditedFile`；目录（catalog）改用 `isOwnRealpath`、`exactStatKey`；main 的恢复新增（复制撤销、不覆盖的 `exclusiveRename`、移动观察）移植到 `StatRecord/maybeLstat/unlinkEntry/hasher`；改版界面改用 `state.blocked`、`requiredDestinations`、`renderer/paths.ts`、`HistoryEntry.outcome`、`state.destinationEta`；删除原件同时满足 main 的新设置与卡卷判定。
+
+**测试方式**：`Scripts/hw/run.mts` + `Scripts/hw/groups/01–06`（沙箱、卷根与 `Photo Importer Data` 快照见证、读取的真实文件逐个哈希见证），以及应用自带的界面自动化（`npm run codex:test`，含 `--real-drives` 只读检查：只允许浏览类动作，记录每次点击，任何写入类按钮即失败）。用户拒绝了屏幕控制授权，界面测试改由应用内自动化完成。
+
+| 组 | 内容 | A006 / Untitled 结果 |
+|---|---|---|
+| 01 | 导入、冲突、整理、撤销、释放、去重、续作、NFC 名称 | 61/61（双向） |
+| 02 | 六种布局、模板、伴随与实况、编辑导出、未知格式、无元数据、问题文件、冲突命名、校验开关、直写/暂存、跳过与重试、文件日期 | 218/218，1 项跳过（exFAT 忽略 chmod，无法制造不可读文件）（双向） |
+| 03 | 单盘/双盘镜像/顺序填盘、故障目的地隔离、空间预留、整盘只增/镜像与移除区、目的地校验、弹出判定 | 124/124，1 项跳过（同上） |
+| 04 | 错位检查、落位记忆、子集与就地整理、恢复列表、残留、旧记录、EXIF 级去重、删除原件、`._` 清理 | 149/149（双向） |
+| 05 | 每个 SIGKILL 中断点（导入暂存/独占、整理独占前后、暂存、释放）后新进程恢复 | 75/75，3 项跳过（仅硬链接路径，exFAT 不可达）（每盘） |
+| 06 | 真实文件只读：清单、ExifTool 元数据、缩略图、按家庭导入（NIKON Z fc NEF+JPG、202503、2018.4签名） | 89/89，505 个真实文件前后一致 |
+| 界面 | 合并后完整界面套件（含 main 的三项分类预览检查） | 69/69 |
+| 界面·实盘 | Untitled `2018.4签名`：索引 148 个文件 5 s；相机分面正确为空（截图无相机信息）、日期/格式分面、目录、6 个文件预览（含中文路径）与 EXIF 与 ExifTool 一致；驱动器未变 | 通过 |
+
+每次实盘运行后两块盘沙箱外条目前后一致（A006 4837 项、Untitled 25 项），沙箱均已删除。
+
+**实盘测试发现并修复的产品问题**：
+
+| 问题 | 处理 |
+|---|---|
+| exFAT 整理独占复制在首块数据同步前被杀：只记录了临时负 inode，恢复认不出自己的半成品，撤销后图库留下截断文件 | 首条记录同时保存出生时间；记录 inode 为负（临时）时按设备+出生时间+单链接+不超过计划大小认定，与导入回执的规则一致；真实 inode 仍须完全相同；撤销移除自己的半成品 |
+| GoPro `.THM` 在 format/type-format 布局中与 MP4 分开（只追一跳伴随关系） | 伴随链追到根原件（`folder-rules` 一处） |
+| exFAT 直写在家庭中后续成员失败时，最终名称留下 0 字节文件 | 只删除本次以 O_EXCL 创建、未写入任何字节、且句柄与名称仍为同一文件的空名称，并关闭其回执 |
+| macOS 为本进程创建的文件与文件夹附加 `com.apple.provenance`，exFAT 以 `._` 文件保存；释放后恢复区留下空槽位文件夹与 `._`，结束判定把 `._` 当作原件，旧日志永远不算结束 | 释放与撤销后只整理本次涉及的槽位文件夹（`removeEmptiedFolders`，`._` 由 `inspectAppleDouble` 判定，含真实数据的保留），并显示进度；结束判定忽略仅含记账信息的 `._` |
+| 分类预览索引 A006（88,154 个文件）约 10 个/秒（约 2.3 小时）：元数据逐个读取，批处理从未形成；写库阻塞读取；每次刷新全表扫描状态 | 并发读取（`mapPool`）、单一后台写入并反压、扫描中状态每 2 s 查询一次、预编译语句与 `synchronous=NORMAL`、只更新变化的列；实盘 1062 个文件由 54–61 提升到 197–217 个/秒（约 3.5 倍），88k 行状态查询由 306 ms 降到 13–29 ms |
+| 加速后的索引以 80 个并发读取占满共享的 ExifTool 队列；暂停目录时已排队的读取仍先执行，审核在 10 s 以上没有进度（界面心跳检查连续两次失败，改回逐个读取即通过，A/B 确认） | 元数据层增加后台优先级：前台（审核、导入）请求总是先派发，后台只填空闲容量，暂停时丢弃尚未派发的后台读取；目录读取仍为 80 个并发（32 个实测使整库变慢到约 137 个/秒，批次填不满）。界面套件连续两次通过；真实应用索引 A006 整库约 400–600 s（约 150–216 个/秒，原约 10 个/秒） |
+| A006 整库索引偶尔以"部分完成"结束，浏览检查等不到完成：扫描读取后的复核按 inode 严格比较，而 exFAT 在高负载下会更换空文件的临时负 inode（本轮两次在 799 个 0 字节文件上实测到） | 复核改用应用统一的身份规则 `paths.sameStat`（inode 为临时值时比较出生时间）；真正改变的文件仍标为部分完成并在日志中列出（新增诊断：按原因计数并给出前 8 个文件）。重试后 A006 596 s 完成全部 88,027 个文件 |
+| `import-capacity-responsive` 界面检查要求图例分别显示 JPG/JPEG、HEIC/HEIF | 容量图例按路由的格式类别显示（第 12.3 节 U4 的有意结果），检查改为期望格式类别 |
+
+**测试工具自身的修正**（只影响测试，不影响产品）：见证对临时负 inode 的空文件改按出生时间比较（实测 macOS 会自行更换这些 inode，A006 恢复区 799 个 0 字节文件仅 inode 变化）；沙箱清理容忍 macOS 自动删除 `._` 伴随文件；崩溃工作进程在实盘沙箱中使用本机恢复密钥；真实数据导入只取完整家庭。
+
+**仍未测试**：协议相机导入（需连接相机）、Windows/Linux、断电。`summary` 与 `exif` 在 78 个真实文件（9 种格式）上读出的日期与机型完全相同，可以考虑合并为一个接口，但尚未覆盖三星、大疆、Insta360 等机型。
+
 ## Release note: files without metadata
 
 Files with no capture date, no camera and no known origin, or with unreadable metadata, are left where they are by default (Settings > Importing > Files without metadata); imports do not copy them and Delete originals never removes them. Choose "Move to a folder" to file them under one folder directly under the library (default `Unknown files`, also under the video root for videos), or "Use file date" for the old routing. The `Unknown Camera` folder is no longer created. Under "Use file date" a file without a camera is filed as `<date>/Unknown files/` where it used to go to `<date>/Unknown Camera/`. A job someone starts (Start, Import now, Organize now, Organize backup, Organize folder) stops at the review and shows a warning when it finds such files; automatic imports record the warning in the job's issues instead.

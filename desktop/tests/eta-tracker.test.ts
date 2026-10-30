@@ -155,7 +155,7 @@ test('a direct copy to exFAT plans no verify step: the job percent and time left
  const tracker=new EtaTracker();
  tracker.plan('j',{kind:'import',verify:true,...drives,publish:tracker.predictPublish(drives.destinations),totals:{copying:{files:total-skipped,bytes:totalBytes},verifying:{files:total,bytes:totalBytes}}});
  const job:Job={id:'j',source:card,phase:'verifying',errors:[],backup:false,progress:{phase:'planning',step:'existing',completed:0,total,bytes:0,totalBytes:0,speed:0,file:''}};
- const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin'};
+ const state:AppState={preferences,sources:[card],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};
  // Confirming the files already on the drive: about 4 s.
  for(let t=0;t<=4;t++){job.progress={...job.progress!,completed:Math.round(6287*t/4)};stampEstimates(state,tracker,t*1000);}
  // Copying, as logged every 5 s from 08:08:01.9 (completed files, bytes); the progress between them is interpolated each second.

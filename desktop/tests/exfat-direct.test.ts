@@ -524,3 +524,45 @@ for(const timing of ['after-review','while-confirming'] as const) test(`a direct
   assert.deepEqual(await fs.readFile(file),changed,'changed source stays untouched');
   assert.deepEqual(await fs.readFile(entry.destination),original,'existing backup stays untouched');
 });
+
+async function familyCard(name:string) {
+  const dir=path.join(base,name);await fs.mkdir(dir);
+  await fs.writeFile(path.join(dir,'DSC_0100.NEF'),randomBytes(64*1024));
+  await fs.writeFile(path.join(dir,'DSC_0100.NEF.xmp'),'<x:xmpmeta/>');
+  return dir;
+}
+const everyFile=async(root:string)=>(await fs.readdir(root,{withFileTypes:true,recursive:true})).filter(entry=>entry.isFile()&&!entry.name.startsWith('._')&&!entry.parentPath.includes('Photo Importer Data')).map(entry=>path.join(entry.parentPath,entry.name));
+
+test('a family whose sidecar vanished after planning leaves no empty file at a final name, closes its receipts, and a retry completes',async t=>{
+  const env=await ready(t);if(!env) return;
+  const dir=await familyCard('family-vanish');
+  const reviewed=(await plan(dir,[env.root],options,metadata)).plans[0]!;
+  const members=reviewed.entries.filter(entry=>/DSC_0100/.test(entry.source));
+  assert.ok(members.length>=2,'a family of several files');
+  // The member begun last is the one that fails, after the others created their names.
+  const last=members[members.length-1]!;
+  await fs.rm(last.source);
+  const result=await execute(reviewed);
+  assert.ok(result.errors.length>0,'the family reports the error');
+  assert.deepEqual((await everyFile(env.root)).filter(file=>!file.includes('Conflicts')),[],'no placeholder is left at a final name');
+  assert.deepEqual(await receiptFiles(env.root),[],'no receipt is still open');
+  await fs.writeFile(last.source,last.source.endsWith('.NEF')?randomBytes(64*1024):'<x:xmpmeta/>');
+  const retry=await execute((await plan(dir,[env.root],options,metadata)).plans[0]!);
+  assert.deepEqual(retry.errors,[]);
+  const found=await everyFile(env.root);
+  assert.equal(found.length,2);
+  for(const file of found) assert.ok((await fs.stat(file)).size>0);
+});
+
+test('a foreign file already at a final name is never removed when the family fails before streaming',async t=>{
+  const env=await ready(t);if(!env) return;
+  const dir=await familyCard('family-foreign');
+  const reviewed=(await plan(dir,[env.root],options,metadata)).plans[0]!;
+  const members=reviewed.entries.filter(entry=>/DSC_0100/.test(entry.source));
+  const first=members[0]!,last=members[members.length-1]!;
+  await fs.mkdir(path.dirname(first.destination),{recursive:true});
+  await fs.writeFile(first.destination,'someone else wrote this');
+  await fs.rm(last.source);
+  await execute(reviewed);
+  assert.equal(await fs.readFile(first.destination,'utf8').catch(()=>undefined),'someone else wrote this','the foreign file is untouched');
+});

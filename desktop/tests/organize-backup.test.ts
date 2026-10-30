@@ -114,5 +114,7 @@ test('main.ts re-plans an open review for this run only with reviewNoMetadata, a
   assert.match(body,/const origin=reviewed\.origin;await openReview\(source,backup,next,destinationIndex\);if\(origin&&reviewed\)reviewed\.origin=origin;/,'a re-plan keeps the job it was parked from');
   assert.match(source,/prefs\.noMetadataHandling=job\.noMetadataHandling/);
   assert.match(source,/prefs:jobPreferences\(job\)/);
-  assert.equal(source.match(/queued\.noMetadataHandling=failed\.noMetadataHandling/g)?.length,2,'both retry paths keep it');
+  // Retry and Skip share one rerun (the consolidation), so the carried choice has a single place.
+  assert.equal(source.match(/next\.noMetadataHandling=failed\.noMetadataHandling/g)?.length,1,'the one rerun keeps it');
+  assert.equal(source.match(/\brerun\(failed,/g)?.length,2,'both retry paths go through it');
 });

@@ -3,15 +3,22 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import type {BigIntStats} from 'node:fs';
 import type {FileOutcome} from '../core';
+import {CHECK_CONCURRENCY,mapPool} from '../core/devices';
 import {inventory,rules,unknownRule,extension} from '../core/inventory';
 import {evaluateRoutes,classifyPlacement,type RoutingInput} from '../core/folder-rules';
-import {exactStatKey,isOwnRealpath,within} from '../core/paths';
+import {exactStatKey,isOwnRealpath,sameStat as sameFile,within} from '../core/paths';
 import {isRecordFolderName} from '../core/legacy-names';
 import {mediaKindForPath} from '../media-formats';
 import type {Listing,Metadata} from '../shared';
 import type {Catalog,CatalogLibrary,CatalogRecord,CatalogScanEvent,CatalogStat,CatalogStatus,CatalogMoveEvent,CatalogChange} from './types';
 import {catalogNameSortKey,catalogValues} from './values';
 export const CATALOG_METADATA_VERSION=1;
+/** Reads in flight during indexing: the check concurrency. They sit in the background lane, so user-facing reads never wait behind them and an abort drops them. */
+export const CATALOG_READS=CHECK_CONCURRENCY;
+/** Files prepared per round; metadata reads run through a pool inside it, so the pool drains only once per window. */
+const WINDOW=1024;
+/** Rows (the store's limit per ingest) written per background round trip, and the backlog at which readers wait for it. */
+const INGEST_BATCH=500,BACKLOG=1024,STATUS_INTERVAL=2000;
 /** Reviewed source identity lets metadata follow bytes only when the cache describes that source. */
 export type CatalogMoveObservation=CatalogMoveEvent&{reviewedStat?:CatalogStat};
 const slash=(value:string)=>value.split(path.sep).join('/');
@@ -34,7 +41,7 @@ export async function bindingUnchanged(binding:LibraryBinding):Promise<boolean>{
  try{const stat=await fs.lstat(binding.root,{bigint:true});return stat.isDirectory()&&!stat.isSymbolicLink()&&directoryIdentity(stat)===binding.rootIdentity&&await isOwnRealpath(binding.root);}catch{return false;}
 }
 interface Options {
- metadata(file:string):Promise<Metadata>;
+ metadata(file:string,options?:{background?:boolean;signal?:AbortSignal}):Promise<Metadata>;
  cachedMetadata?(file:string,identity:string):Metadata|undefined;
  options():RoutingInput['options'];
  validate?(binding:LibraryBinding):Promise<boolean>;
@@ -71,7 +78,14 @@ export class CatalogCoordinator {
  binding(id:string):LibraryBinding|undefined{return this.bindings.get(id);}
  needsRefresh():string[]{return [...this.dirty].filter(id=>this.bindings.get(id)?.library.online);}
  markDirty(id?:string):void{for(const library of this.libraries)if(!id||id===library.libraryId)this.dirty.add(library.libraryId);}
- async status(id:string):Promise<CatalogStatus>{return {...await this.catalog.status(id),...this.states.get(id),...(this.dirty.has(id)?{dirty:true}:{})};}
+ /** While a refresh runs, its own progress is live and the whole-library row counts are re-queried at most every 2 s. */
+ private statusCache=new Map<string,{at:number;status:CatalogStatus}>();
+ async status(id:string):Promise<CatalogStatus>{
+  const state=this.states.get(id),cached=this.statusCache.get(id);let base:CatalogStatus;
+  if(state?.state==='scanning'&&cached&&Date.now()-cached.at<STATUS_INTERVAL)base=cached.status;
+  else{base=await this.catalog.status(id);if(state?.state==='scanning')this.statusCache.set(id,{at:Date.now(),status:base});else this.statusCache.delete(id);}
+  return {...base,...state,...(this.dirty.has(id)?{dirty:true}:{})};
+ }
  stop(id?:string):void{for(const [key,work] of this.refreshing)if(!id||key===id)work.control.abort();}
  async settled():Promise<void>{do{await Promise.allSettled([...this.refreshing.values()].map(work=>work.task));await this.flush();await Promise.resolve();}while(this.running);}
  private async valid(binding:LibraryBinding):Promise<boolean>{return await bindingUnchanged(binding)&&(!this.deps.validate||await this.deps.validate(binding));}
@@ -180,38 +194,57 @@ export class CatalogCoordinator {
   const task=this.readLibrary(id,control.signal).finally(()=>{signal.removeEventListener('abort',abort);this.refreshing.delete(id);this.deps.changed?.(id);});
   this.refreshing.set(id,{control,task});return task;
  }
+ /** One background writer per refresh: at most one ingest in flight, rows stay in order, readers wait only when the backlog is full. */
+ private flusher(id:string,run:string){
+  let pending:CatalogRecord[]=[],inFlight:Promise<void>|undefined,timer:ReturnType<typeof setTimeout>|undefined,failure:unknown,failed=false,stopped=false;
+  const start=()=>{if(timer){clearTimeout(timer);timer=undefined;}if(inFlight||stopped||failed||!pending.length)return;inFlight=(async()=>{while(pending.length&&!stopped){const batch=pending.splice(0,INGEST_BATCH);await this.catalog.ingest(run,batch);}this.deps.changed?.(id);})().catch(error=>{failed=true;failure=error;}).finally(()=>{inFlight=undefined;if(pending.length&&!failed&&!stopped)schedule();});};
+  const schedule=()=>{if(inFlight||stopped||failed)return;if(pending.length>=256)start();else if(!timer&&pending.length)timer=setTimeout(start,250);};
+  const check=()=>{if(failed)throw failure;};
+  return {
+   get failed(){return failed;},
+   async push(record:CatalogRecord){check();pending.push(record);schedule();if(pending.length>BACKLOG){start();await inFlight;check();}},
+   async flush(){while(pending.length||inFlight){check();start();await inFlight;}check();},
+   async stop(){stopped=true;if(timer){clearTimeout(timer);timer=undefined;}await inFlight;},
+  };
+ }
  private async readLibrary(id:string,signal:AbortSignal):Promise<void>{
   const binding=this.bindings.get(id);if(!binding||!await this.valid(binding))return;
-  let run:string|undefined,completed=false;const progress={discovered:0,read:0,failed:0};
+  let run:string|undefined,flusher!:ReturnType<CatalogCoordinator['flusher']>,completed=false;const progress={discovered:0,read:0,failed:0};
   this.states.set(id,{state:'scanning',progress});this.deps.changed?.(id);
   try{
-   signal.throwIfAborted();run=await this.catalog.beginScan(id,['']);let partial=false;
-   const found=await inventory(binding.root,{unknownDefault:'other',unknownRules:this.deps.options().unknownRules,reuse:this.listings.get(id),excludeNames:['Drive backups'],onError:()=>{partial=true;}},signal);
+   signal.throwIfAborted();run=await this.catalog.beginScan(id,['']);flusher=this.flusher(id,run);let partial=false;const why={inventory:0,skipped:0,changed:0,sample:[] as string[]};const note=(kind:'inventory'|'skipped'|'changed',detail:string)=>{why[kind]++;if(why.sample.length<8)why.sample.push(`${kind}: ${detail}`);};
+   const found=await inventory(binding.root,{unknownDefault:'other',unknownRules:this.deps.options().unknownRules,reuse:this.listings.get(id),excludeNames:['Drive backups'],onError:(error:unknown)=>{partial=true;note('inventory',String(error));}},signal);
    if(found.listing)this.listings.set(id,found.listing);
    const files=found.files.filter(file=>!file.system&&this.normalBinding(file.path)?.library.libraryId===id),raw=new Map<string,Metadata>(),mtimes=new Map<string,Date>(),records:CatalogRecord[]=[],unreadable=new Set<string>();
    progress.discovered=files.length;
-   for(let offset=0;offset<files.length;offset+=256){
+   for(let offset=0;offset<files.length;offset+=WINDOW){
     signal.throwIfAborted();if(!await this.valid(binding))throw new Error('Library identity changed.');
-    const chunk=files.slice(offset,offset+256),saved=new Map((await this.catalog.records(id,chunk.map(file=>slash(file.relative)))).map(record=>[record.relativePath,record]));
-    const prepared:{file:typeof files[number];record:CatalogRecord;cached?:Metadata}[]=[];
-    let pending:CatalogRecord[]=[],flushedAt=Date.now();
-    const flush=async(force=false)=>{if(pending.length&&(force||pending.length>=256||Date.now()-flushedAt>=250)){await this.catalog.ingest(run!,pending);pending=[];flushedAt=Date.now();this.deps.changed?.(id);}};
+    const chunk=files.slice(offset,offset+WINDOW),saved=new Map<string,CatalogRecord>();
+    for(let at=0;at<chunk.length;at+=256)for(const record of await this.catalog.records(id,chunk.slice(at,at+256).map(file=>slash(file.relative))))saved.set(record.relativePath,record);
+    const prepared:{file:typeof files[number];record:CatalogRecord;cached?:Metadata;before:BigIntStats}[]=[];
     for(const file of chunk){signal.throwIfAborted();try{
-     const before=await fs.lstat(file.path,{bigint:true});if(!before.isFile()||before.isSymbolicLink()||!within(await fs.realpath(file.path),binding.root)){partial=true;continue;}
+     const before=await fs.lstat(file.path,{bigint:true});if(!before.isFile()||before.isSymbolicLink()||!within(await fs.realpath(file.path),binding.root)){partial=true;note('skipped',file.path);continue;}
      file.size=Number(before.size);
      const relative=slash(file.relative),stat=catalogStat(before),old=saved.get(relative);
      const cached=old?.metadataVersion===CATALOG_METADATA_VERSION&&old.values.metadataStatus==='ready'&&old.routingMetadata&&sameStat(old.stat,stat)?old.routingMetadata:undefined;
-     const record=this.record(binding,relative,stat,cached);if(old)record.fileId=old.fileId;records.push(record);prepared.push({file,record,cached});mtimes.set(file.path,new Date(Number(before.mtimeMs)));pending.push({...record});await flush();
-    }catch(error){if(signal.aborted)throw error;partial=true;progress.failed++;}}
+     const record=this.record(binding,relative,stat,cached);if(old)record.fileId=old.fileId;records.push(record);prepared.push({file,record,cached,before});mtimes.set(file.path,new Date(Number(before.mtimeMs)));await flusher.push({...record});
+    }catch(error){if(signal.aborted||flusher.failed)throw error;partial=true;progress.failed++;}}
     // Names become available as pending before their first metadata read completes.
-    await flush(true);
-    for(const {file,record,cached} of prepared){signal.throwIfAborted();let info=cached;
-     if(!info)try{info=await this.deps.metadata(file.path);signal.throwIfAborted();if(!sameStat(record.stat,catalogStat(await fs.lstat(file.path,{bigint:true})))){partial=true;this.dirty.add(id);info=undefined;}}
-     catch(error){if(signal.aborted)throw error;info={fields:{Error:error instanceof Error?error.message:String(error)}};progress.failed++;}
+    await flusher.flush();
+    const finish=async(file:typeof files[number],record:CatalogRecord,info:Metadata|undefined)=>{
      if(info){raw.set(file.path,info);record.routingMetadata=info;record.values=catalogValues(info);if(record.values.metadataStatus==='error')unreadable.add(file.path);}
-     progress.read++;pending.push({...record});await flush();
-    }
-    await flush(true);
+     progress.read++;await flusher.push({...record});
+    };
+    for(const {file,record,cached} of prepared)if(cached)await finish(file,record,cached);
+    // The read is kept only if the file is still the one listed, by the app's identity rule: exFAT reassigns an empty file's
+    // temporary negative inode under load (measured on A006), so there the birth time decides, as everywhere else.
+    // Concurrent reads let the metadata layer gather its multi-file requests; finish order does not matter.
+    await mapPool(prepared.filter(item=>!item.cached),CATALOG_READS,async({file,record,before})=>{signal.throwIfAborted();let info:Metadata|undefined;
+     try{info=await this.deps.metadata(file.path,{background:true,signal});signal.throwIfAborted();if(!sameFile(before,await fs.lstat(file.path,{bigint:true}))){partial=true;note('changed',file.path);this.dirty.add(id);info=undefined;}}
+     catch(error){if(signal.aborted)throw error;info={fields:{Error:error instanceof Error?error.message:String(error)}};progress.failed++;}
+     await finish(file,record,info);
+    },signal);
+    await flusher.flush();
    }
    // Cached listings preserve names, not current size-based inclusion. Recheck the whole family
    // after every fresh stat so empty originals and their companions transition together.
@@ -220,10 +253,10 @@ export class CatalogCoordinator {
    signal.throwIfAborted();const routes=new Map(evaluateRoutes({sourceRoot:binding.root,files,scanned:files,metadata:raw,mtimes,unreadableMetadata:unreadable,roots:[{root:binding.root,role:binding.library.role}],options:{...this.deps.options(),backup:false,reorganize:true},signal}).map(route=>[route.file.path,route]));
    const recordIds=new Map(records.map(record=>[record.relativePath,record.fileId]));
    for(const record of records){const route=routes.get(path.join(binding.root,record.relativePath));record.familyId=route?.family;record.companionOf=route?.file.companionOf?recordIds.get(slash(path.relative(binding.root,route.file.companionOf))):undefined;record.placement=record.values.metadataStatus==='pending'?record.placement:classifyPlacement({route,actual:{root:binding.library.role,relativePath:record.relativePath},rulesScope:binding.library.rulesScope});}
-   for(let offset=0;offset<records.length;offset+=256){signal.throwIfAborted();await this.catalog.ingest(run,records.slice(offset,offset+256));}
+   for(let offset=0;offset<records.length;offset+=500){signal.throwIfAborted();await this.catalog.ingest(run,records.slice(offset,offset+500));}
    if(!await this.valid(binding))throw new Error('Library identity changed.');
-   await this.catalog.endScan(run,partial?'partial':'complete');completed=true;if(!partial)this.dirty.delete(id);else this.dirty.add(id);this.states.set(id,{state:'idle',progress});
+   if(partial)this.deps.warning?.(new Error(`Library scan ended partial (inventory ${why.inventory}, skipped ${why.skipped}, changed during read ${why.changed}): ${why.sample.join('; ')}`),id);await this.catalog.endScan(run,partial?'partial':'complete');completed=true;if(!partial)this.dirty.delete(id);else this.dirty.add(id);this.states.set(id,{state:'idle',progress});
   }catch(error){this.dirty.add(id);this.states.set(id,{state:signal.aborted?'paused':'error',progress,...(signal.aborted?{}:{error:error instanceof Error?error.message:String(error)})});if(!signal.aborted)this.deps.warning?.(error,id);}
-  finally{if(run&&!completed)await this.catalog.endScan(run,signal.aborted?'cancelled':'partial').catch(error=>this.deps.warning?.(error,id));}
+  finally{await flusher?.stop();if(run&&!completed)await this.catalog.endScan(run,signal.aborted?'cancelled':'partial').catch(error=>this.deps.warning?.(error,id));}
  }
 }

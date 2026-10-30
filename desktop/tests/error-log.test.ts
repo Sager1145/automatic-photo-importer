@@ -93,7 +93,7 @@ test('All errors shows each error with its time and drive, a Clear button, and C
  }
  log.clear([errors[1]!.id!]);value.errorLog=log.update(gatherErrors(value));
  const left=collectErrors(value);assert.equal(left.length,2);
- const controls=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(TitlebarControls,{state:value,act:()=>{},errorCount:left.length,onErrors:()=>{}})}));
+ const controls=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(TitlebarControls,{state:value,act:()=>{},errorCount:left.length,onErrors:()=>{}})}));
  assert.ok(controls.includes('data-count="2"'));
  clearErrors(log,value);value.errorLog=log.update(gatherErrors(value));
  assert.equal(collectErrors(value).length,0);
@@ -124,7 +124,7 @@ test('sidebar sources and destinations with errors show a live count that opens 
   assert.ok(panel.includes(t('Errors for {name}',{name:'Untitled'}))&&panel.includes(t('Show all errors')),`${language}: filter is named and can be removed`);
  }
  clearErrors(log,value,{ids:[errors[0]!.id!]});clearErrors(log,value,{ids:[errors[1]!.id!]});value.errorLog=log.update(gatherErrors(value));errors=collectErrors(value);
- const sources=renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
+ const sources=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(SidebarSources,{state:value,onOpen:()=>{},errors,onErrors:()=>{}})}));
  assert.ok(!sources.includes('sidebar-errors'),'the badge goes once its errors are cleared');
 });
 

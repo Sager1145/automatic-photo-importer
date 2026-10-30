@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createElement,isValidElement} from 'react';
@@ -7,7 +8,7 @@ import {createTranslator,I18nProvider,languages} from '../renderer/i18n';
 import {normalizePreferences} from '../preferences';
 import type {Action,AppState,Language} from '../shared';
 
-const stateOf=(prefs:object={},extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],basePath:'photobackup',...prefs}),sources:[],jobs:[],history:[],platform:'darwin',destinationStatus:[{path:'/backup',available:true,volumeId:'a',total:2e12,free:1e12}],...extra});
+const stateOf=(prefs:object={},extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],basePath:'photobackup',...prefs}),sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:[{path:'/backup',available:true,volumeId:'a',total:2e12,free:1e12}],...extra});
 const html=(language:Language,child:ReactElement)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
 function tree(component:(props:any)=>ReactElement,props:object):ReactNode{let out:ReactNode;const Probe=()=>{out=component(props);return null;};html('en',createElement(Probe));return out;}
 type Props={'data-testid'?:string;children?:ReactNode;onClick:()=>void;disabled?:boolean};

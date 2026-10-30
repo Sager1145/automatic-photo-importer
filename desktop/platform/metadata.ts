@@ -377,7 +377,7 @@ async function readBatch(files:string[]):Promise<Map<string,RawTags>> {
   const list=await exiftool().enqueueTask(()=>new RawBatchTask(files[0]!,args,{readArgs:routingArgs}) as never) as unknown as RawTags[];
   return new Map(list.flatMap(item=>typeof item?.SourceFile==='string'?[[item.SourceFile,item] as [string,RawTags]]:[]));
 }
-interface Waiting {at:number;file:string;dev:bigint;resolve:(tags:RawTags)=>void;reject:(error:unknown)=>void;}
+interface Waiting {at:number;background:boolean;file:string;dev:bigint;resolve:(tags:RawTags)=>void;reject:(error:unknown)=>void;}
 const waiting:Waiting[]=[],busy=new Map<bigint,number>(),limits=new Map<bigint,Promise<number>>(),limitOf=new Map<bigint,number>(),inFlight=new Map<string,Promise<RawTags>>();
 let maxRequests=1;
 const readSingle=(file:string)=>exiftool().readRaw(file,{readArgs:routingArgs}) as Promise<RawTags>;
@@ -402,47 +402,60 @@ async function run(group:Waiting[]):Promise<void> {
 const LINGER_MS=10;
 let lingering=false;
 function pump():void {
+  // Foreground reads (review, import, a user's click) are dispatched first; background reads (catalog indexing) only fill capacity they leave idle.
   for(;;){
     let index=-1,wait=0;
-    const now=performance.now(),counts=new Map<bigint,number>();
-    for(const item of waiting)counts.set(item.dev,(counts.get(item.dev)??0)+1);
-    for(let position=0;position<waiting.length;position++){
-      const item=waiting[position]!,running=busy.get(item.dev)??0;
-      if(running>=(limitOf.get(item.dev)??1))continue;
-      // A short group starts at once only on an idle device; otherwise it gathers files until it is full or has waited long enough.
-      const age=now-waiting.find(other=>other.dev===item.dev)!.at;
-      if(running===0||counts.get(item.dev)!>=routingBatch||age>=LINGER_MS){index=position;break;}
-      wait=Math.max(wait,LINGER_MS-age);
+    for(const lane of [false,true]){
+      const now=performance.now(),counts=new Map<bigint,number>(),firstAt=new Map<bigint,number>();
+      for(const item of waiting)if(item.background===lane){counts.set(item.dev,(counts.get(item.dev)??0)+1);if(!firstAt.has(item.dev))firstAt.set(item.dev,item.at);}
+      for(let position=0;position<waiting.length;position++){
+        const item=waiting[position]!;if(item.background!==lane)continue;
+        const running=busy.get(item.dev)??0;
+        if(running>=(limitOf.get(item.dev)??1))continue;
+        // A short group starts at once only on an idle device; otherwise it gathers files until it is full or has waited long enough.
+        const age=now-firstAt.get(item.dev)!;
+        if(running===0||counts.get(item.dev)!>=routingBatch||age>=LINGER_MS){index=position;break;}
+        wait=Math.max(wait,LINGER_MS-age);
+      }
+      if(index>=0)break;
     }
     if(index<0){
       if(wait>0&&!lingering){lingering=true;setTimeout(()=>{lingering=false;pump();},Math.ceil(wait));}
       return;
     }
-    const dev=waiting[index]!.dev,group:Waiting[]=[];
+    const dev=waiting[index]!.dev,lane=waiting[index]!.background,group:Waiting[]=[];
     for(let position=index;position<waiting.length&&group.length<routingBatch;)
-      if(waiting[position]!.dev===dev){group.push(waiting[position]!);waiting.splice(position,1);}else position++;
+      if(waiting[position]!.dev===dev&&waiting[position]!.background===lane){group.push(waiting[position]!);waiting.splice(position,1);}else position++;
     busy.set(dev,(busy.get(dev)??0)+1);
     void run(group).finally(()=>{busy.set(dev,busy.get(dev)!-1);pump();});
   }
 }
 let scheduled=false;
-async function readRouting(file:string,dev:bigint,key:string):Promise<RawTags> {
+async function readRouting(file:string,dev:bigint,key:string,background=false,signal?:AbortSignal):Promise<RawTags> {
   const shared=inFlight.get(key);if(shared)return shared;
+  // A background read has its own in-flight key so a foreground caller never inherits its low priority or its abort.
+  const slot=background?`background:${key}`:key,sharedBackground=background?inFlight.get(slot):undefined;if(sharedBackground)return sharedBackground;
   maxRequests=exiftoolProcs();
   const read=(async()=>{
+    signal?.throwIfAborted();
     if(routingBatch<=1)return readSingle(file);
     await requestLimit(file,dev);
+    signal?.throwIfAborted();
     return new Promise<RawTags>((resolve,reject)=>{
-      waiting.push({at:performance.now(),file,dev,resolve,reject});
+      const item:Waiting={at:performance.now(),background,file,dev,resolve,reject};
+      waiting.push(item);
+      // An undispatched background read is dropped when its caller aborts; a dispatched one finishes.
+      if(background&&signal)signal.addEventListener('abort',()=>{const at=waiting.indexOf(item);if(at>=0){waiting.splice(at,1);reject(signal.reason??new DOMException('Aborted','AbortError'));}},{once:true});
       // Callers arriving together share a request; a free slot never waits for a full one.
       if(!scheduled){scheduled=true;setTimeout(()=>{scheduled=false;pump();},2);}
     });
   })();
-  inFlight.set(key,read);
-  return read.finally(()=>inFlight.delete(key));
+  inFlight.set(slot,read);
+  return read.finally(()=>inFlight.delete(slot));
 }
 /** details:false reads only the routing fields (camera, date, edited) and caches them by stat; otherwise every tag. */
-export async function metadata(filename:string, options:{details?:boolean}={}):Promise<Metadata> {
+export async function metadata(filename:string, options:{details?:boolean;background?:boolean;signal?:AbortSignal}={}):Promise<Metadata> {
+  options.signal?.throwIfAborted();
   const absolute=path.resolve(filename),before=await stat(absolute,{bigint:true});if(!before.isFile())throw new Error('Choose a media file to inspect.');
   const routing=options.details===false,key=statKey(absolute,before);
   if(routing){const cached=recall(key);if(cached)return structuredClone(cached);}
@@ -450,7 +463,7 @@ export async function metadata(filename:string, options:{details?:boolean}={}):P
   // trailer scans (-fast keeps maker notes). Full inspection keeps everything.
   // Grouped raw values preserve duplicate tags and the camera's recorded clock.
   // Admitted through the memory governor: above 90% of the limit a new read waits for the running ones.
-  const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
+  const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key,options.background===true,options.signal):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
   if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key){const kept=structuredClone(result);remember(key,kept);captured?.set(key,kept);}
   return result;

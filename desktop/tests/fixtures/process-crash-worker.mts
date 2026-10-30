@@ -8,7 +8,9 @@ const [mode,selected,id] = process.argv.slice(2);
 const base = await fs.realpath(selected!);
 const temporary = await fs.realpath(os.tmpdir());
 const relative = path.relative(temporary,base);
-if (!path.basename(base).startsWith('process-crash-') || !relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Crash worker requires its own temporary fixture');
+// Opt-in: the hardware test (Scripts/hw/groups/05-crash.mts) runs this worker inside its sandbox on a mounted volume.
+const hardwareSandbox = /^\/Volumes\/[^/]+\/photo-importer-hw-test-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z\/.+/.test(base);
+if (!path.basename(base).startsWith('process-crash-') || (!hardwareSandbox && (!relative || relative.startsWith('..') || path.isAbsolute(relative)))) throw new Error('Crash worker requires its own temporary fixture');
 const source = path.join(base,'source');
 const destination = path.join(base,'destination');
 const library = path.join(base,'library');
@@ -28,11 +30,18 @@ async function checkpoint(details:Record<string,unknown>):Promise<never> {
 }
 async function retained(operation:string):Promise<string> {
   const entry = path.join(recovery,operation,'originals','0');
-  for (const slot of await fs.readdir(entry)) {
-    const names = await fs.readdir(path.join(entry,slot));
+  for (const slot of (await fs.readdir(entry)).filter(name=>!name.startsWith('._'))) {
+    const names = (await fs.readdir(path.join(entry,slot))).filter(name=>!name.startsWith('._'));
     if (names.length) return path.join(entry,slot,names[0]!);
   }
   throw new Error('No retained original found');
+}
+// Hardware-test only (organization-exclusive-synced): write in 4093-byte pieces without stopping, then stop at a later sync,
+// after the first data sync and the second 'exclusive-created' checkpoint of exclusivePublication.
+function syncedStop(handle:FileHandle,file:string) {
+  const write = handle.write.bind(handle), sync = handle.sync.bind(handle);let syncs = 0;
+  Object.defineProperty(handle,'write',{value:(buffer:Buffer,offset:number,length:number,position:number|null)=>write(buffer,offset,Math.min(length,4093),position)});
+  Object.defineProperty(handle,'sync',{value:async()=>{if (++syncs === 3) await checkpoint({file,syncs});return sync();}});
 }
 function shortWrite(handle:FileHandle,file:string) {
   const write = handle.write.bind(handle);
@@ -43,16 +52,16 @@ function shortWrite(handle:FileHandle,file:string) {
 }
 async function run() {
   const open = fs.open.bind(fs), link = fs.link.bind(fs), rename = fs.rename.bind(fs), unlink = fs.unlink.bind(fs);
-  if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'organization-exclusive') {
+  if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'organization-exclusive' || mode === 'organization-exclusive-synced') {
     fs.open = async(...args:Parameters<typeof fs.open>)=>{
       const handle = await open(...args), file = String(args[0]);
-      if (args[1] === 'wx' && (mode === 'import-stage' ? file.includes(`${path.sep}Photo Importer Data${path.sep}Imports${path.sep}Staging${path.sep}`) && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) shortWrite(handle,file);
+      if (args[1] === 'wx' && (mode === 'import-stage' ? file.includes(`${path.sep}Photo Importer Data${path.sep}Imports${path.sep}Staging${path.sep}`) && file.endsWith('.partial') : mode==='import-exclusive'?file===path.join(destination,'A.bin'):file === target)) (mode === 'organization-exclusive-synced' ? syncedStop : shortWrite)(handle,file);
       return handle;
     };
   }
-  if (mode === 'organization-exclusive' || mode === 'organization-publish') {
+  if (mode === 'organization-exclusive' || mode === 'organization-exclusive-synced' || mode === 'organization-publish') {
     fs.link = async(from,to)=>{
-      if (String(to) === target && mode === 'organization-exclusive') throw Object.assign(new Error('Fixture filesystem has no hard links'),{code:'ENOTSUP'});
+      if (String(to) === target && (mode === 'organization-exclusive' || mode === 'organization-exclusive-synced')) throw Object.assign(new Error('Fixture filesystem has no hard links'),{code:'ENOTSUP'});
       const result = await link(from,to);
       if (String(to) === target && mode === 'organization-publish') await checkpoint({file:target});
       return result;
@@ -92,10 +101,14 @@ async function run() {
   syncBuiltinESMExports();
   const core = await import('../../core/index.ts');
   const {organizeAs} = await import('./records.ts');
-  core.configureOrganizationRecovery('process-crash-host-authentication-secret-32bytes');
+  // A hardware run on a volume whose records folder this Mac wrote needs this Mac's key (the harness's --host-key);
+  // every other run keeps the fixed test key.
+  const hostKey = hardwareSandbox && process.env.HW_HOST_KEY_FILE ? await fs.readFile(process.env.HW_HOST_KEY_FILE) : undefined;
+  if (hostKey && hostKey.length !== 32) throw new Error('HW_HOST_KEY_FILE must name a 32-byte key file');
+  core.configureOrganizationRecovery(hostKey ?? 'process-crash-host-authentication-secret-32bytes');
   if (mode === 'import-stage' || mode === 'import-exclusive' || mode === 'retry-import') {
     const {plans:[plan]} = await core.plan(source,[destination],importOptions,metadata);
-    const result = await core.execute(plan!,undefined,undefined,{exclusiveCopy:mode === 'import-exclusive'});
+    const result = await core.execute(plan!,undefined,undefined,{exclusiveCopy:mode === 'import-exclusive',...(process.env.CRASH_STAGED_IMPORT ? {direct:false} : {})});
     return {result,target:plan!.entries[0]!.destination};
   }
   if (mode === 'undo-organization') return {result:await core.undoOrganization(library,id!),jobs:await core.getOrganizationRecovery(library)};

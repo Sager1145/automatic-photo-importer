@@ -102,8 +102,8 @@ const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',tra
 const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
 const job=(progress:Progress,phase:Job['phase']='verifying'):Job=>({id:'j',source,phase,errors:[],backup:false,progress});
 const state=(value:Job):AppState=>({preferences,sources:[source],jobs:[value],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
-const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
-const dashboard=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{...defaultPreferences, language:'en',children:createElement(ImportDashboard,{state:state(value),act:()=>{}})})).match(/data-testid="total-progress"[\s\S]*?progress-display-line[\s\S]*?<\/div><\/div>/)?.[0]??'';
+const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));
+const dashboard=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDashboard,{state:state(value),act:()=>{}})})).match(/data-testid="total-progress"[\s\S]*?progress-display-line[\s\S]*?<\/div><\/div>/)?.[0]??'';
 const checked:Progress={phase:'planning',step:'checking',completed:64832,total:64832,bytes:834e9,totalBytes:834e9,speed:0,file:'DSC1.JPG'};
 const comparing:Progress={phase:'planning',step:'comparing',completed:3000,total:64832,bytes:36e9,totalBytes:0,speed:0,file:'DSC2.JPG'};
 

@@ -12,6 +12,8 @@ export interface Context {
  firstState:AppState;
  firstBanner:string;
  organizationOnly:boolean;
+ /** Set only by --real-drives: libraries of real, mounted drives to browse read-only. */
+ realDrives?:{destination:string;basePath:string}[];
 }
 export const digest=async(file:string)=>createHash('sha256').update(await fs.readFile(file)).digest('hex');
 /** Digests of every file under a folder. */

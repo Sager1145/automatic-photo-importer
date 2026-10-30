@@ -1,3 +1,4 @@
+import { freshOrganizeOptions } from '../run-policy';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createTranslator} from '../renderer/i18n';
@@ -8,10 +9,10 @@ import type {AppState,Job,Progress} from '../shared';
 // Hardware retest, 2026-10-24: the percent on a row must describe the work its counter counts, and so must the sidebar and the overview.
 // Each job carries the whole-job share the main process logged at that moment; none of these rows may show it.
 const t=createTranslator('en'),number=(value:number)=>value.toLocaleString('en');
-const preferences={language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',allowFolderSource:false,unknownRules:{}} as AppState['preferences'];
+const preferences={showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const folder={id:'xxxx',name:'xxxx',path:'/Volumes/Untitled/xxxx',transport:'folder' as const,selected:true};
 const library={id:'library',name:'Existing library',path:'/Volumes/A006',transport:'folder' as const,selected:true};
-const stateOf=(job:Job):AppState=>({preferences,sources:[folder],jobs:[job],history:[],platform:'darwin',destinationStatus:[{path:'/Volumes/A006',available:true}]});
+const stateOf=(job:Job):AppState=>({preferences,sources:[folder],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:[{path:'/Volumes/A006',available:true}]});
 const percent=(fraction:number|undefined)=>Math.floor(fraction!*100);
 /** The counter's own share: the numbers its text shows. */
 const counted=(text:string)=>{const [done,all]=text.match(/[\d,]+(?= of )|(?<= of )[\d,]+/g)!.map(item=>Number(item.replace(/,/g,'')));return done!/all!;};

@@ -22,7 +22,7 @@ export function pathOf(value:Message):string|undefined{const own=value.params?.p
 /** Codes shown as one row per job however many entries there are. Other entries keep a row each. */
 export const groupedCodes=new Set<string>(['staging-left','unreadable','zero-byte','copy-failed','file-skipped']);
 /** One problem shown in All errors. id is stable while the problem lasts; source groups it, drive names the volume it came from. */
-export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];/** A group's problems per reason. */reasons?:Record<string,number>;id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;/** The source whose unknown file formats await a rule (kind 'format'). */formatSourceId?:string;}
+export interface LoggedError {/** Stable code of the kind of problem, see codeOf. */code:string;/** A grouped entry stands for this many problems; items are the first of them. */count?:number;items?:{path:string;detail?:string}[];/** A group's problems per reason. */reasons?:Record<string,number>;id:string;source:string;drive:string;message:Message;kind:ErrorKind;severity:Severity;sourceId?:string;/** The job a job error belongs to. */jobId?:string;/** The source whose unknown file formats await a rule (kind 'format'). */formatSourceId?:string;/** Old records of an earlier version on this drive: the row offers Acknowledge, and Clear does not apply. */oldDrive?:string;}
 /** Every shown error with when it first appeared (ISO); errors the user cleared are left out. */
 export interface ErrorLogState {entries:(LoggedError&{at:string})[];}
 
@@ -89,6 +89,11 @@ export function gatherErrors(state:AppState):LoggedError[]{
    result.push({id,code:'unknown-formats',source:source.name,drive:driveName(source.path,source.name),message:makeMessage('issue.unknownFormats'),kind:'format',severity:'warning',sourceId:source.id,formatSourceId:source.id});
   }
  }
+ // Records of an earlier version that this Mac wrote: nothing was changed. The row's Acknowledge stops the notice.
+ for(const drive of state.oldRecords??[]){
+  const name=drive.split(/[\\/]+/).filter(Boolean).pop()??drive;
+  result.push({id:'old-records:'+drive,code:'error.oldRecords',source:name,drive:driveName(drive,drive),message:makeMessage('error.oldRecords',{drive:name}),kind:'destination',severity:'warning',oldDrive:drive});
+ }
  return result;
 }
 
@@ -110,7 +115,7 @@ export class ErrorLog{
 /** Clears the listed errors (one, or a whole group), or every error when no ids are given; with a severity, only those of it.
  * Clearing warnings never clears errors, and the reverse. Jobs keep their errors; only the shared app error is reset at its source. */
 export function clearErrors(log:ErrorLog,state:AppState,{ids,severity}:{ids?:string[];severity?:Severity}={}){
- const wanted=ids&&new Set(ids),errors=gatherErrors(state).filter(error=>error.kind!=='format'&&(!wanted||wanted.has(error.id))&&(!severity||error.severity===severity));
+ const wanted=ids&&new Set(ids),errors=gatherErrors(state).filter(error=>error.kind!=='format'&&!error.oldDrive&&(!wanted||wanted.has(error.id))&&(!severity||error.severity===severity));
  log.clear(errors.map(error=>error.id));
  if(errors.some(error=>error.kind==='app'))state.error=undefined;
 }
@@ -126,6 +131,7 @@ function errorInputs(state:AppState,log:ErrorLog):unknown[]{
  for(const source of state.sources)inputs.push(source.id,source.name,source.path,state.sourceInventories?.[source.id]);
  for(const recovery of state.organizationRecovery??[])inputs.push(recovery.id,recovery.root,recovery.error);
  for(const destination of state.destinationStatus??[])inputs.push(destination.path,destination.detail);
+ inputs.push(JSON.stringify(state.oldRecords??[]));
  return inputs;
 }
 /** Rebuilds the error log only when the errors (or a clear) changed since the last emit. */

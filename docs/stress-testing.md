@@ -107,10 +107,11 @@ The whole stress suite took 1,596 s (26.6 min). The organize test alone took 13.
 
 ## Hardware exFAT end-to-end test
 
-`Scripts/test-hardware-exfat.mts` runs import, re-import, conflict, organization, undo, finalize, duplicate removal and an interrupted organization on real external exFAT volumes:
+`Scripts/hw/run.mts` is a harness (`Scripts/hw/harness.mts`) plus scenario groups (`Scripts/hw/groups/<name>.mts`, run in file-name order, each in its own sub-folder of the sandboxes; a throwing group counts as a failure and the run continues). The `01-cycle` group runs import, re-import, conflict, organization, undo, finalize, duplicate removal, an interrupted organization and NFC names on real external exFAT volumes:
 
 ```
-node --import tsx Scripts/test-hardware-exfat.mts --source=/Volumes/A006 --library=/Volumes/Untitled [--keep] [--files=N]
+node --import tsx Scripts/hw/run.mts --source=/Volumes/A006 --library=/Volumes/Untitled [--keep] [--files=N] [--host-key=<path>] [--only=<group,...>]
+node --import tsx Scripts/test-hardware-exfat.mts ...   # wrapper: same as run.mts --only=01-cycle
 ```
 
 It only writes inside one `photo-importer-hw-test-<ISO time>` folder it creates on each volume (a guard rejects every other path), keeps app data in a fresh temporary folder, and removes only those folders at the end unless `--keep` is given. Metadata comes from a synthetic table, so no camera files are needed. It prints a PASS/FAIL/SKIP line per check, per-scenario timings and the exFAT inode observations, and exits non-zero on any failure.

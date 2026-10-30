@@ -6,6 +6,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
 import {ImportDashboard,Organization,SidebarSources,TitlebarControls} from '../renderer/RootApp';
 import type {AppState,Job,Language} from '../shared';
+import { gated } from './gated';
 import { defaultPreferences } from '../preferences';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
@@ -39,7 +40,7 @@ test('Library keeps execution below the destination scope and the same run contr
 });
 
 test('the content actions retain review locking and organization queue semantics',()=>{
- const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:value,act:()=>{},busy:true})}));
+ const render=(value:AppState)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(Organization,{state:gated(value),act:()=>{},busy:true})}));
  const importing:Job={id:'j',source,phase:'copying',errors:[],backup:false};
  const copying=render(state({jobs:[importing]}));
  assert.match(copying,/<button[^>]*disabled[^>]*>(?:<svg[\s\S]*?<\/svg>)?Review changes…/);

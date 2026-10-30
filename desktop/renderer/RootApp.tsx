@@ -576,10 +576,6 @@ export function collectErrors(state: AppState, extra: (string | LocalError | und
   const result: DisplayError[] = [];
   for (const item of extra) { const local = typeof item === 'string' ? { detail: item } : item; if (local?.detail && !result.some(error => error.id === 'local:' + local.detail)) result.push({ id: 'local:' + local.detail, source: '', drive: driveName(local.detail, ''), message: text(local.detail), kind: 'app', severity: 'error', ...(local.at ? { at: local.at } : {}) }); }
   result.push(...(state.errorLog?.entries ?? []));
-  // Records of an earlier version that this Mac wrote: nothing was changed. The row's Acknowledge stops the notice.
-  for (const drive of state.oldRecords ?? []) {
-    result.push({id:'old-records:'+drive,source:basename(drive),drive:driveName(drive,drive),message:message('error.oldRecords',{drive:basename(drive)}),kind:'destination',severity:'warning',oldDrive:drive});
-  }
   return result;
 }
 
