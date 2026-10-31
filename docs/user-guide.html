@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automatic Photo Importer – User Guide</title>
+<style>
+:root{--bg:#fbfaf8;--text:#1d1d1f;--muted:#6e6e73;--card:#fff;--line:#e5e2dc;--accent:#e2553f;--code:#f2efea}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--text:#f5f5f7;--muted:#a1a1a6;--card:#2c2c2e;--line:#3a3a3c;--accent:#ff7a63;--code:#3a3a3c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC",sans-serif}
+main{max-width:860px;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:30px;margin:0 0 4px}h2{font-size:22px;margin:40px 0 12px;padding-top:12px;border-top:1px solid var(--line)}h3{font-size:17px;margin:22px 0 6px}
+p,li{margin:6px 0}ul,ol{padding-left:22px}
+.lead{color:var(--muted);margin:0 0 18px}
+.lang{display:flex;gap:10px;margin:14px 0 24px}.lang a{padding:6px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--text);text-decoration:none}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:12px 0}
+.box.warn{border-color:var(--accent)}
+b.ui{font-weight:600}
+code{background:var(--code);padding:1px 6px;border-radius:5px;font:14px ui-monospace,Menlo,monospace}
+nav ol{columns:2;column-gap:28px}
+@media (max-width:600px){nav ol{columns:1}}
+</style>
+</head>
+<body>
+<main>
+<h1>Automatic Photo Importer</h1>
+<p class="lead">Verified photo and video imports, organized by date and camera. Your originals are never changed.</p>
+<div class="lang"><a href="#en">English</a><a href="#zh">简体中文</a></div>
+
+<section id="en">
+<nav class="box"><strong>Contents</strong><ol>
+<li><a href="#en-install">Install and first open</a></li>
+<li><a href="#en-setup">First setup: where backups go</a></li>
+<li><a href="#en-import">Import page</a></li>
+<li><a href="#en-browser">Library browser</a></li>
+<li><a href="#en-tools">Library tools</a></li>
+<li><a href="#en-activity">Activity</a></li>
+<li><a href="#en-settings">Settings</a></li>
+<li><a href="#en-sidebar">Sidebar</a></li>
+<li><a href="#en-safety">Safety rules</a></li>
+</ol></nav>
+
+<h2 id="en-install">1. Install and first open</h2>
+<ol>
+<li>Open the DMG and drag <b class="ui">Automatic Photo Importer</b> onto <b class="ui">Applications</b>.</li>
+<li>Open it from Applications. Works on Apple silicon and Intel Macs with <b>macOS 14 Sonoma or later</b>.</li>
+</ol>
+<div class="box warn"><strong>“Apple could not verify…” on first open?</strong> This build is not notarized by Apple. Do this once:
+<ol>
+<li>Try to open the app, then click <b class="ui">Done</b> (or <b class="ui">OK</b>).</li>
+<li>Open <b class="ui">System Settings → Privacy &amp; Security</b>, scroll down and click <b class="ui">Open Anyway</b> next to Automatic Photo Importer, then confirm with your password.</li>
+</ol>
+If macOS says the app “is damaged”, run this in Terminal, then open it again:<br><code>xattr -dr com.apple.quarantine "/Applications/Automatic Photo Importer.app"</code></div>
+<p>When macOS asks for access to removable volumes or the camera, click <b class="ui">Allow</b>: the app needs it to read cards and write to backup drives.</p>
+
+<h2 id="en-setup">2. First setup: where backups go</h2>
+<p>Go to <b class="ui">Settings → Storage &amp; folders</b>.</p>
+<ul>
+<li><b class="ui">Choose location…</b>: pick the photo backup folder. It can be on your Mac or on an external HDD/SSD (not a camera card or USB stick). A missing folder is created on the first import.</li>
+<li><b class="ui">Use a separate video folder</b>: keep videos in their own folder, on the same drive, another drive, or any folder depth (for example photos on <code>Drive1/photobackup</code>, videos on <code>Drive2/folder1/folder2</code>).</li>
+<li><b class="ui">Copy policy</b>: <b class="ui">One destination</b>, <b class="ui">Copy to both destinations</b> (a verified copy on two disks) or <b class="ui">Fill first, then second</b>.</li>
+<li><b class="ui">Folder structure</b>: choose <b class="ui">Date, then camera</b> or <b class="ui">Camera, then date</b>, turn date levels on or off, and choose how photos and videos are split by format. The previews show exactly where the next photo, video, JPEG and voice memo will land.</li>
+<li><b class="ui">Edited exports folder</b>: the folder name used for edited exports inside each month.</li>
+</ul>
+
+<h2 id="en-import">3. Import page</h2>
+<h3>Media tab (cards and cameras)</h3>
+<ul>
+<li>Insert a memory card or connect a camera by USB: it appears under <b class="ui">Sources &amp; queue</b>.</li>
+<li><b class="ui">Choose media folders…</b>: add a folder that already holds photos as a source.</li>
+<li><b class="ui">Scan</b> / <b class="ui">Scan all</b>: read a source without copying; shows file counts, formats and cameras.</li>
+<li><b class="ui">Start</b> (or <b class="ui">Start all selected</b> in the title bar): plan the import, review it, then copy. Each copy is checked with SHA-256.</li>
+<li><b class="ui">Stop</b> (or <b class="ui">Stop imports</b>): cancels running work. Finished files stay; importing again resumes.</li>
+<li><b class="ui">List view</b> / <b class="ui">Grid view</b>: change how sources are shown. Click a file to see its preview and EXIF.</li>
+<li>With <b class="ui">Automatic import</b> on (Settings → Importing), imports start as soon as a chosen card connects.</li>
+</ul>
+<h3>Files &amp; folders tab (whole-drive backups)</h3>
+<ul><li><b class="ui">Back up drives or folders…</b>: copy everything, keeping its own folders, into <code>Drive backups/</code>, without sorting by camera or date.</li></ul>
+<h3>Import overview and Destinations</h3>
+<ul>
+<li>The overview shows sources, active jobs, speed, files done and destination space. <b class="ui">Hide the import overview</b> collapses it.</li>
+<li><b class="ui">Destinations</b> lists each backup folder with its drive (“A006 › photobackup”), its video folder, a storage bar and drive activity. <b class="ui">Change</b> opens the copy policy; <b class="ui">Check folder layout</b> checks whether existing files match your folder rules.</li>
+</ul>
+
+<h2 id="en-browser">4. Library browser</h2>
+<p>Browse everything you have imported, read-only. Nothing is moved or renamed here.</p>
+<ul>
+<li><b class="ui">Library</b> menu: pick a destination library. <b class="ui">Browse a folder…</b> (folder icon) adds any other folder to browse; <b class="ui">×</b> removes it from the list.</li>
+<li><b class="ui">Categories</b>: virtual columns such as Date › Camera › Format › Files. <b class="ui">Real folders</b>: the actual folders on disk.</li>
+<li>Click a row to narrow the next columns. Command-click adds more choices in the same column. Every column only shows what matches the columns before it.</li>
+<li><b class="ui">Back</b> / <b class="ui">Forward</b>: step through your selections. <b class="ui">Clear all</b> resets them.</li>
+<li><b class="ui">Search names</b> and <b class="ui">Sort</b> filter and order the Files column.</li>
+<li><b class="ui">RAW + JPEG</b> (on by default): a RAW and the JPEG/HEIF taken with it (same name, same EXIF time and camera) show as one photo marked “+ NEF”.</li>
+<li>Click a file to preview it with camera, lens, date and exposure. <b class="ui">Full EXIF</b> shows every tag; <b class="ui">Show in file manager</b> reveals it in Finder.</li>
+<li>The status line shows indexing progress with <b class="ui">Refresh index</b> / <b class="ui">Stop indexing</b> and a <b class="ui">Placement</b> filter (for example “Needs organization”).</li>
+<li>Drag a column edge to change its width; drag the handle under the columns to change their height (double-click it to fill the window).</li>
+<li>Keyboard: arrow keys move, Space selects, Esc clears or closes the preview.</li>
+</ul>
+<h3>Building a view (Virtual hierarchy panel)</h3>
+<ul>
+<li><b class="ui">Fields</b>: click a field (Date, Camera, Lens, ISO…) to add it as the last column, or drag it to the exact place in <b class="ui">Levels</b>.</li>
+<li><b class="ui">Presets</b>: click one to use it, or drag it into Levels to insert all its columns.</li>
+<li>Click a level to set its options (date granularity, aperture/ISO/shutter ranges, name or format grouping). Drag levels to reorder; <b class="ui">Clear</b> removes them all.</li>
+<li>Type a name and click <b class="ui">Save current view</b> to keep it as your own preset (rename ✎ or delete ×). <b class="ui">Restore default view</b> goes back to Date › Camera › Format.</li>
+</ul>
+
+<h2 id="en-tools">5. Library tools</h2>
+<h3>Organize</h3>
+<ul>
+<li><b class="ui">Check folder layout</b>: find files that are not where your folder rules put them.</li>
+<li><b class="ui">Review changes…</b>: preview the new structure; <b class="ui">Organize now</b> applies it. Originals wait in a recovery area until you release them, so you can undo.</li>
+<li><b class="ui">Organize a folder</b> → <b class="ui">Choose folder…</b>: organize another folder in place.</li>
+<li><b class="ui">Edit folder rules</b>: opens Settings → Storage &amp; folders.</li>
+</ul>
+<h3>Duplicates</h3>
+<ul>
+<li><b class="ui">Where to look</b> → <b class="ui">Choose folder…</b>, then <b class="ui">Scan for duplicates</b>.</li>
+<li>Choose <b class="ui">Choose every keeper</b> (you decide each group) or <b class="ui">Suggest keepers for identical files</b>. Removed copies go to the recovery area and can be undone.</li>
+</ul>
+<h3>Recovery &amp; cleanup</h3>
+<ul><li><b class="ui">Organization recovery</b> lists past organizations you can undo; <b class="ui">Refresh list</b> rereads it. <b class="ui">Maintenance → Clean up</b> releases recovery data you no longer need, after showing what will happen.</li></ul>
+
+<h2 id="en-activity">6. Activity</h2>
+<ul>
+<li><b class="ui">Queue</b>: running and waiting jobs. <b class="ui">Stop all</b> cancels them.</li>
+<li><b class="ui">History</b>: finished imports and what they did.</li>
+<li><b class="ui">Issues</b>: errors and warnings grouped by cause. <b class="ui">Copy all details</b> for support; <b class="ui">Clear all errors</b> when done.</li>
+</ul>
+
+<h2 id="en-settings">7. Settings</h2>
+<ul>
+<li><b class="ui">General</b>: app language (English, 简体中文, 繁體中文, 日本語), text size, appearance (System / Light / Dark) and accent colour.</li>
+<li><b class="ui">Storage &amp; folders</b>: backup folders, copy policy, folder structure and edited exports folder (see section 2).</li>
+<li><b class="ui">Importing</b>: <b class="ui">Automatic import</b>; <b class="ui">Verify each copy after copying</b> (reads each copy back; off is faster); <b class="ui">Drive backups</b>: <b class="ui">Additive</b> or <b class="ui">Mirror</b> (files removed from the source move to <code>Drive backups/.mirror-removed/</code>, never deleted); <b class="ui">After an import</b>: offer to delete originals that are verified in the backup (two-step confirmation, off by default), and eject drives automatically after a clean import.</li>
+<li><b class="ui">File handling</b>: what to do with files without date or camera (<b class="ui">Move to a folder</b>, <b class="ui">Leave where they are</b>, <b class="ui">Use file date</b>); unrecognized file types (<b class="ui">Skip automatically</b>, <b class="ui">Copy to Other files folder</b>, <b class="ui">Ask me</b>, or a saved rule per extension); same name but different content (<b class="ui">Conflicts folder</b> or <b class="ui">Add a number</b>); collect 0-byte problem files; remove empty macOS <code>._</code> files.</li>
+<li><b class="ui">Devices</b>: remembered drives (with the cameras found on them) and ignored drives.</li>
+<li><b class="ui">Performance</b>: drives imported at once, CPU threads and memory limit; <b class="ui">Reset to defaults</b>.</li>
+<li><b class="ui">Diagnostics</b>: log detail, <b class="ui">Open log folder</b>, <b class="ui">Export logs…</b> to share with support.</li>
+</ul>
+
+<h2 id="en-sidebar">8. Sidebar</h2>
+<ul>
+<li><b class="ui">Sources</b>: connected cards, cameras and folders; the refresh button rescans; the eject button safely ejects a card.</li>
+<li><b class="ui">Destinations</b>: each backup folder with free space and its current activity.</li>
+</ul>
+
+<h2 id="en-safety">9. Safety rules</h2>
+<ul>
+<li>Nothing on a card or source is moved, changed or deleted (unless you confirm deleting verified originals).</li>
+<li>Identical files are skipped. A different file with the same name never overwrites: it goes to a Conflicts folder or gets a number.</li>
+<li>Stop or unplug at any time; import again and the app checks what was written and continues.</li>
+</ul>
+</section>
+
+<section id="zh" lang="zh-Hans">
+<h2>简体中文</h2>
+<nav class="box"><strong>目录</strong><ol>
+<li><a href="#zh-install">安装与首次打开</a></li><li><a href="#zh-setup">首次设置：备份位置</a></li><li><a href="#zh-import">导入页面</a></li><li><a href="#zh-browser">分类预览</a></li><li><a href="#zh-tools">资料库工具</a></li><li><a href="#zh-activity">活动</a></li><li><a href="#zh-settings">设置</a></li><li><a href="#zh-sidebar">侧栏</a></li><li><a href="#zh-safety">安全规则</a></li>
+</ol></nav>
+
+<h3 id="zh-install">1. 安装与首次打开</h3>
+<ol><li>打开 DMG，把 <b class="ui">Automatic Photo Importer</b> 拖到 <b class="ui">Applications（应用程序）</b>。</li><li>从“应用程序”打开。支持 Apple 芯片和 Intel 的 Mac，需要 <b>macOS 14 Sonoma 或更高版本</b>。</li></ol>
+<div class="box warn"><strong>首次打开提示“无法验证开发者”？</strong>此版本未经 Apple 公证，只需操作一次：
+<ol><li>先尝试打开应用，然后点「完成」或「好」。</li><li>打开「系统设置 → 隐私与安全性」，向下滚动，点 Automatic Photo Importer 旁的「仍要打开」，输入密码确认。</li></ol>
+如果提示应用“已损坏”，在“终端”中运行下面的命令后再打开：<br><code>xattr -dr com.apple.quarantine "/Applications/Automatic Photo Importer.app"</code></div>
+<p>macOS 询问是否允许访问可移除宗卷或相机时，请点「允许」：应用需要它来读取存储卡并写入备份硬盘。</p>
+
+<h3 id="zh-setup">2. 首次设置：备份位置</h3>
+<p>打开「设置 → 存储与文件夹」。</p>
+<ul>
+<li>「选择位置…」：选择照片备份文件夹，可以在 Mac 上或外置硬盘/SSD 上（不能是相机存储卡或 U 盘）。不存在的文件夹会在首次导入时创建。</li>
+<li>「为视频使用单独的文件夹」：视频单独存放，可在同一硬盘、另一块硬盘或任意多层文件夹中（例如照片放在 <code>Drive1/photobackup</code>，视频放在 <code>Drive2/folder1/folder2</code>）。</li>
+<li>「复制策略」：一个目标、复制到两个目标（两块磁盘各一份校验过的副本），或先存满第一块再用第二块。</li>
+<li>「文件夹结构」：选择先按日期或先按相机，开关各级日期文件夹，并选择照片和视频如何按格式分开。预览会显示下一张照片、视频、JPEG 和语音备忘录的确切位置。</li>
+<li>「编辑导出文件夹」：每个月份文件夹内存放编辑后导出文件的文件夹名称。</li>
+</ul>
+
+<h3 id="zh-import">3. 导入页面</h3>
+<ul>
+<li><b>媒体</b>：插入存储卡或用 USB 连接相机，它会出现在「来源与队列」中。「选择媒体文件夹…」可把已有照片的文件夹加为来源。</li>
+<li>「扫描」/「扫描全部」：只读取不复制，显示数量、格式和相机。</li>
+<li>「开始」：规划、审核后复制，每份副本都用 SHA-256 校验。「停止」：取消进行中的任务，已完成的文件保留，再次导入会继续。</li>
+<li>列表/网格视图切换；点击文件查看预览和 EXIF。在「设置 → 导入」中开启「自动导入」后，插卡即开始导入。</li>
+<li><b>文件和文件夹</b>：「备份磁盘或文件夹…」按原有文件夹结构完整复制到 <code>Drive backups/</code>，不按相机或日期整理。</li>
+<li>「目标」显示每个备份文件夹所在硬盘（如“A006 › photobackup”）、视频文件夹、存储条和硬盘活动；「检查文件夹结构」检查现有文件是否符合文件夹规则。</li>
+</ul>
+
+<h3 id="zh-browser">4. 分类预览</h3>
+<ul>
+<li>只读浏览已导入的内容，这里不会移动或重命名任何文件。</li>
+<li>「资料库」菜单选择目标资料库；文件夹图标「浏览文件夹…」可加入任意其他文件夹，× 可移除。</li>
+<li>「分类浏览」：日期 › 相机 › 格式 › 文件等虚拟栏位；「实际文件夹」：磁盘上的实际文件夹。</li>
+<li>点击一行会筛选后面的栏位；按住 Command 点击可在同一栏多选。每一栏只显示符合前面栏位选择的内容。「后退」/「前进」切换选择历史，「全部清除」重置。</li>
+<li>「搜索名称」和「排序」作用于文件栏。「RAW + JPEG」（默认开启）：同名、EXIF 时间和相机相同的 RAW 与 JPEG/HEIF 合并显示为一张，并标注“+ NEF”。</li>
+<li>点击文件可预览并查看相机、镜头、日期和曝光；「完整 EXIF」显示全部标签；「在文件管理器中显示」在访达中显示。</li>
+<li>拖动栏位边缘调整宽度；拖动栏位下方的手柄调整高度（双击恢复填满窗口）。键盘：方向键移动，空格选择，Esc 清除或关闭预览。</li>
+<li><b>虚拟层级面板</b>：点击「字段」把它加到最后一层，或拖到「层级」中的指定位置；点击「预设」直接使用，或拖入层级插入其全部栏位；点击某一层设置选项，拖动可调整顺序，「清除」移除全部层级；输入名称后点「保存当前视图」保存为自己的预设（✎ 重命名、× 删除），「恢复默认视图」回到 日期 › 相机 › 格式。</li>
+</ul>
+
+<h3 id="zh-tools">5. 资料库工具</h3>
+<ul>
+<li><b>整理</b>：「检查文件夹结构」找出位置不符合规则的文件；「预览更改…」预览新结构，「立即整理」执行。原文件会保留在恢复区直到你释放，可以撤销。「整理文件夹 → 选择文件夹…」原地整理其他文件夹；「编辑文件夹规则」打开设置。</li>
+<li><b>重复文件</b>：在「查找位置」中「选择文件夹…」，然后「扫描重复文件」；可以逐组自行选择保留的文件，或让应用为完全相同的文件建议保留项。移除的副本进入恢复区，可以撤销。</li>
+<li><b>恢复与清理</b>：「整理恢复」列出可撤销的整理；「刷新列表」重新读取；「维护 → 清理」在说明后果后释放不再需要的恢复数据。</li>
+</ul>
+
+<h3 id="zh-activity">6. 活动</h3>
+<ul><li>「队列」：进行中和等待中的任务，「全部停止」可取消。「历史记录」：已完成的导入。「问题」：按原因分组的错误和警告，可「复制全部详情」或「清除所有错误」。</li></ul>
+
+<h3 id="zh-settings">7. 设置</h3>
+<ul>
+<li><b>通用</b>：界面语言、文字大小、外观（跟随系统/浅色/深色）和强调色。</li>
+<li><b>存储与文件夹</b>：备份文件夹、复制策略、文件夹结构、编辑导出文件夹（见第 2 节）。</li>
+<li><b>导入</b>：自动导入；复制后逐一校验（关闭更快）；磁盘备份「累加」或「镜像」（来源中已删除的文件移到 <code>Drive backups/.mirror-removed/</code>，从不删除）；导入完成后：提供删除已在备份中校验过的原文件（两步确认，默认关闭）、导入无误后自动推出驱动器。</li>
+<li><b>文件处理</b>：没有日期或相机的文件（移到文件夹 / 保持原位 / 使用文件日期）；无法识别的文件类型（自动跳过 / 复制到“其他文件”文件夹 / 询问我，或按扩展名保存规则）；同名但内容不同（冲突文件夹 / 添加编号）；收集 0 字节问题文件；删除无数据的 macOS <code>._</code> 文件。</li>
+<li><b>设备</b>：记住的驱动器（含其中发现的相机）和已忽略的驱动器。</li>
+<li><b>性能</b>：同时导入的驱动器数、CPU 线程、内存上限，「恢复默认」。</li>
+<li><b>诊断</b>：日志详细程度、「打开日志文件夹」、「导出日志…」。</li>
+</ul>
+
+<h3 id="zh-sidebar">8. 侧栏</h3>
+<ul><li>「来源」：已连接的存储卡、相机和文件夹；刷新按钮重新扫描，推出按钮安全推出存储卡。「目标」：各备份文件夹的可用空间和当前活动。</li></ul>
+
+<h3 id="zh-safety">9. 安全规则</h3>
+<ul><li>存储卡或来源上的任何内容都不会被移动、修改或删除（除非你确认删除已校验的原文件）。</li><li>相同的文件会被跳过；同名但内容不同的文件绝不会覆盖，而是放进冲突文件夹或添加编号。</li><li>随时可以停止或拔出；再次导入时应用会检查已写入的内容并继续。</li></ul>
+</section>
+</main>
+</body>
+</html>

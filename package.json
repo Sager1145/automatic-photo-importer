@@ -1,6 +1,6 @@
 {
   "name": "automatic-photo-importer",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Verified photo imports and non-deleting drive backups",
   "main": "dist/desktop/main.cjs",
@@ -11,6 +11,7 @@
     "test:stress": "node --import tsx --test --test-concurrency=1 --test-timeout=3600000 desktop/stress/*.stress.ts",
     "typecheck": "tsc --noEmit",
     "package:mac": "npm run native:mac && npm run build && electron-builder --mac dir --arm64",
+    "package:mac:release": "npm run native:mac && npm run build && electron-builder --mac dmg --universal -c.mac.identity=-",
     "package:win": "npm run build && electron-builder --win dir",
     "package:linux": "npm run build && electron-builder --linux dir",
     "native:mac": "bash Scripts/build_camera_bridge.sh",
@@ -23,6 +24,7 @@
     "directories": {
       "output": "build/desktop"
     },
+    "afterPack": "Scripts/after-pack.cjs",
     "files": [
       "dist/**/*",
       "package.json"
@@ -49,7 +51,9 @@
             "NativeCameraBridge"
           ]
         }
-      ]
+      ],
+      "minimumSystemVersion": "14.0",
+      "x64ArchFiles": "Contents/Resources/native/NativeCameraBridge"
     },
     "win": {
       "target": [
@@ -61,6 +65,34 @@
         "dir"
       ],
       "category": "Photography"
+    },
+    "dmg": {
+      "title": "Automatic Photo Importer ${version}",
+      "artifactName": "Automatic-Photo-Importer-${version}-universal.${ext}",
+      "window": {
+        "width": 560,
+        "height": 420
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 170,
+          "type": "file"
+        },
+        {
+          "x": 420,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 280,
+          "y": 320,
+          "type": "file",
+          "path": "docs/user-guide.html",
+          "name": "User Guide 使用说明.html"
+        }
+      ]
     }
   },
   "dependencies": {
