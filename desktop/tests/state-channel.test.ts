@@ -8,7 +8,7 @@ import {withFigures} from '../core/inventory';
 import { defaultPreferences } from '../preferences';
 
 function inventory(name='photo.nef'):Inventory{return withFigures({files:[{path:'/card/'+name,relative:name,size:8,kind:'RAW',included:true}],media:1,companions:0,unknown:0,bytes:8,unknownExtensions:{},elapsedMs:1});}
-function state():AppState{return {preferences:{...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat' as const,videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}},sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};}
+function state():AppState{return {preferences:{...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:[],copyMode:'single',template:'{year}/{yyyymm}/{camera}',mediaLayout:'flat' as const,videoTemplate:'',unknownRules:{}},sources:[{id:'card',name:'Card',path:'/card',transport:'storage'}],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()};}
 function review():Review{return {id:'review',kind:'import',source:{id:'card',name:'Card',path:'/card',transport:'storage'},backup:false,plans:[{source:'/card',root:'/backup',rootIdentity:'disk',entries:[{id:'photo',source:'/card/photo.nef',destination:'/backup/photo.nef',size:8,kind:'RAW',digest:'abc',skip:false,family:'photo'}]}]};}
 const wire=(update:StateUpdate)=>structuredClone(update);
 

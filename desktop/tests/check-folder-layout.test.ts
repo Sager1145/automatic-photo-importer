@@ -9,7 +9,7 @@ import type {Action,AppState,Language,Progress} from '../shared';
 import {gated} from './gated';
 import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const online=[{path:'/Volumes/A006',available:true,volumeId:'a',total:2e12,free:1e12}];
 const progress:Progress={phase:'planning',step:'checking',completed:10,total:100,bytes:0,totalBytes:0,speed:0,file:'a.jpg'};
 const result={count:3,bytes:2e6,checkedAt:'2026-10-23T10:00:00Z'};

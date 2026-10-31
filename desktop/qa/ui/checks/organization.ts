@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {formatMessage} from '../../../messages';
 import type {Check,Harness} from '../harness';
-import {digest,type Context} from './context';
+import {digest,photoFolders,type Context} from './context';
 
 const english=(message?:Parameters<typeof formatMessage>[0])=>message?formatMessage(message,'en'):'';
 const running=['queued','discovering','verifying','copying'];
@@ -15,7 +15,7 @@ async function seed(ctx:Context,folder=path.join(ctx.root,'destination')){
  await fs.copyFile(path.join(ctx.root,'source-1','clip.mp4'),path.join(folder,`unorganized-${seeded}.mp4`));
 }
 /** Every check leaves the backup folder (and the unknown-files choice) where imports expect them. The seeded files carry no metadata, so these checks file them by file date; by default they would be left in place. */
-async function withBasePath(h:Harness,basePath:string,run:()=>Promise<void>){try{await h.prefs({basePath,noMetadataHandling:'fileDate'});await run();}finally{await h.prefs({basePath:'photobackup',noMetadataHandling:'keep'});}}
+async function withBasePath(h:Harness,ctx:Pick<Context,'root'>,basePath:string,run:()=>Promise<void>){try{await h.prefs({...photoFolders(ctx,basePath),noMetadataHandling:'fileDate'});await run();}finally{await h.prefs({...photoFolders(ctx,'photobackup'),noMetadataHandling:'keep'});}}
 const idle=(h:Harness,label:string)=>h.waitFor(label,async()=>!(await h.state()).jobs.some(job=>running.includes(job.phase)),{timeoutMs:60000});
 
 export const organizationChecks=(ctx:Context):Check[]=>[
@@ -42,7 +42,7 @@ export const organizationChecks=(ctx:Context):Check[]=>[
   assert.ok(shown.every(layout=>layout.count),'every progress display shows its count');
   for(const pair of paired){if(pair.timed)assert.ok(pair.layout.speed,`a reported speed is shown: ${JSON.stringify(paired)}`);if(pair.named)assert.ok(pair.layout.file,`a reported file is shown: ${JSON.stringify(paired)}`);}
  }},
- {id:'organization-apply',stage:'organization',suite:'organization',title:'Organization applies changed folder settings once, even when Apply is clicked twice',covers:['organization flow end to end','double-click safety'],budgetMs:120000,run:async h=>withBasePath(h,'organized-library',async()=>{
+ {id:'organization-apply',stage:'organization',suite:'organization',title:'Organization applies changed folder settings once, even when Apply is clicked twice',covers:['organization flow end to end','double-click safety'],budgetMs:120000,run:async h=>withBasePath(h,ctx,'organized-library',async()=>{
   await seed(ctx);
   const reviewed=await h.action({type:'previewOrganization',destinationIndex:0});assert.equal(reviewed.review?.kind,'reorganize');
   const plan=reviewed.review!.plans[0]!;
@@ -56,7 +56,7 @@ export const organizationChecks=(ctx:Context):Check[]=>[
   assert.equal(created.length,1,'Double Apply must create only one organization job');
   assert.equal(created[0]!.phase,'complete',english(created[0]!.detail));
  })},
- {id:'organization-one-click',stage:'organization',suite:'organization',title:'One-click organization executes through the public app action and writes real execution reports',covers:['one-click organization','operation reports','destination marker untouched'],budgetMs:120000,run:async h=>withBasePath(h,'oneclick-library',async()=>{
+ {id:'organization-one-click',stage:'organization',suite:'organization',title:'One-click organization executes through the public app action and writes real execution reports',covers:['one-click organization','operation reports','destination marker untouched'],budgetMs:120000,run:async h=>withBasePath(h,ctx,'oneclick-library',async()=>{
   await seed(ctx);
   const before=new Set((await h.state()).jobs.map(job=>job.id));const started=await h.action({type:'organize',destinationIndex:0});
   const job=started.jobs.find(job=>!before.has(job.id)&&job.organization);assert.ok(job,'App must create an organization job');
@@ -67,7 +67,7 @@ export const organizationChecks=(ctx:Context):Check[]=>[
   assert.deepEqual(written.sourceFolders,(await h.state()).organizationFolders?.[path.join(ctx.root,'destination')]);assert.equal(written.plans[0].source,path.join(ctx.root,'destination'));assert.equal(written.plans[0].root,path.join(ctx.root,'destination','oneclick-library'));
   assert.equal(await digest(ctx.marker),ctx.originals.get(ctx.marker));
  })},
- {id:'organization-second-destination',stage:'organization',suite:'organization',title:'Organization targets either selected destination using the same reviewed workflow',covers:['destination picker on the Organization page'],budgetMs:120000,run:async h=>withBasePath(h,'second-organized',async()=>{
+ {id:'organization-second-destination',stage:'organization',suite:'organization',title:'Organization targets either selected destination using the same reviewed workflow',covers:['destination picker on the Organization page'],budgetMs:120000,run:async h=>withBasePath(h,ctx,'second-organized',async()=>{
   const second=path.join(ctx.root,'destination-2');await seed(ctx,second);
   const before=(await h.state()).preferences.destinations;
   await h.nav('Organization');

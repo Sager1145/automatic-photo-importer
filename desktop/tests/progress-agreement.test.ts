@@ -9,7 +9,7 @@ import type {AppState,Job,Progress} from '../shared';
 // Hardware retest, 2026-10-24: the percent on a row must describe the work its counter counts, and so must the sidebar and the overview.
 // Each job carries the whole-job share the main process logged at that moment; none of these rows may show it.
 const t=createTranslator('en'),number=(value:number)=>value.toLocaleString('en');
-const preferences={showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
+const preferences={showDashboard:true,language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const folder={id:'xxxx',name:'xxxx',path:'/Volumes/Untitled/xxxx',transport:'folder' as const,selected:true};
 const library={id:'library',name:'Existing library',path:'/Volumes/A006',transport:'folder' as const,selected:true};
 const stateOf=(job:Job):AppState=>({preferences,sources:[folder],jobs:[job],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:[{path:'/Volumes/A006',available:true}]});

@@ -13,7 +13,7 @@ const render = (requestedCategory?: SettingsCategory, busy = false) => renderToS
 const panel = (markup: string, category: SettingsCategory) => markup.split(`data-testid="settings-panel-${category}"`)[1]?.split('role="tabpanel"')[0] ?? '';
 
 test('Settings exposes eight task-focused categories and opens General by default', () => {
-  assert.deepEqual(settingsCategories, ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance', 'diagnostics']);
+  assert.deepEqual(settingsCategories, ['general', 'storage', 'defaults', 'files', 'devices', 'performance', 'diagnostics']);
   assert.match(render(), /id="settings-tab-general"[^>]*aria-selected="true"/);
 });
 
@@ -21,8 +21,7 @@ test('each saved policy and live control is grouped under its intended category'
   const markup = render();
   const contents: Record<SettingsCategory, string[]> = {
     general: ['App language', 'Text size', 'Appearance'],
-    storage: ['Backup location', 'Copy policy'],
-    folders: ['Backup folders', 'Backup folder', 'Folder structure', 'Edited exports folder'],
+    storage: ['Backup location', 'Copy policy', 'Folder structure', 'Edited exports folder'],
     defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Drive backups', 'After an import', 'Offer for folders', 'Eject drives automatically after a clean import'],
     files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Remove macOS ._ files', 'Collect problem files'],
     devices: ['Remembered drives', 'Ignored drives'],
@@ -40,7 +39,7 @@ test('explicit category requests select the category without dispatching prefere
 test('legacy saved categories migrate and unknown categories safely open General', () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
   try {
-    for (const [saved, expected] of Object.entries({ importing: 'defaults', destinations: 'storage', organization: 'files', drives: 'devices', folders: 'folders', performance: 'performance', obsolete: 'general', constructor: 'general', toString: 'general' })) {
+    for (const [saved, expected] of Object.entries({ importing: 'defaults', destinations: 'storage', organization: 'files', drives: 'devices', folders: 'storage', performance: 'performance', obsolete: 'general', constructor: 'general', toString: 'general' })) {
       Object.defineProperty(globalThis, 'sessionStorage', {configurable: true, value: { getItem: () => saved }});
       assert.match(render(), new RegExp(`id="settings-tab-${expected}"[^>]*aria-selected="true"`), saved);
       assert.match(render('storage'), /id="settings-tab-storage"[^>]*aria-selected="true"/, 'request takes priority over saved category');
@@ -64,7 +63,7 @@ test('locked work keeps automation, parallelism and diagnostics live while prote
 test('each category reads in the order the work happens: where, then how files are laid out, then an import from start to finish', () => {
   const markup = render();
   const order = (category: SettingsCategory, labels: string[]) => { const text = panel(markup, category), at = labels.map(label => text.indexOf(label)); assert.ok(at.every(index => index >= 0), `${category}: ${labels.join(', ')}`); assert.deepEqual([...at].sort((a, b) => a - b), at, `${category} order`); };
-  order('folders', ['Backup folders', 'Folder structure', 'Edited exports folder']);
+  order('storage', ['Backup location', 'Folder structure', 'Edited exports folder']);
   order('defaults', ['Starting imports', 'Copying', 'Drive backups', 'After an import']);
   order('defaults', ['Offer for folders', 'Offer for SD cards and drives', 'Eject drives automatically after a clean import']);
   assert.ok(!panel(markup, 'storage').includes('Drive backups') && !panel(markup, 'storage').includes('placeholder="photobackup"'), 'storage holds only where backups go');

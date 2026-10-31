@@ -7,7 +7,7 @@ import { I18nProvider } from '../renderer/i18n';
 import type { AppState, Job } from '../shared';
 import { defaultPreferences } from '../preferences';
 
-const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
+const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', template: '{year}', mediaLayout: 'flat', videoTemplate: '', unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 300e9, free: 50e9 };
 const space = [{ needed: 218.2e9, free: 400e9, existing: 0, existingFiles: 0, newFiles: 43539 }];
 /** A job that ended with an error only because of cleanup leftovers, after every file was verified. */

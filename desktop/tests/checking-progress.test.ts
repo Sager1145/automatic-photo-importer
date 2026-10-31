@@ -12,7 +12,7 @@ import * as core from '../core/index';
 import type { AppState, Job, Metadata } from '../shared';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const preferences = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '' } as unknown as AppState['preferences'];
+const preferences = { language: 'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', template: '{year}', mediaLayout: 'flat', videoTemplate: '' } as unknown as AppState['preferences'];
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 const checking = (total: number, totalBytes: number): Job => ({ id: 'j', source: card, phase: 'verifying', errors: [], backup: false, progress: { phase: 'planning', step: 'checking', completed: 0, total, bytes: 0, totalBytes, speed: 0, file: 'a' } });
 

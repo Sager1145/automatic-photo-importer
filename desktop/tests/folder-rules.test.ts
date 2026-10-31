@@ -6,7 +6,7 @@ import os from 'node:os';
 import {gzipSync} from 'node:zlib';
 import {plan} from '../core/index';
 import {expectedFolder} from '../core/folder-rules';
-import {checkFolderSettings,ruleOptions,rulesScope} from '../routing-options';
+import {checkBackupFolders,checkFolderSettings,ruleOptions,rulesScope} from '../routing-options';
 import {validFolderName} from '../folder-template';
 import {validNoMetadataFolder} from '../no-metadata';
 import {loadPlacement,placementId,placementScope,rememberEntries} from '../platform/placement-memory';
@@ -24,7 +24,7 @@ test('one rules scope: every rule that decides a folder changes it, folders a la
   for(const changed of [{template:'{camera}'},{mediaLayout:'flat' as const},{videoTemplate:'{year}'},{editedFolder:'Finished'},{noMetadataHandling:'keep' as const},{noMetadataFolder:'Other'},{unknownRules:{dat:'other' as const}},{unknownDefault:'other' as const}])
     assert.notEqual(rulesScope(ruleOptions({...prefs,...changed})),scope,JSON.stringify(changed));
   assert.notEqual(rulesScope(ruleOptions(prefs,true)),scope);
-  const elsewhere:Preferences={...prefs,mediaLayout:'format',videoBasePath:'elsewhere'};
+  const elsewhere:Preferences={...prefs,mediaLayout:'format',videoDestinations:['/Volumes/B/elsewhere']};
   assert.equal(rulesScope(ruleOptions(elsewhere)),rulesScope(ruleOptions({...prefs,mediaLayout:'format'})));
 });
 
@@ -69,9 +69,10 @@ test('remembered entries count only files beneath a library root, not the root i
 });
 
 test('library roots: one per backup folder, the video one only in the video-root layout',()=>{
-  assert.deepEqual(libraryRoots('/Volumes/A',{...prefs,basePath:'photos',mediaLayout:'format',videoBasePath:'videos'}),['/Volumes/A/photos']);
-  assert.deepEqual(libraryRoots('/Volumes/A',{...prefs,basePath:'photos',mediaLayout:'video-root',videoBasePath:'videos'}),['/Volumes/A/photos','/Volumes/A/videos']);
-  assert.deepEqual(libraryRoots('/Volumes/A',{...prefs,basePath:'',mediaLayout:'format'}),['/Volumes/A']);
+  const chosen={...prefs,destinations:['/Volumes/A/photos'],destinationIds:['a'],videoDestinations:['/Volumes/B/videos'],videoDestinationIds:['b']};
+  assert.deepEqual(libraryRoots({...chosen,mediaLayout:'format'},0),['/Volumes/A/photos']);
+  assert.deepEqual(libraryRoots({...chosen,mediaLayout:'video-root'},0),['/Volumes/A/photos','/Volumes/B/videos'],'the video folder may be on another drive');
+  assert.deepEqual(libraryRoots({...chosen,mediaLayout:'video-root'},1),[],'no destination chosen there');
 });
 
 test('one folder name rule: unknown-files folder and edited folder share it',()=>{
@@ -83,12 +84,15 @@ test('one folder name rule: unknown-files folder and edited folder share it',()=
 test('folder names are checked when saved: what saves can be planned',()=>{
   const error=(changed:Partial<Preferences>)=>{try{checkFolderSettings({...prefs,...changed});return undefined;}catch(thrown){assert.ok(thrown instanceof MessageError);return thrown.key;}};
   assert.equal(error({}),undefined);
-  assert.equal(error({mediaLayout:'format',basePath:''}),undefined,'an empty backup folder is the destination itself');assert.equal(error({basePath:'backups/photos'}),undefined);
-  assert.equal(error({basePath:'../out'}),'error.backupFolderPath');assert.equal(error({basePath:'CON'}),'error.backupFolderPath');assert.equal(error({basePath:'Photo Importer Data'}),'error.backupFolderPath');
-  assert.equal(error({mediaLayout:'video-root',videoBasePath:'a//b'}),'error.videoFolderPath');
-  assert.equal(error({mediaLayout:'video-root',basePath:'photobackup',videoBasePath:'photobackup/videos'}),'error.videoFolderPath','a video folder inside the photo folder');
-  assert.equal(error({mediaLayout:'video-root',basePath:'',videoBasePath:'videobackup'}),'error.videoFolderPath','the video layout needs a photo folder');
-  assert.equal(error({mediaLayout:'format',videoBasePath:''}),undefined,'a video folder the layout does not use');
+  // The backup folders themselves are chosen as folders and checked when chosen and when a job starts.
+  const folders=(changed:Partial<Preferences>)=>{try{checkBackupFolders({...prefs,destinations:['/Volumes/A/photobackup'],videoDestinations:['/Volumes/B/videobackup'],...changed});return undefined;}catch(thrown){assert.ok(thrown instanceof MessageError);return thrown.key;}};
+  assert.equal(folders({mediaLayout:'video-root'}),undefined,'photo and video folders on two drives');
+  assert.equal(folders({mediaLayout:'video-root',videoDestinations:['/Volumes/A/videobackup']}),undefined,'or side by side on one');
+  assert.equal(folders({mediaLayout:'video-root',videoDestinations:['/Volumes/A/photobackup/videos']}),'error.videoFolderNested','a video folder inside the photo folder');
+  assert.equal(folders({mediaLayout:'video-root',videoDestinations:['/Volumes/A']}),'error.videoFolderNested','a video folder holding the photo folder');
+  assert.equal(folders({mediaLayout:'video-root',videoDestinations:[]}),'error.videoFolderMissing');
+  assert.equal(folders({mediaLayout:'format',videoDestinations:[]}),undefined,'a video folder the layout does not use');
+  assert.equal(folders({destinations:['/Volumes/A/Photo Importer Data/photos']}),'error.backupFolderPath');
   assert.equal(error({editedFolder:'CON'}),'error.editedFolderName');assert.equal(error({editedFolder:'a/b'}),'error.editedFolderName');
   assert.equal(error({noMetadataFolder:'2024'}),'error.noMetadataFolderName');
   assert.equal(error({noMetadataFolder:'Finished',editedFolder:'Finished'}),'error.noMetadataFolderName');

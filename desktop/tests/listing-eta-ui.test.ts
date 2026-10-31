@@ -64,7 +64,7 @@ test('the byte fallback never claims days left when the count runs past the esti
 });
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const,selected:true,total:1e12,free:2e11};
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});
 const render=(node:Parameters<typeof renderToStaticMarkup>[0],language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:node}));
 const desk=(value:AppState,language:Language='en')=>render(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}),language);

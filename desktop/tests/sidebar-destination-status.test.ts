@@ -10,7 +10,7 @@ import type {AppState,Job,Progress} from '../shared';
 import { defaultPreferences } from '../preferences';
 
 const GB=1e9;
-const preferences={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/BACKUP'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
+const preferences={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/BACKUP'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const online=[{path:'/Volumes/BACKUP',available:true,total:2000*GB,free:800*GB}];
 const source=(id:string,name:string)=>({id,name,path:`/Volumes/${name}`,transport:'storage' as const,selected:true,total:128*GB,free:40*GB});
 const progress=(patch:Partial<Progress>={}):Progress=>({phase:'copying',completed:120,total:400,bytes:12*GB,totalBytes:40*GB,speed:150e6,file:'SECRET_NAME.NEF',...patch});

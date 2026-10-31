@@ -15,6 +15,8 @@ export interface Context {
  /** Set only by --real-drives: libraries of real, mounted drives to browse read-only. */
  realDrives?:{destination:string;basePath:string}[];
 }
+/** The fixture's photo folders named `name` on both destination drives (the video folders stay where they are). */
+export const photoFolders=(ctx:Pick<Context,'root'>,name:string)=>({destinations:[path.join(ctx.root,'destination',name),path.join(ctx.root,'destination-2',name)]});
 export const digest=async(file:string)=>createHash('sha256').update(await fs.readFile(file)).digest('hex');
 /** Digests of every file under a folder. */
 export async function digests(folder:string):Promise<string[]>{

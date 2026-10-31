@@ -45,7 +45,7 @@ npm ci
 npm start
 ```
 
-On first launch, pick a backup drive or folder: a local folder or a fixed external HDD or SSD. Camera cards and USB flash drives can't be backup destinations. The app creates `photobackup` inside it, or uses the folder as is if you clear the name.
+On first launch, choose a photo backup folder and a video backup folder: each can be a local folder or a folder on a fixed external HDD or SSD, on the same drive or on two different drives. Camera cards and USB flash drives can't be backup destinations. A folder that doesn't exist yet is created on the first import.
 
 For USB cameras on macOS, build the camera helper once first. It needs the Xcode command-line tools.
 
@@ -145,7 +145,7 @@ npm ci
 npm start
 ```
 
-首次启动时，选择一个备份磁盘或文件夹：本地文件夹，或固定的外置硬盘、SSD。相机存储卡和 U 盘不能作为备份目标。应用会在其中创建 `photobackup`；如果清空这个名称，则直接使用所选文件夹。
+首次启动时，选择一个照片备份文件夹和一个视频备份文件夹：可以是本地文件夹，也可以是固定的外置硬盘、SSD 上的文件夹，二者可位于同一驱动器或两个不同的驱动器。相机存储卡和 U 盘不能作为备份目标。尚不存在的文件夹会在首次导入时创建。
 
 在 macOS 上使用 USB 相机前，需要先构建一次相机辅助程序。这需要 Xcode 命令行工具。
 
@@ -245,7 +245,7 @@ npm ci
 npm start
 ```
 
-首次啟動時，選擇一個備份磁碟或資料夾：本機資料夾，或固定式外接硬碟、SSD。相機記憶卡和 USB 隨身碟不能作為備份目的地。App 會在其中建立 `photobackup`；如果清空這個名稱，則直接使用所選資料夾。
+首次啟動時，選擇一個照片備份資料夾和一個影片備份資料夾：可以是本機資料夾，也可以是固定式外接硬碟、SSD 上的資料夾，兩者可位於同一磁碟或兩個不同的磁碟。相機記憶卡和 USB 隨身碟不能作為備份目的地。尚不存在的資料夾會在首次匯入時建立。
 
 在 macOS 上使用 USB 相機前，需要先建置一次相機輔助程式。這需要 Xcode 命令列工具。
 
@@ -345,7 +345,7 @@ npm ci
 npm start
 ```
 
-初回起動時に、バックアップ先のドライブまたはフォルダーを選びます。ローカルフォルダーか、据え置きの外付け HDD・SSD が使えます。カメラのカードと USB フラッシュドライブはバックアップ先にできません。アプリはその中に `photobackup` を作ります。名前を空にすると、選んだフォルダーをそのまま使います。
+初回起動時に、写真のバックアップフォルダーと動画のバックアップフォルダーを選びます。ローカルフォルダーか、据え置きの外付け HDD・SSD 上のフォルダーが使え、同じドライブでも別々のドライブでもかまいません。カメラのカードと USB フラッシュドライブはバックアップ先にできません。まだないフォルダーは最初のインポートで作られます。
 
 macOS で USB カメラを使う場合は、先にカメラヘルパーを一度ビルドします。Xcode コマンドラインツールが必要です。
 

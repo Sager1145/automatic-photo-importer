@@ -181,7 +181,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 	let reportError:unknown;
 	let sources:Source[] = [];
 	let manifestProgress:unknown;
-	let originalPreferences:{basePath:string;parallel:number;mediaLayout:import('../shared').MediaLayout}|undefined;
+	let originalPreferences:{destinations:string[];parallel:number;mediaLayout:import('../shared').MediaLayout}|undefined;
 	let sourcePreservation:ReturnType<typeof compareSourceManifests>[] = [];
 	const testBasePath = "photobackup-hardware-" + (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
 	const testRoot = path.join(destination, testBasePath);
@@ -270,12 +270,12 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 		const state = getState(), prefs = state.preferences;
 		assert.equal(prefs.automatic, false, "Automatic must stay off");
 		assert.equal(prefs.copyMode, "single", "Hardware test requires a single destination");
-		assert.deepEqual(prefs.destinations, [destination]);
+		assert.equal(prefs.destinations.length, 1, "Hardware test requires one photo folder");
 		assert.deepEqual(prefs.destinationIds, [volumeId]);
 		const status = state.destinationStatus?.find((item) => item.path === destination);
 		assert.ok(status?.available, "A006 must be available");
 		assert.equal(status.volumeId, volumeId);
-		const target = path.resolve(destination, prefs.basePath);
+		const target = path.resolve(prefs.destinations[0]!);
 		assert.ok(target === destination || target.startsWith(destination + "/"), "Import root must stay inside A006");
 	};
 	const send = async (input:Action, milliseconds = 3e4) => {
@@ -396,7 +396,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 		if (failures.length) throw new AggregateError(failures, failures.map((error) => String(error)).join("\n"));
 	};
 	const verifyDestinations = async (filename:string) => {
-		const prefs = structuredClone(getState().preferences), root = path.resolve(destination, prefs.basePath);
+		const prefs = structuredClone(getState().preferences), root = path.resolve(prefs.destinations[0]!);
 		assert.equal(root, testRoot, "Independent verification must stay in this test root");
 		const verified:{source:string;entries:number;media:number;captureDatesChecked:number;captureDatesMissing:number}[] = [], timestamps:Awaited<ReturnType<typeof verifyCaptureTimestamps>>[] = [];
 		for (const original of baseline) {
@@ -450,14 +450,14 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 				assert.ok(source.path !== destination && !source.path.startsWith(destination + "/"));
 			}
 			originalPreferences = {
-				basePath: state.preferences.basePath,
+				destinations: [...state.preferences.destinations],
 				parallel: state.preferences.parallel,
 				mediaLayout: state.preferences.mediaLayout
 			};
 			await send({
 				type: "preferences",
 				patch: {
-					basePath: testBasePath,
+					destinations: [testRoot],
 					parallel: 2,
 					// A separate video backup folder would write outside the test root.
 					...(state.preferences.mediaLayout === "video-root" ? { mediaLayout: "photos-flat" as const } : {})
@@ -465,7 +465,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 			});
 			assert.notEqual(getState().preferences.mediaLayout, "video-root");
 			assert.equal(getState().preferences.parallel, 2);
-			assert.equal(getState().preferences.basePath, testBasePath);
+			assert.deepEqual(getState().preferences.destinations, [testRoot]);
 		});
 		await check("Native read-only access authorization for connected cards", async () => {
 			for (const source of sources) await authorizeSource(source);
@@ -570,7 +570,7 @@ export async function runA006HardwareTest(getState:()=>AppState, action:(input:A
 				type: "preferences",
 				patch: originalPreferences
 			}), 3e4, "restore original import preferences");
-			assert.equal(getState().preferences.basePath, originalPreferences.basePath);
+			assert.deepEqual(getState().preferences.destinations, originalPreferences.destinations);
 			assert.equal(getState().preferences.parallel, originalPreferences.parallel);
 			checks.push({
 				name: "Original import preferences restored",

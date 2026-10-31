@@ -5,7 +5,7 @@ import {ipcMain} from 'electron';
 import type {Metadata} from '../../../shared';
 import {formatMessage} from '../../../messages';
 import type {Check,Harness} from '../harness';
-import {digests,savedPreferences,type Context} from './context';
+import {digests,photoFolders,savedPreferences,type Context} from './context';
 import {capacityLayoutChecks} from './capacity-layout';
 
 const english=(message?:Parameters<typeof formatMessage>[0])=>message?formatMessage(message,'en'):'';
@@ -191,12 +191,12 @@ export const importChecks=(ctx:Context):Check[]=>[
   const nested=path.join(ctx.root,'destination','fresh-backup','nested');
   assert.equal(await fs.stat(nested).then(()=>true,()=>false),false);
   try{
-   await h.prefs({basePath:'fresh-backup/nested',parallel:5});
+   await h.prefs({...photoFolders(ctx,'fresh-backup/nested'),parallel:5});
    await h.action({type:'start'});
    await h.waitFor('concurrent new destination folders',async()=>{const jobs=(await h.state()).jobs.filter(job=>!before.has(job.id));return jobs.length===6&&jobs.every(job=>ended(job.phase));},{timeoutMs:60000});
    const jobs=(await h.state()).jobs.filter(job=>!before.has(job.id));assert.ok(jobs.every(job=>job.phase==='complete'),JSON.stringify(jobs.map(job=>({phase:job.phase,errors:job.errors.slice(0,2)}))));
    assert.ok((await fs.stat(nested)).isDirectory());
    const hashes=new Set(await digests(nested));for(const [file,hash] of ctx.originals)if(file.startsWith(path.join(ctx.root,'source-')))assert.ok(hashes.has(hash),`Concurrent import missing ${file}`);
-  }finally{await h.prefs({basePath:'photobackup'});}
+  }finally{await h.prefs(photoFolders(ctx,'photobackup'));}
  }},
 ];

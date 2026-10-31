@@ -37,17 +37,19 @@ export function destinationSpace(plan:TransferPlan,free:number,sameDrive=false):
  * pending bytes plus the largest family still fit `available`; from the first family that does not,
  * every later family goes to the second disk. Paths on the second disk are planned afterwards, for
  * those families only, so no name there depends on a file that stayed on the first. `bytes`: the space
- * the first disk then needs (`requiredTransferSpace` of what it keeps). */
-export function fillFirst(first:TransferPlan,available:number):{kept:Set<string>;bytes:number}{
- const families=new Map<string,PlanEntry[]>();
+ * the first disk then needs (`requiredTransferSpace` of what it keeps). With `videoAvailable` the first
+ * destination's video folder is on a volume of its own: what goes there must fit that instead, and
+ * `videoBytes` is what that volume then needs. */
+export function fillFirst(first:TransferPlan,available:number,videoAvailable?:number):{kept:Set<string>;bytes:number;videoBytes:number}{
+ const families=new Map<string,PlanEntry[]>(),videoEntries=new Set(videoAvailable===undefined?[]:first.videos?.entries??[]);
  for(const entry of destinationEntries(first)){const family=families.get(entry.family)??[];family.push(entry);families.set(entry.family,family);}
- const kept=new Set<string>();let assigned=0,largest=0;
+ const kept=new Set<string>(),sides=[{available,assigned:0,largest:0},{available:videoAvailable??0,assigned:0,largest:0}];
  for(const family of families.values()){
-  const bytes=family.reduce((sum,entry)=>sum+(entry.skip?0:entry.size),0);
-  if(assigned+bytes+Math.max(largest,bytes)>available)break;
-  assigned+=bytes;largest=Math.max(largest,bytes);for(const entry of family)kept.add(entry.source);
+  const bytes=[0,0];for(const entry of family)bytes[videoEntries.has(entry)?1:0]+=entry.skip?0:entry.size;
+  if(sides.some((side,index)=>(index===0||videoAvailable!==undefined)&&side.assigned+bytes[index]!+Math.max(side.largest,bytes[index]!)>side.available))break;
+  sides.forEach((side,index)=>{side.assigned+=bytes[index]!;side.largest=Math.max(side.largest,bytes[index]!);});for(const entry of family)kept.add(entry.source);
  }
- return {kept,bytes:assigned+largest};
+ return {kept,bytes:sides[0]!.assigned+sides[0]!.largest,videoBytes:sides[1]!.assigned+sides[1]!.largest};
 }
 
 /** The space each destination's plan needs, checked against its free space after other jobs'
@@ -60,6 +62,17 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
   // The second disk of fill-first holds what the first could not.
   if(mode==='sequential'&&index===1)throw new MessageError('error.bothNeedSpace');
   throw new MessageError('error.destinationNeedsSpace',{index:index+1,needed:{bytes:space.needed},free:{bytes:space.free},existing:{bytes:space.existing}});
+ });
+}
+
+/** The space each video folder on a volume of its own (`apart`) needs, checked against that volume's free space after
+ * other jobs' reservations; undefined where the video folder shares its photo folder's volume and was counted with it. */
+export function allocateVideoFolders(plans:TransferPlan[],available:number[],apart:boolean[]):(number|undefined)[]{
+ return plans.map((plan,index)=>{
+  if(!apart[index])return undefined;
+  const space=destinationSpace(plan.videos??{...plan,entries:[],videos:undefined},available[index]??0);
+  if(space.needed<=space.free)return space.needed;
+  throw new MessageError('error.videoFolderNeedsSpace',{index:index+1,needed:{bytes:space.needed},free:{bytes:space.free},existing:{bytes:space.existing}});
  });
 }
 

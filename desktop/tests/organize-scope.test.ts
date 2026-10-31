@@ -8,7 +8,7 @@ import {createTranslator,I18nProvider,languages} from '../renderer/i18n';
 import {normalizePreferences} from '../preferences';
 import type {Action,AppState,Language} from '../shared';
 
-const stateOf=(prefs:object={},extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup'],basePath:'photobackup',...prefs}),sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:[{path:'/backup',available:true,volumeId:'a',total:2e12,free:1e12}],...extra});
+const stateOf=(prefs:object={},extra:Partial<AppState>={}):AppState=>({preferences:normalizePreferences({destinations:['/backup/photobackup'],destinationIds:['a'],videoDestinations:['/backup/videobackup'],videoDestinationIds:['a'],...prefs}),sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),destinationStatus:[{path:'/backup/photobackup',available:true,volumeId:'a',total:2e12,free:1e12},{path:'/backup/videobackup',available:true,volumeId:'a',total:2e12,free:1e12}],...extra});
 const html=(language:Language,child:ReactElement)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
 function tree(component:(props:any)=>ReactElement,props:object):ReactNode{let out:ReactNode;const Probe=()=>{out=component(props);return null;};html('en',createElement(Probe));return out;}
 type Props={'data-testid'?:string;children?:ReactNode;onClick:()=>void;disabled?:boolean};
@@ -40,7 +40,7 @@ test('the backup folder is the default organize scope: Organize now runs organiz
 
 test('chosen folders and a destination without a backup folder use the organize action and can be reviewed',async()=>{
   const {Organization}=await import('../renderer/RootApp');
-  for(const [state,label] of [[stateOf({},{organizationFolders:{'/backup':['2024']}}),'chosen'],[stateOf({basePath:''}),'no backup folder']] as const){
+  for(const [state,label] of [[stateOf({},{organizationFolders:{'/backup/photobackup':['2024']}}),'chosen'],[stateOf({mediaLayout:'format'}),'no video folder']] as const){
     const markup=html('en',createElement(Organization,{state,act:()=>{},busy:false}));
     assert.ok(reviewButton(markup)!==''&&!/disabled/.test(reviewButton(markup))&&!markup.includes('backup-review-note'),label);
     const actions:Action[]=[];
@@ -74,4 +74,13 @@ test('two destinations that would read the same show their full paths',async()=>
   const state=stateOf({destinations:paths},{destinationStatus:paths.map((p,i)=>({path:p,available:true,volumeId:String(i),total:1e12,free:5e11}))});
   const markup=html('en',createElement(Organization,{state,act:()=>{},busy:false}));
   for(const path of paths)assert.ok(markup.includes(`>${path}</option>`),path);
+});
+
+test('photo and video folders on two drives cannot be organized as one backup, and say so',async()=>{
+  const {Organization}=await import('../renderer/RootApp');
+  const state=stateOf({videoDestinations:['/other/videobackup'],videoDestinationIds:['b']});
+  const markup=html('en',createElement(Organization,{state,act:()=>{},busy:false}));
+  assert.ok(markup.includes('data-testid="organize-video-other-drive"'),markup);
+  assert.ok(/disabled/.test(reviewButton(markup)),'review is off');
+  assert.ok(/<button[^>]*data-testid="organize-now"[^>]*disabled/.test(markup),'organize is off');
 });

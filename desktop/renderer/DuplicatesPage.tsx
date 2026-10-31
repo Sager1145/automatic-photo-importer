@@ -11,6 +11,7 @@ import { createDetailStore, type FileDetails, type Outcome } from './duplicate-d
 import { Button, CardHeader, Icon, ConfirmSheet, ReleaseConfirm, nextConfirmStep, type DeleteRecoveryStep, type Dispatch } from './ui';
 import { OperationProgress, OrganizationProgress } from './progress';
 import { basename } from './paths';
+import { cameraDisplayName } from '../camera-names';
 
 /** Groups shown per page: only these are drawn and only their previews are fetched, so thousands of groups stay responsive. */
 export const GROUPS_PER_PAGE = 8;
@@ -59,7 +60,7 @@ export function basicExif(file: DuplicateFile, metadata: Metadata | undefined, t
   const when = formatCaptureDateTime(metadata?.date ?? file.exif?.date, language), exposure = formatExposure(metadata?.exposure, language);
   const width = metadata?.fingerprint?.width ?? file.exif?.width, height = metadata?.fingerprint?.height ?? file.exif?.height;
   const rows: [string, string | undefined][] = [
-    [t("Camera"), metadata?.camera ?? file.exif?.camera], [t("Lens"), exposure.lens ?? file.exif?.lens],
+    [t("Camera"), cameraDisplayName(metadata?.camera ?? file.exif?.camera)], [t("Lens"), exposure.lens ?? file.exif?.lens],
     [t("Capture date"), when.date], [t("Capture time"), when.time ? `${when.time}${when.timezone ? ` ${when.timezone}` : ''}` : undefined],
     [t("Shutter speed"), exposure.shutterSpeed], [t("Aperture"), exposure.aperture], [t("ISO"), exposure.iso], [t("Focal length"), exposure.focalLength],
     [t("Dimensions"), width && height ? `${width} × ${height}` : undefined], [t("File size"), formatBytes(file.size)], [t("Path"), file.path],

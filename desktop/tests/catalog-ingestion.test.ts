@@ -99,3 +99,18 @@ test('warm listing refresh uses fresh sizes for media and companion placement in
   await fs.writeFile(path.join(root,'A.jpg'),'');await coordinator.refresh(binding.library.libraryId,new AbortController().signal);records=await c.records(binding.library.libraryId,['A.jpg','A.xmp']);assert.equal(records[0].stat.size,'0');assert.deepEqual(records.map(record=>record.placement.status),['unclassifiable','unclassifiable']);
  }finally{await c.close();await fs.rm(dir,{recursive:true,force:true});}
 });
+
+test('a folder added only to browse is indexed with its companions but never checked against the organization rules',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'catalog-browse-')),root=path.join(dir,'Any folder');const c=openCatalog(':memory:');
+ try{
+  await fs.mkdir(root);await fs.writeFile(path.join(root,'A.jpg'),'twelve bytes');await fs.writeFile(path.join(root,'A.xmp'),'sidecar');
+  const binding=await bindLibrary({root,mountPath:dir,volumeId:'disk',name:'Any folder',role:'photos',rulesScope:'r',online:true,browseOnly:true});
+  assert.equal(binding.library.browseOnly,true);
+  const coordinator=new CatalogCoordinator(c,{metadata:async()=>({camera:'Canon',date:'2024-02-03T12:00:00',fields:{}}),options:()=>({template:'{year}/{camera}',layout:'flat'})});
+  await coordinator.configure([binding]);await coordinator.refresh(binding.library.libraryId,new AbortController().signal);
+  const records=await c.records(binding.library.libraryId,['A.jpg','A.xmp']);
+  assert.deepEqual(records.map(record=>record.placement.status),['unchecked','unchecked'],'misplaced in a backup, but a browsed folder is never judged');
+  assert.equal(records[1].companionOf,records[0].fileId,'companions are still linked');
+  const status=await c.status(binding.library.libraryId);assert.equal(status.misplaced,0);
+ }finally{await c.close();await fs.rm(dir,{recursive:true,force:true});}
+});

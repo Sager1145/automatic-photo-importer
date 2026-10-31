@@ -85,16 +85,18 @@ test('with the default layout the backup library is the backup folder itself, so
   const destination=path.dirname(root);
   const stray=await put('wrong place/A.JPG');
   const outside=path.join(destination,'Other stuff','B.JPG');await fs.mkdir(path.dirname(outside),{recursive:true});await fs.writeFile(outside,'not part of the backup');
-  // backupLibrary returns source=<destination>/<basePath> and no sourceFolders for this layout; that source is planned directly.
+  // backupLibrary returns source=<photo folder> and no sourceFolders for this layout; that source is planned directly.
   const planned=(await plan(root,[root],{...options,reorganize:true},metadata)).plans.flatMap(item=>item.entries.map(entry=>entry.source));
   assert.deepEqual(planned,[stray]);
   assert.ok(!planned.includes(outside));
 });
 
-test('main.ts wires the backup-scope review: refuses outside folders, uses the backup library folders, keeps the scope for re-plans',async()=>{
+test('main.ts wires the backup-scope review: refuses folders on two drives, uses the backup library folders, keeps the scope for re-plans',async()=>{
   const source=await fs.readFile(path.join(__dirname,'../main.ts'),'utf8');
   const start=source.indexOf("case 'previewOrganization':"),block=source.slice(start,source.indexOf("case 'applyReview'",start));
-  assert.ok(block.includes("input.scope==='backup'")&&block.includes('backupLibrary(prefs)')&&block.includes("error.backupFolderOutside")&&block.includes('library.sourceFolders'),block);
+  assert.ok(block.includes("input.scope==='backup'")&&block.includes('backupLibrary(prefs)')&&block.includes('library.sourceFolders'),block);
+  // backupLibrary itself refuses a destination whose photo and video folders are on two drives.
+  assert.ok(/function backupLibrary[\s\S]*?error\.organizeVideoOtherDrive/.test(source),'folders on two drives are refused');
   assert.ok(/backupScope\?sourceFolders:state\.organizationFolders/.test(source),'chosen folders never leak into a backup-scope review');
   assert.ok(source.includes("request.backupScope)state.review.scope='backup'"),'the review remembers its scope for the problem-files toggle');
 });

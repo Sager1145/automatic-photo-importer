@@ -9,7 +9,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleAlert, Clock3, Copy,
-  Eject, ExternalLink, Eye, FileImage, FileQuestion, Files, Folder, FolderCog, FolderOpen,
+  Eject, ExternalLink, Eye, FileImage, FileQuestion, Files, Film, Folder, FolderCog, FolderOpen,
   Activity, EyeOff, FolderPlus, Gauge, HardDrive, History, Info, Laptop, Layers3,
   Circle, LayoutGrid, List, LoaderCircle, Maximize2, Minus, Moon, Pause, Play, Plus, Radio, RefreshCw, RotateCcw, ShieldOff,
   Save, ScanLine, Ellipsis, Settings2, ShieldCheck, Square, Sun, CopyCheck, ScanSearch, Trash2, Usb, X, ArrowUpToLine,
@@ -19,7 +19,7 @@ import type { Accent, Action, AppState, Appearance, BackupMode, ConflictNaming, 
 import { basename, within } from './paths';
 import { DEFAULT_TEXT_SCALE, isRunning, requiredDestinations } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
-import { layoutFolders, mediaKindForPath } from '../media-formats';
+import { formatFolder, layoutFolders, mediaKindForPath } from '../media-formats';
 import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure, shutterNoteText } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
@@ -35,6 +35,8 @@ import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
 
 import { BrowserPage } from './browser/BrowserPage';
+import { sampleShot } from './sample-cameras';
+import { cameraDisplayName } from '../camera-names';
 import { useBrowserConfiguration } from './browser/use-configuration';
 import { reviewWorkspace, sourceImportMode, type ImportMode, type WorkspacePage } from './workspace-state';
 
@@ -57,10 +59,13 @@ export function destinationReadiness(state: Pick<AppState, 'preferences' | 'dest
   const required = requiredDestinations(state.preferences);
   const chosen = state.preferences.destinations.slice(0, required);
   const statusOf = (path: string) => state.destinationStatus?.find(disk => disk.path === path);
+  // In the video-root layout a destination is ready once its video folder (on its own drive or the same one) is too.
+  const videos = state.preferences.mediaLayout === 'video-root' ? chosen.map((_, index) => state.preferences.videoDestinations?.[index] ?? '') : [];
+  const all = [...chosen, ...videos.filter(Boolean)];
   return {
-    ready: (state.destinationStatus ?? []).filter(disk => disk.available && chosen.includes(disk.path)),
-    checking: chosen.some(path => !statusOf(path)),
-    offline: chosen.some(path => statusOf(path)?.available === false),
+    ready: (state.destinationStatus ?? []).filter(disk => disk.available && chosen.includes(disk.path) && (!videos.length || statusOf(videos[chosen.indexOf(disk.path)] ?? '')?.available === true)),
+    checking: all.some(path => !statusOf(path)),
+    offline: all.some(path => statusOf(path)?.available === false),
   };
 }
 /** metadata: the routing read the summary shows; fields: every tag, from the full read for All metadata. */
@@ -76,8 +81,8 @@ const mediaLayouts: { value: MediaLayout; title: string; detail: string }[] = [
   { value: 'video-root', title: 'A separate video backup folder', detail: 'Videos go to their own backup folder beside the photo backup folder.' },
 ];
 // The Settings previews expand the templates exactly as imports do, for one sample capture.
-const sampleValues = templateValues(new Date('2026-10-20T00:00:00Z'), 'Nikon Z6III');
-function samplePath(template: string): string[] { return expandTemplate(template, sampleValues).split('/').filter(Boolean); }
+const sampleDate = new Date('2026-10-20T00:00:00Z'), sampleValues = templateValues(sampleDate, 'Nikon Z6III');
+function samplePath(template: string, camera?: string): string[] { return expandTemplate(template, camera ? templateValues(sampleDate, camera) : sampleValues).split('/').filter(Boolean); }
 const defaultFolderPath = parseTemplate('{year}/{yyyymm}/{camera}')!;
 const monthSample = (month: FolderPath['month']) => expandTemplate(monthToken(month), sampleValues);
 /** Date first or camera first, then a toggle per date level. It edits the folder template, the one stored form. */
@@ -98,7 +103,7 @@ function FolderPathBuilder({ template, onChange, testId }: { template: string; o
 function PathPreview({ label, parts, testId }: { label: string; parts: string[]; testId?: string }) {
   return <div className="folder-preview" data-testid={testId}><span><Icon icon={Folder} size={17} />{label}</span><div>{parts.map((part, index) => <span key={`${index}-${part}`}>{index > 0 && <Icon icon={ChevronRight} size={13} />}<span>{part}</span></span>)}</div></div>;
 }
-function driveBackupFolder(basePath: string): string { return [...basePath.split(/[\\/]/).filter(Boolean), 'Drive backups', '<drive name>'].join('/'); }
+function driveBackupFolder(photoFolder: string): string[] { return [photoFolder, 'Drive backups', '<drive name>']; }
 /** A destination as a drive and folder, "A006 › photobackup"; a folder on the startup disk is its folder name. */
 function destinationLabel(path: string): string { const name = basename(path), drive = driveName(path, name); return drive === name ? name : `${drive} › ${name}`; }
 /** Labels for a list of destinations; two that would read the same show their full paths. */
@@ -337,12 +342,12 @@ export default function RootApp() {
           <div className="import-mode-header"><WorkspaceTabs panelId="import-workspace-panel" label={t("Import mode")} value={importMode} items={[{id:'media',label:t("Media"),testId:'import-mode-media'},{id:'files',label:t("Files & folders"),testId:'import-mode-files'}]} onChange={setImportMode} /><p className="workspace-description">{importMode === 'media' ? t("File by date and camera rules.") : t("Keep the original folder structure.")}</p>{importMode === 'files' && <BackupModeLine mode={state.preferences.backupMode} onChange={() => openSettings('defaults')} />}</div>
           <section role="tabpanel" id="import-workspace-panel" aria-labelledby={`tab-import-mode-${importMode}`}>
           {reviewOwner?.page === 'desk' && reviewOwner.mode === importMode && <ReviewPanel state={state} act={act} inspect={inspect} />}
-          <ImportDesk state={state} act={act} mode={importMode} onOtherMode={() => animateInterfaceChange(() => setImportMode(importMode === 'media' ? 'files' : 'media'))} needsChoice={dismissedDrives} inspect={inspect} onOrganization={openOrganization} onSettings={() => openSettings('storage')} onFolderRules={() => openSettings('folders')} onAutomatic={() => openSettings('defaults')} onActivity={() => navigate('activity', () => setActivityTab('jobs'))} /></section>
+          <ImportDesk state={state} act={act} mode={importMode} onOtherMode={() => animateInterfaceChange(() => setImportMode(importMode === 'media' ? 'files' : 'media'))} needsChoice={dismissedDrives} inspect={inspect} onOrganization={openOrganization} onSettings={() => openSettings('storage')} onFolderRules={() => openSettings('storage')} onAutomatic={() => openSettings('defaults')} onActivity={() => navigate('activity', () => setActivityTab('jobs'))} /></section>
         </>}
-        {page === 'browser' && <BrowserPage requestedLibraryId={browserLibraryRequest} libraries={state.catalogLibraries ?? []} statuses={state.catalogStatuses ?? {}} configuration={browserConfiguration.configuration} onConfiguration={browserConfiguration.setConfiguration} storageError={browserConfiguration.storageError} api={window.importer} onRefresh={libraryId => act({type:'catalogRefresh', libraryId})} onStop={libraryId => act({type:'catalogStop', libraryId})} onReveal={path => act({type:'reveal',path})} onOrganization={destinationIndex => navigate('library', () => { setLibraryTool('organize'); if (destinationIndex !== undefined) setOrganizationDestination(destinationIndex); })} />}
+        {page === 'browser' && <BrowserPage requestedLibraryId={browserLibraryRequest} libraries={state.catalogLibraries ?? []} statuses={state.catalogStatuses ?? {}} configuration={browserConfiguration.configuration} onConfiguration={browserConfiguration.setConfiguration} storageError={browserConfiguration.storageError} api={window.importer} onRefresh={libraryId => act({type:'catalogRefresh', libraryId})} onStop={libraryId => act({type:'catalogStop', libraryId})} onReveal={path => act({type:'reveal',path})} onBrowseFolder={() => act({type:'browseFolderAdd'})} onRemoveFolder={libraryId => act({type:'browseFolderRemove', libraryId})} onOrganization={destinationIndex => navigate('library', () => { setLibraryTool('organize'); if (destinationIndex !== undefined) setOrganizationDestination(destinationIndex); })} />}
         {page === 'library' && <>
           <WorkspaceTabs panelId="library-workspace-panel" label={t("Library tools")} value={libraryTool} items={[{id:'organize',label:t("Organize"),testId:'library-organize'},{id:'duplicates',label:t("Duplicates"),testId:'library-duplicates'},{id:'recovery',label:t("Recovery & cleanup"),testId:'library-recovery'}]} onChange={setLibraryTool} />
-          <section role="tabpanel" id="library-workspace-panel" aria-labelledby={`tab-library-${libraryTool}`}>{libraryTool === 'organize' ? <>{reviewOwner?.page === 'library' && <ReviewPanel state={state} act={act} inspect={inspect} />}<Organization state={state} act={act} busy={busy} selectedDestination={organizationDestination} onSelectDestination={setOrganizationDestination} onFolderRules={() => openSettings('folders')} /></> : libraryTool === 'duplicates' ? <DuplicatesPage state={state} act={act} /> : <><OrganizationRecoveryPanel state={state} act={act} busy={busy || settingsLocked(state)} /><section className="organization-action activity-maintenance"><CardHeader icon={Trash2} title={t("Maintenance")} /><LeftoverFiles state={state} act={act} busy={busy || settingsLocked(state)} /></section></>}</section>
+          <section role="tabpanel" id="library-workspace-panel" aria-labelledby={`tab-library-${libraryTool}`}>{libraryTool === 'organize' ? <>{reviewOwner?.page === 'library' && <ReviewPanel state={state} act={act} inspect={inspect} />}<Organization state={state} act={act} busy={busy} selectedDestination={organizationDestination} onSelectDestination={setOrganizationDestination} onFolderRules={() => openSettings('storage')} /></> : libraryTool === 'duplicates' ? <DuplicatesPage state={state} act={act} /> : <><OrganizationRecoveryPanel state={state} act={act} busy={busy || settingsLocked(state)} /><section className="organization-action activity-maintenance"><CardHeader icon={Trash2} title={t("Maintenance")} /><LeftoverFiles state={state} act={act} busy={busy || settingsLocked(state)} /></section></>}</section>
         </>}
         {page === 'settings' && <SettingsPage state={state} act={act} busy={busy || settingsLocked(state)} requestedCategory={settingsRequest?.category} requestKey={settingsRequest?.key} onLibrary={openOrganization} />}
         {page === 'activity' && <>
@@ -509,7 +514,7 @@ export function SidebarDestinations({ state, errors, onErrors, act, onOpen }: { 
   return <section className="sidebar-section" aria-labelledby="sidebar-destinations"><h2 id="sidebar-destinations">{t("Destinations")}</h2>
     {destinations.length ? <ul>{destinations.map(path => {
       const status = state.destinationStatus?.find(item => item.path === path);
-      const online = status?.available !== false, name = basename(path) || path;
+      const online = status?.available !== false, name = destinationLabel(path) || path;
       const label = <><Icon icon={HardDrive} size={16} /><span>{name}</span><i className={`status-dot ${online ? 'is-online' : 'is-offline'}`} role="img" aria-label={online ? t("Destination available") : t("Drive offline")} /></>;
       return <li key={path} className="sidebar-drive sidebar-destination" title={path} data-testid="sidebar-destination"><div className="sidebar-row">{onOpen ? <button type="button" className="sidebar-item" onClick={() => onOpen(path)}>{label}</button> : <div className="sidebar-item sidebar-static">{label}</div>}{act && online && <RevealButton path={path} act={act} name={name} />}<SidebarErrors errors={errors} target={{ destination: path, name }} onErrors={onErrors} /></div>
         <SidebarDestinationStatus activity={destinationActivity(state, path)} path={path} />
@@ -635,7 +640,7 @@ export function TitlebarControls({state, act, page = 'desk', organizationDestina
   const anythingToStop = anyWorkToStop(state);
   const stopMenu = useRef<HTMLDetailsElement>(null);
   useDismissableDetails(stopMenu);
-  const configured = state.preferences.destinations.length >= requiredDestinations(state.preferences);
+  const configured = destinationsChosen(state.preferences);
   const selectedCount = state.sources.filter(sourceSelected).length;
   const running = state.jobs.some(job => !job.organization && (isRunning(job) || job.phase === 'queued'));
   // Every running job is winding down after Stop or Pause: the controls say so, disabled, until it has.
@@ -794,7 +799,7 @@ function ImportDashboardPanel({state, act}: {state: AppState; act: Dispatch}) {
   // Jobs sharing a destination drive that is the bottleneck finish sooner together than the longest alone (the main process decides).
   const raw = active.length && active.every(job => job.eta !== undefined) ? state.etaTotal?.eta : undefined, remaining = useHeld()('total', raw);
   const needDestinations = requiredDestinations(state.preferences);
-  const configured = state.preferences.destinations.length >= needDestinations;
+  const configured = destinationsChosen(state.preferences);
   const { ready: readyDestinations, checking: checkingDestinations } = destinationReadiness(state);
   // Drives in use: those of running jobs and the destinations they write to; with nothing running, every connected drive.
   const driveTotal = totalDriveActivity(state, active.length ? [...active.map(job => job.source.id), ...state.preferences.destinations.slice(0, needDestinations)] : Object.keys(state.driveActivity ?? {}));
@@ -836,12 +841,13 @@ function ImportDashboardPanel({state, act}: {state: AppState; act: Dispatch}) {
     </section>);
 }
 
-export type SettingsCategory = 'general' | 'storage' | 'folders' | 'defaults' | 'files' | 'devices' | 'performance' | 'diagnostics';
-export const settingsCategories: SettingsCategory[] = ['general', 'storage', 'folders', 'defaults', 'files', 'devices', 'performance', 'diagnostics'];
+export type SettingsCategory = 'general' | 'storage' | 'defaults' | 'files' | 'devices' | 'performance' | 'diagnostics';
+/** Storage holds where backups go and how folders inside them are laid out: choosing a folder and its structure is one task. */
+export const settingsCategories: SettingsCategory[] = ['general', 'storage', 'defaults', 'files', 'devices', 'performance', 'diagnostics'];
 function savedCategory(): SettingsCategory {
   try {
     const value = sessionStorage.getItem('settings-category');
-    const legacy: Record<string, SettingsCategory> = { importing: 'defaults', destinations: 'storage', organization: 'files', drives: 'devices' };
+    const legacy: Record<string, SettingsCategory> = { importing: 'defaults', destinations: 'storage', folders: 'storage', organization: 'files', drives: 'devices' };
     if (value && settingsCategories.includes(value as SettingsCategory)) return value as SettingsCategory;
     return value && Object.hasOwn(legacy, value) ? legacy[value] : 'general';
   } catch { return 'general'; }
@@ -874,6 +880,9 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey,onLibr
   // The panel rises or falls in list order while the selection glides to the new category.
   // Rapid keys step from the latest choice, which may not have rendered yet.
   const chosen = useRef(open);
+  // The path examples show another camera and capture each time this category is opened.
+  const [storageVisit, setStorageVisit] = useState(0);
+  useEffect(() => { if (open === 'storage') setStorageVisit(visit => visit + 1); }, [open]);
   const choose = (id: SettingsCategory, focus = false) => {
     const from = chosen.current;
     chosen.current = id;
@@ -888,8 +897,7 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey,onLibr
   const copyModes: Record<CopyMode, string> = { single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") };
   const categories: { id: SettingsCategory; icon: LucideIcon; title: string; summary: string }[] = [
     { id: 'general', icon: Settings2, title: t("General"), summary: `${localeNames[p.language] ?? p.language} · ${Math.round(p.textScale * 100)}%` },
-    { id: 'storage', icon: HardDrive, title: t("Storage"), summary: p.destinations.length ? `${p.destinations.map(path => basename(path)).join(' + ')} · ${copyModes[p.copyMode]}` : t("Not set") },
-    { id: 'folders', icon: FolderCog, title: t("Folders"), summary: [...p.basePath.split(/[\\/]/).filter(Boolean), ...samplePath(p.template)].join(' / ') },
+    { id: 'storage', icon: HardDrive, title: t("Storage & folders"), summary: p.destinations.length ? `${destinationLabels(p.destinations).join(' + ')} · ${samplePath(p.template).join(' / ')}` : t("Not set") },
     { id: 'defaults', icon: ArrowDownToLine, title: t("Importing"), summary: `${p.automatic ? t("Automatic") : t("Manual")} · ${p.verifyCopies ? t("Verify each copy after copying") : t("Copying")}` },
     { id: 'files', icon: FileQuestion, title: t("File handling"), summary: t("Metadata and file rules") },
     { id: 'devices', icon: Usb, title: t("Devices"), summary: t("{count} remembered", { count: formatNumber(Object.keys(p.rememberedDevices).length) }) },
@@ -908,9 +916,13 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey,onLibr
       </div></section>
     </>,
     storage: <>{lockNote('storage')}<fieldset className="settings-fieldset" disabled={busy} title={lockTip} aria-describedby={lockId('storage')}>
-      <SettingsSection title={t("Backup location")} icon={HardDrive}><DestinationBay state={state} act={act} configure onLibrary={onLibrary} /></SettingsSection>
+      <SettingsSection title={t("Backup location")} icon={HardDrive}><DestinationBay state={state} act={act} configure onLibrary={onLibrary} />
+        {p.mediaLayout === 'video-root'
+          ? <p className="settings-explanation" data-testid="backup-folders-note"><Icon icon={Info} size={14} />{t("Photos and videos each have their own folder. Choose any folder for each: on the same drive, another drive, or several folders deep.")}</p>
+          : <div className="settings-explanation separate-video-cue" data-testid="backup-folders-note"><span><Icon icon={Info} size={14} />{t("Videos are saved with the photos. To keep them in another folder, on any drive, use a separate video folder.")}</span><Button kind="quiet" icon={Film} onClick={() => act({ type: 'preferences', patch: { mediaLayout: 'video-root' } })}>{t("Use a separate video folder")}</Button></div>}
+      </SettingsSection>
+      <FolderSettings key={storageVisit} state={state} act={act} />
     </fieldset></>,
-    folders: <>{lockNote('folders')}<fieldset className="settings-fieldset" disabled={busy} title={lockTip} aria-describedby={lockId('folders')}><FolderSettings state={state} act={act} /></fieldset></>,
     defaults: <>
       {lockNote('defaults')}
       <SettingsSection title={t("Starting imports")} icon={Radio}>
@@ -975,12 +987,12 @@ export function RememberedDrives({ preferences, act }: { preferences: Preference
 function RememberedDriveDetails({ id, name, cameras }: { id: string; name: string; cameras?: DriveCameraRecord }) {
   const { t, language, formatNumber, formatBytes: bytes } = useTranslation();
   const progress = cameras && { checked: formatNumber(cameras.checked), total: formatNumber(cameras.total) };
-  const tally = (items: DriveCameraRecord['models'], testid: string) => <ul className="remembered-drive-cameras" data-testid={testid}>{items.map(item => <li key={item.name} data-camera-bytes={item.bytes}><span>{item.name}</span><small>{t("{count} files", { count: formatNumber(item.files) })} · {bytes(item.bytes)}</small></li>)}</ul>;
+  const tally = (items: DriveCameraRecord['models'], testid: string, label = (name: string) => name) => <ul className="remembered-drive-cameras" data-testid={testid}>{items.map(item => <li key={item.name} data-camera-bytes={item.bytes}><span>{label(item.name)}</span><small>{t("{count} files", { count: formatNumber(item.files) })} · {bytes(item.bytes)}</small></li>)}</ul>;
   return <details className="remembered-drive-details" data-testid="remembered-drive-details" data-device-id={id}>
     <summary aria-label={t("Camera details for {name}", { name })}><Icon icon={Camera} size={14} />{t("Details")}<Icon icon={ChevronDown} size={14} /></summary>
     {cameras && progress ? <div className="remembered-drive-content">
       <ul className="drive-history"><li data-testid="drive-scan-time"><Icon icon={ScanLine} size={13} />{t("Last scan finished {date}", { date: formatWhen(cameras.scanned, language) })}</li><li><Icon icon={Files} size={13} />{cameras.status === 'stopped' ? t("Camera metadata scan stopped: {checked}/{total}", progress) : cameras.status === 'error' ? t("Camera metadata scan incomplete: {checked}/{total}", progress) : t("Camera metadata checked: {checked}/{total}", progress)}</li></ul>
-      <div><h4>{t("Confirmed by EXIF metadata")}</h4>{cameras.models.length ? tally(cameras.models, 'remembered-drive-models') : <p className="muted">{t("No camera models confirmed in checked files.")}</p>}{cameras.unknown > 0 && <p className="muted">{t("{count} files without a camera model", { count: formatNumber(cameras.unknown) })}</p>}</div>
+      <div><h4>{t("Confirmed by EXIF metadata")}</h4>{cameras.models.length ? tally(cameras.models, 'remembered-drive-models', cameraDisplayName) : <p className="muted">{t("No camera models confirmed in checked files.")}</p>}{cameras.unknown > 0 && <p className="muted">{t("{count} files without a camera model", { count: formatNumber(cameras.unknown) })}</p>}</div>
       {!!cameras.lenses?.length && <div><h4>{t("Lenses from EXIF metadata")}</h4>{tally(cameras.lenses, 'remembered-drive-lenses')}</div>}
     </div> : <p className="muted">{t("No camera data from a scan yet. Scan this drive to see its cameras.")}</p>}
   </details>;
@@ -1057,7 +1069,7 @@ export function NoMetadataSettings({ preferences: p, act }: { preferences: Prefe
     { value: 'keep', label: t("Leave where they are"), detail: t("Not moved or copied, and Delete originals never removes them. You are warned before a job starts.") },
     { value: 'fileDate', label: t("Use file date"), detail: t("Filed by the file's modified date, in a camera folder with the folder name below.") },
   ];
-  const valid = validNoMetadataFolder(draft, [p.editedFolder, p.basePath, p.videoBasePath]);
+  const valid = validNoMetadataFolder(draft, [p.editedFolder]);
   return <div className="backup-mode" data-testid="no-metadata-settings">
     <span className="field-label">{t("Files with unknown metadata")}</span>
     <div className="segmented" role="group" aria-label={t("Files with unknown metadata")}>{choices.map(choice => <button key={choice.value} type="button" aria-pressed={current === choice.value} onClick={() => act({ type: 'preferences', patch: { noMetadataHandling: choice.value } })}>{choice.label}</button>)}</div>
@@ -1107,7 +1119,7 @@ function BackupModeControl({ preferences, act }: { preferences: Preferences; act
     <div className="segmented" role="group" aria-label={t("Drive backup mode")}>{modes.map(item => <button key={item.value} type="button" aria-pressed={mode === item.value} disabled={item.value === 'mirror' && mirrorBlocked && mode !== 'mirror'} onClick={() => act({ type: 'preferences', patch: { backupMode: item.value } })}>{item.label}</button>)}</div>
     <p className="settings-explanation">{modes.find(item => item.value === mode)!.detail}</p>
     {mirrorBlocked && <p className="inline-note"><Icon icon={Info} size={14} />{t("Mirror doesn't work with “Fill first, then second”.")}</p>}
-    <PathPreview label={t("Drive backups are saved here on each destination")} parts={driveBackupFolder(preferences.basePath).split('/')} />
+    <PathPreview label={t("Drive backups are saved here on each destination")} parts={driveBackupFolder(preferences.destinations[0] ? basename(preferences.destinations[0]) : t("Photo folder"))} />
   </div>;
 }
 
@@ -1137,7 +1149,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, on
   const otherSources = state.sources.length - modeSources.length;
   const idleSources = modeSources.filter(source => !jobs.some(job => job.source.id === source.id));
   // Organizations read a drive or folder too: each one's latest run is a card, ahead of the drives.
-  const configured = state.preferences.destinations.length >= requiredDestinations(state.preferences);
+  const configured = destinationsChosen(state.preferences);
   const scanning = (state.scanningSources?.length ?? 0) > 0;
   const reviewBusy = !!state.blocked?.review;
   // Starting one drive queues behind the others; only an open review blocks it.
@@ -1148,7 +1160,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, on
   const cards = [...latestJobs.map(job => ({ id: job.source.id, job, source: job.source })), ...idleSources.map(source => ({ id: source.id, job: undefined as Job | undefined, source }))].sort((a, b) => position(a.id) - position(b.id));
   // Drives and folders still connected can be ejected or removed; one in use shows the button disabled.
   const ejectState = (source: Source): 'ready' | 'busy' | 'ejecting' | undefined => ejectable(source) && state.sources.some(item => item.id === source.id) ? (state.ejecting?.includes(source.id) ? 'ejecting' : sourceInUse(state, source) ? 'busy' : 'ready') : undefined;
-  const done = doneSources(state, source => containsBackup(source, state.preferences.destinations));
+  const done = doneSources(state, source => containsBackup(source, backupFolders(state.preferences)));
   const movable = (card: typeof cards[number], index: number) => index > 0 && sourceSelected(card.source) && (!card.job || card.job.phase === 'queued' || (card.job.phase === 'stopped' && !!card.job.paused));
   return <div className="desk-page">
     <ImportDashboard state={state} act={act} />
@@ -1156,7 +1168,7 @@ export function ImportDesk({ state, act, inspect, onOrganization, onSettings, on
       <section aria-labelledby="source-heading" className="source-section"><div className="section-heading"><h2 id="source-heading">{t("Sources & queue")}</h2><div className="source-heading-actions">{done.length > 0 && <EjectAll sources={done} act={act} />}<Button icon={FolderPlus} aria-label={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} title={mode === 'files' ? t("Back up drives or folders…") : t("Choose media folders…")} disabled={!configured || !!state.review || !!state.busyReview} onClick={() => act({ type: 'chooseSource', backup: mode === 'files' })}>{t("Add folder…")}</Button><div className="source-layout-switch" role="group" aria-label={t("Source layout")}>{([{value:'list',label:t("List view"),icon:List},{value:'grid',label:t("Grid view"),icon:LayoutGrid}] as const).map(layout => <button type="button" key={layout.value} data-testid={`source-layout-${layout.value}`} aria-label={layout.label} title={layout.label} aria-pressed={(state.preferences.sourceLayout) === layout.value} onClick={() => act({type:'preferences',patch:{sourceLayout:layout.value}})}><Icon icon={layout.icon} size={18} /></button>)}</div>{<Button icon={scanning ? LoaderCircle : ScanLine} disabled={!state.sources.some(source => source.transport !== 'camera') || reviewBusy} onClick={() => act({ type: 'scan' })}>{scanning ? t("Scanning…") : t("Scan all")}</Button>}</div></div>
         <div className={`source-ledger source-layout-${state.preferences.sourceLayout}`} data-testid="source-cards">
           {latestJobs.length === 0 && idleSources.length === 0 && <div className="source-empty"><div className="empty-device-line"><Icon icon={Camera} size={32} /><span /><Icon icon={Usb} size={20} /><span /><Icon icon={Save} size={30} /></div><h3>{mode === 'files' ? t("Choose folders to back up.") : t("Connect camera storage or a memory card.")}</h3><p>{mode === 'files' ? t("Keep the original folder structure.") : t("Connect a memory card or camera to start.")}</p><Button kind="quiet" icon={Radio} className="inline-note" data-testid="empty-automatic" onClick={() => onAutomatic?.()}>{state.preferences.automatic ? t("Automatic import is watching for new connections.") : t("Automatic import is off. Use Start when you’re ready.")}</Button>{otherSources > 0 && onOtherMode && <div className="source-empty-other" data-testid="other-mode-sources"><span>{otherSources === 1 ? (mode === 'files' ? t("1 connected source is in Media.") : t("1 connected source is in Files & folders.")) : mode === 'files' ? t("{count} connected sources are in Media.", { count: formatNumber(otherSources) }) : t("{count} connected sources are in Files & folders.", { count: formatNumber(otherSources) })}</span><Button kind="quiet" icon={ArrowRight} onClick={onOtherMode}>{mode === 'files' ? t("Media") : t("Files & folders")}</Button></div>}</div>}
-          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow activity={state.driveActivity?.[source.id]} drive={driveContext(job.source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} eject={ejectState(job.source)} reviewing={!!state.busyReview && state.reviewSourceId === job.source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(job.source.id)} verifyOff={!state.preferences.verifyCopies} originalsSize={state.originalsSize} /> : <SourceRow drive={driveContext(source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, state.preferences.destinations)} backupFolder={state.preferences.basePath} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} eject={ejectState(source)} reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(source.id)} verifyOff={!state.preferences.verifyCopies} />; })}
+          {cards.map((card, index) => { const { job, source } = card; return job ? <SourceRow activity={state.driveActivity?.[source.id]} drive={driveContext(job.source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={job.source} job={job} queuePosition={startOrder.indexOf(job.id) + 1} selected={selectedJob?.id === job.id} onSelect={() => animateInterfaceChange(() => setSelectedJobId(job.id))} act={act} configured={configured} inventory={state.sourceInventories?.[job.source.id] ?? job.inventory} scanning={state.scanningSources?.includes(job.source.id)} listing={state.scanProgress?.[job.source.id]} containsBackup={containsBackup(job.source, backupFolders(state.preferences))} backupFolder={backupFolderNames(job.source, state.preferences)} cameraInfo={state.sourceCameraInfo?.[job.source.id]} reviewBusy={reviewBusy} eject={ejectState(job.source)} reviewing={!!state.busyReview && state.reviewSourceId === job.source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(job.source.id)} verifyOff={!state.preferences.verifyCopies} originalsSize={state.originalsSize} /> : <SourceRow drive={driveContext(source, state.sources, state.destinationStatus)} canMoveUp={movable(card, index)} key={card.id} source={source} act={act} configured={configured} inventory={state.sourceInventories?.[source.id]} scanning={state.scanningSources?.includes(source.id)} listing={state.scanProgress?.[source.id]} containsBackup={containsBackup(source, backupFolders(state.preferences))} backupFolder={backupFolderNames(source, state.preferences)} cameraInfo={state.sourceCameraInfo?.[source.id]} reviewBusy={reviewBusy} eject={ejectState(source)} reviewing={!!state.busyReview && state.reviewSourceId === source.id} reviewProgress={state.reviewProgress} startBlocked={startBlocked} organizeBlocked={state.preferences.mediaLayout === 'video-root'} needsChoice={unanswered(source.id)} verifyOff={!state.preferences.verifyCopies} />; })}
 
         </div>
       </section>
@@ -1455,6 +1467,30 @@ export function OrganizeFolderLayoutNote() {
 }
 
 // A drive or folder that holds a backup destination: planning leaves the backup folder out.
+/** Every destination the copy policy needs has its folders: a photo folder and, in the video-root layout, a video folder. */
+function destinationsChosen(p: Preferences): boolean {
+  const required = requiredDestinations(p);
+  return p.destinations.slice(0, required).filter(Boolean).length >= required && (p.mediaLayout !== 'video-root' || p.destinations.slice(0, required).every((_, index) => !!p.videoDestinations?.[index]));
+}
+/** Every chosen backup folder: the photo folders and, in the video-root layout, the video folders. */
+function backupFolders(p: Preferences): string[] {
+  return [...p.destinations, ...(p.mediaLayout === 'video-root' ? p.videoDestinations ?? [] : [])].filter(Boolean);
+}
+/** The backup folders inside a source, named for its note. */
+function backupFolderNames(source: Source, p: Preferences): string {
+  return source.path ? backupFolders(p).filter(folder => within(folder, source.path)).map(basename).join(', ') : '';
+}
+/** Where a destination is organized as a whole: its photo folder, or in the video-root layout the folder holding
+ * both its photo and video folders (undefined when they are on different drives; mirrors libraryAnchor). */
+export function organizationAnchor(p: Preferences, index: number): string | undefined {
+  const photo = p.destinations[index], video = p.mediaLayout === 'video-root' ? p.videoDestinations?.[index] : undefined;
+  if (!photo || !video) return photo || undefined;
+  if ((p.destinationIds?.[index] ?? '') !== (p.videoDestinationIds?.[index] ?? '')) return undefined;
+  const parts = photo.split(/[\\/]/), other = video.split(/[\\/]/);
+  let shared = 0;
+  while (shared < parts.length - 1 && shared < other.length && parts[shared] === other[shared]) shared++;
+  return parts.slice(0, shared).join('/') || '/';
+}
 function containsBackup(source: Source, destinations: string[]): boolean {
   if (!source.path) return false;
   const root = source.path;
@@ -1531,7 +1567,7 @@ export function SourceCameraInformation({ sourceId, info }: { sourceId: string; 
   return <section className="source-camera-info" aria-label={t("Media camera information")} data-testid="source-camera-info" data-source-id={sourceId}>
     <div className="source-camera-heading"><strong><Icon icon={Camera} size={15} />{t("Camera metadata")}</strong><span aria-live="polite">{info.status === 'reading' ? t("Reading camera metadata: {checked}/{total}", progressValues) : info.status === 'stopped' ? t("Camera metadata scan stopped: {checked}/{total}", progressValues) : info.status === 'error' ? t("Camera metadata scan incomplete: {checked}/{total}", progressValues) : t("Camera metadata checked: {checked}/{total}", progressValues)}</span></div>
     {info.hints.length > 0 && <div className="source-camera-hints"><h4>{t("Camera hints — unconfirmed")}</h4><ul>{info.hints.map((hint, index) => <li key={`${hint.evidence}-${hint.name}-${index}`}><span>{hint.name}</span><small>{t(evidenceLabels[hint.evidence])}</small></li>)}</ul></div>}
-    <div className="source-camera-models"><h4>{t("Confirmed by EXIF metadata")}</h4>{info.models.length > 0 ? <ul className="source-camera-names">{info.models.map(model => <li key={model.name}>{model.name}</li>)}</ul> : <p>{t(info.status === 'reading' ? "No camera models confirmed yet." : "No camera models confirmed in checked files.")}</p>}</div>
+    <div className="source-camera-models"><h4>{t("Confirmed by EXIF metadata")}</h4>{info.models.length > 0 ? <ul className="source-camera-names">{info.models.map(model => <li key={model.name}>{cameraDisplayName(model.name)}</li>)}</ul> : <p>{t(info.status === 'reading' ? "No camera models confirmed yet." : "No camera models confirmed in checked files.")}</p>}</div>
     <div className="source-camera-models" data-testid="source-lenses"><h4>{t("Lenses from EXIF metadata")}</h4>{lenses.length > 0 ? <ul className="source-camera-names">{lenses.map(lens => <li key={lens.name}>{lens.name}</li>)}</ul> : <p>{t(info.status === 'reading' ? "No lenses identified yet." : "No lens information in checked files.")}</p>}</div>
   </section>;
 }
@@ -1583,16 +1619,35 @@ function SourceMediaSummary({ source, inventory, scanning }: { source: Source; i
   return <section className="source-media" aria-label={t("Media summary for {name}", { name: source.name })} data-testid="source-media-summary" data-source-id={source.id}><div className="source-media-total"><strong>{t("{count} photos & videos", { count: formatNumber(photos.count + videos.count) })}</strong><span>{t("{size} media", { size: bytes(photos.size + videos.size) })}</span>{scanning && <span aria-live="polite">{t("Updating scan…")}</span>}</div><div className="source-media-groups">{([{ label: t("Photos"), value: photos }, { label: t("Videos"), value: videos }]).map(group => <div className="source-media-group" key={group.label}><div className="source-media-heading"><strong>{group.label}</strong><span>{t("{count} files · {size}", { count: formatNumber(group.value.count), size: bytes(group.value.size) })}</span></div>{group.value.count > 0 ? <dl className="source-formats">{[...group.value.formats].sort(([a],[b])=>a.localeCompare(b)).map(([extension, format]) => <div key={extension}><dt>{extension || t("No extension")}</dt><dd><span>{formatNumber(format.count)}</span><span>{bytes(format.size)}</span></dd></div>)}</dl> : <p>{t(group.value === photos ? "No photos found." : "No videos found.")}</p>}</div>)}</div></section>;
 }
 
+/** A destination's video folder in the video-root layout: chosen apart from its photo folder, on the same drive or another. */
+function VideoFolder({ state, act, index, configure, busy, compact = false }: { state: AppState; act: Dispatch; index: number; configure: boolean; busy: boolean; compact?: boolean }) {
+  const { t, formatBytes } = useTranslation();
+  const p = state.preferences;
+  const path = p.videoDestinations?.[index] || '';
+  const status = path ? state.destinationStatus?.find(item => item.path === path) : undefined;
+  // Its own capacity only when it is on another drive than the photo folder.
+  const otherDrive = !!path && (p.videoDestinationIds?.[index] ?? '') !== (p.destinationIds?.[index] ?? '');
+  if (compact) return <div className="destination-video-line" data-testid={`destination-video-folder-${index}`}><Icon icon={Film} size={13} />{path ? <><span title={path}>{t("Videos: {folder}", { folder: basename(path) })}</span>{otherDrive && <small className="destination-strip-free">{status?.free !== undefined && status.available ? t("{size} free", { size: formatBytes(status.free) }) : status?.available === false ? t("Drive offline") : t("Reading drive capacity…")}</small>}</> : <span>{t("Choose a video folder")}</span>}</div>;
+  return <div className="destination-video-folder" data-testid={`destination-video-folder-${index}`}>
+    <div className="destination-drive"><Icon icon={Film} size={24} /><h3>{path ? basename(path) : t("Choose a video folder")}</h3></div>
+    {path && <small className="destination-folder-kind">{t("Video folder")}</small>}
+    {path ? <p className="destination-path" title={path}><bdi>{path}</bdi></p> : <p className="destination-path"><bdi>{t("Videos go to a folder you choose, on this drive or another.")}</bdi></p>}
+    {path && otherDrive && <CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />}
+    {path && status?.available === false && <div className="destination-health offline"><Icon icon={CircleAlert} size={13} /><span>{t("Reconnect this drive before importing.")}</span></div>}
+    <div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} data-testid={`choose-video-folder-${index}`} onClick={() => act({ type: 'chooseDestination', index, kind: 'videos' })}>{path ? t("Change…") : t("Choose video folder…")}</Button>}<div className="destination-check-actions">{path && <Button kind="quiet" icon={ExternalLink} aria-label={t("Show video folder in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div></div>
+  </div>;
+}
 export function DestinationBay({ state, act, onLibrary, configure = false }: { onLibrary?: () => void; state: AppState; act: Dispatch; configure?: boolean }) {
   const { t, formatNumber } = useTranslation();
   const { preferences } = state;
   const descriptions: Record<CopyMode, string> = { single: t("One verified copy."), mirror: t("A verified copy on both drives."), sequential: t("Fill the first drive, then use the second.") };
+  const videoRoot = preferences.mediaLayout === 'video-root';
   return <aside className="destination-bay" aria-labelledby="destination-heading"><div className="section-heading"><h2 id="destination-heading">{t("Destinations")}</h2><Icon icon={HardDrive} size={19} /></div><div className="destination-panel"><div className="copy-policy">{configure ? <><label htmlFor="copy-policy">{t("Copy policy")}</label><div className="select-wrap"><select id="copy-policy" disabled={state.jobs.some(job => isRunning(job)) || !!state.review || !!state.busyReview} value={preferences.copyMode} onChange={event => act({ type: 'preferences', patch: { copyMode: event.target.value as CopyMode } })}><option value="single">{t("One destination")}</option><option value="mirror">{t("Copy to both destinations")}</option><option value="sequential" disabled={preferences.backupMode === 'mirror'}>{t("Fill first, then second")}</option></select><Icon icon={ChevronDown} size={15} /></div></> : <div className="copy-policy-summary"><strong>{t("Copy policy")}</strong><span>{{ single: t("One destination"), mirror: t("Copy to both destinations"), sequential: t("Fill first, then second") }[preferences.copyMode]}</span></div>}{configure && <p>{descriptions[preferences.copyMode]}</p>}{configure && preferences.backupMode === 'mirror' && <small>{t("Not available with Mirror.")}</small>}</div>{Array.from({ length: preferences.copyMode === 'single' ? 1 : 2 }, (_, index) => {
     const path = preferences.destinations[index];
     const status = state.destinationStatus?.find(item => item.path === path);
     const busy = state.jobs.some(job => isRunning(job)) || !!state.review || !!state.busyReview;
     const wait = state.blocked?.backupCheck;
-    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={HardDrive} size={30} /><h3>{path ? basename(path) : t("Choose a backup drive")}</h3></div>{path ? <p className="destination-path" title={path}><bdi>{path}{preferences.basePath ? ` / ${preferences.basePath}` : ''}</bdi></p> : <p className="destination-path">{t("A drive or folder for your verified copies.")}</p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />{state.driveActivity?.[path] && <DriveActivityMeter activity={state.driveActivity[path]} />}<div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span>{configure && onLibrary && <Button kind="quiet" onClick={onLibrary}>{t("Open in Library")}</Button>}</div>}{path && state.misplacedFiles?.[path]?.missing && !state.misplacedProgress?.[path] && <p className="destination-note" data-testid="destination-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p>}{path && wait && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && status?.available && <small className="destination-note" role="status">{t(message(wait))}</small>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}<div className="destination-check-actions">{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div></div>{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
+    return <section className="destination-slot" key={index} {...(path ? { 'data-destination-path': path } : {})}><div className="destination-slot-label"><span className="destination-number">{index + 1}</span><span>{index === 0 ? t("First destination") : t("Second destination")}</span><span className={`connection-dot ${path && status?.available !== false ? 'connected' : ''}`} aria-label={!path ? t("Not selected") : status?.available === false ? t("Offline") : t("Selected")} /></div><div className="destination-drive"><Icon icon={videoRoot ? FileImage : HardDrive} size={30} /><h3>{path ? basename(path) : t(videoRoot ? "Choose a photo folder" : "Choose a backup folder")}</h3></div>{videoRoot && path && <small className="destination-folder-kind">{t("Photo folder")}</small>}{path ? <p className="destination-path" title={path}><bdi>{path}</bdi></p> : <p className="destination-path"><bdi>{t("A folder on any drive for your verified copies.")}</bdi></p>}{path && <><CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />{state.driveActivity?.[path] && <DriveActivityMeter activity={state.driveActivity[path]} />}<div className={`destination-health ${status?.available === false ? 'offline' : ''}`}><Icon icon={status?.available === false ? CircleAlert : CheckCircle2} size={13} /><span>{status?.available === false ? t("Reconnect this drive before importing.") : status?.available ? t("Destination available") : t("Checking destination…")}</span></div></>}{path && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}{path && !state.misplacedFiles?.[path]?.missing && (state.misplacedFiles?.[path]?.count ?? 0) > 0 && <div className="destination-misplaced" data-testid="destination-misplaced"><Icon icon={CircleAlert} size={13} /><span>{misplacedText(state.misplacedFiles![path].count, t, formatNumber)}</span>{configure && onLibrary && <Button kind="quiet" onClick={onLibrary}>{t("Open in Library")}</Button>}</div>}{path && state.misplacedFiles?.[path]?.missing && !state.misplacedProgress?.[path] && <p className="destination-note" data-testid="destination-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p>}{path && wait && !state.misplacedFiles?.[path] && !state.misplacedProgress?.[path] && status?.available && <small className="destination-note" role="status">{t(message(wait))}</small>}<div className="destination-buttons">{configure && <Button icon={path ? FolderOpen : Plus} kind={path ? 'secondary' : 'primary'} disabled={busy} onClick={() => act({ type: 'chooseDestination', index })}>{path ? t("Change…") : t("Choose location…")}</Button>}<div className="destination-check-actions">{path && <Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} />}</div></div>{videoRoot && path && <VideoFolder state={state} act={act} index={index} configure={configure} busy={busy} />}{configure && index === 1 && path && <Button kind="quiet" icon={Trash2} className="remove-destination" disabled={busy} onClick={() => act({ type: 'removeDestination', index })}>{t("Remove destination")}</Button>}</section>;
   })}</div></aside>;
 }
 
@@ -1609,12 +1664,14 @@ export function DestinationStrip({ state, act, onSettings, onLibrary }: { state:
     const running = !!(path && state.misplacedProgress?.[path]);
     const wait = state.blocked?.backupCheck;
     const online = status?.available === true;
-    if (!path) return <section className="destination-slot destination-strip-line" key={index}><div className="destination-strip-head"><span className="destination-number">{index + 1}</span><strong>{t("Choose a backup drive")}</strong></div></section>;
+    if (!path) return <section className="destination-slot destination-strip-line" key={index}><div className="destination-strip-head"><span className="destination-number">{index + 1}</span><strong>{t(preferences.mediaLayout === 'video-root' ? "Choose a photo folder" : "Choose a backup folder")}</strong></div></section>;
     return <section className="destination-slot destination-strip-line" key={index} data-destination-path={path}>
-      <div className="destination-strip-head"><span className="destination-number">{index + 1}</span><strong title={path}>{basename(path)}</strong><i className={`status-dot ${status?.available === undefined ? 'is-checking' : status.available ? 'is-online' : 'is-offline'}`} role="img" aria-label={status?.available === undefined ? t("Checking destination…") : status.available ? t("Destination available") : t("Drive offline")} /><small className="destination-strip-free">{status?.free !== undefined && status.available ? t("{size} free", { size: formatBytes(status.free) }) : status?.available === false ? t("Drive offline") : t("Reading drive capacity…")}</small></div>
+      <div className="destination-strip-head"><span className="destination-number">{index + 1}</span><strong title={path}>{destinationLabel(path)}</strong><i className={`status-dot ${status?.available === undefined ? 'is-checking' : status.available ? 'is-online' : 'is-offline'}`} role="img" aria-label={status?.available === undefined ? t("Checking destination…") : status.available ? t("Destination available") : t("Drive offline")} /></div>
+      {preferences.mediaLayout === 'video-root' && <VideoFolder state={state} act={act} index={index} configure={false} busy={false} compact />}
+      <CapacityBar total={status?.total} free={status?.free} unavailable={status?.available === false ? t("Drive offline") : t("Reading drive capacity…")} />
       <SidebarDestinationStatus activity={destinationActivity(state, path)} path={path} />
       {state.driveActivity?.[path] && <DriveActivityMeter activity={state.driveActivity[path]} />}
-      <div className="destination-check-actions">{online && !found && !running && <Button icon={FolderCog} className="destination-check" data-testid={`destination-check-backup-folder-${index}`} disabled={!!wait || queuedOrganization} onClick={() => act({ type: 'checkBackupFolder', destinationIndex: index })}>{t("Check folder layout")}</Button>}{running && <Button kind="quiet" icon={X} data-testid={`destination-stop-backup-check-${index}`} onClick={() => act({ type: 'stopBackupCheck' })}>{t("Stop")}</Button>}<Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} /></div>
+      <div className="destination-check-actions">{online && !found && !running && organizationAnchor(preferences, index) && <Button icon={FolderCog} className="destination-check" data-testid={`destination-check-backup-folder-${index}`} disabled={!!wait || queuedOrganization} onClick={() => act({ type: 'checkBackupFolder', destinationIndex: index })}>{t("Check folder layout")}</Button>}{running && <Button kind="quiet" icon={X} data-testid={`destination-stop-backup-check-${index}`} onClick={() => act({ type: 'stopBackupCheck' })}>{t("Stop")}</Button>}<Button kind="quiet" icon={ExternalLink} aria-label={t(index === 0 ? "Show first destination in file manager" : "Show second destination in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path })} /></div>
       {running && state.misplacedProgress?.[path] && <PlanningProgress progress={state.misplacedProgress[path]} label={t("Checking the backup folder")} />}
       {found && !running && (found.missing ? <p className="destination-note" data-testid="destination-folder-missing" role="status">{t("No backup folder yet. The first import creates it.")}</p> : <div className={found.count > 0 ? 'destination-misplaced' : 'destination-misplaced is-clean'} data-testid={found.count > 0 ? 'destination-misplaced' : 'destination-in-order'} role="status"><Icon icon={found.count > 0 ? CircleAlert : CheckCircle2} size={13} /><span>{found.count > 0 ? misplacedText(found.count, t, formatNumber) : t("Backup folder is in order.")}</span>{onLibrary && <Button kind="quiet" onClick={onLibrary}>{t("Open in Library")}</Button>}</div>)}
       {online && wait && !found && !running && <small className="destination-note" role="status">{t(message(wait))}</small>}
@@ -1710,7 +1767,9 @@ export function BackupCheck({ state, act, destinationIndex }: { state: AppState;
   const status = state.destinationStatus?.find(item => item.path === destination);
   const away = status?.available !== true;
   const wait = state.blocked?.backupCheck;
-  const blocked = !!wait || running || away;
+  // Folders on two drives are not one library: their layout cannot be checked together.
+  const apart = !!destination && !organizationAnchor(state.preferences, destinationIndex);
+  const blocked = !!wait || running || away || apart;
   const noFolder = !!found?.missing;
   const check = (kind: 'primary' | 'secondary', label: string) => <Button kind={kind} icon={FolderCog} data-testid="check-backup-folder" disabled={blocked} onClick={() => act({ type: 'checkBackupFolder', destinationIndex })}>{label}</Button>;
   const reveal = <Button kind="quiet" icon={ExternalLink} aria-label={t("Show in file manager")} title={t("Show in file manager")} onClick={() => act({ type: 'reveal', path: destination })} />;
@@ -1733,20 +1792,23 @@ export function Organization({ state, act, busy, selectedDestination = 0, onSele
   const destination = p.destinations[destinationIndex];
   const chosenScope = destination ? chosenScopes[destination] : undefined;
   const selectedFolders = destination ? state.organizationFolders?.[destination] : undefined;
-  const targetFolder = destination ? [destination.replace(/[\\/]$/, ''), p.basePath].filter(Boolean).join('/') : '';
+  const targetFolder = destination ?? '';
+  // Organizing moves files between the photo and video folders, so both must be on one drive.
+  const anchor = organizationAnchor(p, destinationIndex), videoRoot = p.mediaLayout === 'video-root';
   const runningOrganization = state.jobs.find(job => job.organization && (isRunning(job) || job.phase === 'queued'));
   const organizing = !!state.blocked?.organize;
   // The backup folder is the default scope; picked folders always win, and without a backup folder the whole destination is the only other whole scope.
-  const scope: 'backup' | 'whole' | 'chosen' = selectedFolders ? 'chosen' : chosenScope === 'whole' || !p.basePath ? 'whole' : 'backup';
+  // Without a video folder the photo folder is the whole destination.
+  const scope: 'backup' | 'whole' | 'chosen' = selectedFolders ? 'chosen' : chosenScope === 'whole' || !videoRoot ? 'whole' : 'backup';
   const pickScope = (next: 'backup' | 'whole') => { if (destination) setChosenScopes(scopes => ({ ...scopes, [destination]: next })); if (selectedFolders) act({ type: 'resetOrganizationFolders', destinationIndex }); };
-  const videoTarget = p.mediaLayout === 'video-root' ? [destination?.replace(/[\\/]$/, ''), p.videoBasePath].filter(Boolean).join('/') : '';
+  const videoTarget = videoRoot ? p.videoDestinations?.[destinationIndex] ?? '' : '';
   // An open organize review runs with its own options: the switches show those, never the next run's.
   const organizeOptions = (state.review?.kind === 'reorganize' ? state.review.options : undefined) ?? state.organizeOptions;
   return <div className="organization-page">
     {/* Two independent stacks: a card's height never moves the cards in the other column. */}
     <div className="organization-column">
     {runningOrganization && <section className="organization-action organization-running" aria-labelledby="organization-running-heading"><CardHeader icon={LoaderCircle} id="organization-running-heading" title={t("Organizing now")} detail={organizationPlace(runningOrganization, true)} /><OrganizationProgress job={runningOrganization} act={act} /></section>}
-    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Organize backup")} detail={t("Move existing files into your folder structure.")} />{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<div className="select-wrap"><select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{destinationLabels(p.destinations).map((label,index) => <option key={p.destinations[index]} value={index}>{label}</option>)}</select><Icon icon={ChevronDown} size={14} /></div>{destination && <small className="organization-destination-path" title={destination}><bdi>{destination}</bdi></small>}</label>}{destination ? <><fieldset className="organization-scope"><legend>{t("Organize scope")}</legend><div className="organization-scope-options" role="radiogroup"><label><input type="radio" name="organization-scope" checked={scope === 'backup'} disabled={busy || !p.basePath} onChange={() => pickScope('backup')} />{t("Backup folder")}</label><label><input type="radio" name="organization-scope" checked={scope === 'whole'} disabled={busy} onChange={() => pickScope('whole')} />{t("Whole destination")}</label><label><input type="radio" name="organization-scope" checked={scope === 'chosen'} disabled={busy} onChange={() => { if (scope !== 'chosen') act({ type: 'chooseOrganizationFolders', destinationIndex }); }} />{t("Chosen folders")}</label></div>{scope === 'chosen' && <div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button><Button kind="quiet" disabled={busy} onClick={() => pickScope('whole')}>{t("Use whole destination")}</Button></div>}{scope === 'chosen' && <p>{t("Only the selected folders will be scanned.")}</p>}{scope === 'whole' && <p>{t("All folders on this destination will be scanned.")}</p>}{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</fieldset><dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{scope === 'backup' ? targetFolder : destination}{scope === 'backup' && videoTarget && <><br />{videoTarget}</>}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}{videoTarget && <><br />{videoTarget}</>}</dd></div></dl><BackupCheck state={state} act={act} destinationIndex={destinationIndex} /></> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={organizeOptions.removeEmptyFolders} disabled={busy} onChange={removeEmptyFolders => act({ type: 'organizeOptions', removeEmptyFolders })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div className="organization-option" data-testid="release-duplicates"><Switch checked={organizeOptions.releaseDuplicates} disabled={busy} onChange={releaseDuplicates => act({ type: 'organizeOptions', releaseDuplicates })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div><p className="inline-note" data-testid="organize-default"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p><div className="rule-actions organization-execute" data-testid="organization-execute">{onFolderRules && <Button kind="quiet" className="organization-rules" icon={Settings2} onClick={onFolderRules}>{t("Edit folder rules")}</Button>}<Button icon={Eye} data-testid="review-changes" disabled={busy || !destination || (scope === 'backup' && !!state.misplacedFiles?.[destination]?.missing)} onClick={() => act({ type: 'previewOrganization', destinationIndex, ...(scope === 'backup' ? { scope: 'backup' as const } : {}) })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} data-testid="organize-now" disabled={organizing || !destination || (scope === 'backup' && !!state.misplacedFiles?.[destination]?.missing)} onClick={() => act({ type: scope === 'backup' ? 'organizeBackup' : 'organize', destinationIndex })}>{t("Organize now")}</Button></div></section>
+    <section className="organization-action" aria-labelledby="organize-existing-heading"><CardHeader icon={FolderCog} id="organize-existing-heading" title={t("Organize backup")} detail={t("Move existing files into your folder structure.")} />{p.destinations.length > 1 && <label className="organization-destination-select">{t("Destination")}<div className="select-wrap"><select aria-label={t("Organization destination")} disabled={busy} value={destinationIndex} onChange={event => { const index = Number(event.target.value); animateInterfaceChange(() => onSelectDestination(index)); }}>{destinationLabels(p.destinations).map((label,index) => <option key={p.destinations[index]} value={index}>{label}</option>)}</select><Icon icon={ChevronDown} size={14} /></div>{destination && <small className="organization-destination-path" title={destination}><bdi>{destination}</bdi></small>}</label>}{destination && videoRoot && !anchor ? <><p className="inline-note" data-testid="organize-video-other-drive"><Icon icon={Info} size={14} />{t("This destination's photo and video folders are on different drives, so it can't be organized as one backup. Imports still copy to both.")}</p></> : destination ? <><fieldset className="organization-scope"><legend>{t("Organize scope")}</legend><div className="organization-scope-options" role="radiogroup"><label><input type="radio" name="organization-scope" checked={scope === 'backup'} disabled={busy || !videoRoot} onChange={() => pickScope('backup')} />{t("Backup folder")}</label><label><input type="radio" name="organization-scope" checked={scope === 'whole'} disabled={busy} onChange={() => pickScope('whole')} />{t("Whole destination")}</label><label><input type="radio" name="organization-scope" checked={scope === 'chosen'} disabled={busy} onChange={() => { if (scope !== 'chosen') act({ type: 'chooseOrganizationFolders', destinationIndex }); }} />{t("Chosen folders")}</label></div>{scope === 'chosen' && <div className="rule-actions"><Button icon={FolderOpen} disabled={busy} onClick={() => act({ type: 'chooseOrganizationFolders', destinationIndex })}>{t("Choose folders…")}</Button><Button kind="quiet" disabled={busy} onClick={() => pickScope('whole')}>{t("Use whole destination")}</Button></div>}{scope === 'chosen' && <p>{t("Only the selected folders will be scanned.")}</p>}{scope === 'whole' && <p>{t("All folders on this destination will be scanned.")}</p>}{selectedFolders && <ul aria-label={t("Selected organization folders")}>{selectedFolders.map(folder => <li key={folder}>{folder}</li>)}</ul>}</fieldset><dl className="organization-paths"><div><dt>{t("Scan existing files in")}</dt><dd>{scope === 'backup' ? targetFolder : anchor ?? destination}{scope === 'backup' && videoTarget && <><br />{videoTarget}</>}</dd></div><div><dt>{t("New structure under")}</dt><dd>{targetFolder}{videoTarget && <><br />{videoTarget}</>}</dd></div></dl><BackupCheck state={state} act={act} destinationIndex={destinationIndex} /></> : <p className="inline-note">{t("Choose a backup location in Settings to begin.")}</p>}<div className="organization-option" data-testid="remove-empty-folders"><Switch checked={organizeOptions.removeEmptyFolders} disabled={busy} onChange={removeEmptyFolders => act({ type: 'organizeOptions', removeEmptyFolders })} label={t("Remove emptied source folders")} detail={t("Folders left empty after organizing are removed. Folders with files are kept.")} /></div><div className="organization-option" data-testid="release-duplicates"><Switch checked={organizeOptions.releaseDuplicates} disabled={busy} onChange={releaseDuplicates => act({ type: 'organizeOptions', releaseDuplicates })} label={t("Remove confirmed duplicates")} detail={t("After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.")} /></div><p className="inline-note" data-testid="organize-default"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p><div className="rule-actions organization-execute" data-testid="organization-execute">{onFolderRules && <Button kind="quiet" className="organization-rules" icon={Settings2} onClick={onFolderRules}>{t("Edit folder rules")}</Button>}<Button icon={Eye} data-testid="review-changes" disabled={busy || !destination || !anchor || (scope === 'backup' && !!state.misplacedFiles?.[destination]?.missing)} onClick={() => act({ type: 'previewOrganization', destinationIndex, ...(scope === 'backup' ? { scope: 'backup' as const } : {}) })}>{t("Review changes…")}</Button><Button kind="primary" icon={FolderCog} data-testid="organize-now" disabled={organizing || !destination || !anchor || (scope === 'backup' && !!state.misplacedFiles?.[destination]?.missing)} onClick={() => act({ type: scope === 'backup' ? 'organizeBackup' : 'organize', destinationIndex })}>{t("Organize now")}</Button></div></section>
     </div>
     <div className="organization-column">
     <section className="organization-action" aria-labelledby="organize-folder-heading" data-testid="organize-folder"><CardHeader icon={FolderOpen} id="organize-folder-heading" title={t("Organize a folder")} detail={t("Sorts a folder's files into your folder structure, inside that folder.")} />{p.mediaLayout === 'video-root' && <OrganizeFolderLayoutNote />}<p className="inline-note"><Icon icon={Info} size={14} />{t("Organize: move, source removed")}</p><div className="rule-actions"><Button icon={FolderOpen} disabled={organizing || p.mediaLayout === 'video-root'} onClick={() => act({ type: 'organizeFolder' })}>{t("Choose folder…")}</Button></div></section>
@@ -1814,21 +1876,24 @@ function FileRules({ preferences: p, act }: { preferences: Preferences; act: Dis
 function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t } = useTranslation();
   const p = state.preferences;
-  const folders = (folder: string) => folder.split(/[\\/]/).filter(Boolean), videoRoot = p.mediaLayout === 'video-root';
+  const videoRoot = p.mediaLayout === 'video-root';
+  // The previews start at the first destination's chosen folders.
+  const photoFolder = p.destinations[0] ? basename(p.destinations[0]) : t("Photo folder"), videoFolder = p.videoDestinations?.[0] ? basename(p.videoDestinations[0]) : t("Video folder");
   const editedFolder = p.editedFolder;
+  // A different documented camera and capture each time the examples are shown.
+  const [shot] = useState(() => sampleShot());
+  const photoPath = samplePath(p.template, shot.camera), videoPath = samplePath(videoRoot && p.videoTemplate ? p.videoTemplate : p.template, shot.camera);
   return <div className="folder-settings" data-testid="folder-settings">
-      <SettingsSection title={t("Backup folders")} icon={HardDrive}>
-        <TextPreference label={t("Backup folder")} value={p.basePath} placeholder="photobackup" onSave={basePath => act({ type: 'preferences', patch: { basePath } })} description={t("Leave empty to use the drive itself.")} />
-        {videoRoot && <TextPreference label={t("Video backup folder")} value={p.videoBasePath} placeholder="videobackup" onSave={videoBasePath => act({ type: 'preferences', patch: { videoBasePath } })} description={t("Created beside the photo backup folder on each destination.")} />}
-      </SettingsSection>
       <SettingsSection title={t("Folder structure")} icon={FolderCog}>
         {videoRoot && <h4 className="path-builder-heading">{t("Photo folders")}</h4>}
         <FolderPathBuilder template={p.template} onChange={template => act({ type: 'preferences', patch: { template } })} testId="photo-path-builder" />
         <h4 className="path-builder-heading">{t("Then sort by file type")}</h4>
         <div className="preset-grid" role="radiogroup" aria-label={t("Media layout")}>{mediaLayouts.map(layout => <button type="button" role="radio" key={layout.value} className={`preset ${p.mediaLayout === layout.value ? 'selected' : ''}`} aria-checked={p.mediaLayout === layout.value} onClick={() => act({ type: 'preferences', patch: { mediaLayout: layout.value } })}><span className="preset-radio">{p.mediaLayout === layout.value && <span />}</span><span><strong>{t(layout.title)}</strong><small>{t(layout.detail)}</small></span></button>)}</div>
         {videoRoot && <><h4 className="path-builder-heading">{t("Video folders")}</h4><Switch checked={!p.videoTemplate} onChange={same => act({ type: 'preferences', patch: { videoTemplate: same ? '' : p.template } })} label={t("Use the photo folder path for videos")} />{!!p.videoTemplate && <FolderPathBuilder template={p.videoTemplate} onChange={videoTemplate => act({ type: 'preferences', patch: { videoTemplate } })} testId="video-path-builder" />}</>}
-        <PathPreview label={t("Your next photo lands here")} parts={[...folders(p.basePath), ...samplePath(p.template), ...layoutFolders(p.mediaLayout, false, 'NEF'), 'DSC_0001.NEF']} testId="photo-preview" />
-        <PathPreview label={t("Your next video lands here")} parts={[...folders(videoRoot ? p.videoBasePath : p.basePath), ...samplePath(videoRoot && p.videoTemplate ? p.videoTemplate : p.template), ...layoutFolders(p.mediaLayout, true, 'MOV'), 'DSC_0002.MOV']} testId="video-preview" />
+        <PathPreview label={t("Your next photo lands here")} parts={[photoFolder, ...photoPath, ...layoutFolders(p.mediaLayout, false, formatFolder(shot.raw)), shot.raw]} testId="photo-preview" />
+        <PathPreview label={t("Your next video lands here")} parts={[videoRoot ? videoFolder : photoFolder, ...videoPath, ...layoutFolders(p.mediaLayout, true, formatFolder(shot.video)), shot.video]} testId="video-preview" />
+        <PathPreview label={t("Your next JPEG lands here")} parts={[photoFolder, ...photoPath, ...layoutFolders(p.mediaLayout, false, formatFolder(shot.jpeg)), shot.jpeg]} testId="jpeg-preview" />
+        <PathPreview label={t("A voice memo lands beside its photo")} parts={[photoFolder, ...photoPath, ...layoutFolders(p.mediaLayout, false, formatFolder(shot.raw)), shot.voiceMemo]} testId="audio-preview" />
         <details className="path-advanced" data-testid="custom-template"><summary>{t("Advanced: custom template")}</summary>
           <TextPreference label={t(videoRoot ? "Photo folder template" : "Folder template")} value={p.template} onSave={template => template && act({ type: 'preferences', patch: { template } })} description={t("Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}")} />
           {videoRoot && !!p.videoTemplate && <TextPreference label={t("Video folder template")} value={p.videoTemplate} onSave={videoTemplate => videoTemplate && act({ type: 'preferences', patch: { videoTemplate } })} description={t("Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}")} />}
@@ -1836,7 +1901,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
       </SettingsSection>
       <SettingsSection title={t("Edited exports folder")} icon={Folder}>
         <TextPreference label={t("Edited exports folder")} value={editedFolder} placeholder="editied" onSave={editedFolder => act({type:'preferences',patch:{editedFolder}})} description={t("Edited exports go here, inside each month folder.")} />
-        <PathPreview label={t("Your edited export lands here")} parts={[...folders(p.basePath), ...samplePath(editedTemplate(editedFolder)), 'DSC_0001.jpg']} testId="edited-export-preview" />
+        <PathPreview label={t("Your edited export lands here")} parts={[photoFolder, ...samplePath(editedTemplate(editedFolder), shot.camera), shot.jpeg.replace(/\.JPG$/, '.jpg')]} testId="edited-export-preview" />
       </SettingsSection>
   </div>;
 }
@@ -1874,7 +1939,7 @@ export function MetadataDialog({ preview, onClose, act }: { preview: Preview; on
         <div className="metadata-file"><span title={preview.path}>{preview.path}</span><Button kind="quiet" icon={ExternalLink} aria-label={t("Show this file in file manager")} onClick={() => act({ type: 'reveal', path: preview.path })} /></div>
         {preview.loading && <p className="metadata-status" aria-live="polite"><Icon icon={LoaderCircle} size={15} />{t("Reading photo metadata…")}</p>}
         {preview.error && <p className="metadata-status metadata-status-error"><Icon icon={CircleAlert} size={15} />{t("Could not read this file")} · {t("See All errors for details.")}</p>}
-        <dl className="capture-summary"><div className="capture-camera"><dt><Icon icon={Camera} size={17} />{t("Camera")}</dt><dd>{metadata?.camera || t("Not recorded")}</dd></div>
+        <dl className="capture-summary"><div className="capture-camera"><dt><Icon icon={Camera} size={17} />{t("Camera")}</dt><dd>{cameraDisplayName(metadata?.camera) || t("Not recorded")}</dd></div>
           <div><dt>{t("Capture date")}</dt><dd>{captured.date || t("Not recorded")}</dd></div>
           <div><dt>{t("Capture time")}</dt><dd data-testid="metadata-capture-time">{captured.time || t("Not recorded")}</dd></div>
           <div className="capture-timezone"><dt>{t("Time zone")}</dt><dd data-testid="metadata-timezone">{captured.timezone || t("Not recorded")}</dd></div>

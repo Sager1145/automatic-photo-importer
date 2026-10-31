@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {defaultLimits,clampCpuThreads,clampMemoryLimitMB,savedLimits} from './resource-limits';
 import type {DriveCameraRecord,MediaLayout,NoMetadataHandling,Preferences} from './shared';
 import {DEFAULT_TEXT_SCALE,LOG_LEVELS,UNKNOWN_FILES_FOLDER} from './shared';
@@ -8,7 +9,7 @@ import {stableDevices} from './device-selection';
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,basePath:'photobackup',template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoBasePath:'videobackup',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],videoDestinations:[],videoDestinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -33,6 +34,19 @@ function history(value:unknown):NonNullable<Preferences['deviceHistory']> {
  return Object.fromEntries(Object.entries(records<{name:string}>(value,['name'])).map(([id,entry])=>{const {cameras,...rest}=entry as NonNullable<Preferences['deviceHistory']>[string];const record=cameraRecord(cameras);return [id,record?{...rest,cameras:record}:rest];}));
 }
 
+/** The photo and video folders of each destination. Settings saved before folders were chosen held a drive (or folder)
+ * per destination and two folder names inside each, `basePath` ("photobackup") and `videoBasePath` ("videobackup"): those
+ * become the folders they named, both on the drive they were on. */
+function chosenFolders(value:Record<string,unknown>,base:Preferences):Pick<Preferences,'destinations'|'destinationIds'|'videoDestinations'|'videoDestinationIds'> {
+ const destinations=strings(value.destinations,base.destinations),destinationIds=strings(value.destinationIds,base.destinationIds??[]);
+ if(value.videoDestinations===undefined&&Array.isArray(value.destinations)){
+  const photo=typeof value.basePath==='string'?value.basePath:'photobackup',video=typeof value.videoBasePath==='string'?value.videoBasePath:'videobackup';
+  const inside=(drive:string,folder:string)=>drive&&path.isAbsolute(drive)?path.resolve(drive,folder):drive;
+  return {destinations:destinations.map(drive=>inside(drive,photo)),destinationIds,videoDestinations:video?destinations.map(drive=>inside(drive,video)):[],videoDestinationIds:video?[...destinationIds]:[]};
+ }
+ return {destinations,destinationIds,videoDestinations:strings(value.videoDestinations,base.videoDestinations??[]),videoDestinationIds:strings(value.videoDestinationIds,base.videoDestinationIds??[])};
+}
+
 /** The single set of preference rules, for settings read from disk and for every change the
  * interface sends: each field that is missing or invalid keeps its value from `base`. */
 export function normalizePreferences(input:unknown,base:Preferences=defaultPreferences):Preferences {
@@ -46,15 +60,12 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   accent:oneOf(value.accent,['coral','ocean','forest'] as const,base.accent),
   automatic:flag(value.automatic,base.automatic),
   parallel:Math.round(bounded(value.parallel,1,10,base.parallel)),
-  destinations:strings(value.destinations,base.destinations),
-  destinationIds:strings(value.destinationIds,base.destinationIds??[]),
+  ...chosenFolders(value,base),
   copyMode:oneOf(value.copyMode,['single','mirror','sequential'] as const,base.copyMode),
-  basePath:text(value.basePath,base.basePath),
   template:text(value.template,base.template),
   // Settings saved before media layouts had an on/off switch for media-type folders.
   // The old media switch was a choice only when on; off was just its default, so it gets today's.
   mediaLayout:oneOf(value.mediaLayout,mediaLayouts,value.separateMedia===true&&value.mediaLayout===undefined?'format':base.mediaLayout??'video-root'),
-  videoBasePath:text(value.videoBasePath,base.videoBasePath??'videobackup'),
   videoTemplate:text(value.videoTemplate,base.videoTemplate??''),
   backupMode:oneOf(value.backupMode,['additive','mirror'] as const,base.backupMode??'additive'),
   verifyCopies:value.verifyCopies===undefined?base.verifyCopies!==false:value.verifyCopies!==false,

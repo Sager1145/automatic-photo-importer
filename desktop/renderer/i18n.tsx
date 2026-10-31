@@ -212,8 +212,19 @@ Second destination|第二目标|第二目的地|2つ目の保存先
 Not selected|未选择|未選擇|未選択
 Offline|离线|離線|オフライン
 Selected|已选择|已選擇|選択済み
-Choose a backup drive|选择备份磁盘|選擇備份磁碟|バックアップドライブを選択
-A drive or folder for your verified copies.|用于存放校验副本的磁盘或文件夹。|用於存放驗證副本的磁碟或資料夾。|検証済みコピーを保存するドライブやフォルダー。
+Choose a photo folder|选择照片文件夹|選擇照片資料夾|写真のフォルダーを選択
+Choose a backup folder|选择备份文件夹|選擇備份資料夾|バックアップフォルダーを選択
+Photo folder|照片文件夹|照片資料夾|写真のフォルダー
+Video folder|视频文件夹|影片資料夾|動画のフォルダー
+A folder on any drive for your verified copies.|任意驱动器上的一个文件夹，用于存放校验副本。|任一磁碟上的一個資料夾，用於存放驗證副本。|検証済みコピーを保存する、任意のドライブ上のフォルダー。
+Choose a video folder|选择视频文件夹|選擇影片資料夾|動画のフォルダーを選択
+Videos go to a folder you choose, on this drive or another.|视频存放在你选择的文件夹中，可在此驱动器或其他驱动器上。|影片存放在你選擇的資料夾中，可在此磁碟或其他磁碟上。|動画は選んだフォルダーに保存されます。このドライブでも別のドライブでもかまいません。
+Choose video folder…|选择视频文件夹…|選擇影片資料夾…|動画のフォルダーを選択…
+Videos: {folder}|视频：{folder}|影片：{folder}|動画：{folder}
+Show video folder in file manager|在文件管理器中显示视频文件夹|在檔案管理器中顯示影片資料夾|動画のフォルダーをファイルマネージャーで表示
+Choose each destination's photo folder and video folder under Backup location. They can be on the same drive or on different drives.|请在“备份位置”中为每个目标选择照片文件夹和视频文件夹。它们可以位于同一驱动器，也可以位于不同驱动器。|請在「備份位置」中為每個目的地選擇照片資料夾和影片資料夾。它們可以位於同一磁碟，也可以位於不同磁碟。|「バックアップ先」で、保存先ごとに写真のフォルダーと動画のフォルダーを選んでください。同じドライブでも別々のドライブでもかまいません。
+Choose each destination's backup folder under Backup location.|请在“备份位置”中为每个目标选择备份文件夹。|請在「備份位置」中為每個目的地選擇備份資料夾。|「バックアップ先」で、保存先ごとにバックアップフォルダーを選んでください。
+This destination's photo and video folders are on different drives, so it can't be organized as one backup. Imports still copy to both.|此目标的照片和视频文件夹位于不同的驱动器上，因此无法作为一个备份整理。导入仍会复制到两者。|此目的地的照片和影片資料夾位於不同的磁碟上，因此無法作為一個備份整理。匯入仍會複製到兩者。|この保存先の写真と動画のフォルダーは別々のドライブにあるため、1 つのバックアップとして整理できません。インポートは引き続き両方にコピーします。
 Drive offline|磁盘离线|磁碟離線|ドライブがオフライン
 Reading drive capacity…|正在读取磁盘容量…|正在讀取磁碟容量…|ドライブ容量を取得中…
 Reconnect this drive before importing.|请在导入前重新连接此磁盘。|請在匯入前重新連接此磁碟。|インポート前にこのドライブを再接続してください。
@@ -304,8 +315,6 @@ Everything in the camera folder|全部放在相机文件夹|全部放在相機�
 Photos and videos side by side.|照片和视频放在一起。|照片和影片放在一起。|写真と動画を同じ場所に保存します。
 A separate video backup folder|单独的视频备份文件夹|獨立的影片備份資料夾|動画用の別のバックアップフォルダー
 Videos go to their own backup folder beside the photo backup folder.|视频保存到照片备份文件夹旁边的独立备份文件夹。|影片儲存到照片備份資料夾旁的獨立備份資料夾。|動画は写真のバックアップフォルダーの隣にある専用フォルダーに保存します。
-Video backup folder|视频备份文件夹|影片備份資料夾|動画のバックアップフォルダー
-Created beside the photo backup folder on each destination.|在每个目标位置的照片备份文件夹旁创建。|在每個目的地的照片備份資料夾旁建立。|各保存先で写真のバックアップフォルダーの隣に作成します。
 Video folder template|视频文件夹模板|影片資料夾範本|動画のフォルダーテンプレート
 Organization review progress|整理预览进度|整理預覽進度|整理の確認の進行状況
 Review progress|预览进度|預覽進度|確認の進行状況
@@ -490,7 +499,6 @@ Edited exports go here, inside each month folder.|编辑导出的照片放在这
 Fill the first drive, then use the second.|先存满第一个驱动器，再使用第二个。|先存滿第一個磁碟，再使用第二個。|1台目がいっぱいになったら2台目を使います。
 Finished imports appear here.|完成的导入会显示在这里。|完成的匯入會顯示在這裡。|完了した読み込みがここに表示されます。
 Index files the camera writes. Not needed.|相机写入的索引文件，不需要导入。|相機寫入的索引檔案，不需要匯入。|カメラが書き込むインデックスファイルです。不要です。
-Leave empty to use the drive itself.|留空则直接使用驱动器本身。|留空則直接使用磁碟本身。|空欄にするとドライブ直下を使います。
 Mirror doesn't work with “Fill first, then second”.|镜像不能与“先存满第一块再用第二块”同时使用。|鏡像不能與「先存滿第一顆再用第二顆」同時使用。|ミラーは「1台目から順に保存」と併用できません。
 Mirror is on: removed files are moved aside after review.|镜像已开启：已删除的文件会在审核后被移开。|鏡像已開啟：已刪除的檔案會在審核後被移開。|ミラーがオン：削除されたファイルは確認後に移動されます。
 Move existing files into your folder structure.|将现有文件移入你的文件夹结构。|將現有檔案移入你的資料夾結構。|既存のファイルをフォルダー構成に合わせて移動します。

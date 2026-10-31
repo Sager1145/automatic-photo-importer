@@ -35,8 +35,9 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   await h.nav('Settings');
   await h.settingsTab('storage');
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-storage] #copy-policy')!==null&&document.querySelector('[data-testid=settings-panel-storage] .destination-check-actions .destination-check')===null"),true,'Copy policy lives in Settings → Storage, which does not run the folder check');
-  await h.settingsTab('folders');
-  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-folders] input[placeholder=photobackup]')!==null&&document.querySelector('[data-testid=settings-panel-folders] [data-testid=folder-settings]')!==null"),true,'The backup folder name and folder paths live in Settings → Folders');
+  await h.settingsTab('storage');
+  // Storage & folders: each destination's photo and video folders (chosen with the folder picker), then the layout inside them.
+  assert.equal(await h.js<boolean>("(()=>{const p=document.querySelector('[data-testid=settings-panel-storage]');const pickers=p?.querySelector('[data-testid=backup-folders-note]'),layout=p?.querySelector('[data-testid=folder-settings]');return !!pickers&&!!layout&&!!(pickers.compareDocumentPosition(layout)&Node.DOCUMENT_POSITION_FOLLOWING)&&!p.querySelector('input[placeholder=photobackup]');})()"),true,'Storage & folders holds the folder choices, then the folder layout, without a typed backup folder name');
   await h.settingsTab('defaults');
   assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-defaults] [data-testid=backup-mode]')!==null"),true,'Drive backup mode lives in Settings → Importing');
   await h.settingsTab('general');
@@ -60,13 +61,13 @@ export const settingsChecks=(ctx:Context):Check[]=>[
  {id:'settings-edited-folder',stage:'settings',title:'Edited exports folder edits persist, update the preview and reject unsafe names',covers:['text preference save on blur','preview','validation errors stay in All errors'],run:async h=>{
   await h.idle();
   try{
-   await h.nav('Settings');await h.settingsTab('folders');
+   await h.nav('Settings');await h.settingsTab('storage');
    await h.until('default edited exports folder',`${inputValue('editied')}?.value==='editied'`);
    assert.equal((await h.state()).preferences.editedFolder,'editied');
    await typeAndLeave(h,'editied','Finished');
    await h.waitFor('edited exports folder preference',async()=>(await h.state()).preferences.editedFolder==='Finished');
    await h.waitFor('persisted edited exports folder',async()=>(await savedPreferences(ctx.root)).editedFolder==='Finished');
-   await h.until('updated edited-export preview',"document.querySelector('[data-testid=edited-export-preview]')?.textContent.includes('2026202610FinishedNikon Z6III')");
+   await h.until('updated edited-export preview',"/2026202610FinishedNIKON [^/]*(DSC_|_DSC)\\d{4}\\.jpg$/.test(document.querySelector('[data-testid=edited-export-preview]')?.textContent??'')");
    await h.shot('edited-exports-folder');
    for(const [language,label] of [['zh-Hans','编辑导出文件夹'],['zh-Hant','編輯匯出資料夾'],['ja','編集済み書き出しフォルダー'],['en','Edited exports folder']] as const){
     await h.prefs({language});
@@ -82,8 +83,8 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   }finally{
    await h.action({type:'clearErrors'});await h.prefs({editedFolder:'editied'});
   }
-  await h.nav('Settings');await h.settingsTab('folders');
-  await h.until('restored edited exports folder',`${inputValue('editied')}?.value==='editied'&&document.querySelector('[data-testid=edited-export-preview]')?.textContent.includes('2026202610editiedNikon Z6III')`);
+  await h.nav('Settings');await h.settingsTab('storage');
+  await h.until('restored edited exports folder',`${inputValue('editied')}?.value==='editied'&&document.querySelector('[data-testid=edited-export-preview]')?.textContent.includes('2026202610editiedNIKON ')`);
  }},
  {id:'settings-locked',stage:'settings',title:'While work is active, locked settings are greyed out with a tooltip saying why, and changing one raises no error',covers:['locked settings greyed out with tooltip and no error'],skip:async h=>h.hooks?undefined:'needs the QA hook to hold a job active',run:async h=>{
   type Control={key:string;disabled:boolean;opacity:number;tip:string};
@@ -91,7 +92,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   await h.idle();await h.nav('Settings');
   const before:Record<string,Control[]>={};
   for(const id of settingsCategories){await h.settingsTab(id);before[id]=await controls();}
-  const basePath=(await h.state()).preferences.basePath;
+  const template=(await h.state()).preferences.template;
   h.hooks!.addJobs([syntheticJob('locked',{phase:'copying'})]);
   await h.settingsTab('storage');
   await h.until('settings locked',"document.querySelector('[data-testid=settings-lock-note]')");
@@ -111,8 +112,8 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   assert.ok(locked>0,'No setting was locked while a job was active');
   assert.deepEqual(problems,[],'Locked settings');
   // A locked setting sent anyway is dropped quietly: no error, no toast, nothing applied.
-  const after=await h.action({type:'preferences',patch:{basePath:'should-not-apply'}});await h.frames(2);
-  assert.equal(after.preferences.basePath,basePath,'A locked setting changed while work was active');
+  const after=await h.action({type:'preferences',patch:{template:'should-not-apply/{year}'}});await h.frames(2);
+  assert.equal(after.preferences.template,template,'A locked setting changed while work was active');
   assert.equal(after.error,undefined,'Changing a locked setting raised an error');
   assert.equal(await h.js<boolean>("!document.querySelector('[data-testid=error-toast]')"),true,'Changing a locked setting showed an error toast');
  }},

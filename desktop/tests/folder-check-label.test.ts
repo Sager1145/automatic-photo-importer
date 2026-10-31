@@ -11,7 +11,7 @@ import type {AppState,Language,Progress} from '../shared';
 import { defaultPreferences } from '../preferences';
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const,selected:true,total:1e12,free:2e11};
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const progress:Progress={phase:'planning',step:'checking',completed:10,total:100,bytes:0,totalBytes:0,speed:0,file:'a.jpg'};
 const render=(language:Language,checking:boolean)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(Organization,{state:{preferences:{...preferences,language},sources:[source],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...(checking?{misplacedProgress:{'/Volumes/A006':progress}}:{})},act:()=>{},busy:false})}));
 

@@ -44,7 +44,7 @@ export const workspaceFlowChecks=():Check[]=>[
    await h.settingsTab('files');
   }
   await h.nav('Organization');await h.js("[...document.querySelectorAll('.organization-action button')].find(b=>b.textContent==='Edit folder rules').click()");await h.settle();
-  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-folders]')?.getAttribute('aria-selected')==='true'"),true);
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-tab-storage]')?.getAttribute('aria-selected')==='true'"),true,'folder rules open Storage & folders');
  }},
  {id:'nav-stop-scopes',stage:'navigation',title:'Import and Activity dispatch their named Stop scopes without changing job ownership',covers:['Stop imports UI scope','Stop all UI scope','mixed jobs'],skip:async h=>h.hooks&&'beforeAction' in h.hooks?undefined:'needs QA action guard',run:async h=>{
   const seen:Action[]=[],previous=h.hooks!.beforeAction;

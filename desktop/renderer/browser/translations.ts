@@ -12,6 +12,28 @@ In place|位置正确|位置正確|配置済み
 {checked} of {total} checked · {misplaced} need organization|已检查 {checked}／{total} 个 · {misplaced} 个待整理|已檢查 {checked}／{total} 個 · {misplaced} 個待整理|確認済み {checked}／{total} 件 · 整理が必要 {misplaced} 件
 {count} undetermined|{count} 个位置未定|{count} 個位置未定|配置未定 {count} 件
 Last indexed: {time}|上次索引：{time}|上次索引：{time}|前回の索引作成：{time}
+Loading preview…|正在加载预览…|正在載入預覽…|プレビューを読み込み中…
+Resize the columns area|调整栏位区域高度|調整欄位區域高度|列エリアの高さを変更
+Index queued|索引排队中|索引排隊中|索引作成待ち
+RAW + JPEG|RAW + JPEG|RAW + JPEG|RAW + JPEG
+RAW file|RAW 文件|RAW 檔案|RAW ファイル
+No subfolders|没有子文件夹|沒有子資料夾|サブフォルダはありません
+Fields|字段|欄位|項目
+Presets|预设|預設|プリセット
+Levels|层级|層級|階層
+Custom view|自定义视图|自訂檢視|カスタム表示
+Preset: {name}|预设：{name}|預設：{name}|プリセット：{name}
+Options for level {index}: {field}|第 {index} 层选项：{field}|第 {index} 層選項：{field}|階層 {index} のオプション：{field}
+Click to set its options; drag to move it.|点击设置选项；拖动可调整位置。|點按以設定選項；拖移可調整位置。|クリックでオプションを設定、ドラッグで移動します。
+Drag a field or preset onto the levels to insert it there. Click a field to add it last; click a preset to use it. Files always come last.|将字段或预设拖到层级中即可插入到该位置。点击字段会添加到最后；点击预设会直接使用。文件始终在最后。|將欄位或預設拖到層級中即可插入到該位置。點按欄位會加到最後；點按預設會直接使用。檔案一律在最後。|項目やプリセットを階層にドラッグすると、その位置に挿入されます。項目をクリックすると最後に追加、プリセットをクリックするとその表示を使います。ファイルは常に最後です。
+Click to add as the last level; drag to insert.|点击添加为最后一层；拖动可插入。|點按以加為最後一層；拖移可插入。|クリックで最後の階層に追加、ドラッグで挿入します。
+Click to use this view; drag to insert its levels.|点击使用此视图；拖动可插入其层级。|點按以使用此檢視；拖移可插入其層級。|クリックでこの表示を使い、ドラッグでその階層を挿入します。
+Name this view to reuse it|为此视图命名以便重复使用|為此檢視命名以便重複使用|この表示に名前を付けて再利用
+Browse a folder…|浏览文件夹…|瀏覽資料夾…|フォルダーを参照…
+Browse any folder, on any drive. It is only read: nothing is imported or organized.|浏览任意硬盘上的任意文件夹。只会读取，不会导入或整理任何文件。|瀏覽任何硬碟上的任何資料夾。只會讀取，不會匯入或整理任何檔案。|任意のドライブの任意のフォルダーを参照します。読み取るだけで、読み込みや整理は行いません。
+Stop browsing this folder|停止浏览此文件夹|停止瀏覽此資料夾|このフォルダーの参照をやめる
+Browsed folders|浏览的文件夹|瀏覽的資料夾|参照中のフォルダー
+Show a RAW file and the JPEG or HEIF taken with it as one photo, when EXIF shows they are the same capture.|当 EXIF 显示为同一次拍摄时，将 RAW 文件与同时拍摄的 JPEG 或 HEIF 合并显示为一张照片。|當 EXIF 顯示為同一次拍攝時，將 RAW 檔案與同時拍攝的 JPEG 或 HEIF 合併顯示為一張照片。|EXIF で同じ撮影と確認できた RAW と JPEG／HEIF を 1 枚の写真として表示します。
 Next page|下一页|下一頁|次のページ
 Previous page|上一页|上一頁|前のページ
 

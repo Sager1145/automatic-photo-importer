@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {cameraDisplayName} from '../camera-names';
 import test from 'node:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -62,7 +63,8 @@ test('each remembered drive has details with the cameras from its last scan in e
   assert.deepEqual(panels.map(panel=>panel[1]),['UUID-CARD','UUID-NEW'],`${language}: one details panel per remembered drive`);
   const card=panels[0]![0],fresh=panels[1]![0];
   assert.ok(card.includes(t('Details')),`${language}: details label`);
-  for(const name of ['NIKON Z f','NIKON Z6III','NIKKOR Z 40mm f/2'])assert.ok(card.includes(name),`${language}: ${name}`);
+  // Cameras show their marketing names; lenses are shown as recorded.
+  for(const name of [cameraDisplayName('NIKON Z f'),cameraDisplayName('NIKON Z6III'),'NIKKOR Z 40mm f/2'])assert.ok(card.includes(name),`${language}: ${name}`);
   assert.ok(card.includes(t('{count} files',{count:'120'})),`${language}: files per camera`);
   assert.ok(/data-camera-bytes="3000000000"/.test(card),`${language}: bytes per camera`);
   assert.ok(card.includes(t('Camera metadata checked: {checked}/{total}',{checked:'124',total:'124'})),`${language}: how many files were read`);

@@ -7,7 +7,7 @@ import type {AppState,Job} from '../shared';
 import {withFigures} from '../core/inventory';
 import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const card={id:'card',name:'Card',path:'/Volumes/Card',transport:'storage' as const};
 const job=(extra:Partial<Job>):Job=>({id:'j1',source:card,phase:'error',errors:[],backup:false,...extra});
 const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[card],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions(),...extra});

@@ -17,20 +17,23 @@ async function mount(){
  const render=(revision=1)=>root.render(createElement(I18nProvider,{language:'en',children:createElement(BrowserPage,{libraries:[library],statuses:{l:{...status,revision}},configuration,onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}})}));render();
  const column=()=>host.querySelector<HTMLElement>('[data-testid=facet-column]')!;
  const list=()=>column()?.querySelector<HTMLElement>('[role=listbox]')!;
- const row=(label:string)=>[...(column()?.querySelectorAll<HTMLElement>('[role=option]')??[])].find(node=>node.textContent?.startsWith(label))!;
+ const row=(label:string)=>[...(column()?.querySelectorAll<HTMLElement>('[role=option]')??[])].find(node=>node.querySelector('span')?.textContent===label)!;
+ const scrollTo=(top:number)=>{const node=list();node.scrollTop=top;node.dispatchEvent(new Event('scroll',{bubbles:true}));};
  const button=(label:string)=>[...(column()?.querySelectorAll<HTMLButtonElement>('button')??[])].find(node=>node.textContent===label)!;
  const values=()=>latest?.filters.flatMap(filter=>filter.kind==='values'?filter.values:[])??[];
  await until(()=>!!row('Camera 1')&&list().getAttribute('aria-busy')==='false','Initial delayed facets did not render');
- return {host,column,list,row,button,values,render,dispose:()=>{root.unmount();host.remove();}};
+ // The fixture has no stylesheet: give the list the bounded, scrolling box the app's CSS gives it.
+ Object.assign(list().style,{height:'336px',overflowY:'auto'});
+ return {host,column,list,row,button,values,render,scrollTo,dispose:()=>{root.unmount();host.remove();}};
 }
 const checks:{name:string;passed:boolean;error?:string}[]=[];
 async function run(name:string,body:()=>Promise<void>){try{await body();checks.push({name,passed:true});}catch(error){checks.push({name,passed:false,error:String(error)});}}
 void (async()=>{
  await run('cross-page OR selection retains hidden choices and toggles them independently',async()=>{const ui=await mount();try{
   ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1"]','First-page selection missing');
-  ui.button('Next page').click();await until(()=>!!ui.row('Camera 201'),'Second facet page not rendered');
+  ui.scrollTo(ui.list().scrollHeight);await until(()=>!!ui.row('Camera 201'),'Second facet page not appended');
   ui.row('Camera 201').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1","Camera 201"]',`Hidden selection lost: ${JSON.stringify(ui.values())}`);
-  ui.button('Previous page').click();await until(()=>!!ui.row('Camera 1'),'Previous facet page not rendered');
+  ui.scrollTo(0);await until(()=>!!ui.row('Camera 1'),'First rows not rendered after scrolling back');
   ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 201"]',`Toggle lost hidden second-page value: ${JSON.stringify(ui.values())}`);
  }finally{ui.dispose();}});
  await run('continuous ArrowDown survives delayed responses without refocus',async()=>{const ui=await mount();try{
@@ -40,10 +43,15 @@ void (async()=>{
   check(document.activeElement===list,'Focus lost after second response');check(JSON.stringify(ui.values())==='["Camera 3"]',`Second ArrowDown did not advance: ${JSON.stringify(ui.values())}`);
   const active=list.getAttribute('aria-activedescendant');check(active&&document.getElementById(active)&&list.contains(document.getElementById(active)),'Active descendant is missing from the live list');
  }finally{ui.dispose();}});
- await run('new cursor pages reset virtual scroll without replacing the listbox',async()=>{const ui=await mount();try{
-  const list=ui.list();list.focus();list.scrollTop=480;list.dispatchEvent(new Event('scroll',{bubbles:true}));await delay(20);
-  ui.button('Next page').click();await until(()=>!!ui.row('Camera 201'),'Second page not rendered');await delay(20);
-  check(ui.list()===list,'Page navigation replaced listbox identity');check(list.scrollTop===0,`New page retained old scroll: ${list.scrollTop}`);
+ await run('appending the next page keeps the scroll position and the listbox',async()=>{const ui=await mount();try{
+  const list=ui.list();list.focus();ui.scrollTo(list.scrollHeight);const top=list.scrollTop;check(top>0,'Fixture list did not scroll');
+  await until(()=>!!ui.row('Camera 202'),'Second page not appended');await delay(20);
+  check(ui.list()===list,'Appending replaced listbox identity');check(list.scrollTop===top,`Appending moved the scroll position: ${top} -> ${list.scrollTop}`);
+ }finally{ui.dispose();}});
+ await run('a revision refresh keeps the scroll position and the selection',async()=>{const ui=await mount();try{
+  ui.scrollTo(480);await until(()=>!!ui.row('Camera 12'),'Scrolled rows not rendered');ui.row('Camera 12').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);
+  ui.render(2);await delay(150);
+  check(ui.list().scrollTop===480,`Refresh moved the scroll position: ${ui.list().scrollTop}`);check(ui.row('Camera 12')?.getAttribute('aria-selected')==='true','Refresh lost the selection');
  }finally{ui.dispose();}});
  await run('a focused listbox remains mounted throughout a delayed revision refresh',async()=>{const ui=await mount();try{
   const list=ui.list();list.focus();ui.render(2);await delay(5);check(ui.list()===list&&document.activeElement===list,'Refresh replaced the focused list while loading');

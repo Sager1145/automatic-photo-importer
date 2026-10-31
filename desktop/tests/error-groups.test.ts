@@ -10,7 +10,7 @@ import {createTranslator,languages} from '../renderer/i18n';
 import {MAX_GROUP_ITEMS,type AppState,type ExecutionIssue,type Job} from '../shared';
 import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const card={id:'card',name:'Card',path:'/Volumes/Card',transport:'storage' as const};
 const newJob=(extra:Partial<Job>={}):Job=>({id:'j1',source:card,phase:'complete',errors:[],backup:false,...extra});
 const state=(jobs:Job[]):AppState=>({preferences,sources:[card],jobs,history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});

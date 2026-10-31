@@ -9,7 +9,7 @@ import { RateMeter } from '../rate-meter';
 import type { AppState, Job, Progress } from '../shared';
 import { defaultPreferences } from '../preferences';
 
-const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', basePath: 'p', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
+const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', template: '{year}', mediaLayout: 'flat', videoTemplate: '', unknownRules: {} };
 const card = { id: 'card', name: 'Card', path: '/Volumes/CARD', transport: 'storage' as const, selected: true, total: 128e9, free: 40e9 };
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 

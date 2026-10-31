@@ -18,7 +18,7 @@ import type {AppState,Job,Progress} from '../shared';
 import { defaultPreferences } from '../preferences';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}} as AppState['preferences'];
 const card={id:'card',name:'Card',path:'/Volumes/CARD',transport:'storage' as const,selected:true,total:128e9,free:40e9};
 const render=(node:ReturnType<typeof createElement>,language:typeof languages[number]='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:node}));
 const base:Progress={completed:0,total:1000,bytes:0,totalBytes:10e9,speed:0,file:'A.NEF'};

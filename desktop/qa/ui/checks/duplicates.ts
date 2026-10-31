@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Check} from '../harness';
-import type {Context} from './context';
+import {photoFolders,type Context} from './context';
 
 export const duplicateChecks=(ctx:Context):Check[]=>[
  {id:'duplicates-scan',stage:'duplicates',title:'Remove duplicates opens on the destination, scans a copied fixture photo and shows its group with previews',covers:['duplicates flow','levels','previews','SHA badge'],run:async h=>{
-  await h.prefs({basePath:'photobackup'});
+  await h.prefs(photoFolders(ctx,'photobackup'));
   const library=path.join(ctx.root,'destination','photobackup'),folder=path.join(library,'qa-duplicates');await fs.mkdir(folder,{recursive:true});
   await fs.copyFile(path.join(ctx.root,'source-1','photo.png'),path.join(folder,'photo.png'));await fs.copyFile(path.join(ctx.root,'source-1','photo.png'),path.join(folder,'photo copy.png'));
   try{

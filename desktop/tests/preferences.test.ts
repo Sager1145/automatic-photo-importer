@@ -28,9 +28,25 @@ test('a missing settings file yields the defaults',()=>{
 });
 
 test('one unreadable destination entry keeps the others and their positions',()=>{
- const result=normalizePreferences({destinations:['/Volumes/A','/Volumes/B'],destinationIds:[null,'UUID-B']});
- assert.deepEqual(result.destinations,['/Volumes/A','/Volumes/B']);
+ const result=normalizePreferences({destinations:['/Volumes/A/photos','/Volumes/B/photos'],destinationIds:[null,'UUID-B'],videoDestinations:['/Volumes/C/videos',7],videoDestinationIds:['UUID-C']});
+ assert.deepEqual(result.destinations,['/Volumes/A/photos','/Volumes/B/photos']);
  assert.deepEqual(result.destinationIds,['','UUID-B'],'destination 2 keeps its identity');
+ assert.deepEqual(result.videoDestinations,['/Volumes/C/videos','']);
+ assert.deepEqual(result.videoDestinationIds,['UUID-C']);
+});
+
+test('settings saved with a drive and two folder names become the photo and video folders they named',()=>{
+ const saved=normalizePreferences({destinations:['/Volumes/A','/Volumes/B'],destinationIds:['UUID-A','UUID-B'],basePath:'backup/photos',videoBasePath:'clips'});
+ assert.deepEqual(saved.destinations,['/Volumes/A/backup/photos','/Volumes/B/backup/photos']);
+ assert.deepEqual(saved.destinationIds,['UUID-A','UUID-B']);
+ assert.deepEqual(saved.videoDestinations,['/Volumes/A/clips','/Volumes/B/clips'],'each video folder stays on its drive');
+ assert.deepEqual(saved.videoDestinationIds,['UUID-A','UUID-B']);
+ const defaults=normalizePreferences({destinations:['/Volumes/A'],destinationIds:['UUID-A']});
+ assert.deepEqual([defaults.destinations,defaults.videoDestinations],[['/Volumes/A/photobackup'],['/Volumes/A/videobackup']],'the names older versions used by default');
+ assert.deepEqual(normalizePreferences({destinations:['/Volumes/A'],basePath:''}).destinations,['/Volumes/A'],'an empty backup folder was the drive itself');
+ assert.equal('basePath' in saved,false);
+ // Saved again, the folders are kept as they are.
+ assert.deepEqual(normalizePreferences(JSON.parse(JSON.stringify(saved))).destinations,saved.destinations);
 });
 
 test('the former media-type switch becomes a media layout',()=>{
@@ -43,7 +59,7 @@ test('the former media-type switch becomes a media layout',()=>{
  assert.equal('separateMedia' in normalizePreferences({layout:'format' as const}),false);
  const current={...defaultPreferences,mediaLayout:'type-format' as const};
  assert.equal(normalizePreferences({...current,mediaLayout:'??'},current).mediaLayout,'type-format');
- assert.equal(defaultPreferences.videoBasePath,'videobackup');assert.equal(defaultPreferences.videoTemplate,'');
+ assert.deepEqual(defaultPreferences.videoDestinations,[]);assert.equal(defaultPreferences.videoTemplate,'');
 });
 
 test('the Import overview is shown unless the user hides it, and the choice persists',()=>{

@@ -41,7 +41,7 @@ test('folders chosen together are grouped by the drive they are on, and flagged 
  const [one,two,dest]=await volumes(t,['DRVONE','DRVTWO','DRVDEST']);
  const a1=await folder(one!,'Trip A'),a2=await folder(one!,'Trip B'),b1=await folder(two!,'Wedding'),d1=await folder(dest!,'Loose photos');
  const backup=await folder(dest!,'Backups');
- const {sources,rejected}=await resolveFolderSources([a1,a2,b1,d1],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false});
+ const {sources,rejected}=await resolveFolderSources([a1,a2,b1,d1],{sources:[],registered:new Map(),backupRoots:[path.join(backup,'photobackup')],backup:false});
  assert.deepEqual(rejected,[]);
  const by=new Map(sources.map(source=>[source.path,source]));
  const [sa1,sa2,sb1,sd1]=[a1,a2,b1,d1].map(file=>by.get(file)!);
@@ -70,7 +70,7 @@ test('folders chosen together are grouped by the drive they are on, and flagged 
 test('a folder inside the backup on the destination drive is still rejected, not treated as the destination',{skip:!hasHdiutil&&'needs hdiutil on macOS',timeout:600000},async t=>{
  const [dest]=await volumes(t,['DRVBACKUP']);
  const backup=await folder(dest!,'Backups'),inside=await folder(dest!,'Backups/photobackup/2024'),beside=await folder(dest!,'Camera dump');
- const {sources,rejected}=await resolveFolderSources([inside,beside],{sources:[],registered:new Map(),destinations:[backup],backupFolders:['photobackup'],backup:false});
+ const {sources,rejected}=await resolveFolderSources([inside,beside],{sources:[],registered:new Map(),backupRoots:[path.join(backup,'photobackup')],backup:false});
  assert.deepEqual(rejected.map(item=>item.key),['error.alreadyInBackup']);
  assert.deepEqual(sources.map(source=>source.path),[beside]);
 });

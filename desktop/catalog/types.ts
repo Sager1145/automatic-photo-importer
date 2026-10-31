@@ -31,7 +31,7 @@ export interface NumericBucket {min?:number;max?:number;maxInclusive:boolean;}
 export interface NumericRange {min?:number;max?:number;maxInclusive?:boolean;}
 /** Values/ranges within a filter are OR; separate filters, including repeated fields, are AND. */
 export type Filter = ({blockId?:string} & (
-  | {kind:'values';field:CategoryField;values:(string|number)[]}
+  | {kind:'values';field:CategoryField;values:(string|number)[];/** What the rows showed for each value (camera and lens values are match keys); display only. */labels?:string[]}
   | {kind:'range';field:NumericField;min?:number;max?:number;/** Defaults true for user-entered closed ranges; false preserves a bucket's exclusive upper edge. */maxInclusive?:boolean}
   | {kind:'ranges';field:NumericField;ranges:NumericRange[]}
   | {kind:'missing';field:CategoryField}
@@ -43,6 +43,8 @@ export interface CatalogQuery {
   /** Direct children only; absent searches the entire library. Root is ''. */
   parentPath?:string;
   nameContains?:string;
+  /** Show a RAW and the JPEG or HEIF the camera wrote with it (same folder and name, same EXIF capture time and camera) as one row. */
+  combinePairs?:boolean;
   sort:{field:'name'|'captured'|'format'|NumericField;direction:'asc'|'desc'};
   /** Opaque cursor bound to query conditions and catalog revision. */
   cursor?:string;
@@ -64,6 +66,8 @@ export interface CatalogLibrary {
   online:boolean;
   rulesScope:string;
   revision:number;
+  /** A folder added only to browse: never checked against the organization rules. */
+  browseOnly?:boolean;
 }
 export interface CatalogPlacement {
   status:PlacementStatus;
@@ -100,6 +104,8 @@ export interface CatalogRow {
   mediaKind:MediaKind;extension:string;size:string;metadataStatus:MetadataStatus;
   values:CatalogValues;placement:CatalogPlacement;companionCount:number;
   missing?:boolean;
+  /** With combinePairs: the RAW shown together with this JPEG or HEIF. */
+  pairedRaw?:{fileId:string;name:string;extension:string;size:string};
 }
 export interface DirectoryRow {relativePath:string;name:string;count:number;}
 export interface CatalogPage {rows:CatalogRow[];total:number;nextCursor?:string;revision:number;}

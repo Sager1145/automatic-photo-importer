@@ -4,7 +4,7 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {browserTranslationRows} from '../renderer/browser/translations';
 import {I18nProvider,createTranslator} from '../renderer/i18n';
-import {selectedKeys,HierarchyEditor,PresetSidebar,BrowserPage,PreviewPanel,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/BrowserPage';
+import {selectedKeys,HierarchyEditor,BrowserPage,PreviewPanel,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/BrowserPage';
 import {defaultConfiguration,addBlock,createBlock,blockLabels} from '../renderer/browser/configuration';
 import type {BrowserAPI} from '../renderer/browser/BrowserPage';
 import type {CatalogRow,CatalogLibrary,Filter} from '../catalog/types';
@@ -18,9 +18,12 @@ test('editor supplies drag insertion plus labeled keyboard add, move, remove and
  assert.match(html,/draggable="true"/);assert.match(html,/Move earlier/);assert.match(html,/Move later/);assert.match(html,/Remove block/);assert.match(html,/Date granularity/);assert.match(html,/Date display/);assert.match(html,/Files always come last/);
  assert.match(render(createElement(HierarchyEditor,{configuration:{...c,blocks:[createBlock('format')]},onChange:()=>{}})),/Media kind/);
 });
-test('sidebar presets are a bounded disclosure and include single aperture and the complete composite',()=>{
- const html=render(createElement(PresetSidebar,{configuration:defaultConfiguration(),onChange:()=>{},onOpen:()=>{}}));
- assert.match(html,/<details/);assert.match(html,/builtin-aperture/);assert.match(html,/builtin-aperture-date-format-camera/);assert.match(html,/Save current view/);
+test('one view panel holds the levels, fields, presets and a single-row save form',()=>{
+ const c=defaultConfiguration();const html=render(createElement(HierarchyEditor,{configuration:{...c,presets:[{id:'preset-mine',name:'Mine',blocks:c.blocks}]},onChange:()=>{}}));
+ assert.equal(html.match(/<details/g)?.length,1,'presets and the hierarchy share one disclosure');
+ for(const part of ['data-testid="hierarchy-clear"','data-testid="browser-presets"','builtin-aperture-date-format-camera','data-preset-id="preset-mine"','Rename: Mine','Save current view','Restore default view','Drag a field or preset onto the levels'])assert.ok(html.includes(part),part);
+ assert.ok(!html.includes('data-preset-id="builtin-aperture"'),'single fields are the field row, not presets');
+ assert.match(html,/<form class="browser-preset-save">[^]*Preset name[^]*<input[^]*Save current view[^]*Restore default view[^]*<\/form>/,'name, save and restore on one form row');
 });
 test('offline and empty libraries have clear states with read-only refresh and no organization execution',()=>{
  const html=render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration:defaultConfiguration(),onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
@@ -86,11 +89,12 @@ test('selection chips use photographic units for exact values and ranges',()=>{
  assert.equal(selectionValueLabel(aperture,{kind:'range',field:'fNumber',min:2,max:4,maxInclusive:true},'en'),'≥ f/2 – ≤ f/4');
  assert.equal(selectionValueLabel(camera,{kind:'values',field:'camera',values:['QA Camera Alpha']},'en'),'QA Camera Alpha');
 });
-test('sort and column width live in the toolbar; the selection bar shows only when something is selected',()=>{
+test('one toolbar row holds navigation, filters and sort; indexing sits with its status; the selection bar shows only when something is selected',()=>{
  const html=render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration:defaultConfiguration(),onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
- const toolbar=html.match(/<div class="browser-toolbar">([\s\S]*?)<div class="browser-status"/)?.[1]??'';
- assert.ok(toolbar.includes('Newest capture first'),'sort in the toolbar');
- assert.ok(toolbar.includes('browser-column-width'),'column width in the toolbar');
+ const toolbar=html.match(/<div class="browser-toolbar"[^>]*>([\s\S]*?)<div class="browser-status"/)?.[1]??'';
+ for(const part of ['Browser mode','Search names','Newest capture first','RAW + JPEG'])assert.ok(toolbar.includes(part),`${part} in the toolbar`);
+ assert.ok(/<div class="browser-status">[\s\S]*Needs organization[\s\S]*Refresh index/.test(html),'placement filter and indexing beside the index status');
+ assert.ok(!toolbar.includes('browser-toolbar-break'),'a single row');
  assert.ok(!html.includes('browser-selection-bar'),'no empty selection row');
- const rows=toolbar.split('browser-toolbar-break');assert.equal(rows.length,2);assert.ok(rows[0]!.includes('Browser mode')&&rows[1]!.includes('Placement')&&rows[1]!.includes('Search names')&&rows[1]!.includes('Newest capture first'),'navigation first, then what is shown');
+ assert.ok(html.includes('browser-height-resize'),'the columns area has a height handle');
 });

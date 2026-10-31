@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {backupFolders,destinationRoots,sourceInsideBackup} from '../platform/destination-roots';
+import {chosenFolders,destinationRoots,libraryAnchor,libraryRoots,sourceInsideBackup} from '../platform/destination-roots';
 import {volumeInfo} from '../platform/volumes';
+import {defaultPreferences} from '../preferences';
 import type {Preferences,Source} from '../shared';
 
 async function fixture(t:test.TestContext){
@@ -12,10 +13,10 @@ async function fixture(t:test.TestContext){
  t.after(()=>fs.rm(base,{recursive:true,force:true}));
  const destination=path.join(base,'Photos'),source=path.join(destination,'Card');
  await fs.mkdir(source,{recursive:true});
- const info=await volumeInfo(destination);
- const prefs=(basePath:string)=>({copyMode:'single',destinations:[destination],destinationIds:[info.volumeId??''],basePath} as unknown as Preferences);
+ const info=await volumeInfo(destination),id=info.volumeId??'';
+ const prefs=(photo:string,video?:string)=>({...defaultPreferences,copyMode:'single',mediaLayout:video===undefined?'format':'video-root',destinations:[path.join(destination,photo)],destinationIds:[id],videoDestinations:video===undefined?[]:[path.join(destination,video)],videoDestinationIds:video===undefined?[]:[id]} as Preferences);
  const card:Source={id:`folder:${source}`,name:'Card',path:source,transport:'folder'};
- return {destination,source,card,prefs};
+ return {base,destination,source,card,prefs,id};
 }
 
 test('a source inside the backup folder is refused before any folder is created',async t=>{
@@ -33,27 +34,29 @@ test('another connected source inside the backup folder does not block this impo
  assert.deepEqual(roots,[path.join(destination,'photobackup')]);
 });
 
-test('a backup folder beside the source is created as before',async t=>{
+test('a chosen backup folder that is not there yet is created',async t=>{
  const {destination,card,prefs}=await fixture(t);
- const {roots}=await destinationRoots(prefs('photobackup'),[card],card);
- assert.deepEqual(roots,[path.join(destination,'photobackup')]);
+ const {roots}=await destinationRoots(prefs('fresh/photobackup'),[card],card);
+ assert.deepEqual(roots,[path.join(destination,'fresh','photobackup')]);
  assert.ok((await fs.stat(roots[0]!)).isDirectory());
 });
 
 test('only a source inside a backup folder is refused when chosen; one that contains it is allowed',()=>{
- const destinations=['/Volumes/A006'];
- assert.equal(sourceInsideBackup('/Volumes/A006/photobackup',destinations,['photobackup'])?.key,'error.alreadyInBackup');
- assert.equal(sourceInsideBackup('/Volumes/A006/photobackup/2025',destinations,['photobackup'])?.key,'error.alreadyInBackup');
- assert.equal(sourceInsideBackup('/Volumes/A006',destinations,['photobackup']),undefined,'the backup folder is left out instead');
- assert.equal(sourceInsideBackup('/Volumes/A006/2024',destinations,['photobackup']),undefined);
- assert.equal(sourceInsideBackup('/Volumes/A006/photobackup-old',destinations,['photobackup']),undefined);
+ const roots=['/Volumes/A006/photobackup'];
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup',roots)?.key,'error.alreadyInBackup');
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup/2025',roots)?.key,'error.alreadyInBackup');
+ assert.equal(sourceInsideBackup('/Volumes/A006',roots),undefined,'the backup folder is left out instead');
+ assert.equal(sourceInsideBackup('/Volumes/A006/2024',roots),undefined);
+ assert.equal(sourceInsideBackup('/Volumes/A006/photobackup-old',roots),undefined);
 });
 
-test('the video layout keeps a second backup folder on every destination',async t=>{
+test('the video layout uses the video folder chosen for each destination',async t=>{
  const {destination,card,prefs}=await fixture(t);
- const video={...prefs('photobackup'),mediaLayout:'video-root',videoBasePath:'videobackup'} as Preferences;
- assert.deepEqual(backupFolders(video),['photobackup','videobackup']);
- assert.deepEqual(backupFolders({...video,mediaLayout:'format'}),['photobackup'],'other layouts keep one backup folder');
+ const video=prefs('photobackup','videobackup');
+ assert.deepEqual(libraryRoots(video,0),[path.join(destination,'photobackup'),path.join(destination,'videobackup')]);
+ assert.deepEqual(libraryRoots({...video,mediaLayout:'format'},0),[path.join(destination,'photobackup')],'other layouts keep one backup folder');
+ assert.deepEqual(chosenFolders({...video,mediaLayout:'format'}).map(folder=>folder.role),['photos']);
+ assert.deepEqual(chosenFolders({...video,mediaLayout:'format'},true).map(folder=>folder.role),['photos','videos'],'a kept video folder is still listed for its journals');
  const {roots,videoRoots}=await destinationRoots(video,[card],card);
  assert.deepEqual(roots,[path.join(destination,'photobackup')]);
  assert.deepEqual(videoRoots,[path.join(destination,'videobackup')]);
@@ -61,20 +64,35 @@ test('the video layout keeps a second backup folder on every destination',async 
  assert.equal((await destinationRoots(prefs('photobackup'),[card],card)).videoRoots,undefined);
 });
 
+test('the photo and video folders may be in different places, and on different drives',async t=>{
+ const {destination,card,prefs}=await fixture(t);
+ const apart=prefs('Archive/photos','Media/Clips/videos');
+ const {roots,videoRoots,videoInfos}=await destinationRoots(apart,[card],card);
+ assert.deepEqual(roots,[path.join(destination,'Archive','photos')]);
+ assert.deepEqual(videoRoots,[path.join(destination,'Media','Clips','videos')]);
+ assert.equal(videoInfos?.length,1);
+ assert.equal(libraryAnchor(apart,0),destination,'one drive: organized from the folder holding both');
+ assert.equal(libraryAnchor({...apart,videoDestinationIds:['another-volume']},0),undefined,'two drives: not one library');
+ assert.equal(libraryAnchor(prefs('photobackup'),0),path.join(destination,'photobackup'));
+ // A video folder chosen on another volume is checked against that volume.
+ await assert.rejects(destinationRoots({...apart,videoDestinationIds:['another-volume']},[card],card),{key:'error.destinationChanged'} as never);
+});
+
 test('a source inside the video backup folder is refused, and the folders must differ',async t=>{
  const {destination,prefs}=await fixture(t);
- const video={...prefs('photobackup'),mediaLayout:'video-root',videoBasePath:'videobackup'} as Preferences;
+ const video=prefs('photobackup','videobackup');
  const inside:Source={id:'folder:inside',name:'Inside',path:path.join(destination,'videobackup','2025'),transport:'folder'};
  await fs.mkdir(inside.path,{recursive:true});
  await assert.rejects(destinationRoots(video,[inside],inside),/already in your backup/i);
- assert.equal(sourceInsideBackup(inside.path,[destination],backupFolders(video))?.key,'error.alreadyInBackup');
  const card:Source={id:'folder:card',name:'Card',path:path.join(destination,'Card'),transport:'folder'};
- for(const videoBasePath of ['photobackup','photobackup/videos','','../videos'])await assert.rejects(destinationRoots({...video,videoBasePath},[card],card),/video backup folder/i,videoBasePath);
+ for(const folder of ['photobackup','photobackup/videos'])await assert.rejects(destinationRoots(prefs('photobackup',folder),[card],card),{key:'error.videoFolderNested'} as never,folder);
+ await assert.rejects(destinationRoots(prefs('photobackup/photos','photobackup'),[card],card),{key:'error.videoFolderNested'} as never,'a photo folder inside the video folder');
+ await assert.rejects(destinationRoots({...video,videoDestinations:[]},[card],card),{key:'error.videoFolderMissing'} as never);
 });
 
 test('a backup folder may not be or lie in the app\'s records folder, and the unknown files folder may not be named after it',async t=>{
  const {destination,card,prefs}=await fixture(t);
- for(const basePath of ['Photo Importer Data','photo importer data/photos','Photo Importer Recovery'])await assert.rejects(destinationRoots(prefs(basePath),[card],card),{key:'error.backupFolderPath'} as never,basePath);
+ for(const folder of ['Photo Importer Data','Photo Importer Data/photos','Photo Importer Recovery'])await assert.rejects(destinationRoots(prefs(folder),[card],card),{key:'error.backupFolderPath'} as never,folder);
  await assert.rejects(fs.lstat(path.join(destination,'Photo Importer Data')),{code:'ENOENT'},'nothing was created');
  const {validNoMetadataFolder}=await import('../no-metadata');
  for(const name of ['Photo Importer Data','photo importer data'])assert.equal(validNoMetadataFolder(name),false,name);

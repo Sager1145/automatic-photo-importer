@@ -20,7 +20,7 @@ import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesSt
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
-import {checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
+import {checkFolderPair,checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
@@ -28,11 +28,11 @@ import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {within,isAbort,unlinkEntry,isOwnRealpath} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
-import {allocateDestinations,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
+import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,onCameraCard,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
-import {backupFolders,destinationRoots,libraryRoots} from './platform/destination-roots';
+import {chosenFolders,destinationRoots,libraryAnchor,libraryRoots,type ChosenFolder} from './platform/destination-roots';
 import {resolveFolderSources} from './folder-sources';
 import {DeviceSelection,deviceId,recordDeviceHistory} from './device-selection';
 import {moveToFront,nextRunnable,orderSources,queueOrder} from './queue-order';
@@ -90,6 +90,9 @@ let catalog:Catalog|undefined,catalogCoordinator:CatalogCoordinator|undefined,ca
 let catalogPublishTimer:NodeJS.Timeout|undefined,catalogClosing=false;
 const catalogFallbacks=new Map<string,string>(),catalogConnected=new Set<string>(),catalogStopped=new Set<string>();
 let rememberedCatalogLibraries:LibraryBinding[]=[];
+/** The libraries of the folders chosen now (destination folders and added organization folders): the only ones offered for browsing. */
+let offeredCatalogIds=new Set<string>();
+const offeredCatalogLibraries=(coordinator:CatalogCoordinator)=>coordinator.libraries.filter(library=>offeredCatalogIds.has(library.libraryId));
 const catalogManifest=()=>path.join(app.getPath('userData'),'catalog','libraries.json');
 function catalogAvailable():CatalogCoordinator{if(!catalogCoordinator)throw new Error('Catalog is unavailable.');return catalogCoordinator;}
 function catalogMember(id:unknown):CatalogCoordinator{const coordinator=catalogAvailable();if(typeof id!=='string'||!coordinator.binding(id))throw new Error('Unknown library.');return coordinator;}
@@ -99,7 +102,7 @@ async function catalogVolumeValid(binding:LibraryBinding,fresh=false):Promise<bo
 }
 function publishCatalog(){
  if(catalogPublishTimer||catalogClosing)return;
- catalogPublishTimer=setTimeout(()=>{catalogPublishTimer=undefined;const coordinator=catalogCoordinator;if(!coordinator)return;void Promise.all(coordinator.libraries.map(async library=>[library.libraryId,await coordinator.status(library.libraryId)] as const)).then(entries=>{state.catalogLibraries=coordinator.libraries;state.catalogStatuses=Object.fromEntries(entries);emit();}).catch(error=>log('normal','catalog','status-failed',{error}));},250);
+ catalogPublishTimer=setTimeout(()=>{catalogPublishTimer=undefined;const coordinator=catalogCoordinator;if(!coordinator)return;void Promise.all(coordinator.libraries.map(async library=>[library.libraryId,await coordinator.status(library.libraryId)] as const)).then(entries=>{state.catalogLibraries=offeredCatalogLibraries(coordinator);state.catalogStatuses=Object.fromEntries(entries);emit();}).catch(error=>log('normal','catalog','status-failed',{error}));},250);
 }
 function requestCatalogRefresh(){catalogRefreshScheduler.request();}
 function pauseCatalog(){if(catalogCoordinator?.running){catalogRefreshScheduler.request();catalogCoordinator.stop();}}
@@ -116,23 +119,34 @@ const catalogRefreshScheduler=createCatalogRefreshScheduler({
  }
 });
 function scheduleCatalogRefresh(){catalogRefreshScheduler.resume();}
+/** "A006 › photobackup · Photos": the drive names the library, since folders on different drives often share a name. A folder on
+ * the startup disk is its folder name. Browsed folders have no role suffix. */
+function libraryName(folder:string,mountPath:string,role?:'photos'|'videos'):string{const inside=path.relative(mountPath,folder),startup=path.parse(mountPath).root===mountPath&&path.sep==='/';const drive=path.basename(mountPath)||mountPath;const name=!startup&&inside&&!inside.startsWith('..')?`${drive} › ${inside.split(path.sep).join(' › ')}`:path.basename(folder)||drive;return role?`${name} · ${role==='videos'?'Videos':'Photos'}`:name;}
 async function configureCatalog(){
  const coordinator=catalogCoordinator;if(!coordinator)return;
  const bindings:LibraryBinding[]=[],previous=coordinator.libraries.length?coordinator.libraries.map(library=>coordinator.binding(library.libraryId)!):rememberedCatalogLibraries;
  const wanted=coordinator.needsRefresh();
- for(const [index,destination] of state.preferences.destinations.entries()){
-  const status=state.destinationStatus?.[index],volume=volumeOf(mounts,destination),expected=state.preferences.destinationIds?.[index],online=!!status?.available&&(!expected||status.volumeId===expected);
-  const prior=previous.find(binding=>binding.library.destinationIndex===index&&(!expected||binding.library.volumeId===expected)&&within(binding.root,path.resolve(destination)));
-  const mountPath=online?volume?.path??destination:prior?.library.mountPath??destination;
-  if(online&&!catalogConnected.has(destination))catalogFallbacks.set(destination,randomUUID());if(!catalogFallbacks.has(destination))catalogFallbacks.set(destination,randomUUID());if(online)catalogConnected.add(destination);else catalogConnected.delete(destination);
-  for(const [position,root] of libraryRoots(destination,state.preferences).entries())bindings.push(await bindLibrary({root,mountPath,volumeId:expected||(online?volume?.volumeId:prior?.library.trustedVolumeId?prior.library.volumeId:undefined),fallbackId:catalogFallbacks.get(destination),name:`${path.basename(destination)} · ${position?'Videos':'Photos'}`,role:position?'videos':'photos',rulesScope:rulesScope(ruleOptions(state.preferences)),online,destinationIndex:index}));
+ // Each chosen folder is its own library, on its own drive: a video folder may be on another drive than its photo folder.
+ // Only the destinations the copy policy uses: a second one kept while the policy is One destination is not offered.
+ for(const {path:folder,volumeId:expected,role,index} of chosenFolders(state.preferences).filter(folder=>folder.index<requiredDestinations(state.preferences))){
+  const status=state.destinationStatus?.find(item=>item.path===folder),volume=volumeOf(mounts,folder),online=!!status?.available&&(!expected||status.volumeId===expected);
+  const prior=previous.find(binding=>binding.library.destinationIndex===index&&binding.library.role===role&&(!expected||binding.library.volumeId===expected)&&within(binding.root,path.resolve(folder)));
+  const mountPath=online?volume?.path??folder:prior?.library.mountPath??folder;
+  if(online&&!catalogConnected.has(folder))catalogFallbacks.set(folder,randomUUID());if(!catalogFallbacks.has(folder))catalogFallbacks.set(folder,randomUUID());if(online)catalogConnected.add(folder);else catalogConnected.delete(folder);
+  bindings.push(await bindLibrary({root:folder,mountPath,volumeId:expected||(online?volume?.volumeId:prior?.library.trustedVolumeId?prior.library.volumeId:undefined),fallbackId:catalogFallbacks.get(folder),name:libraryName(folder,mountPath,role),role,rulesScope:rulesScope(ruleOptions(state.preferences)),online,destinationIndex:index}));
  }
  for(const location of organizationLocations.filter(item=>item.folder)){
   if(bindings.some(binding=>binding.root===location.root))continue;const volume=volumeOf(mounts,location.root);
   bindings.push(await bindLibrary({root:location.root,mountPath:volume?.path??location.destination,volumeId:location.volumeId,name:path.basename(location.root),role:'photos',rulesScope:rulesScope(ruleOptions(state.preferences)),online:!!volume&&volume.volumeId===location.volumeId}));
  }
+ for(const folder of browseFolders){
+  if(bindings.some(binding=>binding.root===folder))continue;const volume=volumeOf(mounts,folder);
+  bindings.push(await bindLibrary({root:folder,mountPath:volume?.path??path.parse(folder).root,volumeId:volume?.volumeId,name:libraryName(folder,volume?.path??path.parse(folder).root),role:'photos',rulesScope:rulesScope(ruleOptions(state.preferences)),online:!!volume,browseOnly:true}));
+ }
+ // Only folders chosen now are offered for browsing; earlier ones stay bound (offline) so their indexed details survive being chosen again.
+ offeredCatalogIds=new Set(bindings.map(binding=>binding.library.libraryId));
  for(const binding of previous)if(!bindings.some(current=>current.library.libraryId===binding.library.libraryId))bindings.push({...binding,rootIdentity:undefined,library:{...binding.library,online:false}});
- const changed=await coordinator.configure(bindings);state.catalogLibraries=coordinator.libraries;publishCatalog();const added=configuredRefreshIds(wanted,coordinator.needsRefresh(),changed);for(const id of added)catalogStopped.delete(id);if(added.length)requestCatalogRefresh();
+ const changed=await coordinator.configure(bindings);state.catalogLibraries=offeredCatalogLibraries(coordinator);publishCatalog();const added=configuredRefreshIds(wanted,coordinator.needsRefresh(),changed);for(const id of added)catalogStopped.delete(id);if(added.length)requestCatalogRefresh();
  const persisted=coordinator.libraries.filter(library=>library.trustedVolumeId).map(library=>({library:{...library,online:false},root:coordinator.binding(library.libraryId)!.root}));
  const manifest=JSON.stringify(persisted);if(manifest!==JSON.stringify(rememberedCatalogLibraries)){rememberedCatalogLibraries=persisted;void fs.mkdir(path.dirname(catalogManifest()),{recursive:true}).then(()=>fs.writeFile(catalogManifest(),manifest)).catch(error=>log('normal','catalog','manifest-warning',{error}));}
 }
@@ -175,6 +189,17 @@ const scanControls=new Map<string,AbortController>();
 /** folder: an in-place organization of a chosen folder rather than a backup destination. */
 interface OrganizationLocation {root:string;destination:string;volumeId:string;folder?:boolean;}
 let organizationLocations:OrganizationLocation[]=[];
+/** Folders added in the Library browser to browse only (any folder, on any drive). */
+let browseFolders:string[]=[];
+/** Where a chosen backup folder keeps its records and journals are looked for: the folder holding it, as the drive did
+ * when the backup folder was a name inside the destination; a drive's own root keeps them itself. */
+function recordsBase(folder:string):string{const resolved=path.resolve(folder),parent=path.dirname(resolved);return parent===resolved||volumeOf(mounts,resolved)?.path===resolved?resolved:parent;}
+/** A chosen backup folder is connected, on the volume it was chosen on. */
+function folderOnline(folder:Pick<ChosenFolder,'path'|'volumeId'>):boolean{const status=state.destinationStatus?.find(item=>item.path===folder.path);return !!status?.available&&status.volumeId===folder.volumeId;}
+/** The chosen backup folder a configured organization location belongs to: on its volume, inside the place it was remembered at. */
+function locationFolder(location:OrganizationLocation):ChosenFolder|undefined{return chosenFolders(state.preferences,true).find(folder=>folder.volumeId===location.volumeId&&within(folder.path,location.destination));}
+/** A configured location's drive status: that of its chosen folder. */
+function locationStatus(location:OrganizationLocation):DestinationStatus|undefined{const folder=locationFolder(location);return folder?state.destinationStatus?.find(item=>item.path===folder.path):undefined;}
 const organizationJobIds=new Set<string>();
 interface RunRequest {prefs:Preferences;reorganize:boolean;/** Queued by an automatic import: it never waits for confirmation, it records a warning. */automatic?:boolean;/** The user already confirmed this job's unknown files. */confirmed?:boolean;/** This job only: file unknown files by file time instead of the saved choice. */useFileDate?:boolean;/** This job only: keep or folder unknown files whatever the saved choice (request.prefs carries it too). */handling?:'keep'|'folder';/** With file dates chosen: the unknown files found before, shown so the choice can be changed back. */earlier?:NoMetadataSummary;/** Organizing only: this run's choices (default: all on). */options?:OrganizeOptions;sourceFolders?:string[];/** Organizing: this review covers only the backup folder(s), not the whole destination. */backupScope?:boolean;/** Skip files that fail while planning for this job, whatever the setting. */skipErrors?:boolean;/** Source files the user chose to skip in this job. */exclude?:string[];}
 /** Queued jobs the user asked to run again skipping one file (Skip) or every failing file (Skip all). */
@@ -292,7 +317,7 @@ const emit=()=>{lastEmit=Date.now();yieldListing();activityLoop?.wake();state.re
 const progressEmit=throttled(()=>emit(),()=>state.jobs.some(job=>job.phase==='copying'||job.phase==='verifying')?250:100);
 let saving:Promise<void>=Promise.resolve();
 async function syncDirectory(folder:string){let handle:import('node:fs/promises').FileHandle|undefined;try{handle=await fs.open(folder,'r');await handle.sync();}catch(error){if(!['EINVAL','ENOTSUP','EISDIR','EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??''))throw error;}finally{await handle?.close();}}
-function save():Promise<void>{const data=JSON.stringify({preferences:state.preferences,history:state.history,organizationLocations,organizationFolders:state.organizationFolders},null,2);const write=saving.then(async()=>{await fs.mkdir(app.getPath('userData'),{recursive:true});const temp=store()+'.'+randomUUID()+'.new';const file=await fs.open(temp,'wx',0o600);try{await file.writeFile(data);await file.sync();}finally{await file.close();}await fs.rename(temp,store());await syncDirectory(app.getPath('userData'));});saving=write.catch(()=>{});return write;}
+function save():Promise<void>{const data=JSON.stringify({preferences:state.preferences,history:state.history,organizationLocations,organizationFolders:state.organizationFolders,browseFolders},null,2);const write=saving.then(async()=>{await fs.mkdir(app.getPath('userData'),{recursive:true});const temp=store()+'.'+randomUUID()+'.new';const file=await fs.open(temp,'wx',0o600);try{await file.writeFile(data);await file.sync();}finally{await file.close();}await fs.rename(temp,store());await syncDirectory(app.getPath('userData'));});saving=write.catch(()=>{});return write;}
 /** Writes one operation report as a new file (never replacing one) and syncs it: userData/operation-reports/<job>/<name>. */
 async function writeReport(jobId:string,name:string,value:unknown){
  const directory=path.join(app.getPath('userData'),'operation-reports',jobId);await fs.mkdir(directory,{recursive:true});
@@ -305,16 +330,16 @@ async function initializeRecoveryKey(){
 }
 /** History saved before entries carried their outcome: classified once from the English text, as the history page used to. */
 function savedOutcome(value:unknown,title:Message,detail:Message):HistoryEntry['outcome']{if(value==='done'||value==='attention'||value==='stopped')return value;const heading=formatMessage(title,'en'),body=formatMessage(detail,'en');return /attention|error|fail/i.test(heading)||/\b[1-9][\d,]* errors?\b/i.test(body)?'attention':/stop|cancel/i.test(heading+' '+body)?'stopped':'done';}
-async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
+async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message,outcome:HistoryEntry['outcome']){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail,outcome});state.history=state.history.slice(0,50);void save().catch(()=>{});}
-async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...state.preferences.destinations,...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
+async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
-  const volumes=mounts=await mountedVolumes();const destinations=await Promise.all(state.preferences.destinations.map(p=>volumeInfo(p,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
+  const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
   state.destinationStatus=destinations;await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
-  registerDestinations([...state.preferences.destinations,...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
+  registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
   // getSources leaves out the destinations, so every detected drive is a source.
   const detected=found;
   // A chosen folder the system now detects as a volume at the same path becomes that volume, still chosen.
@@ -323,7 +348,7 @@ async function refresh(){
   const connected=new Set(state.sources.map(s=>s.id));for(const id of Object.keys(state.sourceInventories??{}))if(!connected.has(id)){delete state.sourceInventories![id];delete state.sourceCameraInfo?.[id];scanControls.get(id)?.abort();}for(const id of seen)if(!connected.has(id))seen.delete(id);
   // Automatic imports wait until every destination the copy policy needs is connected;
   // unqueued sources stay unseen and are picked up on a later refresh.
-  const required=requiredDestinations(state.preferences),ready=destinations.length>=required&&destinations.slice(0,required).every(info=>info.available);
+  const required=requiredDestinations(state.preferences),needed=chosen.flatMap((folder,position)=>folder.index<required?[destinations[position]!]:[]),ready=needed.length===required*(state.preferences.mediaLayout==='video-root'?2:1)&&needed.every(info=>info.available);
   // Automatic import only takes drives the user selected (now or on a previous connection).
   if(state.preferences.automatic&&ready){for(const source of state.sources.filter(s=>s.selected&&found.some(item=>item.id===s.id)&&!ejectingIds.has(s.id)))if(!seen.has(source.id)){seen.add(source.id);enqueue(source,folders.get(source.id)?.backup??false,true);}}
   // Folders' free space is re-read like a card's, so a capacity bar follows copies and deletions; so is a library's while a job runs on it.
@@ -331,7 +356,7 @@ async function refresh(){
   for(const source of shown.values())if(source.transport==='folder')await updateFolderCapacity(source);
   driveSampler.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
   dropStaleMisplaced();emit();pump();scheduleOldRecordsCheck();scheduleResidueCheck();
-  const scope=JSON.stringify([state.preferences.destinations,backupFolders(state.preferences),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
+  const scope=JSON.stringify([chosenFolders(state.preferences,true),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
   if(scope!==recoveryScope&&!recoveryRefresh.running){recoveryScope=scope;recoveryRefresh.request();}
   else recoveryRefresh.resume();
  }catch(error){state.error=toMessage(error);emit();}finally{refreshing=false;}
@@ -372,11 +397,11 @@ function yieldListing(){
  else if(!drivesInUse()){if(state.organizationRecoveryPaused)log('detailed','listing','resume',{reason:'no job is using the drive'});recoveryRefresh.resume();}
 }
 async function listOrganizations(signal:AbortSignal){
- const destinations=state.preferences.destinations;
+ const configured=chosenFolders(state.preferences,true);
  const locations=[...organizationLocations];
  const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
- // Both backup folder settings on each destination, whatever the current layout: a journal may be in either.
- for(let index=0;index<destinations.length;index++){const destination=destinations[index];for(const folder of [state.preferences.basePath,state.preferences.videoBasePath])add(path.resolve(destination,folder),destination,state.preferences.destinationIds?.[index]??'');}
+ // Every chosen backup folder, the video ones too whatever the current layout: a journal may be in either.
+ for(const folder of configured)add(folder.path,recordsBase(folder.path),folder.volumeId);
  // The previous list stays until each folder is read again, and is replaced folder by folder.
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
@@ -387,7 +412,7 @@ async function listOrganizations(signal:AbortSignal){
   for(let position=0;position<locations.length;position++){
    signal.throwIfAborted();const location=locations[position]!;
    // A folder organized in place is listed while its own drive is present and unchanged.
-   const status=location.folder?await volumeInfo(location.destination):destinations.includes(location.destination)?state.destinationStatus?.find(item=>item.path===location.destination):undefined;
+   const status=location.folder?await volumeInfo(location.destination):locationStatus(location);
    if(!status?.available||status.volumeId!==location.volumeId)continue;
    listed.add(location.root);
    try{
@@ -405,9 +430,7 @@ async function listOrganizations(signal:AbortSignal){
    publish();
   }
   // Journals whose library folder is gone stay listed, flagged, while their destination is connected.
-  for(let index=0;index<destinations.length;index++){
-   const destination=destinations[index]!,status=state.destinationStatus?.find(item=>item.path===destination);
-   if(!status?.available||status.volumeId!==state.preferences.destinationIds?.[index])continue;
+  for(const destination of [...new Set(configured.filter(folder=>folderOnline(folder)).map(folder=>recordsBase(folder.path)))]){
    for(const orphan of await orphanedJournals(destination).catch(()=>[])){if(!listed.has(orphan.root))byRoot.set(orphan.root,[]);listed.add(orphan.root);byRoot.get(orphan.root)!.push(orphan);}
   }
   // Folders not listed this time (drive away, or no longer configured) leave the list.
@@ -416,8 +439,9 @@ async function listOrganizations(signal:AbortSignal){
  }finally{state.organizationRecoveryLoading=false;delete state.organizationRecoveryProgress;emit();}
 }
 async function rememberOrganization(root:string,prefs:Preferences){
- const destination=prefs.destinations[0],volumeId=prefs.destinationIds?.[0];if(!destination||!volumeId||!within(root,destination))throw new MessageError('error.organizationDestination');
- const folder=!state.preferences.destinations.includes(destination);
+ // A backup folder is remembered at the folder holding it (as its drive was), a folder organized in place at itself.
+ const chosen=chosenFolders(prefs).find(item=>within(root,item.path)),volumeId=chosen?.volumeId;if(!chosen||!volumeId)throw new MessageError('error.organizationDestination');
+ const folder=!chosenFolders(state.preferences).some(item=>item.path===chosen.path&&item.volumeId===volumeId),destination=folder?chosen.path:recordsBase(chosen.path);
  if(!organizationLocations.some(item=>item.root===root&&item.volumeId===volumeId))organizationLocations.push({root,destination,volumeId,...(folder?{folder:true}:{})});await save();
 }
 /** "2592 moved · 2592 originals kept for undo (49.0 GB) · 0 errors"; only true claims are made. */
@@ -427,7 +451,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  const operation=JSON.stringify([root,id]);if(resumingOrganizations.has(operation))return;
  assertIdle();
  if(!state.organizationRecovery?.some(item=>item.root===root&&item.id===id))throw new MessageError('error.recoveryListStale');
- const location=organizationLocations.find(item=>item.root===root&&(item.folder||state.preferences.destinations.some((destination,index)=>destination===item.destination&&state.preferences.destinationIds?.[index]===item.volumeId)));if(!location)throw new MessageError('error.organizationDestination');
+ const location=organizationLocations.find(item=>item.root===root&&(item.folder||!!locationFolder(item)));if(!location)throw new MessageError('error.organizationDestination');
  // Claim before disk validation yields: a fast recheck may finish while a
  // second request is still validating, making a later busy() check insufficient.
  resumingOrganizations.add(operation);
@@ -435,7 +459,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  await stopResidueCheck();
  await validateDestination(location.destination,state.sources,{identity:location.volumeId});
  assertIdle('error.busyResume');
- if(!location.folder&&!state.preferences.destinations.some((destination,index)=>destination===location.destination&&state.preferences.destinationIds?.[index]===location.volumeId))throw new MessageError('error.organizationDestination');
+ if(!location.folder&&!locationFolder(location))throw new MessageError('error.organizationDestination');
  const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':kind==='delete'?'job.recheckDelete':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=startJob(job);emit();
  if(kind!=='delete')etaTracker.plan(job.id,{kind:kind==='finalize'?'finalize':kind==='undo'?'undo':'organization',destinations:[etaDrive(mounts,root,'storage')]});
  void settle(withJob(job.id,async()=>{try{
@@ -505,7 +529,7 @@ function finishJob(job:Job){
 }
 
 /** Ejecting a drive or removing a folder needs the app's own state and nothing else; the platform command is injected in tests. */
-function holdsBackup(source:Source):boolean{return !!source.path&&state.preferences.destinations.some(destination=>!!destination&&within(destination,source.path));}
+function holdsBackup(source:Source):boolean{return !!source.path&&chosenFolders(state.preferences,true).some(folder=>within(folder.path,source.path));}
 /** Ids of drives being ejected now (published as state.ejecting). */
 const ejectingIds=new Set<string>();
 function setEjecting(source:Source,ejecting:boolean){if(ejecting)ejectingIds.add(source.id);else ejectingIds.delete(source.id);state.ejecting=[...ejectingIds];emit();}
@@ -528,7 +552,7 @@ function forgetSource(source:Source){
  delete state.sourceInventories?.[source.id];delete state.sourceCameraInfo?.[source.id];
  publishDevices();emit();
 }
-function ejectDeps():EjectDeps{return {view:ejectView,holdsBackup,setEjecting,ejectVolume:async mountPath=>{await releaseIfIdle();return ejectVolume(mountPath,undefined,undefined,{destinations:state.preferences.destinations});},forget:forgetSource};}
+function ejectDeps():EjectDeps{return {view:ejectView,holdsBackup,setEjecting,ejectVolume:async mountPath=>{await releaseIfIdle();return ejectVolume(mountPath,undefined,undefined,{destinations:chosenFolders(state.preferences,true).map(folder=>folder.path)});},forget:forgetSource};}
 /** Auto-eject: a card or drive whose import finished clean and verified is ejected when Settings say so (after Delete originals, when that is offered). */
 async function maybeAutoEject(job:Job){
  const source=state.sources.find(item=>item.id===job.source.id);
@@ -594,7 +618,7 @@ function releaseMissingVolumes(volumes:MountedVolume[]){
 let misplacedControl:AbortController|undefined,misplacedTask:Promise<void>|undefined,misplacedPaths:string[]=[];
 /** Where a destination's saved placement memory lives: one per volume and library, valid for the folder rules it was made under. */
 function placementOf(prefs:Preferences,index:number,useFileDate=false){
- const single={...prefs,destinations:[prefs.destinations[index]!],destinationIds:[prefs.destinationIds?.[index]??'']},library=backupLibrary(single);
+ const single=slotPreferences(prefs,index),library=backupLibrary(single);
  return {library,id:placementId(single.destinationIds[0]!,library.root,library.videoRoot),scope:rulesScope(ruleOptions(single,useFileDate))};
 }
 // Files an import or organization placed are remembered as in place, so the next folder check does not read them
@@ -612,7 +636,8 @@ function rememberPlaced(plans:TransferPlan[],prefs:Preferences,outcomes:Outcomes
  const work=placementWork.then(async()=>{
   try{
    for(const [index,plan] of plans.entries()){
-    if(plan.drive||!prefs.destinations[index])continue;
+    // Placement memory is kept per library; folders on two drives are not one library, so nothing is remembered for them.
+    if(plan.drive||!prefs.destinations[index]||!libraryAnchor(prefs,index))continue;
     const {library,id,scope}=placementOf(prefs,index,useFileDate);
     if(!complete&&await placementScope(app.getPath('userData'),id)!==scope){if(!outcomes)await forgetPlacement(app.getPath('userData'),id);continue;}
     if(!outcomes){await replacePlacement(app.getPath('userData'),id,scope,[]);continue;}
@@ -635,10 +660,12 @@ function checkBackupFolder(index:number){
  misplacedControl=control;misplacedPaths=[path0];(state.misplacedProgress??={})[path0]=planningProgress(0,'',{step:'listing',total:0,bytes:0,totalBytes:0});
  const task:Promise<void>=(async()=>{
   await stopResidueCheck();
-  const snapshot=snapshotPreferences(index),destination=snapshot.destinations[0]!,library=backupLibrary(snapshot),scope=misplacedScope(prefs,index,state.destinationStatus,sessionRules);
+  const snapshot=snapshotPreferences(index),destination=snapshot.destinations[0]!,scope=misplacedScope(prefs,index,state.destinationStatus,sessionRules);
+  const videoStatus=snapshot.mediaLayout==='video-root'?state.destinationStatus?.find(item=>item.path===snapshot.videoDestinations[0]):undefined;
+  if(videoStatus&&(!videoStatus.available||videoStatus.volumeId!==snapshot.videoDestinationIds[0]))throw new MessageError('error.backupCheckDrive');
+  const library=backupLibrary(snapshot);
   const status=state.destinationStatus?.find(item=>item.path===destination),folder=(item:string)=>fs.lstat(item).then(stat=>stat.isDirectory()&&!stat.isSymbolicLink(),()=>false);
   if(!status?.available||status.volumeId!==snapshot.destinationIds?.[0])throw new MessageError('error.backupCheckDrive');
-  if(!within(library.root,destination))throw new MessageError('error.backupFolderOutside');
   // Both backup folders must exist to be compared; the first import creates them. Say so instead of doing nothing.
   if(!await folder(library.root)||library.videoRoot&&!await folder(library.videoRoot)){(state.misplacedFiles??={})[destination]={count:0,bytes:0,checkedAt:new Date().toISOString(),scope,missing:true};return;}
   await placementWork;
@@ -660,8 +687,8 @@ let residueControl:AbortController|undefined,residueTask:Promise<void>|undefined
 /** The backup folders of connected destinations, and folders organized in place on connected drives. */
 async function residueRoots():Promise<string[]>{
  const prefs=state.preferences,roots:string[]=[];
- prefs.destinations.forEach((destination,index)=>{const status=state.destinationStatus?.find(item=>item.path===destination);if(status?.available&&status.volumeId===prefs.destinationIds?.[index])for(const root of libraryRoots(destination,prefs))if(within(root,destination))roots.push(root);});
- for(const location of organizationLocations){const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):state.destinationStatus?.find(item=>item.path===location.destination);if(status?.available&&status.volumeId===location.volumeId)roots.push(location.root);}
+ for(const folder of chosenFolders(prefs))if(folderOnline(folder))roots.push(folder.path);
+ for(const location of organizationLocations){const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):locationStatus(location);if(status?.available&&status.volumeId===location.volumeId)roots.push(location.root);}
  // A folder inside another one is looked through with it.
  return [...new Set(roots)].filter((root,_index,all)=>!all.some(other=>other!==root&&within(root,other)));
 }
@@ -671,7 +698,7 @@ function scheduleResidueCheck(force=false){
  if(qa||(!force&&checkTimer))return;
  // Something running now: look again once it is idle (any later refresh or finished job).
  if(!residueIdle()||residueTask){residueScope='';return;}
- const scope=JSON.stringify([state.preferences.destinations,state.preferences.destinationIds,backupFolders(state.preferences),organizationLocations,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
+ const scope=JSON.stringify([chosenFolders(state.preferences),organizationLocations,state.destinationStatus?.map(info=>[info.path,info.available,info.volumeId])]);
  if(!force&&scope===residueScope)return;
  residueScope=scope;void checkResidue(false);
 }
@@ -703,13 +730,12 @@ async function stopResidueCheck(){residueControl?.abort();await residueTask;}
 async function configuredOldRecordsDrives():Promise<DriveRoots[]>{
  const prefs=state.preferences,drives=new Map<string,{key:string;roots:string[]}>();
  const add=(drive:string,root:string,volumeId:string)=>{const entry=drives.get(drive)??{key:`${drive}\0${volumeId}`,roots:[]};if(!entry.roots.includes(root))entry.roots.push(root);drives.set(drive,entry);};
- prefs.destinations.forEach((destination,index)=>{
-  const status=state.destinationStatus?.find(item=>item.path===destination);if(!status?.available||status.volumeId!==prefs.destinationIds?.[index])return;
-  add(destination,destination,status.volumeId??"");
-  for(const root of libraryRoots(destination,prefs))if(within(root,destination))add(destination,root,status.volumeId??"");
- });
+ for(const folder of chosenFolders(prefs)){
+  if(!folderOnline(folder))continue;const base=recordsBase(folder.path);
+  add(base,base,folder.volumeId);add(base,folder.path,folder.volumeId);
+ }
  for(const location of organizationLocations){
-  const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):state.destinationStatus?.find(item=>item.path===location.destination);
+  const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):locationStatus(location);
   if(status?.available&&status.volumeId===location.volumeId)add(location.destination,location.root,status.volumeId??location.volumeId);
  }
  return [...drives].map(([drive,entry])=>({drive,...entry}));
@@ -749,7 +775,7 @@ const settling=new Set<Promise<unknown>>();
 function settle<T>(work:Promise<T>):Promise<T>{settling.add(work);work.finally(()=>settling.delete(work)).catch(()=>{});return work;}
 function assertOrganizationIdle(){refuse('organize');}
 /** The one way organization is queued: arrange `root`'s files into the folder structure under
- * request.prefs' single destination/basePath with journaled, undoable moves, once imports finish. */
+ * request.prefs' single destination's backup folders with journaled, undoable moves, once imports finish. */
 /** Runs a stopped or failed job again: an organization with its request changed by `change`, an import queued afresh with the file date and unknown-file choices carried over. `settled` clears the buttons once the rerun is queued (a refusal leaves them to try again); `queued` sets up the new import job. */
 function rerun(failed:Job,change:Partial<RunRequest>,settled:()=>void,queued?:(job:Job)=>void){
  if(failed.organization){const request=organizationRuns.get(failed.id);if(!request)throw new MessageError('error.recoveryListStale');queueOrganization(failed.source.path,failed.source.name,{...request,...change});settled();return;}
@@ -763,16 +789,27 @@ function queueOrganization(root:string,name:string,request:RunRequest){
  organizationQueue.set(job.id,request);state.jobs.unshift(job);emit();pump();
 }
 /** One destination's backup as a library: its backup folder, organized in place. In the video-root
- * layout files also move between the photo and video folders, so the library is the destination
- * itself, read only inside those two folders. */
+ * layout files also move between the photo and video folders, so the library is the folder holding
+ * both, read only inside those two folders; folders on two drives cannot be one library. */
 function backupLibrary(prefs:Preferences):{source:string;root:string;videoRoot?:string;sourceFolders?:string[]}{
- const destination=prefs.destinations[0]!,[root,videoRoot]=libraryRoots(destination,prefs);
- return videoRoot?{source:destination,root:root!,videoRoot,sourceFolders:backupFolders(prefs)}:{source:root!,root:root!};
+ const [root,videoRoot]=libraryRoots(prefs,0),source=libraryAnchor(prefs,0);
+ if(!root)throw new MessageError('error.chooseDestination');
+ if(!source)throw new MessageError('error.organizeVideoOtherDrive');
+ return videoRoot?{source,root,videoRoot,sourceFolders:[root,videoRoot].map(folder=>path.relative(source,folder))}:{source:root,root};
 }
-/** Organize only <destination>/<basePath> (and <videoBasePath>) in place: the Organize backup button. */
+/** One destination of `prefs` as the only one, with its photo and video folders. */
+function slotPreferences(prefs:Preferences,index:number):Preferences{
+ return {...prefs,destinations:[prefs.destinations[index]??''],destinationIds:[prefs.destinationIds?.[index]??''],videoDestinations:[prefs.videoDestinations?.[index]??''],videoDestinationIds:[prefs.videoDestinationIds?.[index]??'']};
+}
+/** Where a destination is organized as a whole: the folder holding its photo and video folders, or its photo folder. */
+function organizationRoot(prefs:Preferences,index:number):string{
+ if(!prefs.destinations[index])throw new MessageError('error.chooseDestination');
+ const root=libraryAnchor(prefs,index);if(!root)throw new MessageError('error.organizeVideoOtherDrive');
+ return root;
+}
+/** Organize only the destination's photo folder (and its video folder) in place: the Organize backup button. */
 function queueBackupOrganization(index:number){
- const prefs=snapshotPreferences(index),destination=prefs.destinations[0]!,library=backupLibrary(prefs);
- if(!within(library.root,destination))throw new MessageError('error.backupFolderOutside');
+ const prefs=snapshotPreferences(index),library=backupLibrary(prefs);
  queueOrganization(library.source,'Backup organization',{prefs,reorganize:true,options:takeOrganizeOptions(),...(library.sourceFolders?{sourceFolders:library.sourceFolders}:{})});
 }
 /** Preferences frozen for one operation. Organization always targets one chosen destination. */
@@ -782,9 +819,8 @@ function snapshotPreferences(organizationDestination?:number):Preferences{
  const prefs=structuredClone(state.preferences);prefs.unknownRules={...prefs.unknownRules,...sessionRules};
  if(organizationDestination===undefined)return prefs;
  if(organizationDestination!==0&&organizationDestination!==1)throw new Error('Invalid organization destination');
- const root=prefs.destinations[organizationDestination];if(!root)throw new MessageError('error.chooseDestination');
- prefs.copyMode='single';prefs.destinations=[root];prefs.destinationIds=[prefs.destinationIds?.[organizationDestination]??''];
- return prefs;
+ if(!prefs.destinations[organizationDestination])throw new MessageError('error.chooseDestination');
+ return {...slotPreferences(prefs,organizationDestination),copyMode:'single'};
 }
 /** The single path from a source to reserved destination plans. Reviews and
  * direct imports differ only in when the result is executed. */
@@ -794,7 +830,9 @@ function availableFor(owner:string,infos:DestinationStatus[],volumes:MountedVolu
 }
 async function prepare(owner:string,source:Source,backup:boolean,request:RunRequest,signal:AbortSignal,onCamera:(done:number,total:number)=>void,onProgress:PlanProgress,onPlanning?:()=>void):Promise<Prepared>{
  const {prefs,reorganize,sourceFolders}=request;
- const {roots,videoRoots,infos,volumes}=await destinationRoots(prefs,state.sources,reorganize?undefined:source);
+ const {roots,videoRoots,infos,videoInfos,volumes}=await destinationRoots(prefs,state.sources,reorganize?undefined:source);
+ // A video folder on another volume than its photo folder has its own free space, checked and reserved apart.
+ const apart=infos.map((info,index)=>!!videoInfos?.[index]&&reservationVolume(volumes,videoInfos[index]!.path)!==reservationVolume(volumes,info.path));
  const eta={source:etaDrive(volumes,source.path,source.transport),destinations:infos.map(info=>etaDrive(volumes,info.path,'storage'))};
  etaTracker.plan(owner,{kind:reorganize?'organization':'import',...eta,...(reorganize?{}:{publish:etaTracker.predictPublish(eta.destinations),direct:etaTracker.predictDirect(eta.destinations)})});
  const mirror=backup&&prefs.backupMode==='mirror';
@@ -807,9 +845,10 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
    stage=await prepareCamera(source,signal,onCamera);sourcePath=stage.path;approved.add(sourcePath);
    // Staging may share a destination's disk; measure free space after it.
    for(const [index,root] of roots.entries()){const info=await volumeInfo(root,volumes);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');infos[index]={...infos[index]!,free:info.free};}
+   for(const [index,root] of (videoRoots??[]).entries())if(apart[index]){const info=await volumeInfo(root,volumes);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');videoInfos![index]={...videoInfos![index]!,free:info.free};}
   }
   // The folder for unknown files must not be one the app files into.
-  if(!backup&&!request.useFileDate&&prefs.noMetadataHandling==='folder')noMetadataFolderName(prefs.noMetadataFolder,[prefs.editedFolder??'',prefs.basePath,prefs.videoBasePath??'']);
+  if(!backup&&!request.useFileDate&&prefs.noMetadataHandling==='folder')noMetadataFolderName(prefs.noMetadataFolder,[prefs.editedFolder??'']);
   onPlanning?.();
   // Card files copied before and still unchanged are recognised without reading them.
   const volume=reorganize||stage?undefined:memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,source.path):undefined;
@@ -823,20 +862,24 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   const {unknownRules,unknownDefault,...folderRules}=ruleOptions(prefs,request.useFileDate),filed={...folderRules,...(videoRoots?{videoRoots}:{})};
   const copy={...listed,unknownRules,unknownDefault,sourceDigest,skipErrors,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
    // Disk 1's share is reserved as soon as it is chosen, so a job planning meanwhile does not count on the same space.
-   const {kept,bytes}=fillFirst(first,availableFor(owner,infos,volumes)[0]!);reservations.set(owner,[{volume:reservationVolume(volumes,infos[0]!.path),bytes}]);return kept;
+   const {kept,bytes,videoBytes}=fillFirst(first,availableFor(owner,infos,volumes)[0]!,apart[0]?availableFor(owner,videoInfos!,volumes)[0]!:undefined);reservations.set(owner,[{volume:reservationVolume(volumes,infos[0]!.path),bytes},...(apart[0]?[{volume:reservationVolume(volumes,videoInfos![0]!.path),bytes:videoBytes}]:[])]);return kept;
   }}:{})};
   const planning:PlanRequest=reorganize?{...filed,...listed,backup:false,reorganize:true,collectProblems:prefs.collectProblemFiles!==false}
    :drive?{...copy,backup:true,drive:{name:drive.name,identity:drive.identity,mirror:drive.mirror}}
    :{...filed,...copy,backup:false,duplicates:true,lookElsewhere:async paths=>qa||(await Promise.all(paths.map(async root=>{const index=Math.max(roots.indexOf(root),videoRoots?.indexOf(root)??-1);if(index<0)return true;const {id,scope}=placementOf(prefs,index,request.useFileDate);return await placementScope(app.getPath('userData'),id)!==scope;}))).some(changed=>changed)};
   const {inventory,listing:record,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,planning,p=>metadata(p,{details:false}),signal,onProgress);
   signal.throwIfAborted();
-  const available=availableFor(owner,infos,volumes);
+  const available=availableFor(owner,infos,volumes),videoAvailable=videoInfos?availableFor(owner,videoInfos,volumes):[];
   // A same-drive organization moves files; it never needs room for a second library.
-  const needed=reorganize?plans.map((item,index)=>{const bytes=requiredOrganizationSpace(item);if(bytes>available[index]!)throw new MessageError('error.organizeSpace',{index:index+1,size:{bytes:bytes}});return bytes;}):allocateDestinations(plans,available,prefs.copyMode);
-  reservations.set(owner,infos.map((info,index)=>({volume:reservationVolume(volumes,info.path),bytes:needed[index]})));
-  log('detailed','plan','space-check',{destinations:infos.map((info,index)=>({path:info.path,freeBytes:info.free,availableAfterReservations:available[index],neededBytes:needed[index]})),reorganize});
+  // A video folder on its own volume is checked against that volume: the photo folder's plan then counts its photos only.
+  const photoParts=plans.map((item,index)=>apart[index]?{...item,videos:undefined}:item);
+  const needed=reorganize?plans.map((item,index)=>{const bytes=requiredOrganizationSpace(item);if(bytes>available[index]!)throw new MessageError('error.organizeSpace',{index:index+1,size:{bytes:bytes}});return bytes;}):allocateDestinations(photoParts,available,prefs.copyMode);
+  const videoNeeded=reorganize?[]:allocateVideoFolders(plans,videoAvailable,apart);
+  // One reservation per destination, then one per video folder (nothing where it shares its photo folder's volume), by position.
+  reservations.set(owner,[...infos.map((info,index)=>({volume:reservationVolume(volumes,info.path),bytes:needed[index]})),...(videoInfos??[]).map((info,index)=>({volume:reservationVolume(volumes,info.path),bytes:videoNeeded[index]??0}))]);
+  log('detailed','plan','space-check',{destinations:infos.map((info,index)=>({path:info.path,freeBytes:info.free,availableAfterReservations:available[index],neededBytes:needed[index],...(apart[index]?{video:{path:videoInfos![index]!.path,freeBytes:videoInfos![index]!.free,availableAfterReservations:videoAvailable[index],neededBytes:videoNeeded[index]}}:{})})),reorganize});
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
-  const space=reorganize?undefined:plans.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
+  const space=reorganize?undefined:photoParts.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
   if(!stage)keepListing(source,record,!reorganize&&!backup);
   const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
   return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(request.handling?{handling:request.handling}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(request.useFileDate?{noMetadataHandling:'fileDate' as const}:request.handling?{noMetadataHandling:request.handling}:{}),...(request.useFileDate&&request.earlier?{fileDated:{...request.earlier,files:request.earlier.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
@@ -876,9 +919,11 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    await stopResidueCheck();
    prepared=input;
    // A review can sit open while other jobs fill the disk; recheck before writing.
-   const volumes=await mountedVolumes(),available=availableFor(job.id,await Promise.all(prepared.review.plans.map(item=>volumeInfo(item.root,volumes))),volumes);
+   // A video folder on another volume than its photo folder is checked against its own.
+   const volumes=await mountedVolumes(),parts=prepared.review.plans.flatMap(item=>item.videos&&reservationVolume(volumes,item.videos.root)!==reservationVolume(volumes,item.root)?[{...item,videos:undefined},item.videos]:[item]);
+   const available=availableFor(job.id,await Promise.all(parts.map(item=>volumeInfo(item.root,volumes))),volumes);
    const required=prepared.review.kind==='reorganize'?requiredOrganizationSpace:requiredTransferSpace;
-   if(prepared.review.plans.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
+   if(parts.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
   else{
    job.phase='discovering';job.progress=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
@@ -921,9 +966,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   try{executed=await executeDestinations(plans,{
    signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onFileOutcome:outcome=>{void catalogCoordinator?.observeOutcome(outcome);const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);},
-   validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});},
+   validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});if(!reorganize&&plans[index]?.videos)await validateDestination(prefs.videoDestinations[index]!,state.sources,{identity:prefs.videoDestinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
-   settled:index=>{reserved[index].bytes=0;}
+   // A video folder's own reservation (after the destinations') is released with its destination.
+   settled:index=>{reserved[index].bytes=0;const video=reserved[plans.length+index];if(video)video.bytes=0;}
   });}finally{
    // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails. Only a cache.
    const sums=importedSums(outcomes);
@@ -993,14 +1039,14 @@ async function organizeFolderInPlace(folder:string,known:Source[]){
  const root=await fs.realpath(folder),info=await validateDestination(root,known);
  if(!info.volumeId)throw new MessageError('error.folderUnidentified');
  approved.add(root);
- const prefs=snapshotPreferences();prefs.copyMode='single';prefs.destinations=[root];prefs.destinationIds=[info.volumeId];prefs.basePath='';
+ const prefs=snapshotPreferences();prefs.copyMode='single';prefs.destinations=[root];prefs.destinationIds=[info.volumeId];prefs.videoDestinations=[];prefs.videoDestinationIds=[];
  if(prefs.mediaLayout==='video-root')throw new MessageError('error.organizeFolderVideo');
  queueOrganization(root,`Organize ${path.basename(root)}`,{prefs,reorganize:true,options:takeOrganizeOptions()});
 }
 async function previewSource(source:Source,backup:boolean,organizationDestination?:number,collectProblemFiles?:boolean,sourceFolders?:string[],backupScope=false){
  if(busy())throw new MessageError('error.busyReview');
  const reorganize=organizationDestination!==undefined,prefs=snapshotPreferences(organizationDestination);if(reorganize&&collectProblemFiles!==undefined){prefs.collectProblemFiles=collectProblemFiles;if(state.review?.options)state.organizeOptions={...state.review.options};}
- const request:RunRequest={prefs,reorganize,...(reorganize?{options:takeOrganizeOptions()}:{}),sourceFolders:reorganize?(backupScope?sourceFolders:state.organizationFolders?.[source.path]?.slice()):undefined,...(backupScope?{backupScope:true}:{})};
+ const request:RunRequest={prefs,reorganize,...(reorganize?{options:takeOrganizeOptions()}:{}),sourceFolders:reorganize?(backupScope?sourceFolders:state.organizationFolders?.[prefs.destinations[0]!]?.slice()):undefined,...(backupScope?{backupScope:true}:{})};
  return openReview(source,backup,request,organizationDestination);
 }
 /** Plans `request` into a review and opens it; also how a review is planned again (with file dates). */
@@ -1029,16 +1075,16 @@ const UNREAD_SAMPLE=20;
 const chosenScopes=new Map<string,DuplicateScope>();
 function duplicateScopes():DuplicateScope[]{
  const result:DuplicateScope[]=[];
- for(const destination of state.preferences.destinations)for(const root of libraryRoots(destination,state.preferences)){const folder=path.relative(destination,root);if(!result.some(item=>item.root===root))result.push({root,name:folder?`${path.basename(destination)} · ${folder}`:path.basename(destination),destination});}
+ for(const folder of chosenFolders(state.preferences))if(!result.some(item=>item.root===folder.path))result.push({root:folder.path,name:path.basename(folder.path),destination:folder.path});
  for(const scope of chosenScopes.values())if(!result.some(item=>item.root===scope.root))result.push(scope);
  return result;
 }
 const duplicateScope=(root:string)=>duplicateScopes().find(item=>item.root===root);
 /** Make a library's journals findable by Undo and Release (the organization recovery list). */
 async function rememberLibrary(scope:DuplicateScope){
- const index=state.preferences.destinations.indexOf(scope.destination??''),volumeId=index>=0?state.preferences.destinationIds?.[index]:(await volumeInfo(scope.root)).volumeId;
+ const chosen=chosenFolders(state.preferences).find(folder=>folder.path===scope.destination),volumeId=chosen?chosen.volumeId:(await volumeInfo(scope.root)).volumeId;
  if(!volumeId)throw new MessageError('error.destinationUnidentified');
- if(!organizationLocations.some(item=>item.root===scope.root&&item.volumeId===volumeId))organizationLocations.push({root:scope.root,destination:index>=0?scope.destination!:scope.root,volumeId,...(index>=0?{}:{folder:true})});
+ if(!organizationLocations.some(item=>item.root===scope.root&&item.volumeId===volumeId))organizationLocations.push({root:scope.root,destination:chosen?recordsBase(chosen.path):scope.root,volumeId,...(chosen?{}:{folder:true})});
  await save();
 }
 async function scanDuplicatesAction(){
@@ -1199,9 +1245,10 @@ async function action(input:Action):Promise<void>{
   case 'chooseOrganizationFolders':{
    assertIdle();
    const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');
-   const root=state.preferences.destinations[index];if(!root)throw new MessageError('error.chooseDestination');
+   // Chosen under the folder the destination is organized as a whole from; saved under its photo folder.
+   const root=organizationRoot(state.preferences,index),key=state.preferences.destinations[index]!;
    const result=await dialog.showOpenDialog(window!,{title:'Choose folders to organize',defaultPath:root,properties:['openDirectory','multiSelections']});
-   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(!await isOwnRealpath(path.resolve(file),actual)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[root]=selected;state.organizeOptions=freshOrganizeOptions();await save();}break;
+   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(!await isOwnRealpath(path.resolve(file),actual)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[key]=selected;state.organizeOptions=freshOrganizeOptions();await save();}break;
   }
   case 'organizeOptions':{
    // This run's choices; a run, or choosing folders again, puts them back to on.
@@ -1220,8 +1267,8 @@ async function action(input:Action):Promise<void>{
   case 'deleteOriginals':await settle(removeOriginals(input.jobId));break;
   case 'resetOrganizationFolders':{assertIdle();state.organizeOptions=freshOrganizeOptions();const root=state.preferences.destinations[input.destinationIndex];if(root&&state.organizationFolders){delete state.organizationFolders[root];await save();}break;}
   case 'organize':{
-   const prefs=snapshotPreferences(input.destinationIndex),root=prefs.destinations[0]!;
-   queueOrganization(root,'Library organization',{prefs,reorganize:true,options:takeOrganizeOptions(),sourceFolders:state.organizationFolders?.[root]?.slice()});break;
+   const prefs=snapshotPreferences(input.destinationIndex),root=organizationRoot(prefs,0);
+   queueOrganization(root,'Library organization',{prefs,reorganize:true,options:takeOrganizeOptions(),sourceFolders:state.organizationFolders?.[prefs.destinations[0]!]?.slice()});break;
   }
   case 'organizeFolder':{
    // Arrange a folder's files into the folder structure inside that same folder: a folder source instead of copying it
@@ -1240,7 +1287,7 @@ async function action(input:Action):Promise<void>{
   }
   case 'checkBackupFolder':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid destination');checkBackupFolder(index);break;}
   case 'organizeBackup':{const index=input.destinationIndex;if(index!==0&&index!==1)throw new Error('Invalid organization destination');queueBackupOrganization(index);break;}
-  case 'previewOrganization':{if(input.scope==='backup'){const prefs=snapshotPreferences(input.destinationIndex),library=backupLibrary(prefs);if(!within(library.root,prefs.destinations[0]!))throw new MessageError('error.backupFolderOutside');await previewSource({id:'library:'+library.source,path:library.source,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined,library.sourceFolders,true);break;}const root=snapshotPreferences(input.destinationIndex).destinations[0];await previewSource({id:'library:'+root,path:root,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined);break;}
+  case 'previewOrganization':{if(input.scope==='backup'){const prefs=snapshotPreferences(input.destinationIndex),library=backupLibrary(prefs);await previewSource({id:'library:'+library.source,path:library.source,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined,library.sourceFolders,true);break;}const root=organizationRoot(snapshotPreferences(input.destinationIndex),0);await previewSource({id:'library:'+root,path:root,name:'Existing library',transport:'folder'},false,input.destinationIndex,typeof input.collectProblemFiles==='boolean'?input.collectProblemFiles:undefined);break;}
   case 'reviewFileDate':case 'reviewNoMetadata':{
    // Plan the open review again with another choice for unknown files, for this job only; the saved preference never changes.
    if(!reviewed||busy()||state.busyReview)break;
@@ -1282,7 +1329,7 @@ async function action(input:Action):Promise<void>{
   case 'preferences':{
    const patch=input.patch;
    // A folder name that saves can be planned.
-   if(['basePath','mediaLayout','videoBasePath','editedFolder','noMetadataFolder'].some(key=>Object.hasOwn(patch,key)))checkFolderSettings({...state.preferences,...patch});
+   if(['editedFolder','noMetadataFolder'].some(key=>Object.hasOwn(patch,key)))checkFolderSettings({...state.preferences,...patch});
    // Display and queue settings apply at once. Settings a job reads are ignored without an error (the UI greys them out),
    // while any job runs, waits in the queue or is paused, or a review is open: stop it completely first.
    const before=state.preferences;
@@ -1294,8 +1341,16 @@ async function action(input:Action):Promise<void>{
    dropStaleMisplaced();
    await save();pump();break;
   }
-  case 'chooseDestination':{assertIdle();if(input.index!==0&&input.index!==1)throw new Error('Invalid destination');const result=await dialog.showOpenDialog(window!,{title:`Choose destination ${input.index+1}`,properties:['openDirectory','createDirectory']});if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const info=await validateDestination(root,state.sources);if(!info.volumeId)throw new MessageError('error.destinationUnidentified');state.preferences.destinations[input.index]=root;(state.preferences.destinationIds??=[])[input.index]=info.volumeId;approved.add(root);await save();await refresh();}break;}
-  case 'removeDestination':{assertIdle();state.preferences.destinations.splice(input.index,1);state.preferences.destinationIds?.splice(input.index,1);await save();await refresh();break;}
+  // A destination's photo folder and video folder are each chosen as a folder, on the same drive or on two.
+  case 'chooseDestination':{assertIdle();if(input.index!==0&&input.index!==1)throw new Error('Invalid destination');const videos=input.kind==='videos',prefs=state.preferences;if(videos&&!prefs.destinations[input.index])throw new MessageError('error.chooseDestination');
+   const result=await dialog.showOpenDialog(window!,{title:videos?`Choose the video backup folder for destination ${input.index+1}`:`Choose the photo backup folder for destination ${input.index+1}`,properties:['openDirectory','createDirectory'],...(videos?{defaultPath:path.dirname(prefs.destinations[input.index]!)}:{})});
+   if(!result.canceled&&result.filePaths[0]){const root=await fs.realpath(result.filePaths[0]);const info=await validateDestination(root,state.sources);if(!info.volumeId)throw new MessageError('error.destinationUnidentified');
+    const next=structuredClone(prefs);if(videos){next.videoDestinations[input.index]=root;next.videoDestinationIds[input.index]=info.volumeId;}else{next.destinations[input.index]=root;next.destinationIds[input.index]=info.volumeId;}
+    for(const key of ['videoDestinations','videoDestinationIds'] as const)next[key]=Array.from({length:Math.max(next.destinations.length,next[key].length)},(_,position)=>next[key][position]??'');
+    // The other folder of the destination is checked with it: neither may hold the other.
+    checkFolderPair(next.destinations[input.index],next.videoDestinations[input.index]);
+    state.preferences=next;approved.add(root);await save();await refresh();}break;}
+  case 'removeDestination':{assertIdle();const prefs=state.preferences;if(input.kind==='videos'){if(prefs.videoDestinations[input.index]!==undefined){prefs.videoDestinations[input.index]='';prefs.videoDestinationIds[input.index]='';}}else for(const key of ['destinations','destinationIds','videoDestinations','videoDestinationIds'] as const)prefs[key]?.splice(input.index,1);await save();await refresh();break;}
   case 'ejectSource':{
    const source=state.sources.find(item=>item.id===input.sourceId);if(!source)throw new MessageError('error.ejectNotFound');
    const kind=await ejectSource(ejectDeps(),source);
@@ -1308,7 +1363,17 @@ async function action(input:Action):Promise<void>{
    if(result.ejected+result.removed+result.skipped+result.failed.length)addHistory(message('history.finishedSources'),message('history.ejectDone',{ejected:result.ejected,removed:result.removed,skipped:result.skipped,failed:result.failed.length}),result.failed.length?'attention':'done');
    if(result.failed[0])throw new MessageError(result.failed[0].error.key,result.failed[0].error.params);break;
   }
-  case 'chooseSource':{const result=await dialog.showOpenDialog(window!,{title:input.backup?'Choose drives or folders to back up':'Choose media sources',properties:['openDirectory','multiSelections']});if(result.canceled||!result.filePaths.length)break;for(const chosen of result.filePaths)assertNotEjecting({path:chosen});const {sources,rejected}=await resolveFolderSources(result.filePaths,{sources:state.sources,registered:folders,destinations:state.preferences.destinations,backupFolders:backupFolders(state.preferences),backup:input.backup});const now=new Date().toISOString();for(const source of sources){approved.add(source.path);folders.set(source.id,{source,backup:input.backup});selection.select(source,true,state.preferences.rememberedDevices??={},now,state.preferences.ignoredDevices??={});state.sources=[...state.sources.filter(s=>s.id!==source.id&&s.path!==source.path),source];}if(sources.length){state.sources=selection.apply(state.sources,state.preferences.rememberedDevices??={},state.preferences.ignoredDevices??={},state.preferences.deviceHistory??={});publishDevices();await save();}const [first]=rejected;if(first)throw new MessageError(first.key,first.params);break;}
+  case 'browseFolderAdd':{
+   const result=await dialog.showOpenDialog(window!,{title:'Choose a folder to browse',buttonLabel:'Browse',properties:['openDirectory']});
+   if(result.canceled||!result.filePaths[0])break;
+   const folder=await fs.realpath(result.filePaths[0]);if(!browseFolders.includes(folder))browseFolders=[...browseFolders,folder].slice(-50);
+   await save();await configureCatalog();requestCatalogRefresh();emit();break;
+  }
+  case 'browseFolderRemove':{
+   const root=catalogCoordinator?.binding(String(input.libraryId))?.root;if(!root||!catalogCoordinator?.binding(String(input.libraryId))?.library.browseOnly)break;
+   browseFolders=browseFolders.filter(folder=>folder!==root);await save();await configureCatalog();emit();break;
+  }
+  case 'chooseSource':{const result=await dialog.showOpenDialog(window!,{title:input.backup?'Choose drives or folders to back up':'Choose media sources',properties:['openDirectory','multiSelections']});if(result.canceled||!result.filePaths.length)break;for(const chosen of result.filePaths)assertNotEjecting({path:chosen});const {sources,rejected}=await resolveFolderSources(result.filePaths,{sources:state.sources,registered:folders,backupRoots:chosenFolders(state.preferences).map(folder=>folder.path),backup:input.backup});const now=new Date().toISOString();for(const source of sources){approved.add(source.path);folders.set(source.id,{source,backup:input.backup});selection.select(source,true,state.preferences.rememberedDevices??={},now,state.preferences.ignoredDevices??={});state.sources=[...state.sources.filter(s=>s.id!==source.id&&s.path!==source.path),source];}if(sources.length){state.sources=selection.apply(state.sources,state.preferences.rememberedDevices??={},state.preferences.ignoredDevices??={},state.preferences.deviceHistory??={});publishDevices();await save();}const [first]=rejected;if(first)throw new MessageError(first.key,first.params);break;}
   case 'start':{
    if(state.review){await applyReview();break;}
    if(input.sourceId)selection.dismissReconnected(input.sourceId);else for(const source of state.sources)if(source.selected)selection.dismissReconnected(source.id);publishDevices();
@@ -1401,7 +1466,7 @@ async function boot(){
  if(hardwareReportRoot)state.preferences=normalizePreferences({destinations:[hardwareDestination.path],destinationIds:[hardwareDestination.volumeId]});
  nativeTheme.themeSource=state.preferences.appearance;
  try{try{const stored=JSON.parse(await fs.readFile(catalogManifest(),'utf8'));if(Array.isArray(stored))rememberedCatalogLibraries=stored.filter((entry:LibraryBinding)=>typeof entry?.root==='string'&&path.isAbsolute(entry.root)&&typeof entry.library?.libraryId==='string'&&typeof entry.library.relativeRoot==='string'&&typeof entry.library.mountPath==='string'&&entry.library.trustedVolumeId===true&&within(entry.root,entry.library.mountPath)).map((entry:LibraryBinding)=>({...entry,rootIdentity:undefined,library:{...entry.library,online:false}}));}catch{/* First local index. */}catalogSession=createCatalogSession(onError=>startCatalog(path.join(app.getPath('userData'),'catalog','library.sqlite'),{onError}),{onError:error=>{log('normal','catalog','worker-failed',{error});publishCatalog();}});catalog=catalogSession.catalog;catalogCoordinator=new CatalogCoordinator(catalog,{metadata:(file,options)=>metadata(file,{details:false,...options}),cachedMetadata:cachedRouting,options:()=>ruleOptions(state.preferences),validate:binding=>catalogVolumeValid(binding),changed:()=>publishCatalog(),warning:(error,libraryId)=>log('normal','catalog','index-warning',{error,libraryId})});}catch(error){log('normal','catalog','open-failed',{error});}
- if(qaFixtureRoot){const root=await fs.realpath(qaFixtureRoot);if(!within(root,await fs.realpath(os.tmpdir())))throw new Error('QA fixtures must be in the system temporary directory.');const destination=path.join(root,'destination');const info=await volumeInfo(destination);state.preferences.destinations=[destination,path.join(root,'destination-2')];state.preferences.destinationIds=[info.volumeId??'',info.volumeId??''];for(let i=1;i<=6;i++){const folder=await fs.realpath(path.join(root,`source-${i}`));const source:Source={id:`fixture:${i}`,name:`Fixture card ${i}`,path:folder,transport:'folder',total:info.total,free:info.free};folders.set(source.id,{source,backup:true});approved.add(folder);}}
+ if(qaFixtureRoot){const root=await fs.realpath(qaFixtureRoot);if(!within(root,await fs.realpath(os.tmpdir())))throw new Error('QA fixtures must be in the system temporary directory.');const destination=path.join(root,'destination');const info=await volumeInfo(destination);const drives=[destination,path.join(root,'destination-2')];state.preferences.destinations=drives.map(drive=>path.join(drive,'photobackup'));state.preferences.destinationIds=[info.volumeId??'',info.volumeId??''];state.preferences.videoDestinations=drives.map(drive=>path.join(drive,'videobackup'));state.preferences.videoDestinationIds=[info.volumeId??'',info.volumeId??''];for(let i=1;i<=6;i++){const folder=await fs.realpath(path.join(root,`source-${i}`));const source:Source={id:`fixture:${i}`,name:`Fixture card ${i}`,path:folder,transport:'folder',total:info.total,free:info.free};folders.set(source.id,{source,backup:true});approved.add(folder);}}
  session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
  const renderer=path.join(__dirname,'../renderer/index.html');
  window=new BrowserWindow({frame:process.platform==='darwin',...(process.platform==='darwin'?{titleBarStyle:'hidden' as const,trafficLightPosition:{x:18,y:15}}:{}),title:'Automatic Photo Importer',width:1440,height:940,minWidth:1000,minHeight:720,backgroundColor:'#151c24',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,scrollBounce:true}});

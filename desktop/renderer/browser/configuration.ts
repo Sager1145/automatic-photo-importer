@@ -4,7 +4,7 @@ export const blockKinds=['date','name','format','camera','lens','focal','apertur
 export type BlockKind=typeof blockKinds[number];
 export interface HierarchyBlock {id:string;kind:BlockKind;dateGranularity:'year'|'month'|'day';datePattern:string;nameMode:'initial'|'exact';formatMode:'extension'|'kind';numericMode:'exact'|'buckets';boundaries:number[];}
 export interface BrowserPreset {id:string;name:string;blocks:HierarchyBlock[];}
-export interface BrowserConfiguration {version:1;columnWidth?:number;blocks:HierarchyBlock[];presets:BrowserPreset[];activePresetId?:string;}
+export interface BrowserConfiguration {version:1;columnWidth?:number;/** The columns area's height in px; absent or 0 fills the window. */contentHeight?:number;/** RAW + JPEG/HEIF pairs show as one file; absent means on. */combinePairs?:boolean;blocks:HierarchyBlock[];presets:BrowserPreset[];activePresetId?:string;}
 export const configurationKey='photo-importer.browser.v1';
 export const blockLabels:Record<BlockKind,string>={date:'Date',name:'Name',format:'Format',camera:'Camera',lens:'Lens',focal:'Focal length',aperture:'Aperture',shutter:'Shutter speed',iso:'ISO'};
 const numericFields:Partial<Record<BlockKind,NumericField>>={focal:'focalLengthMm',aperture:'fNumber',shutter:'exposureSeconds',iso:'iso'};
@@ -16,6 +16,10 @@ export const builtInPresets:BrowserPreset[]=[...blockKinds.map(k=>preset(`builti
 export function defaultConfiguration():BrowserConfiguration{return {version:1,blocks:builtInPresets[9]!.blocks.map(b=>({...b,id:id(),boundaries:[...b.boundaries]})),presets:[],activePresetId:'builtin-date-camera-format'};}
 const edited=(c:BrowserConfiguration,blocks:HierarchyBlock[]):BrowserConfiguration=>({...c,blocks,activePresetId:undefined});
 export function addBlock(c:BrowserConfiguration,kind:BlockKind,at:number):BrowserConfiguration {const blocks=[...c.blocks];blocks.splice(Math.max(0,Math.min(at,blocks.length)),0,createBlock(kind));return edited(c,blocks);}
+/** A preset dragged into the path: its levels, with their options, as new blocks at that position. */
+export function insertPreset(c:BrowserConfiguration,presetId:string,at:number):BrowserConfiguration {const p=[...builtInPresets,...c.presets].find(p=>p.id===presetId);if(!p)return c;const blocks=[...c.blocks];blocks.splice(Math.max(0,Math.min(at,blocks.length)),0,...p.blocks.map(b=>({...b,id:id(),boundaries:[...b.boundaries]})));return edited(c,blocks);}
+/** Single-field built-ins are the field palette; the preset row lists views of several levels and the user's own. */
+export const presetRow=(c:BrowserConfiguration):BrowserPreset[]=>[...builtInPresets.filter(p=>p.blocks.length>1),...c.presets];
 export function moveBlock(c:BrowserConfiguration,blockId:string,at:number):BrowserConfiguration {const blocks=[...c.blocks],from=blocks.findIndex(b=>b.id===blockId);if(from<0)return c;const [block]=blocks.splice(from,1);blocks.splice(Math.max(0,Math.min(at,blocks.length)),0,block!);return edited(c,blocks);}
 export function removeBlock(c:BrowserConfiguration,blockId:string):BrowserConfiguration{return edited(c,c.blocks.filter(b=>b.id!==blockId));}
 export function updateBlock(c:BrowserConfiguration,blockId:string,patch:Partial<Omit<HierarchyBlock,'id'|'kind'>>):BrowserConfiguration{return edited(c,c.blocks.map(b=>b.id===blockId?{...b,...patch}:b));}

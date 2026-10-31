@@ -6,7 +6,7 @@ import {text} from '../messages';
 import type {AppState,Job} from '../shared';
 import { defaultPreferences } from '../preferences';
 
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const untitled={id:'untitled',name:'Untitled',path:'/Volumes/Untitled',transport:'storage' as const};
 const folder={id:'folder',name:'photobackup',path:'/Volumes/A006/photobackup',transport:'folder' as const};
 const job=(extra:Partial<Job>):Job=>({id:'j1',source:untitled,phase:'error',errors:[],backup:false,...extra});

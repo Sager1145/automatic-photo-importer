@@ -5,6 +5,12 @@ CPU and memory|CPU 和内存|CPU 與記憶體|CPU とメモリ
 Backup folders|备份文件夹|備份資料夾|バックアップフォルダー
 After an import|导入之后|匯入之後|読み込みのあと
 Storage|存储|儲存|保存先
+Storage & folders|存储与文件夹|儲存與資料夾|保存先とフォルダー
+Your next JPEG lands here|下一张 JPEG 将保存在这里|下一張 JPEG 將儲存在這裡|次の JPEG の保存先
+A voice memo lands beside its photo|语音备忘录会保存在对应照片旁边|語音備忘錄會儲存在對應照片旁邊|ボイスメモは写真の隣に保存されます
+Use a separate video folder|为视频使用单独的文件夹|為影片使用獨立的資料夾|動画用に別のフォルダーを使う
+Videos are saved with the photos. To keep them in another folder, on any drive, use a separate video folder.|视频与照片保存在一起。若要放在任意硬盘上的其他文件夹中，请为视频使用单独的文件夹。|影片與照片儲存在一起。若要放在任何硬碟上的其他資料夾，請為影片使用獨立的資料夾。|動画は写真と一緒に保存されます。任意のドライブの別のフォルダーに保存するには、動画用に別のフォルダーを使います。
+Photos and videos each have their own folder. Choose any folder for each: on the same drive, another drive, or several folders deep.|照片和视频各有自己的文件夹。可以为两者分别选择任意文件夹：同一硬盘、其他硬盘，或多层子文件夹中。|照片和影片各有自己的資料夾。可為兩者分別選擇任何資料夾：同一硬碟、其他硬碟，或多層子資料夾中。|写真と動画にはそれぞれ専用のフォルダーがあります。同じドライブ、別のドライブ、または深い階層のフォルダーなど、どこでも選べます。
 File handling|文件处理|檔案處理|ファイルの扱い
 Metadata and file rules|元数据与文件规则|中繼資料與檔案規則|メタデータとファイルのルール
 Devices|设备|裝置|デバイス

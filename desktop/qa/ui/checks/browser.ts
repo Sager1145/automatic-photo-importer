@@ -8,7 +8,7 @@ import type {Check,Harness} from '../harness';
 
 const storageKey='photo-importer.browser.v1';
 const config=(h:Harness)=>h.js<any>(`JSON.parse(localStorage.getItem(${JSON.stringify(storageKey)}))`);
-const organizationKeys=['template','mediaLayout','videoTemplate','unknownRules','basePath','videoBasePath','editedFolder','noMetadataHandling','noMetadataFolder','conflictNaming','collectProblemFiles','removeAppleDouble'] as const;
+const organizationKeys=['template','mediaLayout','videoTemplate','unknownRules','destinations','videoDestinations','editedFolder','noMetadataHandling','noMetadataFolder','conflictNaming','collectProblemFiles','removeAppleDouble'] as const;
 const organizationPreferences=(p:Preferences)=>Object.fromEntries(organizationKeys.map(k=>[k,p[k]]));
 async function mediaSnapshot(files:string[]){
  return Promise.all(files.map(async file=>{const s=await fs.stat(file,{bigint:true});return {path:file,size:String(s.size),mtimeNs:String(s.mtimeNs),ctimeNs:String(s.ctimeNs),sha256:createHash('sha256').update(await fs.readFile(file)).digest('hex')};}));
@@ -24,7 +24,8 @@ async function enter(h:Harness){
  await h.until('Library browser page',"document.querySelector('[data-testid=library-browser]')");await h.settle();
  await h.js("document.querySelector('[data-testid=browser-presets]').open=true;document.querySelector('[data-testid=hierarchy-editor]').open=true");
 }
-async function choosePreset(h:Harness,id:string){assert.ok(await h.click(`[data-preset-id="${id}"]`));await h.frames();await h.until('preset applied',`document.querySelector('[data-preset-id="${id}"]')?.getAttribute('aria-pressed')==='true'`);}
+/** A single-field view is the field row now: clear the levels, then add that field. */
+async function choosePreset(h:Harness,id:string){const single=/^builtin-(date|name|format|camera|lens|focal|aperture|shutter|iso)$/.exec(id);if(single){if(await h.js<boolean>("!document.querySelector('[data-testid=hierarchy-clear]').disabled"))assert.ok(await h.click('[data-testid=hierarchy-clear]'));assert.ok(await h.click(`[data-block-kind=${single[1]}]`));await h.frames();await h.until('single field applied',`document.querySelectorAll('[data-testid=hierarchy-block]').length===1&&document.querySelectorAll('[data-testid=facet-column]').length===1`);return;}assert.ok(await h.click(`[data-preset-id="${id}"]`));await h.frames();await h.until('preset applied',`document.querySelector('[data-preset-id="${id}"]')?.getAttribute('aria-pressed')==='true'`);}
 async function setField(h:Harness,label:string,value:string){
  assert.ok(await h.js<boolean>(`(()=>{const label=Array.from(document.querySelectorAll('label')).find(e=>e.firstChild?.textContent?.trim()===${JSON.stringify(label)});const e=label?.querySelector('input,select');if(!e)return false;Object.getOwnPropertyDescriptor(e instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event(e instanceof HTMLSelectElement?'change':'input',{bubbles:true}));return true;})()`),`Field ${label} exists`);await h.frames();
 }

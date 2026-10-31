@@ -52,7 +52,7 @@ test('history saved as plain strings by earlier versions still loads and renders
 test('the translator accepts backend messages and job details render in the chosen language', async () => {
   const { ImportDesk } = await import('../renderer/RootApp');
   const source = { id: 'card', name: 'Card', path: '/Volumes/Card', transport: 'storage' as const, selected: true };
-  const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', basePath: 'photobackup', template: '{year}', mediaLayout: 'flat', videoBasePath: 'videobackup', videoTemplate: '', unknownRules: {} };
+  const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/backup'], copyMode: 'single', template: '{year}', mediaLayout: 'flat', videoTemplate: '', unknownRules: {} };
   const job: Job = { id: 'j', source, phase: 'copying', detail: message('job.destinationFile', { index: 1, count: 2, file: 'A.NEF' }), errors: [], backup: false };
   for (const language of languages) {
     const markup = renderToStaticMarkup(createElement(I18nProvider, { language, children: createElement(ImportDesk, { state: { preferences: { ...preferences, language }, sources: [source], jobs: [job], history: [], platform: 'darwin', organizeOptions: freshOrganizeOptions() }, act: () => {}, inspect: () => {}, onOrganization: () => {}, onSettings: () => {} }) }));

@@ -17,7 +17,7 @@ import {createStallWatch} from '../stall-watch';
 export type Page='Import desk'|'Import'|'Files & folders'|'Drives'|'Library tools'|'Organization'|'Duplicates'|'Activity'|'Jobs'|'History'|'Issues'|'Recovery'|'Settings';
 export const pages:Page[]=['Import','Files & folders','Organization','Duplicates','Jobs','History','Issues','Recovery','Settings'];
 export const pageTitle=(page:Page)=>['Import desk','Import','Files & folders'].includes(page)?'Import':['Library tools','Organization','Duplicates','Recovery'].includes(page)?'Library tools':['Activity','Jobs','History','Issues'].includes(page)?'Activity':'Settings';
-export const settingsCategories=['general','storage','folders','defaults','files','devices','performance','diagnostics'];
+export const settingsCategories=['general','storage','defaults','files','devices','performance','diagnostics'];
 export const workspaceRoute=(page:Page):{page:string;tab?:string;mode?:string}=>{
  if(page==='Drives')return {page:'settings',tab:'settings-tab-devices'};
  if(page==='Settings')return {page:'settings'};

@@ -6,7 +6,7 @@ import type {DestinationStatus,MisplacedFiles,Preferences} from './shared';
 export function misplacedScope(prefs:Preferences,index:number,statuses:DestinationStatus[]|undefined,session:Preferences['unknownRules']={}):string{
  const destination=prefs.destinations[index],status=statuses?.find(info=>info.path===destination);
  const rules=rulesScope(ruleOptions({...prefs,unknownRules:{...prefs.unknownRules,...session}}));
- return JSON.stringify([destination,prefs.destinationIds?.[index],prefs.basePath,prefs.videoBasePath,rules,status&&[status.path,status.available,status.volumeId]]);
+ return JSON.stringify([destination,prefs.destinationIds?.[index],prefs.mediaLayout==='video-root'?[prefs.videoDestinations?.[index],prefs.videoDestinationIds?.[index]]:null,rules,status&&[status.path,status.available,status.volumeId]]);
 }
 /** Destinations whose result was computed for something else now. They are dropped, never re-checked; the prompt returns. */
 export function staleMisplaced(results:Record<string,MisplacedFiles>|undefined,prefs:Preferences,statuses:DestinationStatus[]|undefined,session:Preferences['unknownRules']={}):string[]{

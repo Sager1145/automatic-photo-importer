@@ -99,7 +99,7 @@ test('the copy first reports the check of existing destination files, then copie
 });
 
 const source={id:'card',name:'Untitled',path:'/Volumes/Untitled/photobackup',transport:'folder' as const,selected:true};
-const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',basePath:'photobackup',template:'{year}',mediaLayout:'flat',videoBasePath:'videobackup',videoTemplate:'',unknownRules:{}};
+const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const job=(progress:Progress,phase:Job['phase']='verifying'):Job=>({id:'j',source,phase,errors:[],backup:false,progress});
 const state=(value:Job):AppState=>({preferences,sources:[source],jobs:[value],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()});
 const desk=(value:Job)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(ImportDesk,{state:state(value),act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}})}));

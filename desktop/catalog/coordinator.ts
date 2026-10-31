@@ -27,14 +27,14 @@ const directoryIdentity=(stat:BigIntStats)=>`${stat.dev}:${stat.ino}`;
 export const catalogStat=(stat:BigIntStats):CatalogStat=>({dev:String(stat.dev),ino:String(stat.ino),size:String(stat.size),mtimeNs:String(stat.mtimeNs),ctimeNs:String(stat.ctimeNs)});
 const sameStat=(a:CatalogStat,b:CatalogStat)=>a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
 export interface LibraryBinding {library:CatalogLibrary;root:string;rootIdentity?:string;}
-export interface LibrarySpec {root:string;mountPath:string;volumeId?:string;fallbackId?:string;name:string;role:'photos'|'videos';rulesScope:string;online:boolean;destinationIndex?:number;}
+export interface LibrarySpec {root:string;mountPath:string;volumeId?:string;fallbackId?:string;name:string;role:'photos'|'videos';rulesScope:string;online:boolean;destinationIndex?:number;browseOnly?:boolean;}
 /** Reads identity only. An absent library never causes photo directories to be created. */
 export async function bindLibrary(spec:LibrarySpec):Promise<LibraryBinding>{
  const mountPath=await fs.realpath(spec.mountPath).catch(()=>path.resolve(spec.mountPath)),root=await fs.realpath(spec.root).catch(()=>path.resolve(mountPath,path.relative(spec.mountPath,spec.root)));if(!within(root,mountPath))throw new Error('Library must be inside its volume.');
  const volumeId=spec.volumeId??`connection:${spec.fallbackId??randomUUID()}`,relativeRoot=slash(path.relative(mountPath,root));
  let rootIdentity:string|undefined,online=false;
  if(spec.online)try{const real=await fs.realpath(root),mount=await fs.realpath(mountPath),stat=await fs.lstat(root,{bigint:true});if(await isOwnRealpath(root,real)&&within(real,mount)&&stat.isDirectory()&&!stat.isSymbolicLink()){rootIdentity=directoryIdentity(stat);online=true;}}catch{/* Empty/unavailable until the actual photo root exists. */}
- return {root,rootIdentity,library:{libraryId:hash(`${volumeId}\0${relativeRoot}`),volumeId,trustedVolumeId:!!spec.volumeId,relativeRoot,mountPath,name:spec.name,role:spec.role,online,rulesScope:spec.rulesScope,revision:0,...(spec.destinationIndex===undefined?{}:{destinationIndex:spec.destinationIndex})}};
+ return {root,rootIdentity,library:{libraryId:hash(`${volumeId}\0${relativeRoot}`),volumeId,trustedVolumeId:!!spec.volumeId,relativeRoot,mountPath,name:spec.name,role:spec.role,online,rulesScope:spec.rulesScope,revision:0,...(spec.destinationIndex===undefined?{}:{destinationIndex:spec.destinationIndex}),...(spec.browseOnly?{browseOnly:true}:{})}};
 }
 export async function bindingUnchanged(binding:LibraryBinding):Promise<boolean>{
  if(!binding.library.online||!binding.rootIdentity)return false;
@@ -252,7 +252,7 @@ export class CatalogCoordinator {
    for(const file of files){const rule=unknownRule(extension(file.path),custom,{fallback:'other',builtins:true});file.included=file.kind!=='Other'||!!file.companionOf||typeof rule==='string'||!!rule&&rule.action==='camera';let primary=file;for(let hops=0;primary.companionOf&&hops<16;hops++){const parent=byPath.get(primary.companionOf);if(!parent)break;primary=parent;}if(primary.size===0)file.included=false;}
    signal.throwIfAborted();const routes=new Map(evaluateRoutes({sourceRoot:binding.root,files,scanned:files,metadata:raw,mtimes,unreadableMetadata:unreadable,roots:[{root:binding.root,role:binding.library.role}],options:{...this.deps.options(),backup:false,reorganize:true},signal}).map(route=>[route.file.path,route]));
    const recordIds=new Map(records.map(record=>[record.relativePath,record.fileId]));
-   for(const record of records){const route=routes.get(path.join(binding.root,record.relativePath));record.familyId=route?.family;record.companionOf=route?.file.companionOf?recordIds.get(slash(path.relative(binding.root,route.file.companionOf))):undefined;record.placement=record.values.metadataStatus==='pending'?record.placement:classifyPlacement({route,actual:{root:binding.library.role,relativePath:record.relativePath},rulesScope:binding.library.rulesScope});}
+   for(const record of records){const route=routes.get(path.join(binding.root,record.relativePath));record.familyId=route?.family;record.companionOf=route?.file.companionOf?recordIds.get(slash(path.relative(binding.root,route.file.companionOf))):undefined;record.placement=record.values.metadataStatus==='pending'||binding.library.browseOnly?record.placement:classifyPlacement({route,actual:{root:binding.library.role,relativePath:record.relativePath},rulesScope:binding.library.rulesScope});}
    for(let offset=0;offset<records.length;offset+=500){signal.throwIfAborted();await this.catalog.ingest(run,records.slice(offset,offset+500));}
    if(!await this.valid(binding))throw new Error('Library identity changed.');
    if(partial)this.deps.warning?.(new Error(`Library scan ended partial (inventory ${why.inventory}, skipped ${why.skipped}, changed during read ${why.changed}): ${why.sample.join('; ')}`),id);await this.catalog.endScan(run,partial?'partial':'complete');completed=true;if(!partial)this.dirty.delete(id);else this.dirty.add(id);this.states.set(id,{state:'idle',progress});

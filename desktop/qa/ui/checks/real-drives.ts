@@ -12,6 +12,7 @@ import {mediaKindForPath} from '../../../media-formats';
 import {metadata} from '../../../platform/metadata';
 import {mountedVolumes,volumeInfo,volumeOf} from '../../../platform/volumes';
 import {formatCaptureDateTime} from '../../../renderer/metadata-display';
+import {cameraDisplayName} from '../../../camera-names';
 import type {CatalogLibrary,CatalogPage,CatalogQuery,CatalogStatus,FacetResult} from '../../../catalog/types';
 import type {Action,Metadata,Preferences} from '../../../shared';
 import type {Check,Harness} from '../harness';
@@ -146,7 +147,12 @@ async function facetStep(h:Harness,shot:(name:string)=>Promise<void>,library:Cat
  if(await h.js<boolean>("!!Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Clear all')"))await buttonByText(h,'Clear all');
  await h.js<void>("document.querySelector('[data-testid=browser-presets]').open=true");
  const started=performance.now();
- if(!await h.click(`[data-preset-id="builtin-${kind}"]`))throw new Error(`No preset builtin-${kind}`);
+ // One column of this field: clear the levels and add it (single fields are the field row of the view panel).
+ await h.js<void>("document.querySelector('[data-testid=hierarchy-editor]').open=true");
+ if(await h.js<boolean>("!document.querySelector('[data-testid=hierarchy-clear]')?.disabled")&&!await h.click('[data-testid=hierarchy-clear]'))throw new Error('No Clear levels button');
+ if(!await h.click(`[data-block-kind="${kind}"]`))throw new Error(`No field ${kind}`);
+ // Close the view panel, as after choosing a view: the columns get their full height again.
+ await h.js<void>("document.querySelector('[data-testid=hierarchy-editor]').open=false");await h.settle();
  await h.waitFor(`${kind} facet rows`,async()=>(await h.js<boolean>(`(()=>{const c=document.querySelector('${column}');return !!c&&c.querySelector('h3')?.textContent.toLowerCase().includes(${JSON.stringify(kind)})&&c.querySelector('[role=listbox]')?.getAttribute('aria-busy')==='false'&&!!c.querySelector('[role=option]');})()`)),{timeoutMs:60000,interval:25,seen:()=>rowsOf(h,column)});
  const uiMs=Math.round(performance.now()-started);
  const rows=(await rowsOf(h,column)).filter(r=>r.key!=='missing');
@@ -173,7 +179,8 @@ interface Target {rel:string;name:string;why:string}
 /** Compares the preview panel's text with the metadata read in main. */
 function mismatches(truth:Metadata,seen:{details:Record<string,string>},language='en'):string[]{
  const bad:string[]=[],d=seen.details;
- if(truth.camera&&d.Camera!==truth.camera)bad.push(`Camera "${d.Camera??'(none)'}" != "${truth.camera}"`);
+ // The preview shows the name the camera is sold under ("NIKON Z fc" reads "Nikon Z fc").
+ if(truth.camera&&d.Camera!==cameraDisplayName(truth.camera))bad.push(`Camera "${d.Camera??'(none)'}" != "${cameraDisplayName(truth.camera)}" (${truth.camera})`);
  if(truth.date){const f=formatCaptureDateTime(truth.date,language as 'en'),text=[f.date,f.time,f.timezone].filter(Boolean).join(' ');if(d.Date!==text)bad.push(`Date "${d.Date??'(none)'}" != "${text}" (${truth.date})`);}
  const number=(text?:string)=>{if(!text)return NaN;const m=text.match(/^1\/(\d+(?:\.\d+)?)/);if(m)return 1/Number(m[1]);const n=text.match(/-?\d+(?:\.\d+)?/);return n?Number(n[0]):NaN;};
  const near=(shown:string|undefined,wanted:number|undefined,label:string)=>{if(wanted===undefined||!(wanted>0))return;const n=number(shown);if(!(Math.abs(n-wanted)/wanted<=.01))bad.push(`${label} "${shown??'(none)'}" != ${wanted}`);};
@@ -278,7 +285,7 @@ async function realDriveRun(h:Harness,drive:RealDrive,ordinal:number){
    blocked.push(action.type);return false;
   };
   const info=await volumeInfo(volume);if(!info.available||!info.volumeId)throw new Error(`${volume} cannot be identified: ${info.detail}`);
-  hooks.mutate(state=>{state.preferences={...state.preferences,destinations:[volume],destinationIds:[info.volumeId!],basePath:base,copyMode:'single',automatic:false,mediaLayout:'flat'} as Preferences;});
+  hooks.mutate(state=>{state.preferences={...state.preferences,destinations:[path.join(volume,base)],destinationIds:[info.volumeId!],copyMode:'single',automatic:false,mediaLayout:'flat'} as Preferences;});
   results.configured={destination:volume,volumeId:info.volumeId,basePath:base,copyMode:'single',automatic:false,mediaLayout:'flat'};
   await h.action({type:'refresh'});
   let library!:CatalogLibrary;const registered=Date.now();
@@ -312,7 +319,11 @@ async function realDriveRun(h:Harness,drive:RealDrive,ordinal:number){
   say(`${label}: browser shows ${everything.total} files (Files column ${shownTotal}); Node counted ${listing.media.length} media of ${listing.files} files`);
   if(everything.total===0)throw new Error('The browser shows 0 files');
   if(everything.total<listing.media.length*.8)throw new Error(`The browser shows ${everything.total} files but ${listing.media.length} media files are on the drive`);
-  if(shownTotal!==everything.total)throw new Error(`The Files column says ${shownTotal} but the catalog total is ${everything.total}`);
+  // The Files column counts a RAW and the JPEG or HEIF taken with it once while RAW + JPEG is on (the default).
+  const combinePairs=await h.js<boolean>("document.querySelector('.browser-toggle')?.getAttribute('aria-pressed')==='true'");
+  const shown=combinePairs?await ipc<CatalogPage>(h,'catalogQuery',{libraryId:library.libraryId,filters:[],sort:{field:'name',direction:'asc'},limit:1,combinePairs} satisfies CatalogQuery):everything;
+  results.pairing={combinePairs,browserShownTotal:shown.total};
+  if(shownTotal!==shown.total)throw new Error(`The Files column says ${shownTotal} but the catalog total is ${shown.total}${combinePairs?' with RAW + JPEG combined':''}`);
   await save();
 
   // 5. Facets: camera, date, format.
@@ -334,7 +345,7 @@ async function realDriveRun(h:Harness,drive:RealDrive,ordinal:number){
    const largest=[...rows].sort((a,b)=>(b.count??0)-(a.count??0))[0]!;
    if(depth===0)timings.folderColumnMs=Math.round(performance.now()-folderStart);
    await clickRow(h,column,largest.key);
-   const expected=(await ipc<CatalogPage>(h,'catalogQuery',{libraryId:library.libraryId,filters:[],parentPath:largest.key,sort:{field:'name',direction:'asc'},limit:1} satisfies CatalogQuery)).total;
+   const expected=(await ipc<CatalogPage>(h,'catalogQuery',{libraryId:library.libraryId,filters:[],parentPath:largest.key,sort:{field:'name',direction:'asc'},limit:1,...(combinePairs?{combinePairs}:{})} satisfies CatalogQuery)).total;
    await h.waitFor(`Files of folder ${largest.key} = ${expected}`,async()=>!(await filesBusy(h))&&await filesTotal(h)===expected,{timeoutMs:60000,interval:100,seen:async()=>({files:await filesTotal(h),expected})});
    trail.push({depth,folder:largest.key,count:largest.count,filesShown:await filesTotal(h),filesExpected:expected});
    await shot(`folders-level-${depth+1}`);
@@ -379,7 +390,7 @@ async function realDriveRun(h:Harness,drive:RealDrive,ordinal:number){
  finally{
   results.blockedActions=blocked;
   // Restore the fixture configuration so no later check could touch the drive.
-  try{hooks.mutate(state=>{state.preferences={...state.preferences,destinations:original.destinations,destinationIds:original.destinationIds,basePath:original.basePath,copyMode:original.copyMode,automatic:original.automatic,mediaLayout:original.mediaLayout};});await h.action({type:'refresh'});}catch(error){say(`could not restore the fixture configuration: ${String(error)}`);}
+  try{hooks.mutate(state=>{state.preferences={...state.preferences,destinations:original.destinations,destinationIds:original.destinationIds,videoDestinations:original.videoDestinations,videoDestinationIds:original.videoDestinationIds,copyMode:original.copyMode,automatic:original.automatic,mediaLayout:original.mediaLayout};});await h.action({type:'refresh'});}catch(error){say(`could not restore the fixture configuration: ${String(error)}`);}
   hooks.beforeAction=undefined;
  }
  // 9. The witness again, success or failure.

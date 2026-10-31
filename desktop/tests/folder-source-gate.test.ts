@@ -9,7 +9,7 @@ import {defaultPreferences,normalizePreferences} from '../preferences';
 import {jobPreferences} from '../settings-lock';
 import type {AppState} from '../shared';
 
-const state=(extra:Partial<AppState['preferences']>={}):AppState=>({preferences:{...defaultPreferences,destinations:['/Volumes/A'],...extra},sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()} as AppState);
+const state=(extra:Partial<AppState['preferences']>={}):AppState=>({preferences:{...defaultPreferences,destinations:['/Volumes/A/photobackup'],videoDestinations:['/Volumes/A/videobackup'],...extra},sources:[],jobs:[],history:[],platform:'darwin',organizeOptions:freshOrganizeOptions()} as AppState);
 const html=(node:React.ReactElement)=>renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:node}));
 const desk=(value:AppState)=>html(createElement(ImportDesk,{state:value,act:()=>{},inspect:()=>{},onOrganization:()=>{},onSettings:()=>{}}));
 const choose=(markup:string)=>markup.match(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Add folder…/)![0];
