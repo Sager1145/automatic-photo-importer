@@ -1020,6 +1020,23 @@ Copy latest log path|拷贝最新日志路径|拷貝最新記錄檔路徑|最新
 Export logs…|导出日志…|匯出記錄檔…|ログを書き出す…
 Log size: {size}|日志大小：{size}|記錄檔大小：{size}|ログのサイズ：{size}
 Logs stay on this Mac. They never include file contents or recovery keys.|日志只保存在这台 Mac 上，不含文件内容或恢复密钥。|記錄檔只保存在這台 Mac 上，不含檔案內容或復原金鑰。|ログはこの Mac にのみ保存され、ファイルの内容や復元キーは含まれません。
+Checking what this job left…|正在检查此任务留下的内容…|正在檢查此工作留下的內容…|このジョブが残したものを確認中…
+This deletes {count} files ({size}) that this job made.|这将删除此任务创建的 {count} 个文件（{size}）。|這將刪除此工作建立的 {count} 個檔案（{size}）。|このジョブが作成したファイル {count} 件（{size}）を削除します。
+This job left nothing to clean up.|此任务没有留下需要清理的内容。|此工作沒有留下需要清理的內容。|このジョブにはクリーンアップするものが残っていません。
+Unfinished copies at the destination|目标位置的未完成副本|目的地中的未完成副本|保存先の未完了のコピー
+Staged copies in the records folder|记录文件夹中的暂存副本|記錄資料夾中的暫存副本|記録フォルダーの作業用コピー
+Organization scratch files|整理用临时文件|整理用暫存檔案|整理用の一時ファイル
+Camera temporary folders|相机临时文件夹|相機暫存資料夾|カメラの一時フォルダー
+Copy receipts closed|关闭的复制凭据|關閉的複製收據|閉じるコピー記録
+{count} complete copies whose card file changed are kept ({size}).|保留 {count} 个存储卡文件已更改的完整副本（{size}）。|保留 {count} 個記憶卡檔案已變更的完整副本（{size}）。|カードのファイルが変わった完全なコピー {count} 件は保持します（{size}）。
+Clean up what this job left?|清理此任务留下的内容？|清理此工作留下的內容？|このジョブが残したものをクリーンアップしますか？
+Delete leftovers|删除残留文件|刪除殘留檔案|残りのファイルを削除
+Only files this job made are removed. Verified copies, the originals and files of other jobs are never touched.|只会删除此任务创建的文件。已验证的副本、原文件和其他任务的文件都不会被改动。|只會刪除此工作建立的檔案。已驗證的副本、原始檔案和其他工作的檔案都不會被變動。|このジョブが作成したファイルだけを削除します。検証済みのコピー、元のファイル、ほかのジョブのファイルには触れません。
+Afterwards this organization can't be continued here. Its moves stay recorded in Organization recovery, where you can resume or undo them.|之后无法在此继续此整理。已完成的移动仍记录在“整理恢复”中，可在那里继续或撤销。|之後無法在此繼續此整理。已完成的移動仍記錄在「整理復原」中，可在那裡繼續或復原。|この後、ここから整理を続けることはできません。移動の記録は「整理の復元」に残り、そこで再開または取り消しができます。
+Afterwards this job is stopped. Importing again starts over; files already verified aren't copied again.|之后此任务将停止。再次导入会重新开始；已验证的文件不会再次复制。|之後此工作將停止。再次匯入會重新開始；已驗證的檔案不會再次複製。|この後、このジョブは停止します。もう一度インポートすると最初からやり直しますが、検証済みのファイルは再コピーしません。
+Locked while an import, organization or review is running or queued.|有导入、整理或审核正在运行或排队时锁定。|有匯入、整理或審核正在執行或排隊時鎖定。|インポート、整理、確認が実行中または待機中のあいだはロックされます。
+Remove the partial copies and temporary files this job left|删除此任务留下的未完成副本和临时文件|刪除此工作留下的未完成副本和暫存檔案|このジョブが残した未完了のコピーと一時ファイルを削除
+Cleaning up…|正在清理…|正在清理…|クリーンアップ中…
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
 for (const row of [rows, settingsTranslationRows, driveFormatTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
