@@ -22,3 +22,11 @@ test('native camera protocol stages only into its own temporary folder and abort
     assert.equal((await stat(scratch)).isDirectory(),true);
   }finally{closeCameraBridge();if(prior===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=prior;await rm(scratch,{recursive:true,force:true});}
 });
+
+test('a USB camera reports its card slots, and its capacity is their sum', async () => {
+  const { cameraCapacity } = await import('../platform/camera-bridge');
+  assert.deepEqual(cameraCapacity([{name:'Slot 1',total:100,free:40},{name:'Slot 2',total:100,free:60}]), {storages:[{name:'Slot 1',total:100,free:40},{name:'Slot 2',total:100,free:60}],total:200,free:100});
+  // One slot without figures: the slots are still listed, but no partial sum is shown as the camera's capacity.
+  assert.deepEqual(cameraCapacity([{name:'Slot 1',total:100,free:40},{name:'Slot 2'}]), {storages:[{name:'Slot 1',total:100,free:40},{name:'Slot 2',total:undefined,free:undefined}],total:undefined,free:undefined});
+  assert.deepEqual(cameraCapacity(undefined), {});
+});

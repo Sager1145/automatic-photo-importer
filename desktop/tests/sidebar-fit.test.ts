@@ -34,3 +34,12 @@ test('fractional measurements round the width up, so the line that set it fits',
  const fit=sidebarFit({lines:[{natural:120.3,available:100,chrome:80}],chrome:60,minimum:190,maximum:360,current:180});
  assert.equal(fit.width,201);assert.deepEqual(fit.compact,[false]);
 });
+
+test('while the same drives are listed the sidebar does not shrink, so changing figures never move the page',()=>{
+ // Free space ticked from "470.0 GB" to "469.8 GB": the text is a little narrower, the width stays.
+ assert.equal(sidebarFit({lines:[{natural:178,available:180}],chrome:90,minimum:190,maximum:320,current:270,floor:270}).width,270);
+ // A line that really needs more room still grows it.
+ assert.equal(sidebarFit({lines:[{natural:190,available:180}],chrome:90,minimum:190,maximum:320,current:270,floor:270}).width,280);
+ // The floor never exceeds the window's limit.
+ assert.equal(sidebarFit({lines:[{natural:100,available:180}],chrome:90,minimum:190,maximum:240,current:270,floor:270}).width,240);
+});

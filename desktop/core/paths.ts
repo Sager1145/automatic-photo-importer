@@ -87,13 +87,17 @@ export async function isOwnRealpath(file:string,real?:string,ops:RealpathOps=rea
 export async function rootUnchanged(root:string,expected:string):Promise<void> {
   if(await identity(root)!==expected || !await isOwnRealpath(root)) throw new Error(`Destination identity changed; scan again: ${root}`);
 }
-/** Strict directory durability: unsupported filesystems must not acknowledge a backup. */
+/** Windows has no directory flush (fsync on a folder handle fails with EPERM). Its folder entries are written by
+ * the filesystem itself; file contents are still synced before they are published. */
+export const DIRECTORY_SYNC_SUPPORTED=process.platform!=='win32';
+/** Strict directory durability: unsupported filesystems must not acknowledge a backup. On Windows the folder is
+ * still opened and checked, but not flushed. */
 export async function syncDirectory(folder:string):Promise<void> {
   let handle:Awaited<ReturnType<typeof fs.open>>|undefined;
   try {
     handle=await fs.open(folder,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
     if(!(await handle.stat()).isDirectory())throw new Error(`Unsafe directory: ${folder}`);
-    await handle.sync();
+    if(DIRECTORY_SYNC_SUPPORTED)await handle.sync();
   } catch(error){throw Object.assign(new Error(`Directory synchronization failed: ${folder}: ${error instanceof Error?error.message:String(error)}`,{cause:error}),{code:code(error)});}
   finally {await handle?.close();}
 }
@@ -153,7 +157,9 @@ export async function syncParents(file:string,root:string):Promise<void> {
     if(folder===root)break;if(!beneath(folder,root))throw new Error('Unsafe synchronization scope');
   }
 }
-export async function syncFile(file:string):Promise<void> {const handle=await regularHandle(file);try{await handle.sync();}finally{await handle.close();}}
+/** Windows flushes a file only through a handle that may write (FlushFileBuffers), so there the file is reopened
+ * for writing; nothing is written through it. */
+export async function syncFile(file:string):Promise<void> {const handle=await regularHandle(file,DIRECTORY_SYNC_SUPPORTED?fileFlags:constants.O_RDWR);try{await handle.sync();}finally{await handle.close();}}
 /** Check every existing path component, including ancestors of a missing leaf. */
 export async function contained(file:string,root:string):Promise<void> {
   if(!beneath(path.resolve(file),root)) throw new Error(`Unsafe path outside selected folder: ${file}`);
@@ -215,9 +221,9 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
   await contained(file,root);
 }
 export const fileFlags=constants.O_RDONLY | (constants.O_NOFOLLOW??0);
-export async function regularHandle(file:string) {
+export async function regularHandle(file:string,flags:number=fileFlags) {
   if(!(await fs.lstat(file)).isFile()) throw new Error(`Unsafe non-regular source: ${file}`);
-  const handle=await fs.open(file,fileFlags);
+  const handle=await fs.open(file,flags);
   try {
     const stat=await handle.stat({bigint:true});
     if(!stat.isFile()) throw new Error(`Unsafe non-regular source: ${file}`);

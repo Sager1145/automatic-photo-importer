@@ -224,7 +224,7 @@ async function storeRecord(folder:string,base:string,baseStat:BigIntStats):Promi
  if(!stat.isFile()||stat.size>BigInt(LINE_CAPS.header))throw new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);
  const handle=await openRegular(file);let value:unknown;
  try{try{value=JSON.parse(await handle.readFile('utf8'));}catch{throw new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);}}finally{await handle.close();}
- let record:Record<string,unknown>;try{record=openV5('store',value);}catch{throw new Error(`${folder} belongs to another Mac or is damaged; its records cannot be used here`);}
+ let record:Record<string,unknown>;try{record=openV5('store',value);}catch{throw new Error(`${folder} belongs to another computer or is damaged; its records cannot be used here`);}
  const recorded=typeof record.baseIdentity==='string'?record.baseIdentity.split(':')[1]:undefined;
  // A drive mounted again may get another device number (and another name); the folder is the same inode.
  if(recorded!==String(baseStat.ino))throw new Error(`${folder} was copied from another folder; its records are not used. Use First Aid.`);

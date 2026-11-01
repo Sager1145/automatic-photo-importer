@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -113,7 +114,7 @@ async function interrupted(t:test.TestContext,when:'before'|'after'){
  const [job]=await core.getOrganizationRecovery(root);
  const script=path.join(root,'crash.mjs'),module=path.resolve('desktop/core/index.ts');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {deleteOrganizationRecovery,configureOrganizationRecovery} from ${JSON.stringify(module)};
+ import {deleteOrganizationRecovery,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(module).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const rename=filesystem.rename,unlink=filesystem.unlink;
  filesystem.rename=async(...args)=>{if(${JSON.stringify(when)}==='before'&&String(args[1]).includes('deleting-'))process.exit(91);return rename(...args);};

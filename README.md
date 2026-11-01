@@ -105,7 +105,7 @@ npm run codex:qa       # Leave a fixture app open for UI checks
 - [Architecture and features](docs/architecture-and-features.md) (in Chinese)
 - [Organization and recovery](docs/organization-recovery.md) · [Remove duplicates](docs/remove-duplicates.md)
 - [Scan performance](docs/scan-performance.md) · [Verification](docs/verification.md)
-- [Shared desktop implementation](docs/multiplatform-migration.md)
+- [Shared desktop implementation](docs/multiplatform-migration.md) · [Cross-platform policy](docs/cross-platform.md)
 - [Icon](docs/icon.md) · [Research](docs/research.md) · [Earlier SwiftUI app](docs/legacy-implementation.md)
 
 ---
@@ -205,7 +205,7 @@ npm run codex:qa       # 保持测试应用打开以检查界面
 - [实际功能、接口与架构审查](docs/architecture-and-features.md)
 - [整理与恢复](docs/organization-recovery.md) · [移除重复文件](docs/remove-duplicates.md)（英文）
 - [扫描性能](docs/scan-performance.md) · [验证](docs/verification.md)（英文）
-- [共享桌面实现](docs/multiplatform-migration.md)（英文）
+- [共享桌面实现](docs/multiplatform-migration.md) · [跨平台规范](docs/cross-platform.md)（英文）
 - [图标](docs/icon.md) · [调研](docs/research.md) · [早期 SwiftUI 应用](docs/legacy-implementation.md)（英文）
 
 ---
@@ -305,7 +305,7 @@ npm run codex:qa       # 保持測試 App 開啟以檢查介面
 - [實際功能、介面與架構審查](docs/architecture-and-features.md)（簡體中文）
 - [整理與復原](docs/organization-recovery.md) · [移除重複檔案](docs/remove-duplicates.md)（英文）
 - [掃描效能](docs/scan-performance.md) · [驗證](docs/verification.md)（英文）
-- [共用桌面實作](docs/multiplatform-migration.md)（英文）
+- [共用桌面實作](docs/multiplatform-migration.md) · [跨平台規範](docs/cross-platform.md)（英文）
 - [圖示](docs/icon.md) · [研究](docs/research.md) · [早期 SwiftUI App](docs/legacy-implementation.md)（英文）
 
 ---
@@ -405,5 +405,5 @@ npm run codex:qa       # UI 確認のためテスト用アプリを開いたま�
 - [機能・インターフェース・アーキテクチャのレビュー](docs/architecture-and-features.md)（中国語）
 - [整理と復元](docs/organization-recovery.md) · [重複ファイルの削除](docs/remove-duplicates.md)（英語）
 - [スキャン性能](docs/scan-performance.md) · [検証](docs/verification.md)（英語）
-- [共通デスクトップ実装](docs/multiplatform-migration.md)（英語）
+- [共通デスクトップ実装](docs/multiplatform-migration.md) · [クロスプラットフォーム方針](docs/cross-platform.md)（英語）
 - [アイコン](docs/icon.md) · [調査](docs/research.md) · [以前の SwiftUI アプリ](docs/legacy-implementation.md)（英語）

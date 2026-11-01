@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Source } from '../shared';
 import { beneath } from '../core/paths';
+import { windowsCameraBridgeArgs } from './windows-camera';
 
-interface Camera {name:string;cameraID:string;}
+interface Camera {name:string;cameraID:string;storages?:unknown;}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
@@ -31,10 +32,16 @@ export async function nativeCameraHelperPath():Promise<string|undefined> {
   for(const filename of candidates.filter(Boolean))try{await access(filename,constants.X_OK);return filename;}catch{}
   return undefined;
 }
+/** The camera helper to run: the macOS ImageCaptureCore helper, or on Windows the Portable Devices bridge in
+ * PowerShell. Both speak the same JSONL protocol. Other platforms list cameras through their mounted storage. */
+async function bridgeLaunch():Promise<{command:string;args:string[]}|undefined> {
+  if(process.platform==='win32')return {command:'powershell.exe',args:windowsCameraBridgeArgs()};
+  const executable=await nativeCameraHelperPath();return executable?{command:executable,args:[]}:undefined;
+}
 async function startBridge():Promise<boolean> {
   if(child && child.exitCode===null && !child.killed)return true;
-  const executable=await nativeCameraHelperPath();if(!executable)return false;
-  const current=spawn(executable,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});child=current;stdout='';stderr='';
+  const launch=await bridgeLaunch();if(!launch)return false;
+  const current=spawn(launch.command,launch.args,{stdio:['pipe','pipe','pipe'],windowsHide:true});child=current;stdout='';stderr='';
   current.stdout.setEncoding('utf8');
   current.stdout.on('data',(text:string)=>{
     if(child!==current)return;stdout+=text;
@@ -61,7 +68,7 @@ async function ensureBridge():Promise<boolean> {
   try{return await starting;}finally{starting=undefined;}
 }
 async function request(command:Record<string,unknown>, timeout:number, progress?:(completed:number,total:number)=>void, signal?:AbortSignal):Promise<unknown> {
-  if(!await ensureBridge())throw new Error('The macOS native camera helper is unavailable.');
+  if(!await ensureBridge())throw new Error('The native camera helper is unavailable.');
   signal?.throwIfAborted();
   const current=child!;const id=randomUUID();
   return new Promise((resolve,reject)=>{
@@ -70,12 +77,22 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
     current.stdin.write(`${JSON.stringify({...command,id})}\n`,error=>{if(error){clearTimeout(timer);pending.delete(id);reject(error);}});
   });
 }
+const size=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
+/** A camera's storages as the helper reported them, and its capacity: their sums, when every storage reported one. */
+export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'free'> {
+  if(!Array.isArray(value))return {};
+  const storages=value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({name:String(item.name),total:size(item.total),free:size(item.free)}));
+  if(!storages.length)return {};
+  const sum=(key:'total'|'free')=>storages.every(item=>item[key]!==undefined)?storages.reduce((all,item)=>all+item[key]!,0):undefined;
+  return {storages,total:sum('total'),free:sum('free')};
+}
 export async function cameraSources():Promise<Source[]> {
   if(staging)return cached;
-  if(!await nativeCameraHelperPath())return [];
-  const result=await request({command:'list'},10000);
+  if(!await bridgeLaunch())return [];
+  // The first Windows request also compiles the bridge's copy helper, so it gets longer.
+  const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera'}));
+  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...cameraCapacity(camera.storages)}));
   return cached;
 }
 export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {

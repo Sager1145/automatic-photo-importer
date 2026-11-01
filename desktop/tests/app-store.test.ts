@@ -59,7 +59,7 @@ test('a store whose record another Mac sealed, or that was copied from another f
  await fs.cp(path.join(one,'Photo Importer Data'),path.join(two,'Photo Importer Data'),{recursive:true});
  await assert.rejects(store.storesFor(two),/copied from another folder/);
  await fs.writeFile(path.join(one,'Photo Importer Data','store.json'),JSON.stringify({v:5,kind:'store',base:one,seal:'0'.repeat(64)}));
- await assert.rejects(store.storesFor(one),/another Mac or is damaged/);
+ await assert.rejects(store.storesFor(one),/another computer or is damaged/);
 });
 
 test('store unchanged: replacing the folder with another one is noticed',async t=>{

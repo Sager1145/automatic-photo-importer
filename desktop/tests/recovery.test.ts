@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -42,8 +43,8 @@ async function crash(t:test.TestContext,when:'publish'|'stash'|'copy') {
  const f=await fixture(t);const script=path.join(f.root,'crash.mjs');
  const module=path.resolve('desktop/core/index.ts'); const records=path.resolve('desktop/tests/fixtures/records.ts');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {plan,configureOrganizationRecovery} from ${JSON.stringify(module)};
- import {organizeByCopy} from ${JSON.stringify(records)};
+ import {plan,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(module).href)};
+ import {organizeByCopy} from ${JSON.stringify(pathToFileURL(records).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const original=${JSON.stringify(f.original)},root=${JSON.stringify(f.root)};
  const originalRename=filesystem.rename,originalLink=filesystem.link;
@@ -206,7 +207,7 @@ for(const when of ['intent','unlink'] as const)test(`finalization resumes a fres
  const {root}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id),script=path.join(root,'finalize-crash.mjs');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {configureOrganizationRecovery,finalizeOrganization} from ${JSON.stringify(path.resolve('desktop/core/index.ts'))};
+ import {configureOrganizationRecovery,finalizeOrganization} from ${JSON.stringify(pathToFileURL(path.resolve('desktop/core/index.ts')).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const unlink=filesystem.unlink;filesystem.unlink=async(...args)=>{if(String(args[0])===${JSON.stringify(saved)}){if(${JSON.stringify(when)}==='intent')process.exit(92);const result=await unlink(...args);process.exit(92);return result;}return unlink(...args);};
  await finalizeOrganization(${JSON.stringify(root)},${JSON.stringify(job!.id)});process.exit(0);`);

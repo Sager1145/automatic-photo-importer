@@ -381,14 +381,16 @@ function SidebarCapacity({ total, free, unavailable, status, activity, compact =
 
 // The sidebar widens to fit "342.9 GB free of 2.00 TB" when the window has room; a line that
 // still does not fit switches to "342.9 GB free". Measured after every render and on resize,
-// and applied to the DOM directly so measuring never re-renders.
+// and applied to the DOM directly so measuring never re-renders. While the same drives are listed it
+// only grows: progress ticks change free space every second, and shrinking back would shift the page.
 function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
-  const fit = useCallback(() => {
+  const held = useRef<{ drives: string; width: number } | undefined>(undefined);
+  const fit = useCallback((event?: Event) => {
     const aside = sidebar.current; if (!aside) return;
     const root = document.documentElement, texts = [...aside.querySelectorAll<HTMLElement>('.sidebar-capacity-text')].filter(text => text.querySelector('.capacity-full'));
     // Drive names count too, measured on one line, so a name like "Fixture card 2" does not wrap when there is room.
     const names = [...aside.querySelectorAll<HTMLElement>('.sidebar-drive .sidebar-item>span')];
-    if (!texts.length && !names.length) { root.style.removeProperty('--sidebar-width'); return; }
+    if (!texts.length && !names.length) { held.current = undefined; root.style.removeProperty('--sidebar-width'); return; }
     const current = aside.getBoundingClientRect().width;
     const capacity = texts.map(text => ({ natural: text.querySelector<HTMLElement>('.capacity-full')!.getBoundingClientRect().width, available: text.clientWidth, chrome: current - text.clientWidth }));
     // Read every slot, then set every name on one line and read them all, then restore: two layouts, however many drives.
@@ -398,11 +400,15 @@ function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
     names.forEach(name => name.style.removeProperty('white-space'));
     const named = names.map((_, index) => ({ natural: widths[index]!, available: slots[index]!, chrome: current - slots[index]! }));
     const lines = [...capacity, ...named];
-    const result = sidebarFit({ lines, chrome: current - Math.min(...lines.map(line => line.available)), minimum: 190, maximum: Math.min(360, window.innerWidth * .28), current });
+    const drives = [...names.map(name => name.textContent), texts.length].join('\n');
+    // A resize, or a drive that comes or goes, fits from scratch.
+    const floor = !event && held.current?.drives === drives ? held.current.width : undefined;
+    const result = sidebarFit({ lines, chrome: current - Math.min(...lines.map(line => line.available)), minimum: 190, maximum: Math.min(360, window.innerWidth * .28), current, floor });
+    held.current = { drives, width: result.width };
     root.style.setProperty('--sidebar-width', `${result.width}px`);
     texts.forEach((text, index) => text.classList.toggle('is-compact', result.compact[index]!));
   }, [sidebar]);
-  useLayoutEffect(fit);
+  useLayoutEffect(() => fit());
   useEffect(() => { window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit); }, [fit]);
 }
 
@@ -430,7 +436,7 @@ export function SidebarSources({ state, onOpen, errors, onErrors, act }: { state
       const working = !!job && (isRunning(job) || job.phase === 'queued'), use = capacityUse(source.total, source.free);
       // An idle row is one line shorter: its activity joins the free-space line.
       const idle = !working && !scanning && use.known && !use.low && !sharedCapacity;
-      return <li key={source.id} data-source-id={source.id} className={`sidebar-drive${idle ? ' is-idle' : ''}${sourceSelected(source) ? '' : ' sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={source.path || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}{act && ejectable(source) && state.sources.some(item => item.id === source.id) && <EjectButton source={source} act={act} busy={sourceInUse(state, source)} ejecting={!!state.ejecting?.includes(source.id)} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
+      return <li key={source.id} data-source-id={source.id} className={`sidebar-drive${idle ? ' is-idle' : ''}${sourceSelected(source) ? '' : ' sidebar-item-off'}`} data-testid="sidebar-source"><div className="sidebar-row"><button type="button" className="sidebar-item" title={sourcePlace(source) || source.name} onClick={() => onOpen(source.id)}><Icon icon={icon} size={16} /><span>{source.name}</span></button>{act && source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}{act && ejectable(source) && state.sources.some(item => item.id === source.id) && <EjectButton source={source} act={act} busy={sourceInUse(state, source)} ejecting={!!state.ejecting?.includes(source.id)} />}<SidebarErrors errors={errors} target={{ sourceId: source.id, name: source.name }} onErrors={onErrors} /></div>
         <SidebarCapacity total={sharedCapacity ? undefined : source.total} free={sharedCapacity ? undefined : source.free} unavailable={sharedCapacity ? t("Same drive as {name}", { name: drive!.leader.name }) : source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} status={<MiniSteps states={steps} kinds={sourceStepKinds(job)} paused={!!job && jobPaused(job)} />} activity={state.driveActivity?.[source.id]} compact={idle} /></li>;
     })}</ul> : <p className="sidebar-empty">{t("No sources connected")}</p>}
   </section>;
@@ -1221,7 +1227,7 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
       const returning = back.includes(drive.id);
       const history = state.preferences.deviceHistory?.[drive.id];
       return <li key={drive.id} data-source-id={drive.id} className={unplugged ? 'is-unplugged' : ''}>
-        <div className="new-drive-identity"><span className={`source-device ${drive.camera || drive.transport === 'camera' ? '' : 'not-camera'}`}><Icon icon={drive.camera || drive.transport === 'camera' ? Camera : HardDrive} size={21} /></span><div><h3>{returning ? drive.name : t("Import from {name}?", { name: drive.name })}</h3><small>{[drive.total ? bytes(drive.total) : '', drive.path].filter(Boolean).join(' · ')}</small></div>{unplugged && <span className="unplugged-badge" data-testid="drive-unplugged"><Icon icon={Usb} size={13} />{t("Unplugged")}</span>}</div>
+        <div className="new-drive-identity"><span className={`source-device ${drive.camera || drive.transport === 'camera' ? '' : 'not-camera'}`}><Icon icon={drive.camera || drive.transport === 'camera' ? Camera : HardDrive} size={21} /></span><div><h3>{returning ? drive.name : t("Import from {name}?", { name: drive.name })}</h3><small>{[drive.total ? bytes(drive.total) : '', sourcePlace(drive)].filter(Boolean).join(' · ')}</small></div>{unplugged && <span className="unplugged-badge" data-testid="drive-unplugged"><Icon icon={Usb} size={13} />{t("Unplugged")}</span>}</div>
         {unplugged ? <p className="new-drive-evidence">{t("Reconnect it to choose.")}</p> : <p className={`new-drive-evidence ${drive.camera || drive.transport === 'camera' ? 'camera' : ''}`}><Icon icon={drive.camera || drive.transport === 'camera' ? CheckCircle2 : Info} size={14} />{drive.transport === 'camera' ? t("Connected as a camera over USB.") : drive.camera ? t("Camera folders (DCIM) found.") : t("No camera folders (DCIM) found.")}</p>}
         {(history?.lastImportVerified || history?.lastScanCompleted) && <ul className="drive-history" data-testid="drive-history">{history.lastImportVerified && <li><Icon icon={ShieldCheck} size={13} />{t("Last import verified {date}", { date: formatWhen(history.lastImportVerified, language) })}</li>}{history.lastScanCompleted && <li><Icon icon={ScanLine} size={13} />{t("Last scan finished {date}", { date: formatWhen(history.lastScanCompleted, language) })}</li>}</ul>}
         {!unplugged && hints.length > 0 && <ul className="new-drive-hints">{hints.map(hint => <li key={`${hint.evidence}-${hint.name}`}>{hint.name}</li>)}</ul>}
@@ -1344,6 +1350,9 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
   </article>;
 }
 /** macOS calls its file manager Finder. */
+/** Where a source lives, as people read paths. A USB camera without a drive letter (MTP/PTP) has only an internal
+ * device id, so it reads as the camera's name under "USB" instead. */
+export const sourcePlace = (source: { path: string; name: string; transport?: string }) => source.transport === 'camera' ? (/Win/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? `USB\\${source.name}` : `USB/${source.name}`) : source.path;
 export const revealLabel = () => /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? "Show in Finder" : "Show in file manager";
 /** Opens the Finder (file manager) at a source, destination, folder or file the app already works with. */
 export function RevealButton({ path, act, name }: { path: string; act: Dispatch; name?: string }) {
@@ -1541,7 +1550,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
     <details className="source-disclosure" id={detailsId} open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
       <summary><div className="source-compact-capacity">{drive && !drive.showsCapacity ? <SharedCapacityNote drive={drive} /> : <CapacityBar total={source.total} free={source.free} inventory={inventory} scanning={scanning} unavailable={source.transport === 'camera' ? t("Capacity unavailable over USB") : t("Capacity unavailable")} />}<DriveActivityMeter activity={activity} /></div></summary>
       <div className="source-expanded-details">
-        <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{source.path || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div></dl>
+        <dl className="source-location"><div><dt>{t("Drive path")}</dt><dd>{sourcePlace(source) || t("Connected USB camera")}{source.path && source.transport !== 'camera' && <RevealButton path={source.path} act={act} name={source.name} />}</dd></div>{source.storages?.map(storage => <div key={storage.name}><dt>{storage.name}</dt><dd>{storage.total !== undefined && storage.free !== undefined ? t("{free} free of {total}", { free: bytes(storage.free), total: bytes(storage.total) }) : t("Capacity unavailable over USB")}</dd></div>)}</dl>
         {job?.detail && !active && job.phase !== 'error' && <p className="source-detail">{t(job.detail)}</p>}
         <SourceMediaSummary source={source} inventory={inventory} scanning={scanning} />
         {inventory && <SkippedFilesNotice inventory={inventory} />}

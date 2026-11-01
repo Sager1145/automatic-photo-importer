@@ -1,0 +1,5 @@
+{
+  "darwin": { "release": ["arm64"], "planned": [] },
+  "win32": { "release": ["x64"], "planned": ["arm64"] },
+  "linux": { "release": [], "planned": ["x64", "arm64"] }
+}

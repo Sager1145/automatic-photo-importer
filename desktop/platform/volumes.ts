@@ -40,8 +40,13 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
   for(const device of objects((data as any)?.blockdevices)) walk(device);
   return result;
 }
+/** An unlabeled drive reads like Explorer's: the device name with its letter, as "Sony DSC (D:)". */
+function windowsDriveName(v:Record<string,any>):string {
+  const letter=String(v.Path).replace(/\\+$/,''),device=String(v.FriendlyName??'').replace(/\s+USB Device$/i,'').trim();
+  return device?`${device} (${letter})`:v.Path;
+}
 export function parseWindowsVolumes(data:unknown):MountedVolume[] {
-  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || undefined,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
+  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || windowsDriveName(v),volumeId:v.VolumeId || undefined,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
 }
 function fsType(value:unknown):string|undefined {return typeof value==='string'&&value.trim()?value.trim().toLowerCase():undefined;}
 function finite(value:unknown):number|undefined {const n=Number(value); return value!==null && value!==undefined && value!=='' && Number.isFinite(n) && n>=0 ? n : undefined;}
@@ -85,7 +90,7 @@ async function linuxVolumes():Promise<MountedVolume[]> {
 }
 async function windowsVolumes():Promise<MountedVolume[]> {
   // This script is constant: no filesystem paths or other user input enter PowerShell code.
-  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[int]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
+  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[string]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
   const encoded=Buffer.from(script,'utf16le').toString('base64');
   const {stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],commandOptions);
   return parseWindowsVolumes(JSON.parse(stdout.replace(/^\uFEFF/,'')));

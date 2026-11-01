@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -55,7 +56,7 @@ for(const kind of ['rename','copy'] as const)for(const when of ['mid-copy','afte
  const script=path.join(f.root,'undo-crash.mjs');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
  import {syncBuiltinESMExports} from 'node:module';
- import {undoOrganization,configureOrganizationRecovery} from ${JSON.stringify(path.resolve('desktop/core/index.ts'))};
+ import {undoOrganization,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(path.resolve('desktop/core/index.ts')).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const to=${JSON.stringify(f.original)},from=${JSON.stringify(from)},when=${JSON.stringify(when)};
  const open=filesystem.open,unlink=filesystem.unlink;
@@ -238,7 +239,7 @@ test('a finalized organization cannot be undone',async t=>{
 for(const when of ['after-intent','after-link','after-rename'] as const)test(`a process killed ${when} resumes the move without losing the original`,async t=>{
  const f=await fixture(t),script=path.join(f.root,'crash.mjs'),module=path.resolve('desktop/core/index.ts');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(module)};
+ import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(module).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const original=${JSON.stringify(f.original)},destination=${JSON.stringify(f.destination())},root=${JSON.stringify(f.root)},when=${JSON.stringify(when)};
  const link=filesystem.link,unlink=filesystem.unlink,open=filesystem.open;
