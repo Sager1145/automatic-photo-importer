@@ -4,12 +4,14 @@
 // profile must supply what it needs; TypeScript and platform-parity.test.ts refuse a platform that skips one.
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { appleDoubleCleaner } from '../core/index';
+import { inventory } from '../core/inventory';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -25,6 +27,8 @@ export interface PlatformProfile {
   cameraPlace: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
+  /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
+  namesIgnoreCase: boolean;
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -80,6 +84,43 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.equal(sourcePlace({ name: 'Z f', path: 'camera://%3A%3A%7B20D04FE0%7D', transport: 'camera' }), profile.cameraPlace);
       assert.equal(sourcePlace({ name: 'Card', path: profile.volumes()[0]!.path, transport: 'storage' }), profile.volumes()[0]!.path);
     } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); }
+  },
+  'Mac system files: skipped on sources, and .DS_Store removed only as a plain file the system names .DS_Store': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-mac-files-')));
+    try {
+      const finder = Buffer.concat([Buffer.from([0, 0, 0, 1]), Buffer.from('Bud1'), Buffer.alloc(56)]);
+      const has = (file: string) => lstat(file).then(() => true, () => false);
+      // Source: on, a card's Finder files are not listed; off, they are (as system files).
+      const card = join(root, 'card', 'DCIM'); await mkdir(card, { recursive: true });
+      await writeFile(join(card, 'A.JPG'), 'jpeg'); await writeFile(join(card, '.DS_Store'), finder); await writeFile(join(card, '._A.JPG'), 'apple double');
+      assert.equal((await inventory(join(root, 'card'))).files.length, 1);
+      assert.equal((await inventory(join(root, 'card'), { keepMacFiles: true })).files.filter(file => file.system?.id === 'macos-system').length, 2);
+      // Destination: a lower-case name is the same file where names ignore case.
+      const library = join(root, 'library'), cleaner = appleDoubleCleaner(), placed = () => true;
+      const lower = join(library, 'lower'); await mkdir(lower, { recursive: true });
+      await writeFile(join(lower, 'A.JPG'), 'jpeg'); await writeFile(join(lower, '.ds_store'), finder);
+      await cleaner.besideFile(join(lower, 'A.JPG'), library, placed);
+      assert.equal(await has(join(lower, '.ds_store')), !profile.namesIgnoreCase, 'case rule');
+      const exact = join(library, 'exact'); await mkdir(exact);
+      await writeFile(join(exact, 'A.JPG'), 'jpeg'); await writeFile(join(exact, '.DS_Store'), finder);
+      await cleaner.besideFile(join(exact, 'A.JPG'), library, placed);
+      assert.equal(await has(join(exact, '.DS_Store')), false);
+      // This system's folder link named .DS_Store is never removed or entered.
+      const linked = join(library, 'linked'), target = join(root, 'target'); await mkdir(linked); await mkdir(target);
+      await writeFile(join(target, 'keep.txt'), 'keep'); await writeFile(join(linked, 'A.JPG'), 'jpeg');
+      await profile.link(target, join(linked, '.DS_Store'));
+      await cleaner.besideFile(join(linked, 'A.JPG'), library, placed);
+      assert.ok((await lstat(join(linked, '.DS_Store'))).isSymbolicLink(), 'the link stays');
+      assert.deepEqual(await readdir(target), ['keep.txt']);
+      // The app's own folders keep theirs.
+      const records = join(library, 'Photo Importer Data'); await mkdir(records);
+      await writeFile(join(records, 'A.JPG'), 'jpeg'); await writeFile(join(records, '.DS_Store'), finder);
+      await cleaner.besideFile(join(records, 'A.JPG'), library, placed);
+      assert.ok(await has(join(records, '.DS_Store')));
+      assert.equal(cleaner.report.dsStore, profile.namesIgnoreCase ? 2 : 1);
+      assert.ok(await has(join(card, '.DS_Store')), 'the source is never touched');
+    } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),

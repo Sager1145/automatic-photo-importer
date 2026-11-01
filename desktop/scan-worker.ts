@@ -9,7 +9,7 @@ import {setResourceLimits} from './resource-limits';
 // The user's CPU and memory limits, from the parent (this process has its own copy of the module).
 try{setResourceLimits(JSON.parse(process.env.IMPORTER_LIMITS??'{}'));}catch{/* Defaults. */}
 const source:Source=JSON.parse(process.argv[2]);
-const options: {unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault']}=JSON.parse(process.argv[3]??'{}');
+const options: {unknownRules?:Preferences['unknownRules'];unknownDefault?:Preferences['unknownDefault'];keepMacFiles?:boolean}=JSON.parse(process.argv[3]??'{}');
 const signal=new AbortController();
 // Only reads made here go back: the parent already holds what it sent. They go back as they are read
 // (each second, and before the scan ends, fails or stops), so a review started during the scan, or a scan stopped half way, keeps them.
@@ -31,7 +31,7 @@ async function scan(reuse:Listing|undefined,routing:[string,Metadata][],volume:M
   primeRouting(routing);
   const {listing,...result}=await inventory(source.path,{...options,reuse,onProgress:(files,bytes,top,file)=>process.parentPort.postMessage({type:'progress',files,bytes,file,top})},signal.signal);
   // The file table travels once, inside the inventory; the parent derives the listing's files from it (listingOf).
-  process.parentPort.postMessage({type:'inventory',inventory:result,...(listing?{listing:{backup:listing.backup,folders:listing.folders}}:{})});
+  process.parentPort.postMessage({type:'inventory',inventory:result,...(listing?{listing:{backup:listing.backup,...(listing.keepMacFiles?{keepMacFiles:true}:{}),folders:listing.folders}}:{})});
   await analyzeSourceCameras(source,result,file=>metadata(file,{details:false}),signal.signal,info=>process.parentPort.postMessage({type:'cameras',info}));
   clearInterval(timer);flush();
   await closeMetadata();process.parentPort.postMessage({type:'done'});

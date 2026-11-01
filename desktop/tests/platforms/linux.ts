@@ -14,4 +14,5 @@ export const linux: PlatformProfile = {
   navigatorPlatform: 'Linux x86_64',
   cameraPlace: 'USB/Z f',
   folderFlush: true,
+  namesIgnoreCase: false,
 };

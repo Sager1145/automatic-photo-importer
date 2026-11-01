@@ -121,7 +121,7 @@ export function placementExemption(file:string,roots:readonly {root:string}[]):s
     const parts=path.relative(root,file).split(path.sep),parents=parts.slice(0,-1);
     if(parts[0]===DRIVE_BACKUPS||parts[0]===PROBLEM_FILES_FOLDER)return parts[0];
     if(parents.includes(CONFLICTS_FOLDER))return CONFLICTS_FOLDER;
-    if(parts.some(ignoredName))return 'application or system files';
+    if(parts.some(part=>ignoredName(part)))return 'application or system files';
   }
   return undefined;
 }

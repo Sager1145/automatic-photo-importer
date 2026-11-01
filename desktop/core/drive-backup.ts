@@ -50,7 +50,7 @@ export async function driveFolder(root:string,drive:Drive):Promise<string> {
 /** Compare the drive's folder on one destination with the planned copies.
  * `known` lets allocation reuse these hashes: true is a verified copy, false
  * is a file the reviewed mirror moves away before copying. */
-export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[],resolve:(entry:PlanEntry)=>Promise<string>,index:DestinationIndex,signal?:AbortSignal,/** Files compared so far, files found so far (the walk finds more as it goes) and the file. */onProgress?:(compared:number,found:number,file:string)=>void):Promise<{removals:ReviewedRemoval[];known:Map<string,boolean>}> {
+export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[],resolve:(entry:PlanEntry)=>Promise<string>,index:DestinationIndex,signal?:AbortSignal,/** Files compared so far, files found so far (the walk finds more as it goes) and the file. */onProgress?:(compared:number,found:number,file:string)=>void,/** Mac system files are backed up, so they are compared too; otherwise they are left alone. */keepMacFiles=false):Promise<{removals:ReviewedRemoval[];known:Map<string,boolean>}> {
   let found=0,compared=0;
   const planned=new Map(pending.map(entry=>[pathKey(entry.destination),entry])),removals:ReviewedRemoval[]=[],known=new Map<string,boolean>();
   const base=path.join(root,DRIVE_BACKUPS,folder);await contained(base,root);
@@ -58,9 +58,9 @@ export async function mirrorChanges(root:string,folder:string,pending:PlanEntry[
     checkAbort(signal);
     let entries;
     try { entries=await fs.readdir(current,{withFileTypes:true}); } catch(error) { if(code(error)==='ENOENT') return; throw error; }
-    found+=entries.filter(entry=>entry.isFile()&&!ignoredName(entry.name)&&!(current===base&&entry.name===marker)).length;onProgress?.(compared,found,path.relative(base,current)||folder);
+    found+=entries.filter(entry=>entry.isFile()&&!ignoredName(entry.name,keepMacFiles)&&!(current===base&&entry.name===marker)).length;onProgress?.(compared,found,path.relative(base,current)||folder);
     for(const entry of entries) {
-      if(ignoredName(entry.name) || (current===base && entry.name===marker) || entry.isSymbolicLink()) continue;
+      if(ignoredName(entry.name,keepMacFiles) || (current===base && entry.name===marker) || entry.isSymbolicLink()) continue;
       const file=path.join(current,entry.name);await contained(file,root);
       if(entry.isDirectory()) {await walk(file);continue;}
       if(!entry.isFile()) continue;

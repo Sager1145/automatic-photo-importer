@@ -30,7 +30,7 @@ This document is the contract. [Shared desktop implementation](multiplatform-mig
 
 Each platform has its own test file, and all of them check the same app features:
 
-- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, how a USB camera's location reads, and a camera's card slots and capacity.
+- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, how a USB camera's location reads, a camera's card slots and capacity, and Mac system files (skipping `.DS_Store`/`._` on sources, and removing `.DS_Store` only as a plain file by the system's case rules, never through a link or inside the app's folders).
 - `desktop/tests/platforms/darwin.ts`, `win32.ts` and `linux.ts` are the profiles. Each supplies that system's real data and setup: `diskutil` output, `/Volumes` and symbolic links on macOS; `Get-Volume` JSON, `D:\` and junctions on Windows; `lsblk` output, `/media` and symbolic links on Linux.
 - `platform-darwin.test.ts`, `platform-win32.test.ts` and `platform-linux.test.ts` each run the whole list with their profile. Features that use recorded tool output run on any machine; features that need the real filesystem run on their own system and skip elsewhere, saying why.
 - `platform-parity.test.ts` checks that all three files run the shared list, and that the builds match `release-targets.json`.
@@ -48,6 +48,7 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | Flushing a file | Any handle | Needs a handle that may write (`syncFile` reopens with `O_RDWR`) | Any handle |
 | Paths | `/`, case-insensitive by default (APFS) | `\`, case-insensitive, reserved names (`CON`, `NUL` …), no `<>:"/\|?*` | `/`, case-sensitive |
 | Symbolic links | Allowed | Need Developer Mode or admin | Allowed |
+| Mac system files (`.DS_Store`, `._`) | Made by Finder; cleaned up by the "Clean up Mac system files" setting | Same setting, on by default: drives shared with a Mac carry them; `.ds_store` in any case is the same file | Same setting; only the exact name `.DS_Store` is removed (case-sensitive) |
 | Release build | arm64 DMG | x64 MSI with branded dialogs, plus an x64 portable exe | Not released yet |
 | Record seal key | Per computer | Per computer | Per computer |
 

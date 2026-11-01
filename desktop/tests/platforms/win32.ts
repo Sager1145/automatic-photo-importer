@@ -15,4 +15,5 @@ export const win32: PlatformProfile = {
   navigatorPlatform: 'Win32',
   cameraPlace: 'USB\\Z f',
   folderFlush: false,
+  namesIgnoreCase: true,
 };

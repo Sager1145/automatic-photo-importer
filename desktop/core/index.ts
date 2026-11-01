@@ -47,6 +47,7 @@ interface ListingOptions {
   /** The last whole-source listing, reused while its folders are unchanged. */reuse?:Listing;
   /** A file whose name is taken at its destination by other content (ConflictNaming). Absent: folder. */conflictNaming?:ConflictNaming;
   /** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];
+  /** "Clean up Mac system files" is off: list .DS_Store and "._" files as system files (a drive backup copies them; an organization never lists them). */keepMacFiles?:boolean;
 }
 /** What a copy (an import or a drive backup) adds: which source files it takes and what it already knows of them. */
 interface Copy extends ListingOptions {
@@ -237,7 +238,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     for(const item of items){const key=family(item);if(key!==undefined&&failed.has(key)&&!failures.has(file(item)))failures.set(file(item),failed.get(key)!);}
   };
   const listingStart=performance.now();
-  const {listing,...scan}=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
+  const {listing,...scan}=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,keepMacFiles:!!options.keepMacFiles&&options.reorganize!==true,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
   options.onListed?.(scan.files.length,scan.files.reduce((sum,file)=>sum+file.size,0));
   log('detailed','plan','inventory',()=>{const skipped:Record<string,number>={};for(const item of scan.skipped??[])skipped[item.reason]=(skipped[item.reason]??0)+1;return {source:sourceRoot,folders:listing?.folders.length,files:scan.files.length,media:scan.media,companions:scan.companions,unknown:scan.unknown,systemJunkSkipped:scan.system??0,emptyFiles:scan.empty??0,skipped,bytes:scan.bytes,reusedListing:!!options.reuse,elapsedMs:Math.round(performance.now()-listingStart),scanElapsedMs:scan.elapsedMs,sourceFolders:options.sourceFolders,reorganize:!!options.reorganize,backup:!!options.backup};});
   let files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
@@ -436,7 +437,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera),...(options.conflictNaming==='number'?{conflictNaming:'number' as const}:{})}});
       onProgress?.(++made,path.relative(sourceRoot,entry.source),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     }
-    const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0})):undefined;
+    const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0}),!!options.keepMacFiles):undefined;
     // A same-size file at a destination is compared by content. Both sides are hashed here, several
     // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
     // allocation below then reuses those digests unless a file changed in between.

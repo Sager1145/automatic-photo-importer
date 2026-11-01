@@ -14,4 +14,5 @@ export const darwin: PlatformProfile = {
   navigatorPlatform: 'MacIntel',
   cameraPlace: 'USB/Z f',
   folderFlush: true,
+  namesIgnoreCase: true,
 };
