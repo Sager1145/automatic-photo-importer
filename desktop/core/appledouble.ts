@@ -113,7 +113,7 @@ const DS_STORE_MAGIC=Buffer.from([0,0,0,1,0x42,0x75,0x64,0x31]);
 /**
  * Removes "._" files under a job's roots. Every operation is bounded by the root it is given, never
  * follows a link, never throws for a file it cannot judge or remove (that becomes a warning and the file
- * stays), and leaves folders in `protectedNames` (recovery storage, Problem files) alone.
+ * stays), and leaves folders in `protectedNames` (the app's records and recovery storage) alone.
  */
 export class AppleDoubleCleaner {
   readonly report:AppleDoubleReport=emptyAppleDoubleReport();

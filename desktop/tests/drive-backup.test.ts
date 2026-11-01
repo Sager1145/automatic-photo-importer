@@ -5,12 +5,12 @@ import path from 'node:path';
 import * as core from '../core/index';
 import {plan,execute,executeReorganization,configureOrganizationRecovery,type ImportRequest,type OrganizeRequest} from '../core/index';
 import type {Metadata} from '../shared';
-import {put,temporary} from './fixtures/edge';
+import {parts,put,temporary} from './fixtures/edge';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
-// A library never holds a "Drive backups" folder. Files & folders imports file every file into the library (photos and
-// videos by date and camera, everything else in Unknown files of its date), and Library organization files what an
-// earlier version left in Drive backups the same way, journaled and undoable, then removes the emptied folder.
+// A library never holds a "Drive backups" folder. Files & folders imports file photos and videos into the library by date
+// and camera and everything else in the other-files folder beside it (Other files, by its date), and Library organization
+// files what an earlier version left in Drive backups the same way, journaled and undoable, then removes the emptied folder.
 const rules={template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const importing:ImportRequest={...rules,backup:false,everyFile:true,noMetadata:'folder'};
 const organizing:OrganizeRequest={...rules,backup:false,reorganize:true,noMetadata:'folder'};
@@ -33,32 +33,32 @@ async function files(folder:string):Promise<Record<string,string>> {
 }
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
 
-test('Files & folders files photos by date and camera and every other file in Unknown files, never in Drive backups',async t=>{
- const base=await temporary(t,'files-folders-'),source=path.join(base,'card'),root=path.join(base,'photobackup');
+test('Files & folders files photos by date and camera and every other file in the other-files folder, never in Drive backups',async t=>{
+ const base=await temporary(t,'files-folders-'),source=path.join(base,'card'),root=path.join(base,'photobackup'),other=path.join(base,'photobackup-otherfiles');
  await put(path.join(source,'DCIM/100MSDCF/DSC00001.ARW'),'raw 1');await put(path.join(source,'DCIM/100MSDCF/DSC00001.JPG'),'jpg 1');
  await put(path.join(source,'DCIM/100MSDCF/NC_FLLST.DAT'),'nikon list');await put(path.join(source,'archive.zip'),'zip');await put(path.join(source,'notes.txt'),'notes');
  await put(path.join(source,'JPG的替身'),alias);
  await put(path.join(source,'DCIM/100MSDCF/._DSC00001.ARW'),emptyAppleDouble);await put(path.join(source,'.DS_Store'),'finder');
  await fs.mkdir(root);await dated(source);
  const {plans}=await plan(source,[root],importing,metadata);
- assert.deepEqual((await execute(plans[0]!)).errors,[]);
- assert.deepEqual(await files(root),{
-  '2026/202610/ILCE-7M4/DSC00001.ARW':'raw 1','2026/202610/ILCE-7M4/DSC00001.JPG':'jpg 1',
-  '2026/202610/Unknown files/NC_FLLST.DAT':'nikon list','2026/202610/Unknown files/archive.zip':'zip','2026/202610/Unknown files/notes.txt':'notes',
-  '2026/202610/Unknown files/JPG的替身':alias.toString('latin1'),
+ for(const part of parts(plans[0]!))assert.deepEqual((await execute(part)).errors,[]);
+ assert.deepEqual(await files(root),{'2026/202610/ILCE-7M4/DSC00001.ARW':'raw 1','2026/202610/ILCE-7M4/DSC00001.JPG':'jpg 1'});
+ assert.deepEqual(await files(other),{
+  'Other files/2026/202610/NC_FLLST.DAT':'nikon list','Other files/2026/202610/archive.zip':'zip','Other files/2026/202610/notes.txt':'notes',
+  'Other files/2026/202610/JPG的替身':alias.toString('latin1'),
  },'camera bookkeeping and the Finder alias are kept as files; "._" and .DS_Store are not copied');
  assert.equal(await exists(path.join(root,'Drive backups')),false);
  // Importing again finds everything verified; a file deleted from the drive stays in the library (nothing is removed or moved aside).
  await fs.rm(path.join(source,'notes.txt'));
- const again=(await plan(source,[root],importing,metadata)).plans[0]!;
- assert.ok(again.entries.length>0&&again.entries.every(entry=>entry.skip));
- assert.deepEqual((await execute(again)).errors,[]);
- assert.equal(await fs.readFile(path.join(root,'2026/202610/Unknown files/notes.txt'),'utf8'),'notes');
+ const again=parts((await plan(source,[root],importing,metadata)).plans[0]!);
+ assert.ok(again.every(part=>part.entries.length>0&&part.entries.every(entry=>entry.skip)));
+ for(const part of again)assert.deepEqual((await execute(part)).errors,[]);
+ assert.equal(await fs.readFile(path.join(other,'Other files/2026/202610/notes.txt'),'utf8'),'notes');
  assert.equal(await exists(path.join(root,'Drive backups')),false);
  // Without `everyFile` (a Media import) the same card brings photos and videos only.
  await fs.mkdir(path.join(base,'media'));
  const media=(await plan(source,[path.join(base,'media')],{...importing,everyFile:false},metadata)).plans[0]!;
- assert.deepEqual(media.entries.map(entry=>path.basename(entry.destination)).sort(),['DSC00001.ARW','DSC00001.JPG']);
+ assert.deepEqual(parts(media).flatMap(part=>part.entries).map(entry=>path.basename(entry.destination)).sort(),['DSC00001.ARW','DSC00001.JPG']);
 });
 
 /** A library as an earlier version left it: a drive copied unsorted into Drive backups, with its marker, Finder's and
@@ -73,30 +73,34 @@ async function retiredLibrary(t:test.TestContext){
  await put(path.join(root,'Drive backups','Removed by mirror','2026-10-25T00-00-00-000Z-abcd1234','photobackup','old.txt'),'held by mirror');
  await put(path.join(root,'2026/202610/ILCE-7M4/DSC00002.ARW'),'raw 2');
  await dated(root);
- return {root,drive};
+ return {root,drive,other:path.join(path.dirname(root),'photobackup-otherfiles')};
 }
 
-test('organization migrates a Drive backups folder into the library, keeps duplicates for undo, removes the emptied folder, and undo puts it back',async t=>{
- const {root}=await retiredLibrary(t);
+test('organization migrates a Drive backups folder into the library and the other-files folder, keeps duplicates for undo, removes the emptied folder, and undo puts it back',async t=>{
+ const {root,other}=await retiredLibrary(t);
  const before=await files(root);
  // The library check sees the Drive backups files as misplaced, so organizing is offered.
  assert.ok((await core.findMisplaced(root,root,rules,metadata)).count>=1);
- const reviewed=(await plan(root,[root],organizing,metadata)).plans[0]!;
- assert.ok(reviewed.entries.every(entry=>!entry.destination.split(path.sep).includes('Drive backups')),'nothing is filed into Drive backups');
- const result=await executeReorganization(reviewed,undefined,undefined,{removeAppleDouble:true});
- assert.deepEqual(result.errors,[]);
- assert.equal(result.retained,1,'the photo already in the library is a duplicate kept in recovery storage, not deleted');
+ const reviewed=parts((await plan(root,[root],organizing,metadata)).plans[0]!);
+ assert.ok(reviewed.every(part=>part.entries.every(entry=>!entry.destination.split(path.sep).includes('Drive backups'))),'nothing is filed into Drive backups');
+ let retained=0;
+ for(const part of reviewed){const result=await executeReorganization(part,undefined,undefined,{removeAppleDouble:true});assert.deepEqual(result.errors,[]);retained+=result.retained;}
+ assert.equal(retained,1,'the photo already in the library is a duplicate kept in recovery storage, not deleted');
  assert.deepEqual(await files(root),{
   '2026/202610/ILCE-7M4/DSC00001.ARW':'raw 1','2026/202610/ILCE-7M4/DSC00001.JPG':'jpg 1','2026/202610/ILCE-7M4/DSC00002.ARW':'raw 2',
-  '2026/202610/Unknown files/NC_FLLST.DAT':'nikon list','2026/202610/Unknown files/files.zip':'zip','2026/202610/Unknown files/JPG的替身':alias.toString('latin1'),
-  '2026/202610/Unknown files/old.txt':'held by mirror',
+ });
+ assert.deepEqual(await files(other),{
+  'Other files/2026/202610/NC_FLLST.DAT':'nikon list','Other files/2026/202610/files.zip':'zip','Other files/2026/202610/JPG的替身':alias.toString('latin1'),
+  'Other files/2026/202610/old.txt':'held by mirror',
  });
  assert.equal(await exists(path.join(root,'Drive backups')),false,'the emptied folder, its marker and bookkeeping are gone');
  assert.equal((await core.findMisplaced(root,root,rules,metadata)).count,0);
  // Undo restores every file where it was (the marker is app bookkeeping nothing reads any more).
- const [job]=await core.getOrganizationRecovery(root);
- assert.ok(job?.undoable,JSON.stringify(job));
- await core.undoOrganization(root,job!.id);
+ for(const at of [other,root]){
+  const [job]=await core.getOrganizationRecovery(at);
+  assert.ok(job?.undoable,JSON.stringify(job));
+  await core.undoOrganization(at,job!.id);
+ }
  const restored=await files(root),expected={...before};
  for(const name of Object.keys(expected))if(/photo-importer-drive\.json$|\/\._|\.DS_Store$/.test(name))delete expected[name];
  for(const name of Object.keys(restored))if(/\/\._|\.DS_Store$/.test(name))delete restored[name];
@@ -104,16 +108,14 @@ test('organization migrates a Drive backups folder into the library, keeps dupli
 });
 
 test('a Drive backups file that cannot be judged keeps its folder, and nothing in it is lost',async t=>{
- const {root,drive}=await retiredLibrary(t);
+ const {root,drive,other}=await retiredLibrary(t);
  // A "._" with Finder info (an alias's type and creator) is not bookkeeping only: it stays, so its folder does too.
  const finder=Buffer.alloc(82);finder.writeUInt32BE(0x00051607,0);finder.writeUInt32BE(0x00020000,4);finder.writeUInt16BE(1,24);finder.writeUInt32BE(9,26);finder.writeUInt32BE(50,30);finder.writeUInt32BE(32,34);finder.write('alisMACS',50,'latin1');
  await put(path.join(drive,'._JPG的替身'),finder);
  // A file that only looks like a marker (a user's file of that name in a subfolder) is not one.
  await put(path.join(drive,'DCIM','photo-importer-drive.json'),'[1,2,3]');
- const reviewed=(await plan(root,[root],organizing,metadata)).plans[0]!;
- const result=await executeReorganization(reviewed,undefined,undefined,{removeAppleDouble:true});
- assert.deepEqual(result.errors,[]);
+ for(const part of parts((await plan(root,[root],organizing,metadata)).plans[0]!))assert.deepEqual((await executeReorganization(part,undefined,undefined,{removeAppleDouble:true})).errors,[]);
  assert.ok(await exists(path.join(drive,'._JPG的替身')),'the sidecar with Finder info is kept');
- assert.equal(await fs.readFile(path.join(root,'2026/202610/Unknown files/JPG的替身'),'latin1'),alias.toString('latin1'));
+ assert.equal(await fs.readFile(path.join(other,'Other files/2026/202610/JPG的替身'),'latin1'),alias.toString('latin1'));
  assert.deepEqual(Object.keys(await files(path.join(root,'Drive backups'))).sort(),['photobackup/.DS_Store','photobackup/._JPG的替身','photobackup/DCIM/photo-importer-drive.json','photobackup/photo-importer-drive.json'],'only what could not be judged is left, nothing removed');
 });

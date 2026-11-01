@@ -1,15 +1,15 @@
 import path from 'node:path';
 import type {InventoryFile,MediaLayout,Metadata,NoMetadataHandling,NoMetadataReason,UnknownDefault,UnknownFileRule} from '../shared';
-import {LEGACY_UNKNOWN_CAMERA_FOLDER,PROBLEM_FILES_FOLDER,UNKNOWN_FILES_FOLDER} from '../shared';
+import {UNKNOWN_FILES_FOLDER} from '../shared';
 import type {CatalogPlacement} from '../catalog/types';
 import {noMetadataFolderName} from '../no-metadata';
 import {captureTimestamp,parseCapture} from '../capture-time';
 import {formatFolder,layoutFolders} from '../media-formats';
-import {CONFLICTS_FOLDER,DEFAULT_EDITED_FOLDER,editedTemplate,expandTemplate,inEditedFolder,portablePath,safeComponent,templateValues,validateRelative,validFolderName} from '../folder-template';
+import {CONFLICTS_FOLDER,DEFAULT_EDITED_FOLDER,dateFromFolders,datePath,editedTemplate,expandTemplate,inEditedFolder,portablePath,safeComponent,templateValues,validateRelative,validFolderName} from '../folder-template';
 import {MessageError} from '../messages';
 import {extension,stem,rules,nkscEdit,captureOneEdit,unknownRule,ignoredName,type RuleDefaults} from './inventory';
 import {beneath,checkAbort,pathKey} from './paths';
-import {DRIVE_BACKUPS} from './drive-backup';
+import {BROKEN_FOLDERS,OTHER_FOLDERS,isOtherFilesFolder,nameDate,nameOrigin,originCategory,type OtherCategory} from './other-files';
 import {log} from '../logger';
 
 /** The folder rules of a library: where each media file goes under its backup folder. */
@@ -35,7 +35,8 @@ export function expectedFolder(info:Metadata,mtime:Date,media:Media|undefined,op
   const editedFolder=options.editedFolder??DEFAULT_EDITED_FOLDER;
   if(!validFolderName(editedFolder))throw new MessageError('error.editedFolderName');
   const video=options.layout==='video-root'&&!!media?.video;
-  const template=info.edited?editedTemplate(editedFolder):video&&options.videoTemplate?options.videoTemplate:options.template;
+  // An edited export with no camera stays in its month's edited folder itself.
+  const template=info.edited?(info.camera?.trim()?editedTemplate(editedFolder):editedTemplate(editedFolder).replace(/\/\{camera\}$/,'')):video&&options.videoTemplate?options.videoTemplate:options.template;
   // The template is checked, not the result: a camera name may itself contain braces.
   if(/[{}]/u.test(template.replace(/\{([^{}]+)\}/g,(token,key:string)=>Object.hasOwn(values,key)?'':token))) throw new MessageError('error.invalidTemplate',{template});
   const result=expandTemplate(template,values);
@@ -101,7 +102,10 @@ export interface RoutingInput {
 export interface RouteDecision {
   file:InventoryFile;
   family:string;
-  root:'photos'|'videos';
+  /** other: the library's other-files folder (other-files.ts), `relative` inside it. */
+  root:'photos'|'videos'|'other';
+  /** For root other: the category folder it is filed in. */
+  category?:OtherCategory;
   relative?:string;
   camera?:string;
   /** Inheritance and chapter date changes apply only here; capture/exposure stay in input.metadata. */
@@ -114,13 +118,14 @@ export interface RouteDecision {
   exemption?:string;
 }
 /** Policy-owned directories are accepted by library checks rather than routed as ordinary media.
- * Problem files is root-level; Conflicts can sit under any camera template. A Drive backups folder an earlier version
- * wrote is not exempt: its files are misplaced until organization files them. */
+ * Conflicts can sit under any camera template; the other-files folder of a library at the top of its drive sits in it.
+ * Folders an earlier version kept in the library (Problem files, Unknown files, Drive backups) are not exempt: their
+ * files are misplaced until organization moves them to the other-files folder. */
 export function placementExemption(file:string,roots:readonly {root:string}[]):string|undefined {
   for(const {root} of roots) {
     if(!beneath(file,root))continue;
     const parts=path.relative(root,file).split(path.sep),parents=parts.slice(0,-1);
-    if(parts[0]===PROBLEM_FILES_FOLDER)return parts[0];
+    if(parents.length&&isOtherFilesFolder(parts[0]!,root))return 'other files';
     if(parents.includes(CONFLICTS_FOLDER))return CONFLICTS_FOLDER;
     if(parts.some(part=>ignoredName(part)))return 'application or system files';
   }
@@ -274,25 +279,58 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
   }
   // Unknown files: no capture date, no camera and no known origin, or metadata that could not be read. A family is
   // decided by its primary, so it is kept or filed apart whole.
+  const isEdited=(file:InventoryFile)=>isEditedFile(file,infos.get(file.path),options);
+  /** Where a cameraless media file came from: its metadata's origin, else what its name (and a PNG's size) says. */
+  const originOf=(file:InventoryFile):string|undefined=>{
+    const info=infos.get(file.path);
+    if(info?.camera?.trim())return undefined;
+    return info?.origin??nameOrigin(path.basename(file.path),{width:info?.fingerprint?.width,height:info?.fingerprint?.height})?.origin;
+  };
   const unknownReason=(file:InventoryFile,primary:InventoryFile,cameraRule:boolean,context?:Metadata):NoMetadataReason|undefined=>{
     if(unknownMode==='fileDate'||options.backup||(file.kind==='Other'&&!file.companionOf&&!cameraRule))return undefined;
     const root=liveRoot.get(file.path)??chapterLead.get(file.path)??primary,info=cameraRule?context:infos.get(root.path);
     if(root.kind==='Other'&&!cameraRule)return undefined;
     if(unreadableMeta.has(root.path))return 'unreadable';
+    // An edited export belongs in the edited folder, dated by its file time when it carries no capture date.
+    if(!cameraRule&&root.kind!=='RAW'&&isEdited(root))return undefined;
     if(!parseCapture(info?.date))return 'noDate';
-    return !info?.camera?.trim()&&!info?.origin?'noCamera':undefined;
+    return !info?.camera?.trim()&&!info?.origin&&!(cameraRule?undefined:originOf(root))?'noCamera':undefined;
   };
   const libraryParts=input.roots??[];
-  /** Where an unknown file goes under the folder: its subfolders as they are (below the library root when it is in one), minus the folder itself and the legacy Unknown Camera folders. */
-  const unknownRelative=(file:InventoryFile)=>{
+  /** The folders a file sits in, below the library root when it is in one (an import: below the source). */
+  const folderParts=(file:InventoryFile)=>{
     const owner=options.reorganize?libraryParts.find(part=>beneath(file.path,part.root)):undefined;
-    const sub=(owner?path.relative(owner.root,path.dirname(file.path)):path.dirname(file.relative)).split(path.sep).filter(part=>part&&part!=='.');
-    // A retired Drive backups folder adds nothing to where a file came from: its drive's folder follows.
-    if(sub[0]===DRIVE_BACKUPS)sub.shift();
-    if(sub[0]?.toLowerCase()===unknownFolder.toLowerCase())sub.shift();
-    return path.join(unknownFolder,...sub.filter(part=>part.toLowerCase()!==LEGACY_UNKNOWN_CAMERA_FOLDER.toLowerCase()),path.basename(file.path));
+    return (owner?path.relative(owner.root,path.dirname(file.path)):path.dirname(file.relative)).split(path.sep).filter(part=>part&&part!=='.');
   };
-  const isEdited=(file:InventoryFile)=>isEditedFile(file,infos.get(file.path),options);
+  /** The other-files category of a family, decided by its original (`decider`) so the family stays together. Undefined: it
+   * belongs in the library. A camera photo or video never leaves it, nor an edited export; then come a screenshot or chat
+   * image, a file whose metadata cannot be read, and media with no capture date or camera (with unknown files filed in a folder). */
+  const categoryOf=(decider:InventoryFile,cameraRule:boolean):{category:OtherCategory;broken?:keyof typeof BROKEN_FOLDERS}|undefined=>{
+    if(options.backup||!folderRules||cameraRule)return undefined;
+    if(decider.kind==='Other') {
+      // The user's own rule for a type keeps its folder; any other file that is not media is an other file.
+      const ext=extension(decider.path);
+      return ext in custom&&!decider.companionOf?undefined:{category:'other'};
+    }
+    const info=infos.get(decider.path);
+    if(info?.camera?.trim()||decider.kind!=='RAW'&&isEdited(decider))return undefined;
+    const origin=originCategory(originOf(decider));
+    if(origin)return {category:origin};
+    if(unknownMode!=='folder')return undefined;
+    if(unreadableMeta.has(decider.path))return {category:'broken',broken:'unreadable'};
+    return {category:'unknown'};
+  };
+  /** The day an other file is filed under: its family's capture date, else a date in its name, else the date folders it already
+   * sits in. A file that is not media has no other date than its modified time (on this computer's calendar), so that one counts
+   * for it too; for media a modified time is no capture date, and such a file is filed without date folders. */
+  const otherDate=(decider:InventoryFile,category:OtherCategory):Date|undefined=>{
+    const day=parseCapture(infos.get(decider.path)?.date)?.day;
+    if(day)return new Date(day+'T00:00:00Z');
+    const found=nameDate(path.basename(decider.path))??(folderRules?dateFromFolders(folderRules.template,folderParts(decider)):undefined);
+    if(found||category!=='other')return found;
+    const mtime=mtimes.get(decider.path);
+    return mtime&&new Date(Date.UTC(mtime.getFullYear(),mtime.getMonth(),mtime.getDate()));
+  };
   for(const file of files) {
     const primary=primaryFor.get(file.path)!, own=infos.get(file.path)??{fields:{}}, paired=infos.get(primary.path)??{fields:{}};
     const rawMembers=(stems.get(stem(file.path))??[]).filter(f=>f.kind==='RAW');
@@ -301,15 +339,24 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
     const rule=unknownRule(extension(file.path),custom,defaults);
     if(file.kind==='Other' && !file.companionOf && rule!==null && typeof rule==='object' && rule.action==='camera') Object.assign(info,unknownContext(file),{edited:false});
     let effectiveMetadata=info,effectiveMtime=mtimes.get(file.path)!;
-    let relative:string,place:ReturnType<typeof expectedFolder>|undefined,forcedRoot:'photos'|'videos'|undefined;
-    const unknown=unknownReason(file,primary,file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera',info);
+    let relative:string,place:ReturnType<typeof expectedFolder>|undefined,forcedRoot:'photos'|'videos'|'other'|undefined;
+    const cameraRule=file.kind==='Other'&&!file.companionOf&&rule!==null&&typeof rule==='object'&&rule.action==='camera';
+    const decider=liveRoot.get(file.path)??chapterLead.get(file.path)??primary;let other=categoryOf(decider,cameraRule);
+    // A screenshot, chat image or other file is identified, not unknown, whatever is missing from its metadata.
+    const unknown=other&&other.category!=='unknown'&&other.category!=='broken'?undefined:unknownReason(file,primary,cameraRule,info);
+    // A camera-rule file whose folder names no camera or date is unknown too, and filed with the unknown files.
+    if(!other&&unknown&&unknownMode==='folder')other=unknown==='unreadable'?{category:'broken',broken:'unreadable'}:{category:'unknown'};
     if(unknown) {
-      log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(unknownMode==='folder'?{destination:unknownRelative(file)}:{})});
+      log('detailed','plan','no-metadata',{source:file.path,reason:unknown,decision:unknownMode,...(other?{category:other.category}:{})});
       if(unknownMode==='keep') {decisions.push({file,family:(info.edited?'edited:':'')+familyFor.get(file.path)!,root:'photos',effectiveMetadata:info,effectiveMtime,reason:'keep',noMetadataReason:unknown});continue;}
     }
-    if(unknown) {
-      // Every unknown file, videos and companions included, is filed under the photo library root, also in the video-root layout.
-      relative=unknownRelative(file);forcedRoot='photos';
+    if(other) {
+      // The library's other-files folder: the category, a broken file's reason, the date folders when a date is known (never
+      // the folders it came from, so nothing an earlier version made is nested again), and a companion's own folder.
+      const date=otherDate(decider,other.category),nksc=nkscEdit(file.path)&&!!file.companionOf,captureOne=file.companionOf?captureOneEdit(file.path):undefined;
+      const folder=other.category==='unknown'?unknownFolder:OTHER_FOLDERS[other.category];
+      relative=path.join(folder,...(other.broken?[BROKEN_FOLDERS[other.broken]]:[]),...(date&&folderRules?datePath(folderRules.template,date).split('/').filter(Boolean):[]),nksc?'NKSC_PARAM':captureOne??'',path.basename(file.path));
+      forcedRoot='other';
     }
     else if(!folderRules) relative=file.relative;
     else if(file.kind==='Other' && !file.companionOf && typeof rule==='string') relative=path.join(rule,path.basename(file.path));
@@ -328,7 +375,7 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
     // Every name is one macOS, Windows and Linux all accept, so the library can move between them.
     relative=portablePath(relative,path.sep);
     log('trace','plan','route',()=>({source:file.path,destination:relative,camera:place?.camera??info.camera,date:info.date,kind:file.kind,companionOf:file.companionOf,reason:options.backup?'drive backup keeps the source layout':file.kind==='Other'&&!file.companionOf&&typeof rule==='string'?`rule for .${extension(file.path)}: folder ${rule}`:place?info.camera&&info.date?'camera and capture date from metadata':info.date?'capture date from metadata, no camera name':info.camera?'camera from metadata, date from the file modification time':'no metadata: file modification time':'filed with its original',origin:info.origin}));
-    decisions.push({file,relative,root:forcedRoot??place?.root??'photos',camera:place?.camera,effectiveMetadata,effectiveMtime,captureTimeMs:options.backup?undefined:captureTimestamp(info.date),family:(info.edited?'edited:':'')+familyFor.get(file.path)!,reason:'route',...(unknown?{noMetadataReason:unknown}:{})});
+    decisions.push({file,relative,root:forcedRoot??place?.root??'photos',camera:place?.camera,effectiveMetadata,effectiveMtime,captureTimeMs:options.backup?undefined:captureTimestamp(info.date),family:(info.edited?'edited:':'')+familyFor.get(file.path)!,reason:'route',...(other?{category:other.category}:{}),...(unknown?{noMetadataReason:unknown}:{})});
   }
   return decisions;
 }

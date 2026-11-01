@@ -135,8 +135,8 @@ export function filesTooLarge(plan: Pick<TransferPlan, 'entries'>, format: Drive
 }
 /** Refuses an import before anything is copied when a destination's format cannot hold one of its files (FAT32 and
  * 4 GiB): `fsTypeOf` names the file system a plan's root is on. Each plan's video folder is checked with its own drive. */
-export function checkFileSizes(plans: readonly (Pick<TransferPlan, 'root' | 'entries'> & { videos?: Pick<TransferPlan, 'root' | 'entries'> })[], fsTypeOf: (root: string) => string | undefined): void {
-  for (const [index, plan] of plans.entries()) for (const part of [plan, ...(plan.videos ? [plan.videos] : [])]) {
+export function checkFileSizes(plans: readonly (Pick<TransferPlan, 'root' | 'entries'> & { videos?: Pick<TransferPlan, 'root' | 'entries'>; other?: Pick<TransferPlan, 'root' | 'entries'> })[], fsTypeOf: (root: string) => string | undefined): void {
+  for (const [index, plan] of plans.entries()) for (const part of [plan, ...(plan.videos ? [plan.videos] : []), ...(plan.other ? [plan.other] : [])]) {
     const fsType = fsTypeOf(part.root), format = driveFormat(fsType), large = filesTooLarge(part, format);
     if (!large.length) continue;
     const largest = large.reduce((a, b) => b.size > a.size ? b : a), name = largest.source.split(/[\\/]/).pop() ?? largest.source;

@@ -18,8 +18,9 @@ export function ruleOptions(prefs:Rules,useFileDate=false){
   unknownRules:prefs.unknownRules,unknownDefault:prefs.unknownDefault,
  };
 }
-/** Bumped when the app itself changes which folder a file is filed in. 3 and 4 were each used by one of two merged branches. */
-const RULES_VERSION=5;
+/** Bumped when the app itself changes which folder a file is filed in. 3 and 4 were each used by one of two merged branches;
+ * 7 (other files beside the library, edited exports by more editors) skips 6 so a branch merged alongside may take it. */
+const RULES_VERSION=7;
 /** The scope the routing and placement memories are valid for: every rule in `ruleOptions`. A record made under
  * another scope (or another RULES_VERSION) is not trusted. */
 export function rulesScope(rules:ReturnType<typeof ruleOptions>):string {

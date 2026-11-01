@@ -17,10 +17,10 @@ import {
 } from 'lucide-react';
 import type { Accent, Action, AppState, Appearance, ConflictNaming, CopyMode, DestinationSpace, DriveActivity, DriveCameraRecord, Inventory, Job, Language, LogLevel, MediaLayout, Metadata, NoMetadataHandling, Preferences, Progress, Review, Source, SourceCameraInfo } from '../shared';
 import { basename, within } from './paths';
-import { DEFAULT_TEXT_SCALE, isRunning, requiredDestinations } from '../shared';
+import { DEFAULT_TEXT_SCALE, OTHER_FILES_SUFFIX, OTHER_FOLDERS, isRunning, requiredDestinations } from '../shared';
 import { filePath, formatMessage, message, text, type Message } from '../messages';
 import { formatFolder, layoutFolders, mediaKindForPath } from '../media-formats';
-import { buildTemplate, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
+import { buildTemplate, datePath, editedTemplate, expandTemplate, monthToken, parseTemplate, templateValues, type FolderPath } from '../folder-template';
 import { formatCaptureDateTime, formatExposure, shutterNoteText } from './metadata-display';
 import { sidebarFit } from './sidebar-fit';
 import { DisplayHold } from '../eta-format';
@@ -965,7 +965,7 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey,onLibr
       <SettingsSection title={t("Files without date or camera")} icon={FileQuestion}><NoMetadataSettings preferences={p} act={act} /></SettingsSection>
       <SettingsSection title={t("Unrecognized file types")} icon={FileQuestion}><FileRules preferences={p} act={act} /></SettingsSection>
       <SettingsSection title={t("Same name, different content")} icon={Files}><ConflictNamingSettings preferences={p} act={act} /></SettingsSection>
-      <SettingsSection title={t("Problem files")} icon={FileQuestion}><div data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div><Switch checked={p.removeAppleDouble} onChange={removeAppleDouble => act({ type: 'preferences', patch: { removeAppleDouble } })} label={t("Clean up Mac system files")} detail={t("Skips Finder's .DS_Store and ._ files when importing and removes them from folders the app writes to. ._ files holding tags or other data are kept.")} /></SettingsSection>
+      <SettingsSection title={t("Problem files")} icon={FileQuestion}><div data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Broken files, beside the library. Undo puts them back.")} /></div><Switch checked={p.removeAppleDouble} onChange={removeAppleDouble => act({ type: 'preferences', patch: { removeAppleDouble } })} label={t("Clean up Mac system files")} detail={t("Skips Finder's .DS_Store and ._ files when importing and removes them from folders the app writes to. ._ files holding tags or other data are kept.")} /></SettingsSection>
     </fieldset></>,
     devices: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /><DriveFormats state={state} act={act} /></>,
     performance: <>
@@ -1896,6 +1896,28 @@ function FileRules({ preferences: p, act }: { preferences: Preferences; act: Dis
   return <><UnknownDefaultControl preferences={p} act={act} />{Object.keys(p.unknownRules).length > 0 ? <div className="saved-rules">{Object.entries(p.unknownRules).map(([extension, folder]) => <div key={extension}><span className="extension-name">{extension ? `.${extension}` : t("No extension")}</span><span>{folder === null ? t("Ignore") : typeof folder === 'string' ? t("Copy to {folder}", { folder }) : t("Copy to camera folders")}</span><Button kind="quiet" icon={Settings2} aria-label={t("Edit rule for {extension}", { extension: extension || t("files without an extension") })} onClick={() => { setRuleExtension(extension); setRuleFolder(typeof folder === 'string' ? folder : 'Other files'); setRuleAction(folder === null ? 'ignore' : typeof folder === 'string' ? 'copy' : 'camera'); }}>{t("Edit")}</Button></div>)}</div> : <p className="muted">{t("No saved rules.")}</p>}<div className="rule-editor"><div className="rule-fields"><label className="field-label">{t("File extension")}<input value={ruleExtension} onChange={event => setRuleExtension(event.target.value)} placeholder={t("For example, PDF")} /><small>{t("Leave empty for files without an extension.")}</small></label><label className="field-label">{t("Action")}<div className="select-wrap"><select value={ruleAction} onChange={event => setRuleAction(event.target.value as typeof ruleAction)}><option value="camera">{t("Copy to camera folders")}</option><option value="copy">{t("Copy to custom folder")}</option><option value="ignore">{t("Ignore")}</option></select><Icon icon={ChevronDown} size={14} /></div></label></div>{ruleAction === 'copy' && <label className="field-label">{t("Relative folder")}<input value={ruleFolder} onChange={event => setRuleFolder(event.target.value)} placeholder="Documents/Camera notes" />{!folderValid && <span className="field-error">{t("Use a relative folder without empty components, . or ..")}</span>}</label>}<div className="rule-actions"><Button icon={Check} disabled={!extensionValid || ruleAction === 'copy' && !folderValid} onClick={saveRule}>{t("Save rule")}</Button></div></div></>;
 }
 
+/** Where what is not a camera photo or video goes: the folder beside the library, and its category folders (core/other-files.ts). */
+function OtherFilesSettings({ preferences: p }: { preferences: AppState['preferences'] }) {
+  const { t } = useTranslation();
+  const library = p.destinations[0], otherFolder = library ? `${basename(library) || library}${OTHER_FILES_SUFFIX}` : `${t("Photo folder")}${OTHER_FILES_SUFFIX}`;
+  // A library at the top of a drive (D:\ or /) has nothing beside it on that drive: the folder is inside it.
+  const where = !library ? undefined : /^(?:[A-Za-z]:)?[\\/]?$/.test(library) ? `${library.replace(/[\\/]*$/, library.includes('\\') ? '\\' : '/')}library${OTHER_FILES_SUFFIX}` : `${library.replace(/[\\/]+$/, '')}${OTHER_FILES_SUFFIX}`;
+  const dated = datePath(p.template, new Date(Date.UTC(2026, 0, 15))).split('/').filter(Boolean);
+  const folders: [string, string][] = [
+    [OTHER_FOLDERS.screenshots, t("Screenshots and screen recordings, recognized by their metadata first and their names second.")],
+    [OTHER_FOLDERS.chat, t("Pictures and videos saved from WeChat, WhatsApp, LINE, Telegram and other messaging apps.")],
+    [OTHER_FOLDERS.broken, t("Empty (0-byte) files and files whose contents cannot be read.")],
+    [p.noMetadataFolder || OTHER_FOLDERS.unknown, t("Photos and videos with no capture date, camera or known origin.")],
+    [OTHER_FOLDERS.other, t("Everything that is not a photo or video: archives, camera index files, aliases.")],
+  ];
+  return <SettingsSection title={t("Other files")} icon={Folder}>
+    <p className="muted" data-testid="other-files-location">{where ? t("Files that are not camera photos or videos go to {folder}, beside the library on the same drive.", { folder: where }) : t("Files that are not camera photos or videos go to a folder beside the library, named after it with “-otherfiles”.")}</p>
+    <ul className="other-files-folders" data-testid="other-files-folders">{folders.map(([name, detail]) => <li key={name}><strong>{name}</strong> — {detail}</li>)}</ul>
+    <p className="muted">{t("Camera photos and edited exports stay in the library. Files keep date folders when a date is known.")}</p>
+    <PathPreview label={t("A screenshot lands here")} parts={[otherFolder, OTHER_FOLDERS.screenshots, ...dated, 'Screenshot_20260115-093000.png']} testId="other-files-preview" />
+  </SettingsSection>;
+}
+
 // Folder structure, photo/video layout, where the next files land, and the edited exports folder.
 function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
   const { t } = useTranslation();
@@ -1927,6 +1949,7 @@ function FolderSettings({ state, act }: { state: AppState; act: Dispatch }) {
         <TextPreference label={t("Edited exports folder")} value={editedFolder} placeholder="editied" onSave={editedFolder => act({type:'preferences',patch:{editedFolder}})} description={t("Edited exports go here, inside each month folder.")} />
         <PathPreview label={t("Your edited export lands here")} parts={[photoFolder, ...samplePath(editedTemplate(editedFolder), shot.camera), shot.jpeg.replace(/\.JPG$/, '.jpg')]} testId="edited-export-preview" />
       </SettingsSection>
+      <OtherFilesSettings preferences={p} />
   </div>;
 }
 
@@ -2047,7 +2070,7 @@ export function ProblemFilesReview({ review, act, busy = false }: { review: Pick
   const reasonName = (reason: 'empty' | 'emptyPrimary' | 'unreadable') => reason === 'unreadable' ? t("Could not be read") : t(message(reason === 'empty' ? 'inventory.emptyFile' : 'inventory.emptyPrimaryFile'));
   const shown = problems.slice(0, 200);
   const summary = [
-    organizing && collected.length > 0 && t("{count} problem files will be collected into Problem files/…", { count: formatNumber(collected.length) }),
+    organizing && collected.length > 0 && t("{count} problem files will be collected into Broken files/…", { count: formatNumber(collected.length) }),
     organizing && left > 0 && t("{count} problem files will stay where they are", { count: formatNumber(left) }),
     !organizing && t("{count} problem files are skipped and not copied", { count: formatNumber(problems.length) }),
   ].filter(Boolean).join(' · ');
@@ -2059,7 +2082,7 @@ export function ProblemFilesReview({ review, act, busy = false }: { review: Pick
         <div><dl>{shown.map(item => <div key={item.path}><dt>{item.relative}</dt><dd>{reasonName(item.reason)}</dd></div>)}</dl>{problems.length > shown.length && <p>{t("and {count} more", { count: formatNumber(problems.length - shown.length) })}</p>}</div>
       </div>
     </details>
-    {organizing && review.destinationIndex !== undefined && <div data-testid="collect-problem-files-review"><Switch checked={review.collectProblemFiles !== false} disabled={busy} onChange={collectProblemFiles => act({ type: 'previewOrganization', destinationIndex: review.destinationIndex!, collectProblemFiles, ...(review.scope === 'backup' ? { scope: 'backup' as const } : {}) })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div>}
+    {organizing && review.destinationIndex !== undefined && <div data-testid="collect-problem-files-review"><Switch checked={review.collectProblemFiles !== false} disabled={busy} onChange={collectProblemFiles => act({ type: 'previewOrganization', destinationIndex: review.destinationIndex!, collectProblemFiles, ...(review.scope === 'backup' ? { scope: 'backup' as const } : {}) })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Broken files, beside the library. Undo puts them back.")} /></div>}
   </section>;
 }
 
@@ -2077,7 +2100,7 @@ export function ReviewPanel({ state, act, inspect }: { state: AppState; act: Dis
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
   useEffect(() => { setQuery(''); setPage(0); }, [review?.id]);
-  const entries = useMemo(() => review?.plans.flatMap((plan, destinationIndex) => [...plan.entries, ...plan.videos?.entries ?? []].map(entry => ({ ...entry, destinationIndex }))) ?? [], [review]);
+  const entries = useMemo(() => review?.plans.flatMap((plan, destinationIndex) => [...plan.entries, ...plan.videos?.entries ?? [], ...plan.other?.entries ?? []].map(entry => ({ ...entry, destinationIndex }))) ?? [], [review]);
   const changed = useMemo(() => entries.filter(entry => !entry.skip), [entries]);
   const visible = useMemo(() => entries.filter(entry => `${entry.source} ${entry.destination} ${entry.kind} ${entry.digest ?? ''}`.toLowerCase().includes(query.toLowerCase())), [entries, query]);
   if (!review) return <section className="review-panel review-loading" aria-live="polite"><Icon icon={ScanLine} size={24} /><div><h2>{t("Building your file review…")}</h2><p>{t("Checking files. Nothing is copied yet.")}</p>{state.reviewProgress && <PlanningProgress progress={state.reviewProgress} label={t("Review progress")} />}</div><Button onClick={() => act({ type: 'discardReview' })}>{t("Cancel review")}</Button></section>;

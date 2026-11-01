@@ -10,19 +10,21 @@ import {unknownDecision} from '../unknown-confirm';
 import {validNoMetadataFolder} from '../no-metadata';
 import type {Metadata} from '../shared';
 import {slash} from './fixtures/os';
+import {parts} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'no-metadata-fixes-')));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  const source=path.join(root,'source'),library=path.join(root,'library');
+  // Unknown files are filed in the library's other-files folder beside it.
+  const source=path.join(root,'source'),library=path.join(root,'library'),unknown=path.join(root,'library-otherfiles','Unknown files');
   await fs.mkdir(source);await fs.mkdir(library);
   const put=async(dir:string,relative:string,contents='x')=>{const file=path.join(dir,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,contents);await fs.utimes(file,new Date('2020-01-01T12:00:00'),new Date('2020-01-01T12:00:00'));return file;};
-  return {root,source,library,put};
+  return {root,source,library,unknown,put};
 }
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
-const entries=(found:Awaited<ReturnType<typeof plan>>)=>found.plans.flatMap(item=>[...item.entries,...item.videos?.entries??[]]);
+const entries=(found:Awaited<ReturnType<typeof plan>>)=>found.plans.flatMap(item=>parts(item).flatMap(part=>part.entries));
 const names=(found:Awaited<ReturnType<typeof plan>>)=>entries(found).map(entry=>path.basename(entry.source)).sort();
 const known:Metadata={camera:'Cam',date:'2022-05-06T12:00:00Z',fields:{}};
 
@@ -36,7 +38,7 @@ test('one builder gives every caller the same rules, and each rule changes the r
   assert.notDeepEqual(scopes(defaultPreferences,true),original);
 });
 
-test('the folder check built from the shared rules leaves unknown files alone under keep, and flags them under folder until they are in the Unknown files folder',async t=>{
+test('the folder check built from the shared rules leaves unknown files alone under keep, and flags them under folder until they are out of the library',async t=>{
   const f=await fixture(t);
   await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_1.JPG');await f.put(f.library,'old/SNAP_2.PNG');await f.put(f.library,'old/IMG_3.JPG');
   const meta=async(file:string):Promise<Metadata>=>/NOCAM/.test(file)?{date:'2021-03-04T10:00:00Z',fields:{}}:/SNAP/.test(file)?{fields:{}}:known;
@@ -46,8 +48,8 @@ test('the folder check built from the shared rules leaves unknown files alone un
   assert.deepEqual((await check(keep)).files.map(slash),['old/IMG_3.JPG']);
   const folder={...flat,noMetadataHandling:'folder' as const};
   assert.deepEqual((await check(folder)).files.map(slash).sort(),['2021/202103/Unknown Camera/NOCAM_1.JPG','old/IMG_3.JPG','old/SNAP_2.PNG']);
-  await f.put(f.library,'Unknown files/old/SNAP_2.PNG');await fs.rm(path.join(f.library,'old/SNAP_2.PNG'));
-  assert.ok(!(await check(folder)).files.map(slash).includes('Unknown files/old/SNAP_2.PNG'));
+  await f.put(f.unknown,'SNAP_2.PNG');await fs.rm(path.join(f.library,'old/SNAP_2.PNG'));
+  assert.ok(!(await check(folder)).files.some(file=>file.endsWith('SNAP_2.PNG')));
 });
 
 test('an exiftool Error alone does not make a file unknown; with no date and no camera it does',async t=>{
@@ -72,7 +74,7 @@ test('a camera-rule file takes its folder context: filed normally beside a dated
     const lone=await plan(alone,[f.library],{...base,unknownRules:rules,noMetadata:mode},meta);
     assert.deepEqual(lone.noMetadata?.files.map(item=>slash(item.relative)),['LOOSE/INDEX02.DSC'],mode);
     const loose=entries(lone);
-    if(mode==='keep')assert.equal(loose.length,0);else{assert.equal(loose.length,1);assert.equal(loose[0]!.destination,path.join(f.library,'Unknown files/LOOSE/INDEX02.DSC'));}
+    if(mode==='keep')assert.equal(loose.length,0);else{assert.equal(loose.length,1);assert.equal(loose[0]!.destination,path.join(f.unknown,'INDEX02.DSC'));}
   }
 });
 
@@ -104,7 +106,7 @@ for(const mode of ['keep','folder'] as const)test(`families stay whole under ${m
     assert.deepEqual(unknown,unknownFamilies);
     assert.deepEqual(kept,[...unknownFamilies,'GX010002.MP4','GX020002.MP4','LIVE_B.HEIC','LIVE_B.MOV','RAW_B.CR3','RAW_B.JPG'].sort());
     const filed=entries(found).filter(entry=>unknownFamilies.includes(path.basename(entry.source)));
-    assert.ok(filed.every(entry=>path.dirname(entry.destination)===path.join(f.library,'Unknown files/DCIM')));
+    assert.ok(filed.every(entry=>path.dirname(entry.destination)===f.unknown),'a family is filed together, by its original (no date known here)');
   }
 });
 
@@ -113,14 +115,13 @@ test('undoing a folder-mode organization puts every file back where it was',asyn
   await f.put(f.library,'old/trip/SNAP_1.PNG','snap');await f.put(f.library,'old/IMG_2.JPG','img');await f.put(f.library,'2021/202103/Unknown Camera/NOCAM_3.JPG','nocam');
   const meta=async(file:string):Promise<Metadata>=>/NOCAM/.test(file)?{date:'2021-03-04T10:00:00Z',fields:{}}:/SNAP/.test(file)?{fields:{}}:known;
   const found=await plan(f.library,[f.library],{...base,reorganize:true,noMetadata:'folder'},meta);
-  assert.deepEqual((await executeReorganization(found.plans[0]!,undefined,undefined)).errors,[]);
-  assert.equal(await exists(path.join(f.library,'Unknown files/old/trip/SNAP_1.PNG')),true);
-  const [job]=await getOrganizationRecovery(f.library);
-  await undoOrganization(f.library,job!.id);
+  for(const part of parts(found.plans[0]!))assert.deepEqual((await executeReorganization(part,undefined,undefined)).errors,[]);
+  assert.equal(await exists(path.join(f.unknown,'SNAP_1.PNG')),true);
+  for(const root of [path.dirname(f.unknown),f.library])for(const job of await getOrganizationRecovery(root))await undoOrganization(root,job.id);
   assert.equal(await fs.readFile(path.join(f.library,'old/trip/SNAP_1.PNG'),'utf8'),'snap');
   assert.equal(await fs.readFile(path.join(f.library,'2021/202103/Unknown Camera/NOCAM_3.JPG'),'utf8'),'nocam');
   assert.equal(await fs.readFile(path.join(f.library,'old/IMG_2.JPG'),'utf8'),'img');
-  assert.equal(await exists(path.join(f.library,'Unknown files/old/trip/SNAP_1.PNG')),false);
+  assert.equal(await exists(path.join(f.unknown,'SNAP_1.PNG')),false);
 });
 
 test('after switching from file dates to the folder, importing the same card again copies nothing',async t=>{
@@ -131,8 +132,8 @@ test('after switching from file dates to the folder, importing the same card aga
   assert.deepEqual((await execute(first.plans[0]!,undefined,undefined,{verify:true})).errors,[]);
   const second=await plan(f.source,[f.library],{...base,noMetadata:'folder',lookElsewhere:async()=>true},meta);
   assert.equal(second.elsewhere?.files,1);
-  assert.equal((await execute(second.plans[0]!,undefined,undefined,{verify:true})).copied,0);
-  assert.equal(await exists(path.join(f.library,'Unknown files/DCIM/SNAP_1.PNG')),false);
+  for(const part of parts(second.plans[0]!))assert.equal((await execute(part,undefined,undefined,{verify:true})).copied,0);
+  assert.equal(await exists(path.join(f.unknown,'SNAP_1.PNG')),false);
 });
 
 test('a started job asks first only when nothing else holds the review, and waits its turn otherwise',()=>{
@@ -153,7 +154,7 @@ test('a per-run preference override changes where unknown files go: the folder u
   const meta=async(file:string):Promise<Metadata>=>file.endsWith('SNAP.PNG')?{fields:{}}:known;
   const planWith=(noMetadataHandling:'keep'|'folder'|'fileDate',useFileDate=false)=>{const {unknownRules,unknownDefault:_d,...rules}=ruleOptions({...defaultPreferences,mediaLayout:'flat',noMetadataHandling},useFileDate);return plan(f.source,[f.library],{...rules,backup:false,unknownRules},meta);};
   const folder=await planWith('folder');
-  assert.equal(entries(folder).find(entry=>entry.source.endsWith('SNAP.PNG'))?.destination,path.join(f.library,'Unknown files/DCIM/SNAP.PNG'));
+  assert.equal(entries(folder).find(entry=>entry.source.endsWith('SNAP.PNG'))?.destination,path.join(f.unknown,'SNAP.PNG'));
   const keep=await planWith('keep');
   assert.deepEqual(names(keep),['IMG_1.JPG']);assert.equal(keep.noMetadata?.handling,'keep');
   const dated=await planWith('keep',true);

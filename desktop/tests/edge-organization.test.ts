@@ -40,7 +40,8 @@ const misplaced=async(drive:string,photos:string,videos:string,layout:MediaLayou
 for(const strategy of ['rename','copy'] as const)test(`video-root organization in place (${strategy}) moves videos to videobackup and undo restores every file and date`,async t=>{
  const {drive,photos,videos,files}=await library(t);
  const before=await snapshot(drive);
- assert.equal(await misplaced(drive,photos,videos,'video-root'),Object.keys(files).length-2);
+ // Every file but the empty one is misplaced: keep.txt is not media, so it belongs in the other-files folder.
+ assert.equal(await misplaced(drive,photos,videos,'video-root'),Object.keys(files).length-1);
  const {results}=await organize(drive,photos,videos,'video-root',strategy);
  for(const result of results)assert.deepEqual(result.errors,[]);
  const camera='2026/202610/Nikon Z6III',pocket='2026/202610/DJI Osmo Pocket 3';
@@ -53,14 +54,14 @@ for(const strategy of ['rename','copy'] as const)test(`video-root organization i
  assert.equal(twins.length,2);assert.equal(new Set(twins.map(([,digest])=>digest)).size,2);
  assert.ok(twins.some(([relative])=>relative.split(path.sep).includes('Conflicts')));
  assert.equal(await misplaced(drive,photos,videos,'video-root'),0);
- assert.equal(await fs.readFile(path.join(videos,'keep.txt'),'utf8'),'not media');
+ assert.equal(await fs.readFile(path.join(drive,'photobackup-otherfiles','Other files','2020','202001','keep.txt'),'utf8'),'not media');
  // Every byte is still there exactly once outside the recovery store (the copy strategy also keeps the originals inside it).
  assert.deepEqual(new Set(organized.values()),new Set([...before.values()].map(value=>value.split(' ')[0])));
- const found=await jobs(photos,videos);
- assert.equal(found.length,2);assert.ok(found.every(job=>job.status==='complete'&&job.undoable&&!job.error),JSON.stringify(found));
+ const found=await jobs(photos,videos,path.join(drive,'photobackup-otherfiles'));
+ assert.equal(found.length,3);assert.ok(found.every(job=>job.status==='complete'&&job.undoable&&!job.error),JSON.stringify(found));
  for(const job of found)await core.undoOrganization(job.root,job.id);
  assert.deepEqual(await snapshot(drive),before);
- assert.deepEqual(await jobs(photos,videos),[]);
+ assert.deepEqual(await jobs(photos,videos,path.join(drive,'photobackup-otherfiles')),[]);
 });
 
 test('finalize releases kept originals, and a later layout supersedes the earlier journal without losing a byte',async t=>{

@@ -92,16 +92,16 @@ test('unknown formats, camera service files and extensionless files are never dr
  for(const name of names)await put(path.join(source,name),'bytes of '+name);
  for(const unknownDefault of ['skip','other','ask'] as const){
   const {inventory:scan,plans:[transfer]}=await plan(source,[photos],{...base,layout:'format',unknownDefault},fixed);
-  const planned=new Set(transfer!.entries.map(entry=>entry.source)),skipped=new Set(scan.skipped!.map(file=>file.path));
+  const planned=new Set(parts(transfer!).flatMap(part=>part.entries).map(entry=>entry.source)),skipped=new Set(scan.skipped!.map(file=>file.path));
   // Every listed file is either planned or reported as skipped, never both or neither.
   for(const file of scan.files)assert.equal(planned.has(file.path)!==skipped.has(file.path),true,`${unknownDefault}: ${file.relative}`);
   assert.equal(scan.files.length,names.length);
   for(const service of ['NC_FLLST.DAT','NIKON001.DSC','MEDIAPRO.XML','SONYCARD.IND','FFXFER.DAT','X.CTG'])assert.equal(scan.skipped!.find(file=>path.basename(file.path)===service)?.reason,'system',service);
   if(unknownDefault==='other'){
-   assert.equal(slash(path.relative(photos,by(transfer!.entries,'notes.txt').destination)),'Other files/txt/notes.txt');
-   // An extension that is not a plain word gets the shared Other files folder.
-   assert.equal(slash(path.relative(photos,by(transfer!.entries,'data.d@t').destination)),'Other files/data.d@t');
-   assert.equal(slash(path.relative(photos,by(transfer!.entries,'weird.ext with space').destination)),'Other files/weird.ext with space');
+   // Files that are not media go to Other files in the other-files folder beside the library, dated by their modified time.
+   const other=transfer!.other!;
+   assert.equal(other.root,`${photos}-otherfiles`);
+   for(const name of ['notes.txt','data.d@t','weird.ext with space'])assert.match(slash(path.relative(other.root,by(other.entries,name).destination)),new RegExp(`^Other files/\\d{4}/\\d{6}/${name.replace('.','\\.')}$`),name);
    assert.equal((await executeAll(transfer!)).errors.length,0);await assertCopied(transfer!);
   }
  }

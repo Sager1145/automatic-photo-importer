@@ -83,7 +83,9 @@ test('existing-library refresh always honors edited ancestry and policy-owned fo
   const binding=await bindLibrary({root,mountPath:dir,volumeId:'disk',name:'Photos',role:'photos',rulesScope:'r',online:true});
   const coordinator=new CatalogCoordinator(c,{metadata:async()=>({camera:'Canon',date:'2024-02-03T12:00:00',fields:{}}),options:()=>({template:'{year}/{camera}',layout:'flat',editedFolder:'editied'})});
   await coordinator.configure([binding]);await coordinator.refresh(binding.library.libraryId,new AbortController().signal);
-  const records=await c.records(binding.library.libraryId,names);assert.deepEqual(Object.fromEntries(records.map(record=>[record.relativePath,record.placement.status])),Object.fromEntries(names.map(name=>[name,'inPlace'])));
+  const records=await c.records(binding.library.libraryId,names);
+  // An earlier version's Problem files folder is no longer the app's own: what is in it belongs elsewhere.
+  assert.deepEqual(Object.fromEntries(records.map(record=>[record.relativePath,record.placement.status])),{...Object.fromEntries(names.slice(0,2).map(name=>[name,'inPlace'])),'Problem files/Empty files/C.jpg':'misplaced'});
  }finally{await c.close();await fs.rm(dir,{recursive:true,force:true});}
 });
 

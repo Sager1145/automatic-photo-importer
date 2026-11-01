@@ -72,9 +72,10 @@ test('planning and a Files & folders import follow the setting',async t=>{
   assert.equal(skipped.files.length,1);
   const listed=(await plan(source,[destination],{...importOptions,keepMacFiles:true},metadata)).inventory;
   assert.equal(listed.files.length,3);
-  // A Files & folders import takes every file: kept Mac files go with the rest, never as photos.
+  // A Files & folders import takes every file: kept Mac files go with the rest, never as photos (to the other-files folder).
   const everything=(await plan(source,[destination],{...importOptions,everyFile:true,keepMacFiles:true},metadata)).plans[0]!;
-  assert.deepEqual(everything.entries.map(entry=>path.basename(entry.source)).sort(),['.DS_Store','._DSC_0001.JPG','DSC_0001.JPG']);
+  assert.deepEqual(everything.entries.map(entry=>path.basename(entry.source)),['DSC_0001.JPG']);
+  assert.deepEqual(everything.other?.entries.map(entry=>path.basename(entry.source)).sort(),['.DS_Store','._DSC_0001.JPG']);
   const skipping=(await plan(source,[destination],{...importOptions,everyFile:true},metadata)).plans[0]!;
   assert.deepEqual(skipping.entries.map(entry=>path.basename(entry.source)),['DSC_0001.JPG']);
 });
@@ -129,7 +130,7 @@ test('organization removes .DS_Store from the folders it moves files into and ou
 
 test('protected folders, a file that is not a .DS_Store, and links named .DS_Store are left alone',async t=>{
   const root=await temp(t,'mac-files-safety-'),cleaner=appleDoubleCleaner(),placed=()=>true;
-  for(const name of ['Photo Importer Data','Photo Importer Recovery','Problem files']){
+  for(const name of ['Photo Importer Data','Photo Importer Recovery']){
     const folder=path.join(root,name,'2024');await fs.mkdir(folder,{recursive:true});
     await fs.writeFile(path.join(folder,'A.JPG'),'a');await fs.writeFile(path.join(folder,'.DS_Store'),finder());
     await cleaner.besideFile(path.join(folder,'A.JPG'),root,placed);

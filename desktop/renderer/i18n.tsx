@@ -297,8 +297,8 @@ This folder path is a custom template. Edit it under Advanced, or start again wi
 Use the folder builder|使用文件夹构建器|使用資料夾建構器|フォルダービルダーを使う
 Folder template|文件夹模板|資料夾範本|フォルダーテンプレート
 Collect problem files|收集问题文件|收集問題檔案|問題のあるファイルを集める
-Move 0-byte files and their companions into Problem files. Undo puts them back.|将 0 字节文件及其伴随文件移入“Problem files”。撤销会把它们放回原处。|將 0 位元組檔案及其隨附檔案移入「Problem files」。還原會把它們放回原處。|0 バイトのファイルとその関連ファイルを「Problem files」に移動します。取り消すと元に戻ります。
-{count} problem files will be collected into Problem files/…|{count} 个问题文件将被收集到 Problem files/…|{count} 個問題檔案將被收集到 Problem files/…|問題のあるファイル {count} 件を Problem files/… に集めます
+Move 0-byte files and their companions into Broken files, beside the library. Undo puts them back.|将 0 字节文件及其伴随文件移入媒体库旁边的“Broken files”。撤销会把它们放回原处。|將 0 位元組檔案及其隨附檔案移入資料庫旁邊的「Broken files」。還原會把它們放回原處。|0 バイトのファイルとその関連ファイルを、ライブラリの隣の「Broken files」に移動します。取り消すと元に戻ります。
+{count} problem files will be collected into Broken files/…|{count} 个问题文件将被收集到 Broken files/…|{count} 個問題檔案將被收集到 Broken files/…|問題のあるファイル {count} 件を Broken files/… に集めます
 {count} problem files will stay where they are|{count} 个问题文件将保留在原处|{count} 個問題檔案將保留在原處|問題のあるファイル {count} 件はそのまま残ります
 {count} problem files are skipped and not copied|已跳过 {count} 个问题文件，不会复制|已略過 {count} 個問題檔案，不會複製|問題のあるファイル {count} 件はスキップされ、コピーされません
 Empty files|空文件|空檔案|空のファイル
@@ -306,6 +306,16 @@ Unreadable files|无法读取的文件|無法讀取的檔案|読み取れない�
 Could not be read|无法读取|無法讀取|読み取れませんでした
 and {count} more|还有 {count} 个|還有 {count} 個|ほか {count} 件
 Edited exports folder|编辑导出文件夹|編輯匯出資料夾|編集済み書き出しフォルダー
+Other files|其他文件|其他檔案|その他のファイル
+Screenshots and screen recordings, recognized by their metadata first and their names second.|截屏和屏幕录制，先按元数据识别，再按文件名识别。|螢幕截圖和螢幕錄影，先依中繼資料辨識，再依檔名辨識。|スクリーンショットと画面収録。まずメタデータ、次にファイル名で判別します。
+Pictures and videos saved from WeChat, WhatsApp, LINE, Telegram and other messaging apps.|从微信、WhatsApp、LINE、Telegram 等聊天应用保存的图片和视频。|從微信、WhatsApp、LINE、Telegram 等聊天應用程式儲存的圖片和影片。|WeChat、WhatsApp、LINE、Telegram などのメッセージアプリから保存した画像と動画。
+Empty (0-byte) files and files whose contents cannot be read.|空文件（0 字节）和内容无法读取的文件。|空檔案（0 位元組）和內容無法讀取的檔案。|空（0 バイト）のファイルと、内容を読み取れないファイル。
+Photos and videos with no capture date, camera or known origin.|没有拍摄日期、相机或已知来源的照片和视频。|沒有拍攝日期、相機或已知來源的照片和影片。|撮影日、カメラ、出どころのいずれもわからない写真と動画。
+Everything that is not a photo or video: archives, camera index files, aliases.|所有非照片或视频的文件：压缩包、相机索引文件、替身等。|所有非照片或影片的檔案：壓縮檔、相機索引檔、替身等。|写真や動画以外のすべて：アーカイブ、カメラのインデックスファイル、エイリアスなど。
+Files that are not camera photos or videos go to {folder}, beside the library on the same drive.|不是相机照片或视频的文件会放到 {folder}，与资料库位于同一驱动器、相邻存放。|不是相機照片或影片的檔案會放到 {folder}，與資料庫位於同一磁碟、相鄰存放。|カメラの写真や動画ではないファイルは、同じドライブのライブラリの隣にある {folder} に入ります。
+Files that are not camera photos or videos go to a folder beside the library, named after it with “-otherfiles”.|不是相机照片或视频的文件会放到资料库旁边的文件夹，名称为资料库名加“-otherfiles”。|不是相機照片或影片的檔案會放到資料庫旁邊的資料夾，名稱為資料庫名稱加「-otherfiles」。|カメラの写真や動画ではないファイルは、ライブラリの隣の、ライブラリ名に「-otherfiles」を付けたフォルダーに入ります。
+Camera photos and edited exports stay in the library. Files keep date folders when a date is known.|相机照片和编辑导出的文件保留在资料库中。已知日期的文件按日期文件夹存放。|相機照片和編輯匯出的檔案保留在資料庫中。已知日期的檔案依日期資料夾存放。|カメラの写真と編集済みの書き出しはライブラリに残ります。日付がわかるファイルは日付フォルダーに入ります。
+A screenshot lands here|截屏会放在这里|螢幕截圖會放在這裡|スクリーンショットはここに入ります
 Your edited export lands here|编辑导出的照片将保存在这里|編輯匯出的照片將儲存在這裡|編集済み写真の保存先
 Available tokens: {year}, {yyyymm}, {month}, {monthName}, {yearMonthName}, {day}, {yyyyMMdd}, {camera}|可用标记：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|可用標記：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}|使用可能なトークン：{year}、{yyyymm}、{month}、{monthName}、{yearMonthName}、{day}、{yyyyMMdd}、{camera}
 Media layout|媒体文件布局|媒體檔案配置|メディアの配置

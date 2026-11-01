@@ -27,6 +27,7 @@ export const darwin: PlatformProfile = {
   folderKeyProvesNames: true,
   // The A006 SSD's root as macOS reports it (its store.json from 0.3.0 recorded 16777241:18); the device number changes per mount.
   recordsDrive: { dev: 16777241n, ino: 18n, identity: '18' },
+  otherFiles: { library: '/Volumes/A006/photobackup', beside: '/Volumes/A006/photobackup-otherfiles', top: '/Volumes/A006', inside: '/Volumes/A006/A006-otherfiles' },
   namesIgnoreCase: true,
   // Finder and Lightroom take POSIX paths: /Volumes/… with forward slashes.
   dropPath: /^\/(?!.*\\)/,

@@ -117,6 +117,22 @@ test('edited-export folder settings localize the default and custom preview with
   }
 });
 
+test('folder settings show the other-files folder beside the library and its folders, in every language', async () => {
+  const {SettingsPage}=await import('../renderer/RootApp');
+  for(const language of languages){
+    const state={preferences:{...defaultPreferences,language,destinations:['/Volumes/A/photobackup'],template:'{camera}/{year}/{yyyymm}',mediaLayout:'flat'},sources:[],jobs:[],errors:[]} as unknown as AppState;
+    const markup=renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(SettingsPage,{state,act:()=>{},busy:false})}));
+    const t=createTranslator(language);
+    assert.ok(markup.includes(t('Other files')),language);
+    assert.ok(markup.includes(t('Files that are not camera photos or videos go to {folder}, beside the library on the same drive.',{folder:'/Volumes/A/photobackup-otherfiles'})),language);
+    const folders=markup.slice(markup.indexOf('data-testid="other-files-folders"')).replace(/<[^>]+>/g,'');
+    for(const name of ['Screenshots','Chat images','Broken files','Unknown files','Other files'])assert.ok(folders.includes(name),`${language}: ${name}`);
+    // The template's date levels, without the camera.
+    const preview=markup.slice(markup.indexOf('data-testid="other-files-preview"')).replace(/<[^>]+>/g,'');
+    assert.ok(preview.includes('photobackup-otherfilesScreenshots2026202601Screenshot_20260115-093000.png'),preview.slice(0,200));
+  }
+});
+
 test('organization shows the exact selected folder scope and retains an explicit whole-destination option', async () => {
   const { Organization, ReviewPanel } = await import('../renderer/RootApp');
   for (const language of languages) {

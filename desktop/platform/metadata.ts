@@ -11,6 +11,7 @@ import { exactStatKey } from '../core/paths';
 import { isListedPath, listedFile, readListed, sourceAware } from '../core/source-fs';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
 import { log } from '../logger';
+import { nameOrigin, SCREENSHOT_SOFTWARE } from '../core/other-files';
 
 // A camera file (core/source-fs) is looked at like any other.
 const {stat}=sourceAware(nodeFs);
@@ -96,9 +97,12 @@ function sourceFolder(entries:TagEntries,file?:string):string|undefined {
   const name=file?path.basename(file):'';
   const text=(names:string[])=>entries.filter(([key])=>names.includes(tagName(key))).map(([,value])=>typeof value==='string'?value.trim():'');
   const notes=text(['UserComment','ImageDescription','Comment','Description']);
-  if(notes.some(value=>/^screenshot$/i.test(value))||/^(?:Screenshot[_ ]|截屏|屏幕截图)/i.test(name))return 'Screenshots';
-  if(text(['Author']).includes('ReplayKitRecording')||/^(?:RPReplay_|ScreenRecording_)/i.test(name))return 'Screen Recordings';
-  if(text(['Copyright']).some(value=>/^wxmm/i.test(value))||notes.some(value=>value.includes('"WXVer"'))||name.includes('_WC-EditVideo_')||/^mmexport/i.test(name))return 'WeChat';
+  // Metadata first: what only that source writes (Apple's UserComment "Screenshot", a screenshot tool's Software, ReplayKit, WeChat's tags).
+  if(notes.some(value=>/^screenshot$/i.test(value))||text(['Software','CreatorTool']).some(value=>SCREENSHOT_SOFTWARE.test(value)))return 'Screenshots';
+  if(text(['Author']).includes('ReplayKitRecording'))return 'Screen Recordings';
+  if(text(['Copyright']).some(value=>/^wxmm/i.test(value))||notes.some(value=>value.includes('"WXVer"')))return 'WeChat';
+  // Then the name, and a PNG's or HEIC's pixel size (core/other-files.ts lists the rules).
+  return name?nameOrigin(name,{width:dimension(entries,['ExifImageWidth','ImageWidth','SourceImageWidth']),height:dimension(entries,['ExifImageHeight','ImageHeight','SourceImageHeight'])})?.origin:undefined;
 }
 /** A DJI photo's camera code and its videos' encoder name become the product's one folder name.
  * Insta360 keeps its model in a trailer that routing does not read, so its files fall back to the brand. */
@@ -192,7 +196,9 @@ function counter(key:string,value:unknown):number|undefined {
   return count;
 }
 function editorProvenance(entries:TagEntries):boolean {
-  const photoEditor=/^(?:(?:Adobe\s+)?(?:Photoshop|Lightroom)|Capture\s*One|darktable|RawTherapee|Affinity\s+Photo|DxO\s+(?:PhotoLab|PureRAW|OpticsPro)|GIMP)\b/i;
+  // Desktop and phone editors whose exports name them. Camera firmware ("NIKON Z f Ver.01.10", "ILCE-7M4 v2.00") and
+  // phone system versions ("17.1") never match: those are originals.
+  const photoEditor=/^(?:(?:Adobe\s+)?(?:Photoshop|Lightroom)|Capture\s*One|darktable|RawTherapee|Affinity\s+Photo|DxO\s+(?:PhotoLab|PureRAW|OpticsPro)|GIMP|Snapseed|VSCO|PicsArt|Polarr|Pixelmator|Luminar|ON1\s+Photo|NX\s+Studio|Capture\s+NX|ViewNX|Digital\s+Photo\s+Professional|Imaging\s+Edge|SILKYPIX|FUJIFILM\s+X\s+RAW\s+STUDIO|OM\s+Workspace|Olympus\s+Workspace|Darkroom|Afterlight|Facetune|Meitu|美图秀秀|醒图|Hypic|Photos\s+\d)/iu;
   const known=(value:unknown):boolean=>typeof value==='string'&&photoEditor.test(value.trim());
   const software=(value:unknown)=>Array.isArray(value)?value.some(known):known(value);
   for(const [key,value] of entries){
