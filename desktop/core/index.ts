@@ -637,12 +637,16 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
         const existing=looked.has(entry)?looked.get(entry):await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
         if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
         // Same name and size, neither checksum known (the index, this session's reads, a checksum remembered for the card file):
-        // both are opened once and read in full only if their first 64 KB agree. Known checksums are compared below without a read.
+        // both are opened once and read in full only if their first 64 KB agree. Only where that can save a read: a numbered
+        // conflict copy needs no checksum, while a Conflicts folder is named by content, so a different file is read in full
+        // anyway (and a file of 64 KB or less is its own first 64 KB). Known checksums are compared below without a read.
         const sourceKnown=entry.digest??resolved.get(entry.source)??early.get(entry.source)??options.sourceDigest?.(entry.source,statKey(sourceStats.get(entry.source)!));
-        if(sourceKnown===undefined&&index.known(entry.destination,existing)===undefined&&!isListedPath(entry.source)) {
+        if(entry.allocation?.conflictNaming==='number'&&entry.size>HEAD_BYTES&&sourceKnown===undefined&&!credited.has(entry.source)&&index.known(entry.destination,existing)===undefined&&!isListedPath(entry.source)) {
           await contained(entry.source,sourceRoot);credited.add(entry.source);
-          const pair=await readPairOnce(entry.source,entry.destination,signal,bytes=>{readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
-          if(!pair){differentHeads.add(`${entry.source}\0${entry.destination}`);if(sizedSources.delete(entry.source))compareBytes-=entry.size;return;}
+          let read=0;
+          const pair=await readPairOnce(entry.source,entry.destination,signal,bytes=>{read+=bytes;readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
+          // Different: only the first 64 KB were read, so only those count; the bytes announced shrink to match.
+          if(!pair){differentHeads.add(`${entry.source}\0${entry.destination}`);if(sizedSources.has(entry.source))compareBytes-=entry.size-read;comparing(path.relative(sourceRoot,entry.source));return;}
           if(!sameStat(sourceStats.get(entry.source)!,pair.sourceStat)||!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
           resolved.set(entry.source,pair.source);index.observe(entry.destination,pair.destination,pair.before,pair.after);
         }

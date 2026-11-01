@@ -35,7 +35,10 @@ test('same name, same size, different first 64 KB: a different file, never read 
   const {source,photos,existing}=await library(t,'conflict-head-');
   await put(existing('DSC_0001.JPG'),big('a'));
   await put(path.join(source,'DCIM','DSC_0001.JPG'),big('b'));
-  const {plans:[transfer]}=await plan(source,[photos],{...base,conflictNaming:'number'},fixed);
+  const events:{bytes:number;totalBytes:number}[]=[];
+  const {plans:[transfer]}=await plan(source,[photos],{...base,conflictNaming:'number'},fixed,undefined,(_count,_file,detail)=>{if(detail?.step==='comparing')events.push({bytes:detail.bytes,totalBytes:detail.totalBytes});});
+  // Comparing counts the 64 KB it read, and its total shrinks to that once the pair is found different.
+  assert.deepEqual(events.at(-1),{bytes:64*1024,totalBytes:64*1024});
   const entry=entryNamed(transfer!,'DSC_0001.JPG');
   assert.equal(entry.skip,false);
   assert.equal(path.basename(entry.destination),'DSC_0001 (1).JPG');
