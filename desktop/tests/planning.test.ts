@@ -38,7 +38,10 @@ test('one source preparation produces independent verified plans for both destin
 
 test('source mutation while metadata is read rejects the shared preparation',async t=>{
  const {source,roots}=await fixture(t);const file=path.join(source,'A.JPG');await fs.writeFile(file,'original');
- await assert.rejects(plan(source,roots,options,async()=>{await fs.writeFile(file,'modified');return {fields:{}};}),/Source changed/);
+ // Same size, so only the times tell. Windows file times advance in coarse ticks: a rewrite within one is
+ // indistinguishable by stat, so the rewrite is dated later, as any real later write is.
+ const rewrite=async()=>{const before=await fs.stat(file);await fs.writeFile(file,'modified');await fs.utimes(file,before.atime,new Date(before.mtimeMs+2000));};
+ await assert.rejects(plan(source,roots,options,async()=>{await rewrite();return {fields:{}};}),/Source changed/);
  assert.deepEqual(await fs.readdir(roots[0]),[]);assert.deepEqual(await fs.readdir(roots[1]),[]);
 });
 
