@@ -7,6 +7,7 @@ import { volumeAt } from '../platform/volumes';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { ownEntry } from './own-entries';
 
 const exec=promisify(execFile);
 
@@ -204,7 +205,9 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
     for(const part of parts) {
       current=path.join(current,part);
       if(rootIdentity) await rootUnchanged(root,rootIdentity);
-      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
+      // A macOS "._" by the new folder's name already there is not this app's (own-entries.ts): it stays.
+      const sidecarExisted=await fs.lstat(path.join(path.dirname(current),'._'+part)).then(()=>true,()=>false);
+      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); ownEntry(current,root,sidecarExisted); } catch(error) { if(code(error)!=='EEXIST') throw error; }
       // Ancestors were checked a step earlier; the whole chain is checked again below.
       const stat=await fs.lstat(current,{bigint:true});
       if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);

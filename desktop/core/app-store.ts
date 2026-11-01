@@ -3,6 +3,7 @@ import {constants,type BigIntStats} from 'node:fs';
 import path from 'node:path';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {APP_DATA_FOLDER} from './legacy-names';
+import {ownRecordWrite} from './own-entries';
 import {logDeletion} from '../logger';
 import {beneath,checkAbort,code,contained,maybeLstat,pathKey,posixRelative,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey,unlinkEntry,isOwnRealpath} from './paths';
 export {APP_DATA_FOLDER} from './legacy-names';
@@ -147,7 +148,7 @@ async function flush(file:string,log:Log):Promise<void>{
  if(!ready.length)return;
  try{
   const created=log.create&&!await maybeLstat(file);
-  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);
+  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);if(created)ownRecordWrite(file);
   try{
    const opened=await handle.stat();if(!opened.isFile()||opened.nlink!==1)throw new Error(`Unsafe record log: ${file}`);
    // Start on a fresh line if an interrupted write left a partial one.
@@ -165,7 +166,7 @@ export function holdLog<T>(file:string,work:()=>Promise<T>):Promise<T>{
 }
 /** A new file holding exactly `text`, created exclusively, synchronized with its folder. */
 export async function writeNewFile(file:string,text:string):Promise<void>{
- const handle=await fs.open(file,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
+ const handle=await fs.open(file,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);ownRecordWrite(file);
  try{await handle.writeFile(text);await handle.sync();}finally{await handle.close();}
  await syncDirectory(path.dirname(file));
 }
@@ -182,7 +183,7 @@ export async function readSealedRecord(kind:SealKind,file:string,maxBytes:number
 export async function replaceSealed(kind:SealKind,target:string,prefix:string,payload:Record<string,unknown>):Promise<void>{
  const temporary=path.join(path.dirname(target),`${prefix}-${randomUUID()}.tmp`);
  try{
-  const handle=await fs.open(temporary,'wx',0o600);
+  const handle=await fs.open(temporary,'wx',0o600);ownRecordWrite(temporary);
   try{await handle.writeFile(JSON.stringify(sealV5(kind,payload)));await handle.sync();}finally{await handle.close();}
   await fs.rename(temporary,target);
  }catch(error){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'temporary sealed record of a write that failed','written by this call, never renamed into place'),()=>{});throw error;}
@@ -208,7 +209,7 @@ export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>sameFile
 export async function renameChecked(source:string,target:string,expected?:(stat:BigIntStats)=>boolean):Promise<'done'|'retry'>{
  if(await maybeLstat(target))throw new FirstAidError(`Something is already at ${target}; nothing was moved`);
  const before=await fs.lstat(source,{bigint:true});
- await fs.rename(source,target);
+ await fs.rename(source,target);ownRecordWrite(source);ownRecordWrite(target);
  const [from,to]=await Promise.all([maybeLstat(source),maybeLstat(target)]);
  if(from&&to){
   if(from.dev===to.dev&&from.ino===to.ino)throw new FirstAidError(`First Aid needed: ${source} and ${target} name the same file`);
@@ -344,7 +345,7 @@ async function createStore(base:string):Promise<Store>{
  if(path.resolve(base)!==base||!await isOwnRealpath(base))throw new Error(`Unsafe records location: ${base}`);
  const baseStat=await fs.lstat(base,{bigint:true});if(!baseStat.isDirectory())throw new Error(`Unsafe records location: ${base}`);
  const folder=path.join(base,APP_DATA_FOLDER);
- try{await fs.mkdir(folder,{mode:0o700});await syncDirectory(base);}catch(error){if(code(error)!=='EEXIST')throw error;}
+ try{await fs.mkdir(folder,{mode:0o700});ownRecordWrite(folder);await syncDirectory(base);}catch(error){if(code(error)!=='EEXIST')throw error;}
  const stat=await fs.lstat(folder,{bigint:true});
  if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==baseStat.dev)throw new Error(`Unsafe ${APP_DATA_FOLDER} folder: ${folder}`);
  const file=path.join(folder,'store.json'),existing=await openStore(folder,base,baseStat);
@@ -398,7 +399,7 @@ export async function storeFolder(store:Store,...parts:string[]):Promise<string>
  let current=store.path;
  for(const part of parts){
   current=path.join(current,part);await contained(current,store.path);
-  try{await fs.mkdir(current,{mode:0o700});await syncDirectory(path.dirname(current));}catch(error){if(code(error)!=='EEXIST')throw error;}
+  try{await fs.mkdir(current,{mode:0o700});ownRecordWrite(current);await syncDirectory(path.dirname(current));}catch(error){if(code(error)!=='EEXIST')throw error;}
   const stat=await fs.lstat(current,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==store.dev)throw new Error(`Unsafe records folder: ${current}`);
  }
  return current;

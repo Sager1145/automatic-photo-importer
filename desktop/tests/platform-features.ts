@@ -16,7 +16,7 @@ import { otherComputer } from './fixtures/other-computer';
 import { getOrganizationRecovery } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
 import { evaluateRoutes } from '../core/folder-rules';
-import { appleDoubleCleaner, configureOrganizationRecovery, execute, plan } from '../core/index';
+import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan } from '../core/index';
 import { portableName, portablePath } from '../folder-template';
 import type { InventoryFile } from '../shared';
 import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type Access, type DriveFormat } from '../core/drive-formats';
@@ -203,6 +203,33 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.ok(await has(join(records, '.DS_Store')));
       assert.equal(cleaner.report.dsStore, profile.namesIgnoreCase ? 2 : 1);
       assert.ok(await has(join(card, '.DS_Store')), 'the source is never touched');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'Mac system files: organizing a library a Mac wrote removes its bookkeeping "._" files in the folders touched, on any system': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-mac-sidecars-')));
+    try {
+      const has = (file: string) => lstat(file).then(() => true, () => false);
+      // Bookkeeping only (what macOS writes for every entry on exFAT), and one holding a Finder colour label.
+      const header = () => { const b = Buffer.alloc(4096); b.writeUInt32BE(0x00051607, 0); b.writeUInt32BE(0x00020000, 4); return b; };
+      const labelled = () => { const b = header(); b.writeUInt16BE(1, 24); b.writeUInt32BE(9, 26); b.writeUInt32BE(50, 30); b.writeUInt32BE(32, 34); b[50 + 9] = 0x0c; return b; };
+      const library = join(root, 'photobackup'), incoming = join(library, 'incoming'), other = join(library, 'other'), linked = join(library, 'linked');
+      await mkdir(incoming, { recursive: true }); await mkdir(join(library, '2019'), { recursive: true }); await mkdir(other);
+      await writeFile(join(incoming, 'M.JPG'), Buffer.alloc(5000, 3)); await writeFile(join(incoming, 'notes.txt'), 'keep');
+      await writeFile(join(other, 'notes.txt'), 'o');
+      // This system's folder link: its "._" is not a folder's, so it stays.
+      await profile.link(other, linked);
+      const mac = { root: join(root, '._photobackup'), folder: join(library, '._incoming'), year: join(library, '._2019'), photo: join(incoming, '._M.JPG'), tagged: join(incoming, '._TAGGED.JPG'), link: join(library, '._linked') };
+      for (const [name, file] of Object.entries(mac)) await writeFile(file, name === 'tagged' ? labelled() : header());
+      const metadata = async () => ({ fields: {}, camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z' });
+      const review = (await plan(library, [library], { backup: false, reorganize: true, template: '{year}/{yyyymm}/{camera}', layout: 'flat' }, metadata)).plans[0]!;
+      const result = await executeReorganization(review, undefined, undefined, { removeAppleDouble: true });
+      assert.deepEqual(result.errors, []);
+      for (const name of ['root', 'folder', 'year', 'photo'] as const) assert.equal(await has(mac[name]), false, name);
+      assert.ok(await has(mac.tagged), 'a "._" holding a label stays');
+      assert.ok(await has(mac.link), 'the "._" of a folder link is not a folder\'s');
+      assert.ok(result.appleDouble!.kept >= 1 && result.appleDouble!.removed + result.appleDouble!.orphans >= 4);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'time left: publishing is priced as this system publishes on each file system': async (profile, t) => {
