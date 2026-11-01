@@ -16,7 +16,8 @@ private struct Command: Decodable, Sendable {
 
 /// JSONL process boundary around the non-deleting ImageCaptureCore adapter. The protocol is the Windows bridge's
 /// (desktop/platform/windows-camera.ts): "list" the cameras, "files" of one (names, folders, sizes, dates; nothing
-/// downloaded), "read" a byte range of one file (base64 in the reply), "release" what a reader held. The app plans from
+/// downloaded), "read" a byte range of one file (base64 in the reply), "release" what a reader held, "close" the camera's session once
+/// the app's imports of it end. The app plans from
 /// the list, reads only what it needs, and writes new files only into the destination.
 @main
 @MainActor
@@ -88,6 +89,11 @@ struct NativeCameraBridge {
                         line(reply)
                     case "release":
                         // Each range is its own request on the camera; nothing stays open between them.
+                        emit(["id": command.id, "result": true])
+                    case "close":
+                        // The app's imports of this camera ended: its session goes, so Photos, Lightroom or another
+                        // app can use the camera and it can sleep. The next "files" opens a new one.
+                        if let cameraID = command.cameraID { discovery.close(id: cameraID) }
                         emit(["id": command.id, "result": true])
                     default:
                         emit(["id": command.id, "error": "Unknown native camera command."])

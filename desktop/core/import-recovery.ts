@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import type {PlanEntry,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
 import {appendLines,holdLog,LINE_CAPS,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
-import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,unlinkEntry,type StatRecord} from './paths';
+import {checkAbort,closeHandles,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,regularHandles,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,unlinkEntry,type StatRecord} from './paths';
 import {currentJob,log,logDeletion} from '../logger';
 import {noteRoot} from './run-trace';
 // A partial's source may be a USB camera's file (source-fs).
@@ -159,12 +159,12 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
 }
 
 async function prefixMatches(file:string,source:string,length:number,signal?:AbortSignal):Promise<boolean>{
- const partial=await regularHandle(file),input=await regularHandle(source),a=Buffer.allocUnsafe(1024*1024),b=Buffer.allocUnsafe(a.length);
+ const [partial,input]=await regularHandles(file,source),a=Buffer.allocUnsafe(1024*1024),b=Buffer.allocUnsafe(a.length);
  try {for(let position=0;position<length;){checkAbort(signal);const size=Math.min(a.length,length-position);let left=0,right=0;
   while(left<size){const read=await partial.read(a,left,size-left,position+left);if(!read.bytesRead)return false;left+=read.bytesRead;}
   while(right<size){const read=await input.read(b,right,size-right,position+right);if(!read.bytesRead)return false;right+=read.bytesRead;}
   if(!a.subarray(0,size).equals(b.subarray(0,size)))return false;position+=size;
- }return true;}finally{await partial.close();await input.close();}
+ }return true;}finally{await closeHandles(partial,input);}
 }
 /** Where a receipt's file must be to be the app's: a staged copy in its store's staging folder, a publication at its destination inside the library. */
 const ownedPlace=(record:RecordData,store:Store)=>record.kind==='stage'?path.dirname(record.file)===path.join(store.path,IMPORTS,STAGING)&&stagePattern.test(path.basename(record.file)):record.file===record.destination;

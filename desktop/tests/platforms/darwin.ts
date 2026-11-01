@@ -1,5 +1,6 @@
 // macOS: `diskutil info -plist` output, /Volumes mounts, symbolic links, folders that can be flushed.
 import { symlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { parseMacVolume } from '../../platform/volumes';
 import type { PlatformProfile } from '../platform-features';
 
@@ -31,4 +32,15 @@ export const darwin: PlatformProfile = {
   namesIgnoreCase: true,
   // Finder and Lightroom take POSIX paths: /Volumes/… with forward slashes.
   dropPath: /^\/(?!.*\\)/,
+  heldOpen,
 };
+
+/** What any process has open under the root, as lsof lists it (exit 1: nothing). */
+function heldOpen(root: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    execFile('/usr/sbin/lsof', ['-n', '-Fn', '+D', root], { timeout: 120000, encoding: 'utf8' }, (error, stdout, stderr) => {
+      if (error && (error as { code?: unknown }).code !== 1) reject(new Error(`lsof failed: ${stderr || error.message}`));
+      else resolve(stdout.split('\n').filter(line => line.startsWith('n')).map(line => line.slice(1)));
+    });
+  });
+}

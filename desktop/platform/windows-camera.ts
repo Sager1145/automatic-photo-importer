@@ -1,6 +1,6 @@
 import { deflateRawSync } from 'node:zlib';
 
-/** The Windows camera bridge: the macOS helper's JSONL protocol ("list", "files", "read", "release") over Windows
+/** The Windows camera bridge: the macOS helper's JSONL protocol ("list", "files", "read", "release", "close") over Windows
  * Portable Devices. Cameras in MTP/PTP mode have no drive letter; the Shell's portable-device namespace lists them and
  * their files (name, folder, size, dates and WPD object id; the 7,850 files of a Nikon Z f in about 10 s), and each file
  * is read straight from the device through the WPD API (IPortableDeviceResources::GetStream) in one session opened for
@@ -110,6 +110,8 @@ public static class CameraRead {
   try { if (device != null) device.Close(); } catch {}
   device = null; resources = null; session = null;
  }
+ // Once the app's imports of a camera end, its session goes, so Windows and other apps can use the camera again.
+ public static void Close(string pnp) { if (session == pnp) Close(); }
  static Reader Stream(string objectId) {
   // A few files may be open at once (a header read while another file streams); past that, all go and are reopened on demand.
   if (readers.Count >= 4) { foreach (var key in new List<string>(readers.Keys)) Release(key); }
@@ -210,6 +212,7 @@ while($null -ne ($line=$in.ReadLine())){
   }
   elseif($command.command -eq 'read'){[CameraRead]::Read($out,[string]$command.id,(Pnp ([string]$command.cameraID)),[string]$command.objectID,[int64]$command.offset,[int]$command.length)}
   elseif($command.command -eq 'release'){[CameraRead]::Release([string]$command.objectID);Send @{id=$command.id;result=$true}}
+  elseif($command.command -eq 'close'){[CameraRead]::Close([string](Pnp ([string]$command.cameraID)));Send @{id=$command.id;result=$true}}
   else{Send @{id=$command.id;error='Unknown native camera command.'}}
  }catch{[CameraRead]::Close();Send @{id=$command.id;error=[string]$_.Exception.Message}}
 }
