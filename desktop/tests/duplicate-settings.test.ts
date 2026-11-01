@@ -155,7 +155,9 @@ test('automatic, queued and unreviewed imports never delete: only applying a rev
  const grants=[...main.matchAll(/deleteSourceDuplicates=true/g)];
  assert.equal(grants.length,1,'one place grants the deletion');
  const apply=main.indexOf('async function applyReview(');
- assert.ok(apply>=0&&grants[0]!.index>apply&&grants[0]!.index<main.indexOf('\n}\n',apply),'and it is applyReview');
+ // The function's closing brace, whatever line endings the checkout uses (CRLF on Windows).
+ const end=apply+main.slice(apply).search(/\r?\n\}\r?\n/);
+ assert.ok(apply>=0&&end>apply&&grants[0]!.index>apply&&grants[0]!.index<end,'and it is applyReview');
  assert.match(main.slice(apply,grants[0]!.index+40),/if\(reviewConfirmsDeletion\(prepared\.review\)\)prepared\.deleteSourceDuplicates=true/);
  const gate=main.indexOf("purpose:'duplicates'");
  assert.equal(main.indexOf("purpose:'duplicates'",gate+1),-1,'one deletion of source duplicates');
