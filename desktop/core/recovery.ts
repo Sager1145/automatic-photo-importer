@@ -10,7 +10,7 @@ import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,ty
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
 import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES, type AppleDoubleReport } from './appledouble';
-import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, recordedPath, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
+import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pathSystem, pointerPartition, readLines, recordedPath, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
@@ -283,8 +283,26 @@ function manifestFrom(header:Record<string,unknown>,entries:Record<string,unknow
   ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{}),...(header.cleanupScope!==undefined?{cleanupScope:header.cleanupScope}:{})};
  return validateManifest(m,root,id);
 }
-/** The listing's error for a journal recorded with the drive elsewhere (see journalsIn). */
-export const RECORDED_ELSEWHERE='Recorded with the drive at another place or on another system; finish or undo it there.';
+/** A journal that does not verify, as the listing shows it: an error, or a note for one most likely written by a
+ * computer the store does not list yet (`recordedOn`), or one recorded with the drive at another place (`recordedAt`). */
+type Unreadable={id:string;records:string;error?:string;recordedAt?:string;recordedOn?:NonNullable<OrganizationRecovery['recordedOn']>};
+/** The library a journal's header names, read without verifying it: for showing where a record that cannot be
+ * verified here came from, never for acting on it. */
+async function unverifiedRoot(journal:string,scope:string):Promise<string|undefined>{
+ try{
+  await contained(journal,scope);const handle=await openRegular(journal);
+  try{let root:unknown;await readLines(handle,journal,0,()=>LINE_CAPS.header,text=>{try{root=(JSON.parse(text) as Record<string,unknown>)?.root;}catch{/* Not JSON. */}},{limit:1});return typeof root==='string'?root:undefined;}
+  finally{await handle.close();}
+ }catch{return undefined;}
+}
+/** Each journal that cannot be read here listed once, under the folder it names when that folder is listed: a records
+ * folder at a drive's base is read for every backup folder on it, so a note or error about one of its journals would
+ * otherwise repeat for each. */
+export function listedOnce(jobs:OrganizationRecovery[]):OrganizationRecovery[]{
+ const chosen=new Map<string,OrganizationRecovery>(),key=(job:OrganizationRecovery)=>`${job.records}\0${job.id}`;
+ for(const job of jobs){if(!job.records)continue;const known=chosen.get(key(job));if(!known||job.recordedOn?.here&&!known.recordedOn?.here)chosen.set(key(job),job);}
+ return jobs.filter(job=>!job.records||chosen.get(key(job))===job);
+}
 interface Found {store:Store;folder:string;journal:string;}
 /** Where journal `id` of library `root` is: its folder in exactly one of the stores readers consult. Refused when
  * two stores hold it. */
@@ -308,7 +326,7 @@ async function readManifest(root:string,id:string):Promise<Manifest> {
  return openJournal(await locateJob(root,id),root,id);
 }
 /** The journals whose header names `folder` (by path key) as their library, in every store readers consult for it. */
-async function journalsIn(folder:string,unreadable?:{id:string;error:string;recordedAt?:string}[]):Promise<{id:string;root:string;found:Found}[]>{
+async function journalsIn(folder:string,unreadable?:Unreadable[]):Promise<{id:string;root:string;found:Found}[]>{
  const journals:{id:string;root:string;found:Found}[]=[];
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
@@ -321,16 +339,24 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string;reco
    // A journal whose head cannot be read may be this folder's: refused, or (for a listing) reported as it is.
    try{root=(await readJournalHead(found.journal,store.path,false)).header.root;}
    catch(error){
-    const text=error instanceof Error?error.message:String(error);
-    // Another Mac's journal was never written by this app here and cannot name its journals: it is skipped (and listed).
-    if(unreadable){unreadable.push({id,error:text});continue;}
-    if(text.startsWith('Recovery journal authentication failed'))continue;
+    const text=error instanceof Error?error.message:String(error),failed=text.startsWith('Recovery journal authentication failed');
+    // A computer the store does not list yet wrote here (docs/shared-records.md): a journal no known key verifies is
+    // most likely its, so it is a note, not an error, until that computer joins. Where every writer is listed, a
+    // journal that does not verify is damaged or forged: an error. Neither is ever acted on.
+    if(failed&&store.unlisted&&unreadable){
+     const root=await unverifiedRoot(found.journal,store.path),mapped=root===undefined?undefined:recordedPath({base:store.base,bases:[...store.bases,...(store.unlisted.base?[store.unlisted.base]:[])]},root);
+     const system=(root===undefined?undefined:pathSystem(root))??store.unlisted.system;
+     unreadable.push({id,records:store.path,recordedOn:{...(system?{system}:{}),place:root??store.unlisted.base??store.base,here:!!mapped&&pathKey(mapped)===pathKey(folder)}});continue;
+    }
+    // Another computer's journal cannot name its library here: it is skipped (and listed).
+    if(unreadable){unreadable.push({id,records:store.path,error:text});continue;}
+    if(failed)continue;
     throw new Error(`The organization record ${found.journal} cannot be read, so it is not known which library it belongs to: ${text}`);
    }
    if(typeof root==='string'&&pathKey(root)===pathKey(folder))journals.push({id,root,found});
    // This folder's journal, recorded with the drive at another place or on another system (/Volumes/A006 against I:):
    // its paths and file identities are that system's, so it is listed there and never acted on here.
-   else if(unreadable&&typeof root==='string'){const here=recordedPath(store,root);if(here&&pathKey(here)===pathKey(folder))unreadable.push({id,error:RECORDED_ELSEWHERE,recordedAt:root});}
+   else if(unreadable&&typeof root==='string'){const here=recordedPath(store,root);if(here&&pathKey(here)===pathKey(folder))unreadable.push({id,records:store.path,recordedAt:root});}
   }
  }
  return journals;
@@ -1118,6 +1144,8 @@ export async function orphanedJournals(destination:string):Promise<OrganizationR
  const found:OrganizationRecovery[]=[];
  for(const store of await storesFor(destination).catch(()=>[] as Store[]))for(const {id,root} of await storeJournals(store)){
   if(await fs.realpath(root).then(real=>isOwnRealpath(root,real),()=>false))continue;
+  // Recorded with the drive at another place (/Volumes/A006 against I:\): its library is listed as recorded there, not missing.
+  const here=recordedPath(store,root);if(here&&pathKey(here)!==pathKey(root))continue;
   found.push({id,root,missingRoot:true,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error:`The library folder of this organization was not found: ${root}`});
  }
  return found;
@@ -1153,9 +1181,9 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(!await isOwnRealpath(root))throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
- const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string;recordedAt?:string}[]=[];
+ const jobs:OrganizationRecovery[]=[],unreadable:Unreadable[]=[];
  const ids=[...new Set((await journalsIn(root,unreadable)).map(journal=>journal.id))].sort();let looked=0;
- for(const {id,error,recordedAt} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error,...(recordedAt?{recordedElsewhere:recordedAt}:{})});
+ for(const {id,records,error,recordedAt,recordedOn} of unreadable)jobs.push({id,root,records,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,...(error?{error}:{}),...(recordedAt?{recordedElsewhere:recordedAt}:{}),...(recordedOn?{recordedOn}:{})});
  const report=(position:number,within:number,file:string,counts?:{read:number;total:number},later?:{done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(later?{later}:{})});
  const {signal}=options;
  report(0,0,'');

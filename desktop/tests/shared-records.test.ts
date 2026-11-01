@@ -9,7 +9,7 @@ import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import * as store from '../core/app-store';
 import {parseReceiptLine} from '../core/import-recovery';
-import {getOrganizationRecovery} from '../core/index';
+import {getOrganizationRecovery,listedOnce} from '../core/index';
 import {otherComputer} from './fixtures/other-computer';
 
 const SECRET='fixture-only-host-recovery-secret-32bytes';
@@ -65,9 +65,9 @@ test('an earlier store another computer sealed is history here, is joined on the
  await fs.mkdir(path.join(root,'photobackup'));
  const id=randomUUID(),journal=path.join(data,'Organizations',id,'journal.jsonl');await fs.mkdir(path.dirname(journal),{recursive:true});
  await fs.writeFile(journal,mac.line('organization',{id,root:path.join(root,'photobackup')})+'\n');
- // Its journals are listed as unreadable, never undone or finalized here.
  const jobs=await getOrganizationRecovery(path.join(root,'photobackup'));
- assert.deepEqual(jobs.map(job=>[job.id,job.undoable,job.finalizable]),[[id,false,false]]);assert.match(jobs[0]!.error!,/authentication failed/);
+ // Its journals are notes about that computer, not errors, and never undone or finalized here.
+ assert.deepEqual(jobs.map(job=>[job.id,job.undoable,job.finalizable,job.error,job.recordedOn?.place]),[[id,false,false,undefined,path.join(root,'photobackup')]]);
  // An import onto the drive goes on: the library's store is joined.
  const library=path.join(root,'photobackup');store.registerDestinations([root]);
  const made=await store.storeFor(library);assert.equal(made.path,data);assert.deepEqual([made.verified,made.joined],[true,true]);
@@ -129,4 +129,46 @@ test('each system keeps its own index and duplicate store for a library, so movi
  const partition=store.libraryPartition({base:path.join(os.tmpdir(),'A006')},path.join(os.tmpdir(),'A006','photo','backup'));
  const darwin=store.hash8('photo/backup'),system=store.hash8(`${process.platform}\nphoto/backup`);
  assert.equal(partition,`backup ${process.platform==='darwin'?darwin:system}`,'macOS keeps the name earlier versions gave it');
+});
+
+test('journals of a computer the store does not list yet are notes, once per store however many backup folders read it',async t=>{
+ // A006: the Mac's earlier store, joined by this computer; photobackup and videobackup both read the store at the drive's base.
+ const {root,data,file}=await drive(t),mac=otherComputer('darwin'),base=await fs.lstat(root,{bigint:true});
+ await fs.writeFile(file,JSON.stringify(mac.legacyStoreRecord('/Volumes/A006',`${base.dev}:${base.ino}`)));
+ assert.equal(await store.joinStore(root),true);
+ const [joined]=await store.storesFor(root);assert.deepEqual(joined!.unlisted,{base:'/Volumes/A006',system:'darwin'});
+ const folders=['photobackup','videobackup'],named=['photobackup','photobackup','videobackup'],ids=named.map(()=>randomUUID());
+ for(const folder of folders)await fs.mkdir(path.join(root,folder));
+ for(const [index,folder] of named.entries()){
+  const journal=path.join(data,'Organizations',ids[index]!,'journal.jsonl');await fs.mkdir(path.dirname(journal),{recursive:true});
+  await fs.writeFile(journal,mac.line('organization',{id:ids[index],root:`/Volumes/A006/${folder}`})+'\n');
+ }
+ // One naming no library this computer can place, and a damaged one (an error), are each listed once too.
+ const loose=randomUUID(),torn=randomUUID();
+ await fs.mkdir(path.join(data,'Organizations',loose));await fs.writeFile(path.join(data,'Organizations',loose,'journal.jsonl'),mac.line('organization',{id:loose,root:'/Users/someone/Pictures'})+'\n');
+ await fs.mkdir(path.join(data,'Organizations',torn));await fs.writeFile(path.join(data,'Organizations',torn,'journal.jsonl'),'{"torn":\n');
+ const each=await Promise.all(folders.map(folder=>getOrganizationRecovery(path.join(root,folder))));
+ assert.deepEqual(each.map(jobs=>jobs.length),[5,5],'each folder reads the whole store');
+ const jobs=listedOnce(each.flat()),damaged=jobs.filter(job=>job.error);
+ assert.deepEqual(damaged.map(job=>job.id),[torn]);assert.match(damaged[0]!.error!,/Damaged organization record/);
+ assert.deepEqual(jobs.filter(job=>!job.error).map(job=>[job.id,job.root,job.recordedOn?.system,job.recordedOn?.place]).sort(),[
+  ...named.map((folder,index)=>[ids[index],path.join(root,folder),'darwin',`/Volumes/A006/${folder}`]),
+  [loose,path.join(root,'photobackup'),'darwin','/Users/someone/Pictures'],
+ ].sort());
+ assert.ok(jobs.every(job=>!job.undoable&&!job.finalizable&&job.records===data));
+});
+
+test('a journal that does not verify where every computer that wrote to the store is listed is an error',async t=>{
+ const {root,data,file}=await drive(t),pc=otherComputer('win32'),base=await fs.lstat(root,{bigint:true});
+ await fs.writeFile(file,JSON.stringify(pc.storeRecord(root,store.storeIdentity(base))));
+ assert.equal(await store.joinStore(root),true);
+ const [joined]=await store.storesFor(root);assert.equal(joined!.unlisted,undefined);
+ await fs.mkdir(path.join(root,'photobackup'));
+ // Sealed by a listed computer, then changed: damaged or forged.
+ const tampered=async(sealed:string)=>{const id=randomUUID(),journal=path.join(data,'Organizations',id,'journal.jsonl');await fs.mkdir(path.dirname(journal),{recursive:true});
+  const value=JSON.parse(sealed);value.root=path.join(root,'photobackup');await fs.writeFile(journal,JSON.stringify(value)+'\n');return id;};
+ const ids=[await tampered(pc.line('organization',{id:'x',root:path.join(root,'elsewhere')})),await tampered(store.sealedLine('organization',{id:'x',root:path.join(root,'elsewhere')}))];
+ const jobs=await getOrganizationRecovery(path.join(root,'photobackup'));
+ assert.deepEqual(jobs.map(job=>job.id).sort(),[...ids].sort());
+ for(const job of jobs){assert.match(job.error!,/authentication failed/);assert.equal(job.recordedOn,undefined);}
 });

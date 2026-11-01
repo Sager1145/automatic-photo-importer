@@ -30,7 +30,7 @@ export {pairLivePhotos} from './folder-rules';
 export type {FolderRules} from './folder-rules';
 import type {PlacedFile} from '../platform/placement-memory';
 import { log, logDeletion } from '../logger';
-export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
+export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, listedOnce, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
 import { refuseOldRecords } from './old-records';
 // Listed sources (a USB camera) read through the same calls as a card; see source-fs.
 const fs=sourceAware(nodeFs);

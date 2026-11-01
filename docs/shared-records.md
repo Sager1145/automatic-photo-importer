@@ -88,7 +88,13 @@ A store written before this change has a single-computer `store.json` (`baseIden
    every record it ever wrote on that drive verifies on every computer.
 2. **Any other computer** cannot verify it. It does not refuse the drive. It treats what is there as unverified
    history:
-   - journals that do not verify are listed as unreadable and never resumed, undone, finalized or cleaned up;
+   - journals that do not verify are never resumed, undone, finalized or cleaned up. While the store's key list leaves
+     out a computer that wrote to it (its earlier record, kept as `legacy`, verifies with no listed key), such a
+     journal is most likely that computer's, so the listing shows it as a note, not an error: "Recorded on another
+     computer (macOS, /Volumes/A006/photobackup). Open the drive there to finish or undo it." The system and path come
+     from the journal's own header, read without verifying it, for display only. Once every writer is listed, a
+     journal that verifies with none of their keys is damaged or forged, and is an error. A seal cannot tell which key
+     made it, so while a writer is unlisted a damaged journal reads as a note too; it is still never acted on;
    - receipts that do not verify grant nothing, and a segment holding one is never removed;
    - indexes and duplicate stores that do not verify are ignored and rebuilt by scanning;
    - staged copies with no verified receipt are kept (Clean up only, as before).
@@ -142,8 +148,13 @@ These are listed in [cross-platform.md](cross-platform.md#known-gaps).
 | `store.json` that is not a store record | `Damaged Photo Importer Data record: <file>` |
 | This system's identity does not match | `<folder> was copied from another folder; its records are not used. Use First Aid.` |
 | Earlier store this computer cannot verify (log only) | `Records in <folder> were written by another computer with an earlier version; they are kept as history and not acted on here until that computer uses this drive again.` |
-| Journal that does not verify (listing) | `Recovery journal authentication failed; originals retained` (unchanged) |
-| Journal recorded with the drive elsewhere (listing, all four languages) | `Recorded with the drive at <recorded path>. Finish or undo it on the computer that recorded it.` |
+| Journal that does not verify, every writer listed (listing, error) | `Recovery journal authentication failed; originals retained` (unchanged) |
+| Journal that does not verify while a writer is unlisted (listing, note, all four languages) | `Recorded on another computer (<system>, <recorded path>). Open the drive there to finish or undo it.` |
+| Journal recorded with the drive elsewhere (listing, note, all four languages) | `Recorded with the drive at <recorded path>. Finish or undo it on the computer that recorded it.` |
+
+A store at a drive's base is read for every backup folder on the drive (`photobackup` and `videobackup` on A006), so
+the listing shows each journal that cannot be read or acted on here once per store (`listedOnce`), under the folder it
+names. Notes are not errors: they do not appear in All errors.
 
 ## Code
 
@@ -154,5 +165,8 @@ These are listed in [cross-platform.md](cross-platform.md#known-gaps).
   records become shared as soon as it sees the drive, without waiting for an import.
 - `desktop/core/drive-backup.ts`: reads a destination's store before reading drive markers, so markers written
   by another computer verify.
-- Tests: `desktop/tests/shared-records.test.ts`, and the platform feature "records: a store made on another system
-  opens here" in `desktop/tests/platform-features.ts`.
+- `desktop/core/recovery.ts`: `journalsIn` lists a journal that does not verify as a note (`recordedOn`) when the
+  store has an unlisted writer (`Store.unlisted`), and `listedOnce` lists each once per store.
+- Tests: `desktop/tests/shared-records.test.ts`, and the platform features "records: a store made on another system
+  opens here" and "records: journals a computer the drive does not list yet wrote are notes" in
+  `desktop/tests/platform-features.ts`.
