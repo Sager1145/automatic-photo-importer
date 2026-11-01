@@ -9,6 +9,7 @@ import { refuseOnCamera } from './camera-guard';
 import { destinationEntries } from './allocation';
 import type { DestinationOutcome } from './destinations';
 import type { TransferPlan } from '../shared';
+import { mediaKindForPath } from '../media-formats';
 
 /** Files checked at once; each device's own stream limit (devices.ts) still caps the reads. */
 const VERIFY_CONCURRENCY=4;
@@ -16,8 +17,14 @@ const VERIFY_CONCURRENCY=4;
 /** A source file an import copied and verified: its checksum and every place the import put it.
  * identity: the source's statKey when the import read it for that checksum. */
 export interface VerifiedOriginal {source:string;size:number;sha256:string;destinations:string[];identity?:string;}
-/** stopped: Stop was pressed before this file was removed. */
-export type KeptReason='changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error'|'stopped';
+/** Only photos and videos are ever deleted from a source: everything else an import copies (documents, archives, sidecars,
+ * hidden files) stays where it is. */
+export function deletableFromSource(file:string):boolean {
+  const name=path.basename(file);
+  return !name.startsWith('.')&&mediaKindForPath(name)!=='Other';
+}
+/** stopped: Stop was pressed before this file was removed. not-media: not a photo or video (deletableFromSource). */
+export type KeptReason='not-media'|'changed'|'missing'|'unverified'|'destination-missing'|'destination-differs'|'unsafe'|'error'|'stopped';
 export interface OriginalsMeasure {files:number;bytes:number;/** Files that would stay: changed, missing or not found in the backup. */kept:number;}
 /** stopped: the run was stopped; files it had already removed are still listed in `deleted`. A stop before the emptied-folder pass removes no folder; one during it ends the pass early. */
 export interface OriginalsResult {deleted:{source:string;size:number}[];kept:{source:string;reason:KeptReason}[];bytes:number;errors:string[];/** Source folders removed because this run left them empty. */folders:number;stopped?:boolean;}
@@ -45,8 +52,8 @@ export async function measureOriginals(sourceRoot:string,files:VerifiedOriginal[
 }
 /** Why a source this import copied is not offered for deletion. copy-missing: a destination its allocation requires
  * (both disks when mirroring, the one it was assigned when filling first) holds no copy from this run. unverified: a
- * required copy was never read back (verification off). */
-export interface WithheldOriginal {source:string;reason:'copy-missing'|'unverified';}
+ * required copy was never read back (verification off). not-media: not a photo or video, never deleted (deletableFromSource). */
+export interface WithheldOriginal {source:string;reason:'copy-missing'|'unverified'|'not-media';}
 /** The originals a finished import may offer to delete, from what each file actually came to at each destination: a source
  * qualifies only when every destination its plan sends it to holds a copy this run verified, and its actual paths there are
  * what deleteOriginals re-reads. Only a source this run read itself (a copy it published) carries its identity, which lets
@@ -58,6 +65,7 @@ export function verifiedOriginals(outcomes:ReadonlyMap<string,readonly Destinati
   for(const [source,found] of outcomes) {
     const slots=required.get(source);
     if(!slots||!found.length) continue;
+    if(!deletableFromSource(source)) {withheld.push({source,reason:'not-media'});continue;}
     if([...slots].some(slot=>!found.some(item=>item.destinationSlot===slot))) {withheld.push({source,reason:'copy-missing'});continue;}
     if(found.some(item=>item.verification!=='content-verified')) {withheld.push({source,reason:'unverified'});continue;}
     const read=found.find(item=>item.disposition==='published'&&item.sourceIdentity!==undefined);
@@ -76,6 +84,7 @@ export function libraryDuplicates(outcomes:ReadonlyMap<string,readonly Destinati
 export function plannedLibraryDuplicates(plans:TransferPlan[]):{files:number;bytes:number} {
   const seen=new Map<string,{size:number;everywhere:boolean}>();
   for(const plan of plans) for(const entry of destinationEntries(plan)) {
+    if(!deletableFromSource(entry.source)) continue;
     const known=seen.get(entry.source),there=entry.skip&&!!entry.digest;
     seen.set(entry.source,{size:entry.size,everywhere:(known?.everywhere??true)&&there});
   }
@@ -118,6 +127,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
     // Counted as planned, even when the source turns out to need a read after all.
     const read=reads(file);
     try {
+      if(!deletableFromSource(file.source)) return {kept:'not-media'};
       if(!file.sha256||!file.destinations.length) return {kept:'unverified'};
       if(!beneath(file.source,sourceRoot)||file.destinations.includes(file.source)) return {kept:'unsafe'};
       await contained(file.source,sourceRoot);

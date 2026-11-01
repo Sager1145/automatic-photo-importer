@@ -76,7 +76,7 @@ import {addErrors,appleDoubleIssues,noMetadataIssues,errorTotal,issuePaths,recor
 import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
-import {sourcePolicy,freshOrganizeOptions,importOperation} from './run-policy';
+import {sourcePolicy,freshOrganizeOptions,importOperation,importDuplicateRemoval,reviewConfirmsDeletion} from './run-policy';
 import {useCameraCheck,CameraDeleteRefused} from './core/camera-guard';
 import {ejectVolume} from './platform/eject';
 import {autoEjectDecision,ejectDone,ejectingSource,ejectSource,offersOriginals,originalsBlocked,originalsVolumeChanged,type EjectDeps,type EjectView} from './source-eject';
@@ -298,7 +298,7 @@ const reusableScan=(source:Source)=>source.transport==='camera'?undefined:listin
 const usedBytes=(source:Source)=>source.transport!=='camera'&&source.transport!=='folder'&&source.total!==undefined&&source.free!==undefined?source.total-source.free:0;
 const sessionRules:Preferences['unknownRules']=state.sessionUnknownRules={};
 /** Reserved destination plans for one source. A review holds one until applied. */
-interface Prepared {/** The job this plan was parked from: its id (log lines), and whether it was an organization, so Continue keeps it one. */origin?:{jobId:string;organization?:boolean;folders?:string[]};/** What this was planned from, to plan again with file dates. */request:RunRequest;useFileDate?:boolean;handling?:'keep'|'folder';/** Unknown files planning left or filed apart (all of them; the review carries a capped list). */noMetadata?:NoMetadataSummary;/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;/** An import: files already in the backup under older folder rules (skipped there) and families copied whole because only some members were. */elsewhere?:{files:number;partialFamilies:number;skipped:{size:number;candidates:number}[]};}
+interface Prepared {/** Set by applyReview only: this import's review was shown and applied with "delete from the source" ticked. */deleteSourceDuplicates?:true;/** The job this plan was parked from: its id (log lines), and whether it was an organization, so Continue keeps it one. */origin?:{jobId:string;organization?:boolean;folders?:string[]};/** What this was planned from, to plan again with file dates. */request:RunRequest;useFileDate?:boolean;handling?:'keep'|'folder';/** Unknown files planning left or filed apart (all of them; the review carries a capped list). */noMetadata?:NoMetadataSummary;/** The drives read and written, for the time-left model. */eta:{source:DriveInfo;destinations:DriveInfo[]};problems:ProblemFile[];review:Review;prefs:Preferences;options:OrganizeOptions;inventory:Inventory;space?:DestinationSpace[];stage?:{path:string;cleanup():Promise<void>};/** Files left out of the plans because of an error; `text` is the English reason for reports. */failures:{path:string;error:Message;text:string}[];skipErrors:boolean;/** Duplicate detection stage 1 findings, recorded in each library after the job. */duplicates?:PlanDuplicates;/** An import: files already in the backup under older folder rules (skipped there) and families copied whole because only some members were. */elsewhere?:{files:number;partialFamilies:number;skipped:{size:number;candidates:number}[]};}
 let reviewed:Prepared|undefined;
 let reviewControl:AbortController|undefined;
 const store=()=>path.join(app.getPath('userData'),'settings.json');
@@ -992,7 +992,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   // transfer) or from a camera or camera card (a camera import, which never deletes anything on the camera).
   const operation=reorganize?undefined:importOperation(source,source.transport==='folder'&&await onCameraCard(sourcePath)),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs,operation);
   const sourceDuplicates=operation?plannedLibraryDuplicates(plans):undefined;
-  const duplicateRemoval:DuplicateRemovalPlan=operation?{operation,enabled:operation==='camera'?prefs.removeDuplicatesCamera===true:policy.removeSourceDuplicates,files:policy.removeSourceDuplicates?sourceDuplicates!.files:0,bytes:policy.removeSourceDuplicates?sourceDuplicates!.bytes:0}:{operation:'organize',enabled:options.releaseDuplicates};
+  const duplicateRemoval:DuplicateRemovalPlan=operation?importDuplicateRemoval(operation,policy,prefs,sourceDuplicates!):{operation:'organize',enabled:options.releaseDuplicates};
   return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(request.handling?{handling:request.handling}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(request.useFileDate?{noMetadataHandling:'fileDate' as const}:request.handling?{noMetadataHandling:request.handling}:{}),...(request.useFileDate&&request.earlier?{fileDated:{...request.earlier,files:request.earlier.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,duplicateRemoval,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
  }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}
 }
@@ -1127,11 +1127,12 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
   if(!reorganize)job.importResult={copied,skipped,planned:entries,errors:errorTotal(job)};
-  // Remove confirmed duplicates (drive transfers): after an import that finished clean and was not stopped, the source files
-  // it found already in the library are read again at the source and in the library, and only those that still match are
-  // deleted from the source. Never a camera import (the policy), and never on a camera or camera card (the core guard).
+  // Remove confirmed duplicates (drive transfers): only when this import's review was shown and applied with its box ticked
+  // (never an automatic, queued or unreviewed run). After an import that finished clean and was not stopped, the source photos
+  // and videos it found already in the library are read again at the source and in the library, and only those that still
+  // match are deleted from the source. Never a camera import, and never on a camera or camera card (the core guard).
   let sourceDuplicatesLine:Message|undefined;const deletedDuplicates=new Set<string>();
-  if(!reorganize&&policy.removeSourceDuplicates&&job.phase==='complete'&&!errorTotal(job)&&!job.failedFiles&&!prepared.stage&&!signal.aborted){
+  if(!reorganize&&operation==='drive'&&prepared.deleteSourceDuplicates===true&&job.phase==='complete'&&!errorTotal(job)&&!job.failedFiles&&!prepared.stage&&!signal.aborted){
    const files=libraryDuplicates(outcomes,plans);
    if(files.length){
     job.detail=message('job.removingSourceDuplicates',{count:files.length});progressEmit();
@@ -1262,6 +1263,8 @@ async function applyReview(){
  if(!reviewed)return;
  if(busy()||state.busyReview)throw new MessageError('error.busy');
  const prepared=reviewed;reviewed=undefined;state.review=undefined;
+ // The one way an import deletes from its source: this review, shown for this import, applied with its box ticked.
+ if(reviewConfirmsDeletion(prepared.review))prepared.deleteSourceDuplicates=true;
  const {job,organization}=appliedReviewJob(randomUUID(),prepared);state.jobs.unshift(job);if(organization){organizationRuns.set(job.id,organization);state.organizeOptions={...prepared.options};}const control=startJob(job);
  reservations.set(job.id,reservations.get(prepared.review.id)!);reservations.delete(prepared.review.id);
  log('normal','job','review-applied',{reviewId:prepared.review.id,...(prepared.origin?{plannedBy:prepared.origin.jobId}:{})},job.id);void settle(withJob(job.id,()=>run(job,control,prepared))).finally(()=>{if(job.phase==='error')job.retryable=true;finishJob(job);});
@@ -1517,6 +1520,7 @@ async function action(input:Action):Promise<void>{
    const origin=reviewed.origin;await openReview(source,backup,next,destinationIndex);if(origin&&reviewed)reviewed.origin=origin;break;
   }
   case 'applyReview':await applyReview();break;
+  case 'reviewDuplicates':{const plan=reviewed?.review.kind==='import'?reviewed.review.duplicateRemoval:undefined;if(plan?.operation==='drive'&&(plan.files??0)>0){plan.remove=input.remove===true;state.review=reviewed!.review;emit();}break;}
   case 'discardReview':await discardReview();pump();break;
   case 'window': if(input.command==='minimize')window?.minimize();else if(input.command==='maximize'){if(window?.isMaximized())window.unmaximize();else window?.maximize();}else if(input.command==='close')window?.close();break;
   case 'acknowledgeErrors':{

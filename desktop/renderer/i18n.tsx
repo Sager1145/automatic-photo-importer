@@ -556,15 +556,15 @@ Library organization|资料库整理|資料庫整理|ライブラリの整理
 Drive transfers|驱动器传输|磁碟傳輸|ドライブからの転送
 Camera imports|相机导入|相機匯入|カメラからの読み込み
 After organizing finishes without errors, originals already at their destination are checked again and deleted instead of kept for undo; the Organize page can change it for one run.|整理无错误完成后，再次校验已在目标位置的原文件并将其删除，而不是保留以供撤销；可在“整理”页面为单次运行更改。|整理無錯誤完成後，再次校驗已在目標位置的原始檔案並將其刪除，而不是保留以供復原；可在「整理」頁面為單次執行變更。|整理がエラーなく完了したら、移動先に既にある元のファイルを再確認し、元に戻す用に残さず削除します。「整理」ページで1回ごとに変更できます。
-After an import from a drive or folder finishes without errors, its files that were already in the library are checked again on both sides and deleted from the source.|从驱动器或文件夹导入无错误完成后，对已在资料库中的文件在两侧再次校验，然后从来源删除。|從磁碟或資料夾匯入無錯誤完成後，對已在資料庫中的檔案在兩側再次校驗，然後從來源刪除。|ドライブやフォルダーからの読み込みがエラーなく完了したら、ライブラリに既にあったファイルを両方で再確認し、ソースから削除します。
+Ticks the import review's box to delete from the source the photos and videos already in the library, after a clean import. Each import asks first; automatic imports never delete.|干净导入后，勾选导入审阅中的选项，从来源删除已在资料库中的照片和视频。每次导入都会先询问；自动导入从不删除。|乾淨匯入後，勾選匯入審閱中的選項，從來源刪除已在資料庫中的照片和影片。每次匯入都會先詢問；自動匯入從不刪除。|読み込み前の確認で、ライブラリに既にある写真と動画をエラーなく読み込んだ後にソースから削除するチェックを入れておきます。読み込みごとに確認し、自動読み込みでは削除しません。
 USB cameras and camera cards: files already in the library always stay on the camera or card, because nothing there is ever deleted.|USB 相机和相机卡：已在资料库中的文件始终保留在相机或卡上，因为那里的任何内容都不会被删除。|USB 相機和相機卡：已在資料庫中的檔案始終保留在相機或卡上，因為那裡的任何內容都不會被刪除。|USB カメラとカメラカード：カメラやカード上のものは削除されないため、ライブラリに既にあるファイルも常にカメラやカードに残ります。
 Settings: on for library organization|设置：资料库整理已开启|設定：資料庫整理已開啟|設定：ライブラリの整理ではオン
 Settings: off for library organization|设置：资料库整理已关闭|設定：資料庫整理已關閉|設定：ライブラリの整理ではオフ
 Library organization: confirmed duplicates are released|资料库整理：已确认的重复文件会被释放|資料庫整理：已確認的重複檔案會被釋放|ライブラリの整理：確認済みの重複ファイルは解放されます
 Library organization: confirmed duplicates are kept for undo|资料库整理：已确认的重复文件会保留以便撤销|資料庫整理：已確認的重複檔案會保留以便復原|ライブラリの整理：確認済みの重複ファイルは取り消し用に保持されます
-Drive transfer: {count} source files already in the library will be deleted from {source} after a clean import|驱动器传输：干净导入后，将从 {source} 删除 {count} 个已在资料库中的来源文件|磁碟傳輸：乾淨匯入後，將從 {source} 刪除 {count} 個已在資料庫中的來源檔案|ドライブからの転送：エラーなく読み込みが終わると、ライブラリに既にあるソースファイル {count} 件を {source} から削除します
+{count} files already in the library will be deleted from {source} after the import|导入后，将从 {source} 删除 {count} 个已在资料库中的文件|匯入後，將從 {source} 刪除 {count} 個已在資料庫中的檔案|読み込み後、ライブラリに既にあるファイル {count} 件を {source} から削除します
+Only photos and videos are deleted, each read again at the source and in the library first. Other files stay.|只删除照片和视频，删除前会在来源和资料库中再次读取每个文件。其他文件保留。|只刪除照片和影片，刪除前會在來源和資料庫中再次讀取每個檔案。其他檔案保留。|削除するのは写真と動画だけで、削除前にソースとライブラリの両方で読み直します。その他のファイルは残ります。
 Drive transfer: none of these files is already in the library|驱动器传输：这些文件都不在资料库中|磁碟傳輸：這些檔案都不在資料庫中|ドライブからの転送：ライブラリに既にあるファイルはありません
-Drive transfer: files already in the library stay on the source|驱动器传输：已在资料库中的文件保留在来源上|磁碟傳輸：已在資料庫中的檔案保留在來源上|ドライブからの転送：ライブラリに既にあるファイルはソースに残ります
 Camera import: nothing on the camera or card is deleted|相机导入：不会删除相机或卡上的任何内容|相機匯入：不會刪除相機或卡上的任何內容|カメラからの読み込み：カメラやカード上のものは削除されません
 After organizing finishes without errors, originals already present at their destination are checked again and removed instead of kept for undo.|整理无错误完成后，再次校验已存在于目标位置的原文件，然后将其删除，而不是保留以供撤销。|整理無錯誤完成後，再次校驗已存在於目標位置的原始檔案，然後將其刪除，而不是保留以供復原。|整理がエラーなく完了したら、移動先に既にある元のファイルを再確認し、元に戻す用に残さず削除します。
 Folders left empty after organizing are removed. Folders with files are kept.|整理后变空的文件夹会被删除，仍有文件的文件夹会保留。|整理後變空的資料夾會被刪除，仍有檔案的資料夾會保留。|整理後に空になったフォルダーは削除します。ファイルが残るフォルダーは残します。

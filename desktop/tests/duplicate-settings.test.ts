@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {createHash} from 'node:crypto';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {plan,execute,configureOrganizationRecovery} from '../core/index';
-import {deleteOriginals,libraryDuplicates,plannedLibraryDuplicates} from '../core/originals';
+import {deleteOriginals,deletableFromSource,libraryDuplicates,plannedLibraryDuplicates,verifiedOriginals} from '../core/originals';
 import type {DestinationOutcome} from '../core/destinations';
 import {defaultPreferences,normalizePreferences,DUPLICATE_DEFAULTS_VERSION} from '../preferences';
-import {duplicateRemovalDefaults,duplicateSetting,freshOrganizeOptions,importOperation,sourcePolicy} from '../run-policy';
+import {duplicateRemovalDefaults,duplicateSetting,freshOrganizeOptions,importDuplicateRemoval,importOperation,reviewConfirmsDeletion,sourcePolicy} from '../run-policy';
 import {acceptedPreferences,livePreferences} from '../settings-lock';
 import {I18nProvider,languages,createTranslator} from '../renderer/i18n';
-import {SettingsPage,duplicateRemovalText} from '../renderer/RootApp';
+import {SettingsPage,DuplicateRemovalChoice,duplicateRemovalText} from '../renderer/RootApp';
 import type {AppState,Metadata,Review,Source} from '../shared';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -63,7 +64,7 @@ test('camera imports are USB cameras and camera cards; every other import is a d
  assert.equal(importOperation(source('folder',{drive:{volumeId:'v',name:'SD',mount:'/media/sd',kind:'card'}}),false),'camera');
 });
 
-test('only a drive transfer with its setting on deletes source duplicates; a camera import never does',()=>{
+test('only a drive transfer has its setting tick the review box; a camera import never does',()=>{
  const on=normalizePreferences({duplicateDefaultsVersion:1,removeDuplicatesDrive:true,removeDuplicatesCamera:true});
  assert.equal(sourcePolicy('import',undefined,on,'drive').removeSourceDuplicates,true);
  assert.equal(sourcePolicy('import',undefined,on,'camera').removeSourceDuplicates,false,'the camera setting on still deletes nothing on a camera');
@@ -120,9 +121,83 @@ test('Settings shows one switch per kind of run with its default, in every langu
 test('the import review says which setting applies and what it deletes',()=>{
  const t=createTranslator('en'),n=(value:number)=>String(value);
  const review=(duplicateRemoval:Review['duplicateRemoval'])=>({source:source('folder',{name:'Archive'}),duplicateRemoval});
- assert.equal(duplicateRemovalText(review({operation:'drive',enabled:true,files:3,bytes:9}),t,n),'Drive transfer: 3 source files already in the library will be deleted from Archive after a clean import');
+ assert.equal(duplicateRemovalText(review({operation:'drive',enabled:true,files:3,bytes:9}),t,n),'3 files already in the library will be deleted from Archive after the import');
  assert.equal(duplicateRemovalText(review({operation:'drive',enabled:true,files:0}),t,n),'Drive transfer: none of these files is already in the library');
- assert.equal(duplicateRemovalText(review({operation:'drive',enabled:false}),t,n),'Drive transfer: files already in the library stay on the source');
  assert.equal(duplicateRemovalText(review({operation:'camera',enabled:true,files:5}),t,n),'Camera import: nothing on the camera or card is deleted');
  for(const language of languages)assert.ok(duplicateRemovalText(review({operation:'drive',enabled:true,files:2}),createTranslator(language),n).includes('Archive'),language);
+});
+
+const reviewOf=(duplicateRemoval:Review['duplicateRemoval'],kind:Review['kind']='import')=>({kind,duplicateRemoval});
+test('a drive transfer review asks once with a box ticked from Settings; a camera import is never asked',()=>{
+ const on=normalizePreferences({duplicateDefaultsVersion:1,removeDuplicatesDrive:true,removeDuplicatesCamera:true}),off={...on,removeDuplicatesDrive:false};
+ const planned={files:3,bytes:900};
+ assert.deepEqual(importDuplicateRemoval('drive',sourcePolicy('import',undefined,on,'drive'),on,planned),{operation:'drive',enabled:true,files:3,bytes:900,remove:true},'ticked by default');
+ assert.deepEqual(importDuplicateRemoval('drive',sourcePolicy('import',undefined,off,'drive'),off,planned),{operation:'drive',enabled:false,files:3,bytes:900,remove:false},'setting off: counted, unticked');
+ assert.equal(importDuplicateRemoval('drive',sourcePolicy('import',undefined,on,'drive'),on,{files:0,bytes:0}).remove,false,'nothing to delete: nothing to tick');
+ const camera=importDuplicateRemoval('camera',sourcePolicy('import',undefined,on,'camera'),on,planned);
+ assert.equal(camera.remove,undefined);assert.equal(camera.files,0);assert.equal(reviewConfirmsDeletion(reviewOf(camera)),false,'camera setting on: still nothing deleted');
+});
+
+test('only a drive transfer review applied with its box ticked lets an import delete; unticked, missing or unreviewed never does',()=>{
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:true,files:3,remove:true})),true,'ticked and confirmed');
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:true,files:3,remove:false})),false,'the user unticked it');
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:true,files:3})),false,'never asked: no box state');
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:false,files:3,remove:true})),true,'setting off, ticked by hand for this import');
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:true,files:0,remove:true})),false,'nothing was shown to delete');
+ assert.equal(reviewConfirmsDeletion(reviewOf(undefined)),false);
+ assert.equal(reviewConfirmsDeletion(reviewOf({operation:'drive',enabled:true,files:3,remove:true},'reorganize')),false,'an organization is not an import');
+});
+
+test('automatic, queued and unreviewed imports never delete: only applying a review grants it',async()=>{
+ // Every run that is not an applied review (Automatic import, Start all selected, queued and retried runs) plans through
+ // prepare() and reaches run() with a request; the permission is a field of the plan that applyReview alone sets.
+ const main=await fs.readFile(path.join(import.meta.dirname,'..','main.ts'),'utf8');
+ const grants=[...main.matchAll(/deleteSourceDuplicates=true/g)];
+ assert.equal(grants.length,1,'one place grants the deletion');
+ const apply=main.indexOf('async function applyReview(');
+ assert.ok(apply>=0&&grants[0]!.index>apply&&grants[0]!.index<main.indexOf('\n}\n',apply),'and it is applyReview');
+ assert.match(main.slice(apply,grants[0]!.index+40),/if\(reviewConfirmsDeletion\(prepared\.review\)\)prepared\.deleteSourceDuplicates=true/);
+ const gate=main.indexOf("purpose:'duplicates'");
+ assert.equal(main.indexOf("purpose:'duplicates'",gate+1),-1,'one deletion of source duplicates');
+ assert.match(main.slice(main.lastIndexOf('if(!reorganize&&',gate),gate),/operation==='drive'&&prepared\.deleteSourceDuplicates===true/,'which needs the grant');
+});
+
+test('only photos and videos are ever deleted from a source; other files, hidden files and "._" files stay',async t=>{
+ for(const name of ['A.JPG','b.arw','clip.MP4','photo.png','x.heic'])assert.equal(deletableFromSource(path.join('src',name)),true,name);
+ for(const name of ['.hidden-note','notes.txt','archive.zip','A.xmp','._A.JPG','.secret.jpg','README'])assert.equal(deletableFromSource(path.join('src',name)),false,name);
+ const {folder,root,plans,outcomes}=await reimport(t);
+ // Non-media files the same import found already in the library (a Files & folders import copies them too).
+ const extra=['notes.txt','.hidden-note','._A.JPG'];
+ const sample=[...outcomes.values()][0]![0]!;
+ for(const name of extra){
+  const from=path.join(folder,'DCIM',name),to=path.join(root,'Other',name),body=name.repeat(20);
+  await fs.writeFile(from,body);await fs.mkdir(path.dirname(to),{recursive:true});await fs.writeFile(to,body);
+  const sha256=createHash('sha256').update(body).digest('hex');
+  plans[0]!.entries.push({id:name,source:from,destination:to,size:body.length,kind:'Other',digest:sha256,skip:true,family:name});
+  outcomes.set(from,[{...sample,source:from,destination:to,entryId:name,size:body.length,sha256,disposition:'existing'}]);
+ }
+ assert.equal(plannedLibraryDuplicates(plans).files,3,'the review counts the photos only');
+ const files=libraryDuplicates(outcomes,plans);
+ assert.deepEqual(files.map(file=>path.basename(file.source)).sort(),['A.JPG','B.JPG','C.JPG']);
+ assert.deepEqual(verifiedOriginals(outcomes,plans).withheld.filter(item=>item.reason==='not-media').map(item=>path.basename(item.source)).sort(),[...extra].sort(),'Delete originals never offers them either');
+ // Even handed one directly, the deletion keeps it.
+ const forced=[...files,{source:path.join(folder,'DCIM','notes.txt'),size:180,sha256:'0'.repeat(64),destinations:[path.join(root,'Other','notes.txt')]}];
+ const result=await deleteOriginals(folder,forced,{purpose:'duplicates'});
+ assert.deepEqual(result.deleted.map(item=>path.basename(item.source)).sort(),['A.JPG','B.JPG','C.JPG'],'photos confirmed by the review are deleted');
+ assert.deepEqual(result.kept,[{source:forced.at(-1)!.source,reason:'not-media'}]);
+ assert.deepEqual((await fs.readdir(path.join(folder,'DCIM'))).sort(),['.hidden-note','D.JPG','._A.JPG','notes.txt'].sort());
+});
+
+test('the review shows the box with its count and state, in every language',()=>{
+ const review={source:source('folder',{name:'Archive'}),duplicateRemoval:{operation:'drive' as const,enabled:true,files:2,bytes:9,remove:true}};
+ const detail='Only photos and videos are deleted, each read again at the source and in the library first. Other files stay.';
+ for(const language of languages){
+  const render=(value:Pick<Review,'source'|'duplicateRemoval'>)=>renderToStaticMarkup(createElement(I18nProvider,{language,children:createElement(DuplicateRemovalChoice,{review:value,act:()=>{}})}));
+  const ticked=render(review),unticked=render({...review,duplicateRemoval:{...review.duplicateRemoval,remove:false}});
+  assert.match(ticked,/data-testid="review-duplicates-choice"/);assert.ok(ticked.includes('Archive'),language);
+  assert.match(ticked,/checked=""/,language);assert.doesNotMatch(unticked,/checked=""/,language);
+  if(language!=='en')assert.notEqual(createTranslator(language)(detail),detail,language);
+ }
+ const camera=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(DuplicateRemovalChoice,{review:{...review,duplicateRemoval:{operation:'camera',enabled:true,files:0}},act:()=>{}})}));
+ assert.equal(camera,'','a camera import is never asked');
 });
