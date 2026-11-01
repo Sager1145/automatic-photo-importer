@@ -21,7 +21,8 @@ const realDrives=typeof flags['real-drives']==='string'?flags['real-drives'].spl
 if(flags['real-drives']!==undefined&&(!realDrives?.length||realDrives.some(drive=>!/^\/Volumes\/[^/]+$/.test(drive.destination)||!drive.basePath||path.isAbsolute(drive.basePath)||drive.basePath.split('/').includes('..')))){console.error('--real-drives needs destination[:basePath] entries such as /Volumes/A006:photobackup (destination must match ^/Volumes/[^/]+$).');process.exit(2);}
 const large=realDrives?0:Number(flags.large??0);
 const run=(bin,args,timeoutMs=0)=>new Promise((resolve,reject)=>{
- const child=spawn(bin,args,{cwd:repo,stdio:'inherit',env:{...process.env,ELECTRON_RUN_AS_NODE:undefined}});
+ // Windows runs a .cmd (npm.cmd) only through a shell since Node's 2024 spawn hardening; the arguments here are constant.
+ const child=spawn(bin,args,{cwd:repo,stdio:'inherit',env:{...process.env,ELECTRON_RUN_AS_NODE:undefined},shell:process.platform==='win32'&&/\.cmd$/i.test(bin)});
  let expired=false;
  const deadline=timeoutMs?setTimeout(()=>{expired=true;child.kill('SIGKILL');},timeoutMs):undefined;
  child.on('error',error=>{clearTimeout(deadline);reject(error);});
