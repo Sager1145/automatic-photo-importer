@@ -50,6 +50,8 @@ public final class DeviceDiscovery: NSObject {
     private var storages: [String: [CameraStorage]] = [:]
     /// The session a camera gets when it connects, which reads its catalog once to learn its storages.
     private var probes: [String: Task<Void, Never>] = [:]
+    /// Cameras an import is reading: their session stays open from "files" until "close".
+    private var held: Set<String> = []
 
     public override init() {
         super.init()
@@ -79,7 +81,7 @@ public final class DeviceDiscovery: NSObject {
     }
 
     /// The camera's open session, opened (and its complete catalog awaited) on first use. It stays open for the
-    /// listings and reads that follow, until the camera goes away or the bridge ends.
+    /// listings and reads that follow, until the app closes it, the camera goes away or the bridge ends.
     private func session(_ id: String) async throws -> CameraSession {
         if let open = sessions[id], open.usable { return open }
         guard let camera = cameras[id], isPTP(camera) else { throw CameraAdapterError.unavailable }
@@ -94,14 +96,31 @@ public final class DeviceDiscovery: NSObject {
     private func probe(id: String) {
         guard probes[id] == nil else { return }
         probes[id] = Task { [weak self] in
-            _ = try? await self?.session(id)
-            self?.probes[id] = nil
+            let opened = try? await self?.session(id)
+            guard let self else { return }
+            self.probes[id] = nil
+            // Its storages are known now; unless an import began meanwhile, the camera is let go again.
+            if let opened, !self.held.contains(id), self.sessions[id] === opened { self.end(id) }
         }
+    }
+
+    /// The app's imports of the camera ended: its session closes (a later "files" opens a new one).
+    public func close(id: String) {
+        held.remove(id)
+        probes[id]?.cancel()
+        probes[id] = nil
+        end(id)
+    }
+
+    private func end(_ id: String) {
+        sessions[id]?.cancel()
+        sessions[id] = nil
     }
 
     /// Every file of the camera, or with `storageID` of that storage (card slot) only, without downloading any.
     public func files(id: String, storageID: String?) async throws -> [CameraFileEntry] {
-        try await session(id).files(storageID: storageID)
+        held.insert(id)
+        return try await session(id).files(storageID: storageID)
     }
 
     /// Up to `length` bytes of a listed file from `offset` (fewer only at its end), read from the camera by range.
@@ -124,6 +143,7 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
             probes[id] = nil
             sessions[id]?.didRemove(device)
             sessions[id] = nil
+            held.remove(id)
             storages[id] = nil
             cameras[id] = nil
         }

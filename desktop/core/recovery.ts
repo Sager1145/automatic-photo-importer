@@ -17,7 +17,7 @@ import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath, DIRECTORY_SYNC_SUPPORTED } from './paths';
+import { sameBirth, beneath, checkAbort, closeHandles, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, regularHandles, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath, DIRECTORY_SYNC_SUPPORTED } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -458,12 +458,12 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
  const current=await fs.lstat(entry.destination,{bigint:true});if(!current.isFile()||current.size>BigInt(entry.size))return false;
  const owned=ownedPartial(state.exclusive.get(index),current,entry);
  if(!owned)return false;
- const partial=await regularHandle(entry.destination),original=await regularHandle(input);
+ const [partial,original]=await regularHandles(entry.destination,input);
  try {
   const identical=await streams.run([entry.destination,input],async chunk=>{const a=Buffer.allocUnsafe(chunk),b=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await partial.read(a,0,a.length,null);if(!bytesRead)break;let count=0;while(count<bytesRead){const read=await original.read(b,count,bytesRead-count,null);if(!read.bytesRead)return false;count+=read.bytesRead;}if(!a.subarray(0,bytesRead).equals(b.subarray(0,bytesRead)))return false;}return true;},signal);
   if(!identical)return false;
   if(!matches(await partial.stat({bigint:true}),statRecord(current))||!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(current)))throw new Error('Incomplete destination changed while checking');
- }finally{await partial.close();await original.close();}
+ }finally{await closeHandles(partial,original);}
  await checkpoint(m,'incomplete-intent',index);checkAbort(signal);await roots(m);await contained(entry.destination,m.root);
  if(!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(current)))throw new Error('Incomplete destination changed before preservation');
  const saved=path.join(jobFolder(m),`incomplete-${randomUUID()}`);await contained(saved,scopeOf(m));if(await maybeLstat(saved))throw new Error('Recovery collision');

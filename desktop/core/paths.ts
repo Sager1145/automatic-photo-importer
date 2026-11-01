@@ -239,6 +239,18 @@ export async function regularHandle(file:string,flags:number=fileFlags) {
   } catch(error) { await handle.close().catch(()=>{}); throw error; }
   return handle;
 }
+/** Several files opened as `regularHandle` does, in order; if one cannot be, those already open are closed again. */
+export async function regularHandles<T extends string[]>(...files:T):Promise<{[K in keyof T]:Awaited<ReturnType<typeof regularHandle>>}> {
+  const handles:Awaited<ReturnType<typeof regularHandle>>[]=[];
+  try { for(const file of files) handles.push(await regularHandle(file)); }
+  catch(error) { await closeHandles(...handles).catch(()=>{}); throw error; }
+  return handles as {[K in keyof T]:Awaited<ReturnType<typeof regularHandle>>};
+}
+/** Closes every handle, even when closing one fails (that failure is then thrown). */
+export async function closeHandles(...handles:{close():Promise<void>}[]):Promise<void> {
+  const failed=(await Promise.allSettled(handles.map(handle=>handle.close()))).find(result=>result.status==='rejected');
+  if(failed) throw failed.reason;
+}
 type Stat=import('node:fs').BigIntStats;
 /** The stat a cached record (a digest, a file's metadata, a receipt, a journal entry) is bound to: dev, inode, size, mtime and ctime as decimal strings. */
 export interface StatRecord {dev:string;ino:string;size:string;mtime:string;ctime:string;}

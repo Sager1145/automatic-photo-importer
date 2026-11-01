@@ -1,6 +1,7 @@
 // Windows: the app's Get-Volume/Get-Disk JSON (DriveType by name), drive letters, junctions (no Developer Mode
 // needed), and no folder flush.
 import { symlink } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { parseWindowsVolumes } from '../../platform/volumes';
 import type { PlatformProfile } from '../platform-features';
 
@@ -31,4 +32,31 @@ export const win32: PlatformProfile = {
   namesIgnoreCase: true,
   // Explorer and Lightroom take drive-letter paths with backslashes (C:\…).
   dropPath: /^[A-Za-z]:\\(?!.*\/)/,
+  heldOpen,
 };
+
+// Every file and folder under the root opened as another program would to have it alone: CreateFileW with no sharing
+// (folders with backup semantics). A sharing violation means something holds it; one that lasts past three tries half
+// a second apart is a real hold, not Defender or the indexer glancing at a new file.
+const probe = String.raw`
+$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Exclusive {
+ [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ public static bool Held(string name) { var handle = CreateFileW(name, 0x80000000, 0, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero); if (handle == new IntPtr(-1)) return Marshal.GetLastWin32Error() == 32; CloseHandle(handle); return false; }
+}
+"@
+$held=@(@($env:PROBE_ROOT)+@(Get-ChildItem -LiteralPath $env:PROBE_ROOT -Recurse -Force|ForEach-Object{$_.FullName})|Where-Object{[Exclusive]::Held($_)})
+for($try=0;$try -lt 2 -and $held.Count;$try++){Start-Sleep -Milliseconds 500;$held=@($held|Where-Object{[Exclusive]::Held($_)})}
+$held|ForEach-Object{[Console]::Out.WriteLine($_)}
+`;
+function heldOpen(root: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(probe, 'utf16le').toString('base64')], { env: { ...process.env, PROBE_ROOT: root }, windowsHide: true, timeout: 120000, encoding: 'utf8' }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`exclusive-open probe failed: ${stderr || error?.message}`));
+      else resolve(stdout.split(/\r?\n/).filter(Boolean));
+    });
+  });
+}

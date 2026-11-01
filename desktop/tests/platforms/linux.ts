@@ -1,5 +1,6 @@
 // Linux: `lsblk --json --bytes` output, /media mounts, symbolic links, folders that can be flushed.
-import { symlink } from 'node:fs/promises';
+import { readdir, readlink, symlink } from 'node:fs/promises';
+import { sep } from 'node:path';
 import { parseLinuxVolumes } from '../../platform/volumes';
 import type { PlatformProfile } from '../platform-features';
 
@@ -30,4 +31,15 @@ export const linux: PlatformProfile = {
   namesIgnoreCase: false,
   // File managers take POSIX paths with forward slashes.
   dropPath: /^\/(?!.*\\)/,
+  heldOpen,
 };
+
+/** What this process has open under the root: its descriptors in /proc (lsof is not on every distribution). */
+async function heldOpen(root: string): Promise<string[]> {
+  const held: string[] = [];
+  for (const fd of await readdir('/proc/self/fd')) {
+    const target = await readlink(`/proc/self/fd/${fd}`).catch(() => '');
+    if (target === root || target.startsWith(root + sep)) held.push(target);
+  }
+  return held;
+}

@@ -34,7 +34,7 @@ export async function nativeCameraHelperPath():Promise<string|undefined> {
   return undefined;
 }
 /** The camera helper to run: the macOS ImageCaptureCore helper, or on Windows the Portable Devices bridge in
- * PowerShell. Both speak the same JSONL protocol. Other platforms list cameras through their mounted storage.
+ * PowerShell. Both speak the same JSONL protocol ("list", "files", "read", "release", "close"). Other platforms list cameras through their mounted storage.
  * IMPORTER_NATIVE_BRIDGE names a stand-in on any system (a .js/.mjs one runs in Node), for tests. */
 async function bridgeLaunch():Promise<{command:string;args:string[]}|undefined> {
   const standIn=process.env.IMPORTER_NATIVE_BRIDGE;
@@ -167,7 +167,7 @@ export function cameraOf(source:Pick<Source,'path'|'transport'>):{cameraID:strin
 export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
   const {cameraID,storageID}=cameraOf(source);
   signal?.throwIfAborted();
-  opened++;
+  opened++;sessions.set(cameraID,(sessions.get(cameraID)??0)+1);
   let release=true;
   try {
     // A progress line every 250 files restarts the timeout, so a large card is not cut off while it is listed.
@@ -186,6 +186,18 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
     });
     release=false;
     let closed=false;
-    return {path:root,cleanup:async()=>{if(closed)return;closed=true;unregister();opened--;}};
-  } finally { if(release)opened--; }
+    return {path:root,cleanup:async()=>{if(closed)return;closed=true;unregister();opened--;await endSession(cameraID);}};
+  } finally { if(release){opened--;await endSession(cameraID);} }
+}
+/** Imports of each camera now open (one per card slot being imported). */
+const sessions=new Map<string,number>();
+/** Once no import reads a camera any more, the helper closes its session on it (WPD device, ImageCaptureCore session),
+ * so Windows, Photos, Lightroom or another app can use the camera and it can power off. The helper process stays for
+ * the next listing. A helper that cannot close (an older build, or one that is gone) is left as it is: ending the
+ * bridge closes every session anyway. */
+async function endSession(cameraID:string):Promise<void> {
+  const left=(sessions.get(cameraID)??1)-1;
+  if(left>0){sessions.set(cameraID,left);return;}
+  sessions.delete(cameraID);
+  if(child)await request({command:'close',cameraID},10000).catch(()=>{});
 }

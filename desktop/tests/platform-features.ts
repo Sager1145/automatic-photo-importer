@@ -4,7 +4,7 @@
 // profile must supply what it needs; TypeScript and platform-parity.test.ts refuse a platform that skips one.
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdtemp, mkdir, open, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep, posix, win32 } from 'node:path';
 import { classifyMounted, classifyVolume, onCameraCard, validateDestination, type MountedVolume } from '../platform/volumes';
@@ -76,6 +76,9 @@ export interface PlatformProfile {
   /** A library on an external drive as this system names it and its other-files folder beside it; a library that is a drive's
    * own top folder (nothing beside it is on that drive) and its other-files folder inside it. */
   otherFiles: { library: string; beside: string; top: string; inside: string };
+  /** Files and folders under `root` held open right now, found the way this system can: exclusive opens on Windows
+   * (what another program needs to rename or delete), lsof on macOS, this process's /proc descriptors on Linux. */
+  heldOpen(root: string): Promise<string[]>;
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -558,6 +561,35 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       const { getOrganizationRecovery } = await import('../core/recovery');
       for (const folder of [other, library]) for (const job of await getOrganizationRecovery(folder)) await undoOrganization(folder, job.id);
       assert.deepEqual(await listed(library), ['2022/202203/Unknown files/_R6_1149.png', '2026/202601/NIKON Z f/DSC_0001.NEF', '2026/202601/Screenshots/Screenshot_20260115-093000.png', 'Problem files/Empty files/photobackup/Drive backups/photobackup/DCIM 2/EMPTY.JPG', 'archive.zip']);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'releasing files: once an import, a stop, Clean up or an organization ends, nothing it used is held open, so other programs can change the files and the drive ejects': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-release-')));
+    try {
+      const card = join(root, 'card'), library = join(root, 'photobackup'), when = new Date(2026, 9, 25, 12), first = join(card, 'DCIM', '100MSDCF', 'DSC00000.JPG');
+      for (let index = 0; index < 6; index++) { const file = join(card, 'DCIM', '100MSDCF', `DSC0000${index}.JPG`); await mkdir(dirname(file), { recursive: true }); await writeFile(file, Buffer.alloc(1_500_000 + index, index + 1)); await utimes(file, when, when); }
+      await mkdir(library);
+      // The probe finds a file this process holds.
+      const held = await open(first, 'r');
+      try { assert.deepEqual(await profile.heldOpen(root), [first], 'the probe finds an open file'); } finally { await held.close(); }
+      const metadata = async () => ({ fields: {}, camera: 'ILCE-7M4', date: '2026-10-25T10:00:00' }), options = { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat' as const, unknownRules: {} };
+      const stop = new AbortController();
+      await withJob('feature-release', async () => {
+        const { plans: [transfer] } = await plan(card, [library], options, metadata);
+        await assert.rejects(execute(transfer!, stop.signal, progress => { if (progress.bytes > 0) stop.abort(); }), (error: Error) => error.name === 'AbortError');
+      });
+      assert.deepEqual(await profile.heldOpen(root), [], 'after Stop');
+      await cleanResidue(await findRunResidue({ job: 'feature-release', ...runTrace('feature-release')! }));
+      assert.deepEqual(await profile.heldOpen(root), [], 'after Clean up');
+      const { plans: [transfer] } = await plan(card, [library], options, metadata);
+      assert.deepEqual((await execute(transfer!)).errors, []);
+      assert.deepEqual(await profile.heldOpen(root), [], 'after an import');
+      await writeFile(join(library, 'stray.JPG'), Buffer.alloc(1000, 9));
+      const { plans: [organization] } = await plan(library, [library], { ...options, reorganize: true }, metadata);
+      assert.deepEqual((await executeReorganization(organization!)).errors, []);
+      assert.deepEqual(await profile.heldOpen(root), [], 'after an organization');
     } finally { await rm(root, { recursive: true, force: true }); }
   },
 };
