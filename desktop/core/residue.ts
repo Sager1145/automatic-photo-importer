@@ -18,11 +18,13 @@ import { checkAbort, code, contained, digest, isAbort, maybeLstat, sameStat , un
  * segment every receipt of which is closed. journal: an ended organization's records, deleted whole.
  * sidecar: a macOS "._" file in the records folder holding only bookkeeping.
  * unbound: only a receipt - of a direct copy - that no longer matches the whole file at its name; the file is never touched, only Clean up
- * (or removeUnboundReceipt, for one item) closes the receipt (`rid`). */
-export type ResidueKind='partial'|'resumable'|'kept'|'recoverable'|'receipt'|'index'|'organization'|'folder'|'temporary'|'segment'|'journal'|'sidecar'|'unbound';
+ * (or removeUnboundReceipt, for one item) closes the receipt (`rid`). direct: an unfinished direct copy at its final
+ * name (exFAT, FAT), still bound by its receipt and shorter than its source; only Clean up for the job that wrote it lists it. */
+export type ResidueKind='direct'|'partial'|'resumable'|'kept'|'recoverable'|'receipt'|'index'|'organization'|'folder'|'temporary'|'segment'|'journal'|'sidecar'|'unbound';
 export interface ResidueItem {path:string;kind:ResidueKind;bytes:number;/** The folder it was found under; it is removed only while still inside it. */root:string;stat?:BigIntStats;/** unbound: the file the receipt names and its stat when found. */file?:string;fileStat?:BigIntStats;
  /** Records v5: the store it is in, and the receipt to close once it is handled. */store?:Store;rid?:string;
- /** An ended organization (kind 'journal'). */journal?:{root:string;id:string};}
+ /** An ended organization (kind 'journal'). */journal?:{root:string;id:string};
+ /** Listed by Clean up for this job (findRunResidue). */job?:string;}
 export interface Residue {items:ResidueItem[];files:number;bytes:number;/** Staged copies a re-import could continue. */resumable:{files:number;bytes:number};/** Staged copies not proven dead; only Clean up removes them. */kept:{files:number;bytes:number};/** Complete staged copies kept because their card file changed; folder is where the first was found. */recoverable:{files:number;bytes:number;folder?:string};/** Receipts of unfinished direct copies that no longer match their files, and (up to 5) those files. */unbound?:{files:number;paths:string[]};}
 
 // Only names this app creates: its prefix plus a random UUID (or mkdtemp's six characters).
@@ -228,9 +230,72 @@ export async function findResidue(roots:string[],options:{temporary?:string;sign
   }
   return summary(items);
 }
+/** What Clean up for one job looks at: the job id its receipts carry, the organization journals it started or worked on,
+ * and the temporary folders it made (see run-trace). */
+export interface RunScope {job:string;roots:string[];journals:{root:string;id:string}[];temporary:string[];}
+/** Read-only: what one stopped or paused job left, and only what it provably made. Its open receipts (they carry its job
+ * id): staged copies (resumable, kept or dead, but never a complete one whose card file changed), unfinished direct copies
+ * at their destination (still bound to the receipt and shorter than the source), and receipts whose file is gone. Scratch
+ * files of its own journals and their set-aside deletions, never a journal itself. Its own temporary folders. Nothing
+ * else: receipts of other jobs, staged copies without a receipt, segments, indexes and sidecars stay for the store cleanup. */
+export async function findRunResidue(scope:RunScope,options:{signal?:AbortSignal}={}):Promise<Residue>{
+  const items:ResidueItem[]=[],canonical=(folder:string)=>fs.realpath(folder).catch(()=>undefined);
+  const stores=new Map<string,Store>();
+  for(const root of scope.roots){const real=await canonical(root);if(real)for(const store of await storesFor(real).catch(()=>[] as Store[]))stores.set(store.path,store);}
+  const journals=new Set(scope.journals.map(item=>item.id));
+  for(const store of stores.values()){
+    checkAbort(options.signal);
+    try{
+      await storeUnchanged(store);
+      for(const [rid,record] of await openReceipts(store,options.signal)){
+        checkAbort(options.signal);
+        if(record.job!==scope.job)continue;
+        let found;try{found=await assessReceipt(store,record);}catch{continue;}
+        if(!found.owned)continue;
+        const where=record.kind==='stage'?store.path:record.root;
+        if(!found.present){items.push({path:found.file,kind:'receipt',bytes:0,root:where,store,rid,job:scope.job});continue;}
+        const stat=found.stat!,bytes=Number(stat.size);
+        if(record.kind==='publication'){
+          // Only a copy still bound to this receipt and short of its source; a whole file is finished by a re-import, never removed here.
+          if(found.bound&&!found.complete&&stat.isFile()&&stat.nlink===1n)items.push({path:found.file,kind:'direct',bytes,root:where,stat,store,rid,job:scope.job});
+          continue;
+        }
+        const kind:ResidueKind=found.resumable?'resumable':found.stale&&found.complete?'recoverable':found.stale&&found.bound?'partial':'kept';
+        items.push({path:found.file,kind,bytes,root:where,stat,store,rid,job:scope.job});
+      }
+      const organizations=path.join(store.path,ORGANIZATIONS);
+      for(const entry of await list(organizations)){
+        checkAbort(options.signal);
+        const folder=path.join(organizations,entry.name);
+        if(!entry.isDirectory())continue;
+        // A stopped Delete recovery files sets the journal aside as deleting-<id>-<uuid>.
+        const aside=deletingPattern.test(entry.name)&&[...journals].some(id=>entry.name.startsWith(`deleting-${id}-`));
+        if(aside){const stat=await fs.lstat(folder,{bigint:true}).catch(()=>undefined);if(stat)items.push({path:folder,kind:'organization',bytes:await folderBytes(folder,options.signal),root:store.path,stat,job:scope.job});continue;}
+        if(!journals.has(entry.name))continue;
+        for(const inner of await list(folder)){
+          const file=path.join(folder,inner.name),stat=inner.isFile()&&journalScratch.test(inner.name)?await regular(file):undefined;
+          if(stat)items.push({path:file,kind:'organization',bytes:Number(stat.size),root:store.path,stat,job:scope.job});
+        }
+      }
+    }catch(error){if(isAbort(error))throw error;/* A store that changed or cannot be read is left; Clean up can look again. */}
+  }
+  for(const named of scope.temporary){
+    checkAbort(options.signal);
+    const folder=await canonical(named),parent=folder&&path.dirname(folder);
+    if(!folder||!parent||!temporaryFolder.test(path.basename(folder)))continue;
+    const stat=await fs.lstat(folder,{bigint:true}).catch(()=>undefined);
+    if(stat?.isDirectory())items.push({path:folder,kind:'temporary',bytes:await folderBytes(folder,options.signal),root:parent,stat,job:scope.job});
+  }
+  return summary(items);
+}
+/** What the confirmation lists for one job's leftovers: counts and sizes per group (see JobLeftovers). */
+export function runLeftoverGroups(residue:Residue){
+  const sum=(kinds:ResidueKind[])=>{const list=residue.items.filter(item=>kinds.includes(item.kind));return {files:list.length,bytes:list.reduce((total,item)=>total+item.bytes,0)};};
+  return {direct:sum(['direct']),staged:sum(['resumable','kept','partial']),organization:sum(['organization']),temporary:sum(['temporary']),receipts:residue.items.filter(item=>item.kind==='receipt').length,recoverable:sum(['recoverable'])};
+}
 /** What automatic cleanup (keepResumable) leaves: resumable and kept copies alike, recoverable copies and unbound receipts' files. */
 const keptKinds=new Set<ResidueKind>(['resumable','kept','recoverable','unbound']);
-const residueReason=(kind:string)=>kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':kind==='sidecar'?'macOS "._" file in the records folder holding only bookkeeping':kind==='segment'?'receipt log segment whose receipts are all closed':'leftover of an interrupted run (staging file, receipt or scratch file)';
+const residueReason=(kind:string)=>kind==='direct'?'unfinished direct copy a stopped or paused job left at its destination (Clean up for that job)':kind==='resumable'?'interrupted copy a re-import could continue (Clean up)':kind==='kept'?'kept copy, removed by Clean up':kind==='temporary'?'leftover temporary folder of an earlier run':kind==='folder'?'empty leftover folder':kind==='sidecar'?'macOS "._" file in the records folder holding only bookkeeping':kind==='segment'?'receipt log segment whose receipts are all closed':'leftover of an interrupted run (staging file, receipt or scratch file)';
 function summary(items:ResidueItem[]):Residue {
   // A receipt to close is not a file the user has; it is still done by the next cleanup.
   const counted=items.filter(item=>!(item.kind==='receipt'&&item.rid));

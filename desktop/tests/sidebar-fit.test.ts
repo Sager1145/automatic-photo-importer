@@ -20,7 +20,7 @@ test('once the sidebar has grown, a line that now fits shows the full text',()=>
 });
 
 test('with no drives the sidebar keeps its minimum width',()=>{
- assert.deepEqual(sidebarFit({lines:[],chrome:90,minimum:190,maximum:320}),{width:190,compact:[]});
+ assert.deepEqual(sidebarFit({lines:[],chrome:90,minimum:190,maximum:320}),{width:190,compact:[],grown:false});
 });
 
 test('each line can bring its own chrome: a name beside its buttons needs more room around it than a capacity line',()=>{
@@ -35,11 +35,20 @@ test('fractional measurements round the width up, so the line that set it fits',
  assert.equal(fit.width,201);assert.deepEqual(fit.compact,[false]);
 });
 
-test('while the same drives are listed the sidebar does not shrink, so changing figures never move the page',()=>{
- // Free space ticked from "470.0 GB" to "469.8 GB": the text is a little narrower, the width stays.
- assert.equal(sidebarFit({lines:[{natural:178,available:180}],chrome:90,minimum:190,maximum:320,current:270,floor:270}).width,270);
- // A line that really needs more room still grows it.
- assert.equal(sidebarFit({lines:[{natural:190,available:180}],chrome:90,minimum:190,maximum:320,current:270,floor:270}).width,280);
- // The floor never exceeds the window's limit.
- assert.equal(sidebarFit({lines:[{natural:100,available:180}],chrome:90,minimum:190,maximum:240,current:270,floor:270}).width,240);
+test('while the same drives are listed the sidebar holds its width: it never creeps while lines fit, and grows once for a line that does not',()=>{
+ // Real case on Windows: one line's room did not track the sidebar's width, and re-deriving the width each
+ // progress tick grew it a pixel at a time from 285 to the 360 limit. Holding, a fitting line changes nothing.
+ let hold={width:285,grown:false};
+ for(let tick=0;tick<100;tick++){
+  const fit=sidebarFit({lines:[{natural:180,available:184,chrome:110},{natural:120,available:119.6,chrome:166}],chrome:90,minimum:190,maximum:360,current:hold.width,hold});
+  hold={width:fit.width,grown:fit.grown};
+ }
+ assert.equal(hold.width,285);
+ // A line that really does not fit grows it by its shortfall, once; if it still does not fit it uses the short text.
+ const first=sidebarFit({lines:[{natural:200,available:184}],chrome:90,minimum:190,maximum:360,current:285,hold:{width:285,grown:false}});
+ assert.deepEqual([first.width,first.grown],[301,true]);
+ const again=sidebarFit({lines:[{natural:200,available:190}],chrome:90,minimum:190,maximum:360,current:301,hold:{width:301,grown:true}});
+ assert.deepEqual([again.width,again.compact],[301,[true]]);
+ // The hold never exceeds the window's limit.
+ assert.equal(sidebarFit({lines:[{natural:100,available:180}],chrome:90,minimum:190,maximum:240,current:270,hold:{width:270,grown:false}}).width,240);
 });

@@ -93,13 +93,29 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   });
 }
 const size=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
+type Storage={id?:string;name:string;total?:number;free?:number};
+function cameraStorages(value:unknown):Storage[] {
+  if(!Array.isArray(value))return [];
+  return value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({...(typeof item.id==='string'&&item.id?{id:String(item.id)}:{}),name:String(item.name),total:size(item.total),free:size(item.free)}));
+}
 /** A camera's storages as the helper reported them, and its capacity: their sums, when every storage reported one. */
 export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'free'> {
-  if(!Array.isArray(value))return {};
-  const storages=value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({name:String(item.name),total:size(item.total),free:size(item.free)}));
+  const storages=cameraStorages(value).map(({name,total,free})=>({name,total,free}));
   if(!storages.length)return {};
   const sum=(key:'total'|'free')=>storages.every(item=>item[key]!==undefined)?storages.reduce((all,item)=>all+item[key]!,0):undefined;
   return {storages,total:sum('total'),free:sum('free')};
+}
+/** The sources for the helper's "list" reply. A camera with several storages (card slots), each with its own id, is
+ * one source per storage ("Z f · Slot 1"), with that storage's capacity; its id joins the camera's id and the
+ * storage's id (the camera's own id for that slot, never its position), so it is the same source on every
+ * connection. A camera with one storage stays one source under its own name and id, as it always was. */
+export function cameraSourcesFrom(result:unknown[]):Source[] {
+  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string').flatMap(camera=>{
+    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const};
+    const storages=cameraStorages(camera.storages),ids=storages.map(storage=>storage.id);
+    if(storages.length<2||ids.some(id=>id===undefined)||new Set(ids).size!==ids.length)return [{...base,...cameraCapacity(camera.storages)}];
+    return storages.map(storage=>({id:`${base.id}|${storage.id}`,name:`${camera.name} · ${storage.name}`,path:`${base.path}/${encodeURIComponent(storage.id!)}`,transport:'camera' as const,total:storage.total,free:storage.free,storage:{id:storage.id!,name:storage.name,camera:camera.name}}));
+  });
 }
 export async function cameraSources():Promise<Source[]> {
   // While a camera is being imported its helper serves that import; the last list stands.
@@ -108,7 +124,7 @@ export async function cameraSources():Promise<Source[]> {
   // The first Windows request also compiles the bridge's reader, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...cameraCapacity(camera.storages)}));
+  cached=cameraSourcesFrom(result);
   return cached;
 }
 /** One file as the helper lists it: its storage (card slot), folders, name, size, dates (ms) and the helper's own id for it. */
@@ -137,26 +153,28 @@ export function listedFiles(files:readonly CameraFile[]):(ListedFile&{objectID:s
     return {relative,size:file.size,modifiedMs:file.modified??file.created??0,...(file.created?{createdMs:file.created}:{}),objectID:file.objectID};
   });
 }
-/** The camera (and, for a source that is one card slot, its storage) a camera source reads. */
-export function cameraOf(source:Source):{cameraID:string;storage?:string} {
+/** The camera a camera source reads and, for a source that is one card slot (camera://<camera>/<storage>), the
+ * camera's own id for that storage: its "files" request then lists only that slot. */
+export function cameraOf(source:Pick<Source,'path'|'transport'>):{cameraID:string;storageID?:string} {
   if(source.transport!=='camera'||!source.path.startsWith('camera://'))throw new Error('Choose a native camera source.');
-  return {cameraID:decodeURIComponent(source.path.slice('camera://'.length))};
+  const [camera,storage]=source.path.slice('camera://'.length).split('/');
+  return {cameraID:decodeURIComponent(camera!),...(storage?{storageID:decodeURIComponent(storage)}:{})};
 }
 /** Opens a camera for an import without downloading anything: its files are listed (names, folders, sizes, dates),
  * then made readable under a folder path of their own (core/source-fs), so the import plans from the list, reads only
  * what it needs (headers for capture dates, contents to compare with the library) straight from the camera, and writes
  * new files only into the destination. `cleanup` makes the path unreadable again. */
 export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
-  const {cameraID,storage}=cameraOf(source);
+  const {cameraID,storageID}=cameraOf(source);
   signal?.throwIfAborted();
   opened++;
   let release=true;
   try {
     // A progress line every 250 files restarts the timeout, so a large card is not cut off while it is listed.
-    const {files}=cameraFiles(await request({command:'files',cameraID,...(storage?{storage}:{})},120000,onProgress,signal));
+    const {files}=cameraFiles(await request({command:'files',cameraID,...(storageID?{storageID}:{})},120000,onProgress,signal));
     signal?.throwIfAborted();
     const listed=listedFiles(files);
-    const {root,unregister}=registerListedSource({id:`${cameraID}\0${storage??''}`,files:listed,
+    const {root,unregister}=registerListedSource({id:`${cameraID}\0${storageID??''}`,files:listed,
       async read(file,offset,length){
         const result=await request({command:'read',cameraID,objectID:(file as typeof listed[number]).objectID,offset,length},120000) as {bytes?:unknown;data?:unknown};
         if(typeof result?.data!=='string'||!Number.isSafeInteger(result.bytes))throw new Error('The camera helper returned an invalid read.');

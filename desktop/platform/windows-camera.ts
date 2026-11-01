@@ -173,7 +173,9 @@ function Pnp([string]$id){$id.Substring([Math]::Max(0,$id.IndexOf('\\?\')))}
 function Safe([string]$name){$clean=($name -replace '[\x00-\x1f<>:"/\\|?*]','_').Trim().TrimEnd('.');if(-not $clean -or $clean -eq '.' -or $clean -eq '..'){'unnamed'}else{$clean}}
 # A storage's own description names it ("SID-{10001,NIKON Z F   [Slot 1],...}" -> "Slot 1"); the Shell's name is localized.
 function StorageName($item){if($item.Path -match 'SID-\{[^,]*,([^,\[]*(\[([^\]]+)\])?[^,]*),'){if($matches[3]){return Safe $matches[3]};$d=($matches[1] -replace '\s+',' ').Trim();if($d){return Safe $d}};Safe $item.Name}
-function Storages($camera){@($camera.GetFolder.Items()|Where-Object{$_.IsFolder}|ForEach-Object{$t=$_.ExtendedProperty('System.Capacity');$f=$_.ExtendedProperty('System.FreeSpace');$o=@{name=(StorageName $_)};if($null -ne $t){$o.total=[int64]$t};if($null -ne $f){$o.free=[int64]$f};$o})}
+# Its MTP storage id ("SID-{10001,...}" -> "10001", "20001" for Slot 2) names the slot on every connection, whatever its position.
+function StorageId($item){if($item.Path -match 'SID-\{([^,}]+)'){return $matches[1]};Split-Path -Leaf $item.Path}
+function Storages($camera){@($camera.GetFolder.Items()|Where-Object{$_.IsFolder}|ForEach-Object{$t=$_.ExtendedProperty('System.Capacity');$f=$_.ExtendedProperty('System.FreeSpace');$o=@{id=(StorageId $_);name=(StorageName $_)};if($null -ne $t){$o.total=[int64]$t};if($null -ne $f){$o.free=[int64]$f};$o})}
 $epoch=New-Object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc)
 function J([string]$text){'"'+($text -replace '\\','\\' -replace '"','\"' -replace '[\x00-\x1f]',' ')+'"'}
 # The listing is written as JSON by hand, the folder part once per folder: ConvertTo-Json, or a function call per file,
@@ -201,7 +203,9 @@ while($null -ne ($line=$in.ReadLine())){
   if($command.command -eq 'list'){Send @{id=$command.id;result=@(Cameras|ForEach-Object{@{name=$_.Name;cameraID=$_.Path;storages=@(Storages $_)}})}}
   elseif($command.command -eq 'files'){
    $camera=Camera $command.cameraID;$list=New-Object Collections.ArrayList
-   foreach($storage in $camera.GetFolder.Items()){if($storage.IsFolder){$name=StorageName $storage;if(-not $command.storage -or $command.storage -eq $name){Walk $storage.GetFolder @() $name $list $command.id}}}
+   # With a storage id, only that storage (card slot); without one, the whole camera. Either way a storage's files stay under its name.
+   $items=@($camera.GetFolder.Items()|Where-Object{$_.IsFolder});if($command.storageID){$items=@($items|Where-Object{(StorageId $_) -eq [string]$command.storageID});if(-not $items.Count){throw 'The camera card slot is no longer available.'}}
+   foreach($storage in $items){Walk $storage.GetFolder @() (StorageName $storage) $list $command.id}
    [CameraRead]::Line($out,'{"id":'+(J $command.id)+',"result":['+($list -join ',')+']}')
   }
   elseif($command.command -eq 'read'){[CameraRead]::Read($out,[string]$command.id,(Pnp ([string]$command.cameraID)),[string]$command.objectID,[int64]$command.offset,[int]$command.length)}

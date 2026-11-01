@@ -8,6 +8,7 @@ import { volumeAt } from '../platform/volumes';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { ownEntry } from './own-entries';
 // Listed sources (a USB camera) read through the same calls as a card; see source-fs.
 const fs=sourceAware(nodeFs);
 
@@ -21,7 +22,10 @@ export function code(error:unknown):string|undefined { return (error as NodeJS.E
 /** Errors of link(2) that mean this file system has no hard links (or no more of them): exFAT, FAT, some network shares. */
 export const LINK_UNSUPPORTED=new Set(['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK']);
 /** Publishing a staged copy falls back to copying when the link cannot be made: no hard links, or another volume. A full link count (EMLINK) is not that. */
-export const linkRefused=(error:unknown):boolean=>{const name=code(error)??'';return name==='EXDEV'||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
+/** Windows answers a hard link on a filesystem without them (exFAT, FAT32) with ERROR_INVALID_FUNCTION, which
+ * libuv reports as EISDIR. A link's source here is always a regular file, so there it means "no hard links". */
+const windowsNoLinks=(name:string,platform:NodeJS.Platform)=>platform==='win32'&&name==='EISDIR';
+export const linkRefused=(error:unknown,platform:NodeJS.Platform=process.platform):boolean=>{const name=code(error)??'';return name==='EXDEV'||windowsNoLinks(name,platform)||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
 export function beneath(child:string,root:string):boolean {
   const relative=path.relative(root,child);
   return relative!=='' && relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative);
@@ -204,7 +208,9 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
     for(const part of parts) {
       current=path.join(current,part);
       if(rootIdentity) await rootUnchanged(root,rootIdentity);
-      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
+      // A macOS "._" by the new folder's name already there is not this app's (own-entries.ts): it stays.
+      const sidecarExisted=await fs.lstat(path.join(path.dirname(current),'._'+part)).then(()=>true,()=>false);
+      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); ownEntry(current,root,sidecarExisted); } catch(error) { if(code(error)!=='EEXIST') throw error; }
       // Ancestors were checked a step earlier; the whole chain is checked again below.
       const stat=await fs.lstat(current,{bigint:true});
       if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);

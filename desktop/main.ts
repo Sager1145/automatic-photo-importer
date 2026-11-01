@@ -46,7 +46,9 @@ import {metadata,closeMetadata,primeRouting,routingEntriesUnder,cachedRouting,ca
 import {thumbnail,systemDecoders} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
-import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
+import {findResidue,cleanResidue,removeUnboundReceipt,findRunResidue,runLeftoverGroups,type Residue,type ResidueItem} from './core/residue';
+import {forgetTraces,runTrace,traceJournal} from './core/run-trace';
+import {cleanupLocked,cleanupOffered,markCleaned} from './job-cleanup';
 import {orphanedJournals} from './core/recovery';
 import {joinStore,registerDestinations,registeredDestinations} from './core/app-store';
 import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-records';
@@ -474,6 +476,7 @@ async function resumeOrganizationJob(root:string,id:string,kind:'resume'|'finali
  if(!location.folder&&!locationFolder(location))throw new MessageError('error.organizationDestination');
  const job:Job={id:randomUUID(),source:source??{id:'organization:'+id,name:'Library organization',path:root,transport:'folder'},organization:true,...(folders?{folders}:{}),phase:'verifying',detail:message(kind==='finalize'?'job.recheckFinalize':kind==='undo'?'job.recheckUndo':kind==='delete'?'job.recheckDelete':'job.recheckJournal'),errors:[],backup:false};state.jobs.unshift(job);const control=startJob(job);emit();
  if(kind!=='delete')etaTracker.plan(job.id,{kind:kind==='finalize'?'finalize':kind==='undo'?'undo':'organization',destinations:[etaDrive(mounts,root,'storage')]});
+ traceJournal(job.id,root,id);
  void settle(withJob(job.id,async()=>{try{
   // Finalize and undo check every entry before changing any, then change them in turn.
   const stepProgress=(progress:OrganizationProgress)=>{const verifying=progress.step==='checking'||recordSteps.includes(progress.step);job.phase=verifying?'verifying':'copying';job.progress={phase:verifying?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.detail=recordsDetail(progress)??message(progress.step==='checking'?'job.stepChecking':progress.step==='releasing'?'job.stepReleasing':progress.step==='deleting'?'job.stepDeleting':'job.stepRestoring',{completed:progress.completed,total:progress.total});progressEmit();};
@@ -735,6 +738,50 @@ function checkResidue(all:boolean):Promise<void>{
 }
 /** Anything about to write waits for a running cleanup to stop. */
 async function stopResidueCheck(){residueControl?.abort();await residueTask;}
+// Clean up for one stopped or paused job: only what its runs provably left (receipts carrying its id, its journals'
+// scratch, its temporary folders). It runs as the residue task, so anything about to write stops it first.
+const jobCleanupFound=new Map<string,Residue>();
+const emptyLeftovers=()=>({direct:{files:0,bytes:0},staged:{files:0,bytes:0},organization:{files:0,bytes:0},temporary:{files:0,bytes:0},receipts:0,recoverable:{files:0,bytes:0}});
+function jobForCleanup(jobId:string):Job{
+ const job=state.jobs.find(item=>item.id===jobId);
+ if(!job||!cleanupOffered(job)||active.has(job.id)||originalsControls.has(job.id))throw new MessageError('error.cleanupStale');
+ if(cleanupLocked(state)||active.size||resumingOrganizations.size||duplicateControl)throw new MessageError('error.cleanupBusy');
+ return job;
+}
+function residueWork<T>(work:(signal:AbortSignal)=>Promise<T>):Promise<T>{
+ const control=new AbortController();residueControl=control;
+ const task=work(control.signal),settled=task.then(()=>{},()=>{}).finally(()=>{if(residueControl===control)residueControl=undefined;if(residueTask===settled)residueTask=undefined;void releaseIfIdle();});
+ residueTask=settled;return task;
+}
+async function measureJobCleanup(jobId:string){
+ jobForCleanup(jobId);await stopResidueCheck();const job=jobForCleanup(jobId);
+ forgetTraces(id=>state.jobs.some(item=>item.id===id));
+ const scope={job:job.id,...runTrace(job.id)??{roots:[],journals:[],temporary:[]}};
+ job.leftovers={...emptyLeftovers(),checking:true};emit();
+ try{
+  const found=await residueWork(signal=>findRunResidue(scope,{signal}));
+  jobCleanupFound.set(job.id,found);
+  job.leftovers={...runLeftoverGroups(found),checkedAt:new Date().toISOString()};
+  log('normal','job','cleanup-measured',{roots:scope.roots,journals:scope.journals.map(item=>item.id),folders:scope.temporary,...job.leftovers},job.id);
+ }catch(error){job.leftovers={...emptyLeftovers(),...(isAbort(error)?{}:{error:toMessage(error)})};}
+ finally{emit();}
+}
+async function cleanJob(jobId:string){
+ jobForCleanup(jobId);await stopResidueCheck();const job=jobForCleanup(jobId);
+ const found=jobCleanupFound.get(job.id);if(!found||!job.leftovers?.checkedAt)throw new MessageError('error.cleanupStale');
+ jobCleanupFound.delete(job.id);
+ const measured=job.leftovers;job.leftovers={...measured,cleaning:true};emit();
+ try{
+  // Exactly what the confirmation listed, each item only while it is still the file found.
+  const {removed,left}=await residueWork(signal=>cleanResidue(found,{signal,onProgress:(done,total,bytes,totalBytes,file)=>{if(job.leftovers)job.leftovers.progress={phase:'copying',step:'deleting',completed:done,total,bytes,totalBytes,speed:0,file};progressEmit();}}));
+  const at=new Date().toISOString(),wasPaused=!!job.paused;
+  markCleaned(job);organizationQueue.delete(job.id);
+  job.leftovers={...runLeftoverGroups(left),checkedAt:at,cleaned:{...removed,at}};
+  job.detail=message('job.cleanedUp',{count:removed.files,size:{bytes:removed.bytes}});
+  log('normal','job','cleaned-up',{removed,left:runLeftoverGroups(left),wasPaused},job.id);
+ }catch(error){job.leftovers={...measured,...(isAbort(error)?{}:{error:toMessage(error)})};delete job.leftovers.checkedAt;}
+ finally{emit();}
+}
 // Records v5: what an earlier version wrote on a connected destination is never read beyond telling whether this
 // Mac wrote it, never changed and never deleted. A notice names the drive; Acknowledge stops it for those items.
 /** Per connected, unchanged destination: the folders to look at (the destination, its backup folders, folders organized there). */
@@ -1238,6 +1285,8 @@ async function action(input:Action):Promise<void>{
    if(item)await removeUnboundReceipt(item);
    await checkResidue(false);break;
   }
+  case 'measureJobCleanup':await measureJobCleanup(String(input.jobId));break;
+  case 'cleanJob':await cleanJob(String(input.jobId));break;
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'recovery':{if(!['resume','finalize','undo','delete'].includes(input.op))throw new Error('Invalid recovery operation');await resumeOrganizationJob(input.root,input.id,input.op,undefined,undefined,input.op==='resume'&&input.full===true);break;}
   case 'measureOrganizationRecovery':{

@@ -8,15 +8,15 @@ import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, uti
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
-import { cameraCapacity } from '../platform/camera-bridge';
-import { DIRECTORY_SYNC_SUPPORTED, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { cameraCapacity, cameraOf, cameraSourcesFrom } from '../platform/camera-bridge';
+import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
-import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
+import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
 import { getOrganizationRecovery } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
 import { evaluateRoutes } from '../core/folder-rules';
-import { appleDoubleCleaner, configureOrganizationRecovery, execute, plan } from '../core/index';
+import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan } from '../core/index';
 import { portableName, portablePath } from '../folder-template';
 import type { InventoryFile } from '../shared';
 import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type Access, type DriveFormat } from '../core/drive-formats';
@@ -25,6 +25,10 @@ import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
 import { inventory } from '../core/inventory';
 import { registerListedSource, LISTED_PARENT } from '../core/source-fs';
 import { createHash } from 'node:crypto';
+import { recordPartial, IMPORTS, STAGING } from '../core/import-recovery';
+import { cleanResidue, findRunResidue } from '../core/residue';
+import { runTrace } from '../core/run-trace';
+import { withJob } from '../logger';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -42,6 +46,8 @@ export interface PlatformProfile {
   cameraFolder: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
+  /** The error this system gives for a hard link on a filesystem without them (exFAT): publishing must then copy. */
+  noHardLinkError: string;
   /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
   namesIgnoreCase: boolean;
   /** The file system of the computer's own disk as the adapter names it (NTFS, APFS, ext4): it has hard links, so files publish by linking. */
@@ -207,6 +213,33 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.ok(await has(join(card, '.DS_Store')), 'the source is never touched');
     } finally { await rm(root, { recursive: true, force: true }); }
   },
+  'Mac system files: organizing a library a Mac wrote removes its bookkeeping "._" files in the folders touched, on any system': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-mac-sidecars-')));
+    try {
+      const has = (file: string) => lstat(file).then(() => true, () => false);
+      // Bookkeeping only (what macOS writes for every entry on exFAT), and one holding a Finder colour label.
+      const header = () => { const b = Buffer.alloc(4096); b.writeUInt32BE(0x00051607, 0); b.writeUInt32BE(0x00020000, 4); return b; };
+      const labelled = () => { const b = header(); b.writeUInt16BE(1, 24); b.writeUInt32BE(9, 26); b.writeUInt32BE(50, 30); b.writeUInt32BE(32, 34); b[50 + 9] = 0x0c; return b; };
+      const library = join(root, 'photobackup'), incoming = join(library, 'incoming'), other = join(library, 'other'), linked = join(library, 'linked');
+      await mkdir(incoming, { recursive: true }); await mkdir(join(library, '2019'), { recursive: true }); await mkdir(other);
+      await writeFile(join(incoming, 'M.JPG'), Buffer.alloc(5000, 3)); await writeFile(join(incoming, 'notes.txt'), 'keep');
+      await writeFile(join(other, 'notes.txt'), 'o');
+      // This system's folder link: its "._" is not a folder's, so it stays.
+      await profile.link(other, linked);
+      const mac = { root: join(root, '._photobackup'), folder: join(library, '._incoming'), year: join(library, '._2019'), photo: join(incoming, '._M.JPG'), tagged: join(incoming, '._TAGGED.JPG'), link: join(library, '._linked') };
+      for (const [name, file] of Object.entries(mac)) await writeFile(file, name === 'tagged' ? labelled() : header());
+      const metadata = async () => ({ fields: {}, camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z' });
+      const review = (await plan(library, [library], { backup: false, reorganize: true, template: '{year}/{yyyymm}/{camera}', layout: 'flat' }, metadata)).plans[0]!;
+      const result = await executeReorganization(review, undefined, undefined, { removeAppleDouble: true });
+      assert.deepEqual(result.errors, []);
+      for (const name of ['root', 'folder', 'year', 'photo'] as const) assert.equal(await has(mac[name]), false, name);
+      assert.ok(await has(mac.tagged), 'a "._" holding a label stays');
+      assert.ok(await has(mac.link), 'the "._" of a folder link is not a folder\'s');
+      assert.ok(result.appleDouble!.kept >= 1 && result.appleDouble!.removed + result.appleDouble!.orphans >= 4);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
   'time left: publishing is priced as this system publishes on each file system': async (profile, t) => {
     const tracker = new EtaTracker(), [card, ssd] = profile.volumes(), drive = (fsType?: string, external = false) => ({ id: fsType, transport: 'storage', fsType, external });
     // The adapter's own names: an exFAT card or SSD (no hard links) publishes by copying, or is written directly where the system does that.
@@ -289,9 +322,58 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.deepEqual((await readdir(tmpdir())).filter(entry => !temporary.has(entry) && !entry.startsWith('feature-camera-')), [], 'nothing was written to the temporary folder');
     } finally { await rm(root, { recursive: true, force: true }); }
   },
+  'publishing: a drive without hard links (exFAT) gets copies instead of failing': profile => {
+    // Real case: Windows reports a hard link on exFAT as EISDIR, and every new file of an import failed.
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: profile.noHardLinkError }), profile.platform), true, profile.noHardLinkError);
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'ENOENT' }), profile.platform), false, 'a missing file is a real error');
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'EEXIST' }), profile.platform), false, 'an existing name is a real error');
+  },
+  'Clean up for a stopped job: the copies it left in the destination go, nothing else; a USB camera import leaves nothing in the temporary folder': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'feature-job-cleanup-')));
+    const before = new Set(await readdir(tmpdir()));
+    // A camera import reads the camera where it is (core/source-fs): its only leftovers are partial copies in the destination.
+    const original = Buffer.alloc(4000, 1);
+    const camera = registerListedSource({ id: `feature-cleanup-${profile.platform}`, files: [{ relative: 'Slot 1/DCIM/100NZ_F/DSC_0001.NEF', size: original.length, modifiedMs: Date.parse('2024-02-03T12:00:00Z') }], read: async (_file, offset, length) => original.subarray(offset, offset + length) });
+    try {
+      const root = join(base, 'backup'), other = join(base, 'other.partial');
+      await mkdir(root); await writeFile(other, 'x');
+      const [transfer] = (await plan(camera.root, [root], { backup: false, template: '{year}/{camera}', layout: 'flat', unknownRules: {} }, async () => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} }))).plans;
+      const staging = await storeFolder(await storeFor(root), IMPORTS, STAGING);
+      await withJob('feature-job', async () => {
+        const staged = join(staging, `${randomUUID()}.partial`); await writeFile(staged, Buffer.alloc(1000, 1));
+        await recordPartial('stage', staged, await lstat(staged, { bigint: true }), transfer!.entries[0]!, transfer!, new Map());
+      });
+      const found = await findRunResidue({ job: 'feature-job', ...runTrace('feature-job')! });
+      assert.deepEqual(found.items.map(item => item.kind), ['resumable'], 'the partial copy, and no temporary folder');
+      await cleanResidue(found);
+      assert.deepEqual(await readdir(staging), []);
+      assert.equal(await readFile(other, 'utf8'), 'x', 'another file stays');
+      assert.deepEqual((await readdir(tmpdir())).filter(name => !before.has(name) && /photo-importer/i.test(name)), []);
+    } finally { camera.unregister(); await rm(base, { recursive: true, force: true }); }
+  },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),
       { storages: [{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }], total: 256, free: 96 });
+  },
+  'USB camera with two card slots: each slot is a source of its own, read as USB, the camera, then the slot': async profile => {
+    const camera = { cameraID: 'camera-1', name: 'Z f', storages: [{ id: '10001', name: 'Slot 1', total: 128, free: 64 }, { id: '20001', name: 'Slot 2', total: 128, free: 32 }] };
+    const sources = cameraSourcesFrom([camera]);
+    assert.deepEqual(sources.map(source => [source.id, source.name, source.total, source.free]),
+      [['camera:camera-1|10001', 'Z f · Slot 1', 128, 64], ['camera:camera-1|20001', 'Z f · Slot 2', 128, 32]]);
+    assert.deepEqual(sources.map(source => cameraOf(source).storageID), ['10001', '20001']);
+    const [single] = cameraSourcesFrom([{ ...camera, storages: camera.storages.slice(0, 1) }]);
+    assert.deepEqual([single!.id, single!.name, cameraOf(single!).storageID], ['camera:camera-1', 'Z f', undefined]);
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { value: { platform: profile.navigatorPlatform }, configurable: true });
+    try {
+      const { sourcePlace } = await import('../renderer/RootApp');
+      // This system's separator, as it reads in the camera's own place ("USB/Z f" or "USB\Z f").
+      const separator = profile.cameraPlace.slice('USB'.length, -'Z f'.length);
+      assert.equal(sourcePlace(sources[0]!), `${profile.cameraPlace}${separator}Slot 1`);
+      assert.equal(sourcePlace(single!), profile.cameraPlace);
+    } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); }
   },
 };
 

@@ -7,7 +7,8 @@ private struct Command: Decodable, Sendable {
     let id: String
     let command: String
     let cameraID: String?
-    let storage: String?
+    /// With "files": only this storage (card slot) of the camera, by the id "list" reported for it.
+    let storageID: String?
     let objectID: String?
     let offset: Int64?
     let length: Int64?
@@ -60,11 +61,15 @@ struct NativeCameraBridge {
                 do {
                     switch command.command {
                     case "list":
-                        let cameras = discovery.sources.map { ["name": $0.name, "cameraID": $0.id] }
+                        let cameras = discovery.sources.map { source -> [String: Any] in
+                            var camera: [String: Any] = ["name": source.name, "cameraID": source.id]
+                            if !source.storages.isEmpty { camera["storages"] = source.storages.map { ["id": $0.id, "name": $0.name] } }
+                            return camera
+                        }
                         emit(["id": command.id, "result": cameras])
                     case "files":
                         guard let cameraID = command.cameraID else { throw CameraAdapterError.unavailable }
-                        let files = try await discovery.files(id: cameraID, storage: command.storage)
+                        let files = try await discovery.files(id: cameraID, storageID: command.storageID)
                         emit(["id": command.id, "result": files.map { file -> [String: Any] in
                             var entry: [String: Any] = ["storage": file.storage, "folder": file.folder, "name": file.name, "size": file.size, "objectID": file.objectID]
                             if let modified = milliseconds(file.modified) { entry["modified"] = modified }

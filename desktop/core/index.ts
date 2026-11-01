@@ -20,6 +20,7 @@ import { hasher } from './hasher';
 import { APP_FOLDERS, confirmCandidates, duplicateMember, type PlanDuplicates } from './duplicates';
 import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_RECOVERY_FOLDER, APP_DATA_FOLDER, type OrganizationEntry } from './recovery';
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
+import { ownRecordWrite } from './own-entries';
 export type { AppleDoubleReport } from './appledouble';
 import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,directReceiptExists,openPartial,clearPartialRecord,stagingFolder,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {constants} from 'node:fs';
@@ -761,7 +762,7 @@ async function openStage(target:StageTarget,signal:AbortSignal|undefined):Promis
   const staging=await stagingFolder(transfer.root,path.dirname(entry.destination)).catch(error=>{if(recovered)claimedStages.delete(recovered.file);throw error;});
   const file=recovered?.file??path.join(staging.folder,`${randomUUID()}.partial`);
   let output:Awaited<ReturnType<typeof fs.open>>;
-  try{output=recovered?await openPartial(recovered,transfer.root):await fs.open(file,'wx',0o600);}catch(error){claimedStages.delete(file);throw error;}
+  try{output=recovered?await openPartial(recovered,transfer.root):await fs.open(file,'wx',0o600);ownRecordWrite(file);}catch(error){claimedStages.delete(file);throw error;}
   claimedStages.add(file);
   let outputStat;
   try{outputStat=await output.stat({bigint:true});}catch(error){await output.close().catch(()=>{});claimedStages.delete(file);if(!recovered){await unlinkEntry(file).then(()=>logDeletion('staging',file,'staging file whose identity could not be read','created by this call with exclusive open (wx) a moment ago, nothing was written',{error}),()=>{});}throw error;}
@@ -1487,6 +1488,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
     for(const run of runs) if(run.index) await flushIndex(run.index);
     // Receipt removals marked lazily are flushed before the job reports back.
     await flushFolders();
+    // The "._" files macOS made for the folders and records this import created; never throws.
+    for(const run of runs) if(run.appleDouble) await run.appleDouble.own([run.transfer.root],signal);
     runs.forEach((_run,position)=>{if(!settled.has(position))onSettled?.(position);});
   }
   checkAbort(signal);

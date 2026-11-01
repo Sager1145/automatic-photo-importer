@@ -7,12 +7,13 @@ import type {PlanEntry,TransferPlan} from '../shared';
 import {MessageError} from '../messages';
 import {appendLines,holdLog,LINE_CAPS,openRegular,openV5,readLines,sealedLine,storeFolder,storeFor,storesFor,storeUnchanged,type Store} from './app-store';
 import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,unlinkEntry,type StatRecord} from './paths';
-import {log,logDeletion} from '../logger';
+import {currentJob,log,logDeletion} from '../logger';
+import {noteRoot} from './run-trace';
 // A partial's source may be a USB camera's file (source-fs).
 const fs=sourceAware(nodeFs);
 
 type Kind='stage'|'publication';
-interface RecordData {kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:StatRecord;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];}
+interface RecordData {kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:StatRecord;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];/** The job that wrote it (absent before this was recorded): Clean up for that job removes only what its receipts name. */job?:string;}
 /** An open receipt in a store's receipt log: what it says and where it is. */
 export interface Receipt {rid:string;store:Store;record:RecordData;}
 export interface OwnedPartial extends Receipt {file:string;stat:BigIntStats;/** A receipt written before its file was created: no file was there. */absent?:boolean;/** findPublication: the file no longer shows the birth time of the receipt, only one the finished copy may have (never resumed, only finished when its bytes are equal). */tolerant?:boolean;}
@@ -146,12 +147,12 @@ async function writeReceipt(kind:Kind,file:string,fileId:string,entry:PlanEntry,
  await rootUnchanged(transfer.root,transfer.rootIdentity);
  const store=await storeFor(transfer.root);
  await contained(file,kind==='stage'?store.path:transfer.root);await contained(entry.source,transfer.source);
- const sourceStat=await fs.lstat(entry.source,{bigint:true});
+ const sourceStat=await fs.lstat(entry.source,{bigint:true}),job=currentJob();
  if(!sourceStat.isFile()||sourceStat.size!==BigInt(entry.size))throw new MessageError('error.sourceChanged',{path:entry.source});
- const record:RecordData={kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:statRecord(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId,...(direct?{mode:'direct' as const,size:String(direct.size),finalBirth:direct.finalBirth.map(String)}:{})};
+ const record:RecordData={kind,file,source:entry.source,destination:entry.destination,sha256:entry.digest??'',sourceStat:statRecord(sourceStat),root:transfer.root,rootIdentity:transfer.rootIdentity,sourceRoot:transfer.source,sourceIdentity:await identity(transfer.source),parentIdentity:await identity(path.dirname(file)),fileIdentity:fileId,...(direct?{mode:'direct' as const,size:String(direct.size),finalBirth:direct.finalBirth.map(String)}:{}),...(job?{job}:{})};
  const rid=randomUUID(),line=openLine(rid,record);
  if(Buffer.byteLength(line)>LINE_CAPS.receipt)throw new Error('Import receipt is too large');
- await appendReceipts(store,[line]);
+ await appendReceipts(store,[line]);noteRoot(transfer.root);
  log('detailed','exec','receipt-written',{kind,file,rid,source:entry.source});
  (await receiptSet(store,index)).open.set(rid,record);
  return {rid,store,record};
