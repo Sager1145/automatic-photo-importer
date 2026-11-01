@@ -57,7 +57,9 @@ export const backendMessages={
  'job.destinationLabel':{en:'Destination {index} of {count}','zh-Hans':'目标 {index}/{count}','zh-Hant':'目的地 {index}/{count}',ja:'保存先 {index}/{count}'},
  'job.destinationFile':{en:'Destination {index} of {count}: {file}','zh-Hans':'目标 {index}/{count}：{file}','zh-Hant':'目的地 {index}/{count}：{file}',ja:'保存先 {index}/{count}：{file}'},
  'job.revalidating':{en:'Revalidating reviewed paths','zh-Hans':'正在重新验证已审核的路径','zh-Hant':'正在重新驗證已審核的路徑',ja:'確認済みのパスを再検証中'},
- 'job.copied':{en:'{copied} copied · {skipped} verified','zh-Hans':'已复制 {copied} 个 · 已验证 {skipped} 个','zh-Hant':'已複製 {copied} 個 · 已驗證 {skipped} 個',ja:'{copied} 件コピー · {skipped} 件検証済み'},
+ // {skipped}: files already verified in the backup and not copied again; {copied} files were copied (and, with verification on, verified: job.copiedVerified).
+ 'job.copied':{en:'{copied} copied · {skipped} already in the backup','zh-Hans':'已复制 {copied} 个 · {skipped} 个已在备份中','zh-Hant':'已複製 {copied} 個 · {skipped} 個已在備份中',ja:'{copied} 件コピー · {skipped} 件はバックアップ済み'},
+ 'job.copiedVerified':{en:'{copied} copied and verified · {skipped} already in the backup','zh-Hans':'已复制并校验 {copied} 个 · {skipped} 个已在备份中','zh-Hant':'已複製並驗證 {copied} 個 · {skipped} 個已在備份中',ja:'{copied} 件コピー・検証済み · {skipped} 件はバックアップ済み'},
  'job.skippedErrors':{en:'{count} skipped with errors','zh-Hans':'{count} 个因错误跳过','zh-Hant':'{count} 個因錯誤略過',ja:'エラーで {count} 件スキップ'},
  'job.mirrorRemoved':{en:'{count} moved to Removed by mirror','zh-Hans':'{count} 个已移至 Removed by mirror','zh-Hant':'{count} 個已移至 Removed by mirror',ja:'{count} 件を Removed by mirror に移動'},
  'job.errors':{en:'{count} errors','zh-Hans':'{count} 个错误','zh-Hant':'{count} 個錯誤',ja:'エラー {count} 件'},

@@ -79,7 +79,7 @@ test('an import whose files all failed shows its result on the card, as History 
     const page = await desk([job]);
     assert.doesNotMatch(page, /files verified/);
     assert.doesNotMatch(page, /93%|100%|>Verified</);
-    assert.match(page, /0 copied · 0 verified/);
+    assert.match(page, /0 copied · 0 already in the backup/);
     assert.match(page, new RegExp(`${job.importResult!.errors} errors`));
     assert.match(page, />0%</);
   }
@@ -90,7 +90,7 @@ test('an import that ended with errors after some copies shows how many were ver
   const job = verifiedError({ progress: { phase: 'verifying', completed: 43, total: 43, bytes: 0, totalBytes: 1e9, speed: 0, file: '' }, importResult: { copied: 30, skipped: 3, planned: 43, errors: 10 } });
   assert.equal(cardFraction(job), 33 / 43);
   const page = await desk([job]);
-  assert.match(page, /30 copied · 3 verified/);
+  assert.match(page, /30 copied · 3 already in the backup/);
   assert.match(page, /10 errors/);
   assert.match(page, />76%</);
   // Every file verified and only cleanup leftovers failed: still finished.

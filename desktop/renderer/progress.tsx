@@ -119,10 +119,10 @@ export function allVerified(job: Job): boolean {
 export function endedResult(job?: Job): Job['importResult'] {
   return job && ended(job) && !job.organization && !jobFinished(job) ? job.importResult : undefined;
 }
-/** A job's counter: an import that ended short shows what it did, as History does ("0 copied · 0 verified"); otherwise its step's count. */
+/** A job's counter: an import that ended short shows what it did, as History does ("0 copied · 0 already in the backup"); otherwise its step's count. */
 export function jobCount(job: Job, progress: Progress, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
   const result = endedResult(job);
-  return result ? t("{copied} copied · {skipped} verified", { copied: formatNumber(result.copied), skipped: formatNumber(result.skipped) }) : progressCount(progress, t, formatNumber, organization, formatBytes);
+  return result ? t("{copied} copied · {skipped} already in the backup", { copied: formatNumber(result.copied), skipped: formatNumber(result.skipped) }) : progressCount(progress, t, formatNumber, organization, formatBytes);
 }
 /** Complete, or ended with an error only after every file was verified. */
 export const jobFinished = (job: Job) => job.phase === 'complete' || (job.phase === 'error' && allVerified(job));
