@@ -9,7 +9,7 @@ import { beneath } from '../core/paths';
 import { windowsCameraBridgeArgs } from './windows-camera';
 
 interface Camera {name:string;cameraID:string;storages?:unknown;}
-interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;}
+interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;/** Restarts the timeout: a request that reports progress is timed from its last report, not its start. */alive():void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
 let stdout='';let stderr='';let staging=0;let cached:Source[]=[];
@@ -51,7 +51,7 @@ async function startBridge():Promise<boolean> {
       const line=stdout.slice(0,newline);stdout=stdout.slice(newline+1);
       let message:any;try{message=JSON.parse(line);}catch{continue;}
       const item=pending.get(message.id);if(!item)continue;
-      if(message.progress){const {completed,total}=message.progress;if(Number.isSafeInteger(completed)&&Number.isSafeInteger(total))item.progress?.(completed,total);continue;}
+      if(message.progress){item.alive();const {completed,total}=message.progress;if(Number.isSafeInteger(completed)&&Number.isSafeInteger(total))item.progress?.(completed,total);continue;}
       pending.delete(message.id);clearTimeout(item.timer);
       if(typeof message.error==='string')item.reject(new Error(message.error));else item.resolve(message.result);
     }
@@ -72,9 +72,10 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   signal?.throwIfAborted();
   const current=child!;const id=randomUUID();
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{if(pending.has(id)){void closeCameraBridge();reject(new Error('The native camera request timed out.'));}},timeout);
-    pending.set(id,{resolve,reject,timer,progress});
-    current.stdin.write(`${JSON.stringify({...command,id})}\n`,error=>{if(error){clearTimeout(timer);pending.delete(id);reject(error);}});
+    const expire=()=>{if(pending.has(id)){void closeCameraBridge();reject(new Error('The native camera request timed out.'));}};
+    const item:Pending={resolve,reject,timer:setTimeout(expire,timeout),progress,alive(){clearTimeout(item.timer);item.timer=setTimeout(expire,timeout);}};
+    pending.set(id,item);
+    current.stdin.write(`${JSON.stringify({...command,id})}\n`,error=>{if(error){clearTimeout(item.timer);pending.delete(id);reject(error);}});
   });
 }
 const size=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
@@ -104,6 +105,8 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
   const abort=()=>{void closeCameraBridge();};signal?.addEventListener('abort',abort,{once:true});staging++;
   try {
     signal?.throwIfAborted();
+    // Every staged file restarts the 30-minute timeout, so a large card is not cut off while files keep arriving
+    // (a 128 GB card at the 68 MB/s once measured over MTP takes 31 minutes).
     const result=await request({command:'stage',cameraID,directory:scratch},30*60*1000,onProgress,signal) as {path?:unknown};
     signal?.throwIfAborted();
     if(typeof result?.path!=='string')throw new Error('The camera helper did not return its staged folder.');
