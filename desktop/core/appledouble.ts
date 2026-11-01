@@ -10,7 +10,8 @@ import { log, logDeletion } from '../logger';
  * macOS AppleDouble "._<name>" files. On exFAT, FAT and other volumes without extended attributes, macOS
  * writes a "._<name>" file beside every file it attaches an attribute to; the kernel attaches
  * com.apple.provenance to everything this app writes, so the app cannot prevent them. This module
- * removes only the ones that carry nothing but that bookkeeping.
+ * removes only the ones that carry nothing but that bookkeeping. The same cleaner also removes Finder's ".DS_Store"
+ * (window layout only) from the folders a job wrote to or moved files out of.
  */
 export const APPLEDOUBLE_MAX_BYTES=64*1024;
 const MAGIC=0x00051607,VERSION=0x00020000,ATTR_MAGIC=0x41545452;
@@ -75,6 +76,8 @@ export interface AppleDoubleReport {
   kept:number;
   /** Removed "._" files whose main file no longer exists. */
   orphans:number;
+  /** Finder ".DS_Store" files removed from folders this job wrote to or moved files out of. */
+  dsStore:number;
   /** Failures to look at or remove one; the job goes on and the file stays. */
   warnings:string[];
   /** Folders the sweep could not read. */
@@ -84,20 +87,23 @@ export interface AppleDoubleReport {
   failures:{path:string;detail:string;folder?:boolean}[];
 }
 const MAX_WARNINGS=20,MAX_DETAILS=1000;
-export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,warnings:[],folderWarnings:[],keptFiles:[],failures:[]});
+export const emptyAppleDoubleReport=():AppleDoubleReport=>({removed:0,kept:0,orphans:0,dsStore:0,warnings:[],folderWarnings:[],keptFiles:[],failures:[]});
 export function addAppleDoubleReport(total:AppleDoubleReport,part:AppleDoubleReport|undefined):void {
   if(!part)return;
-  total.removed+=part.removed;total.kept+=part.kept;total.orphans+=part.orphans;
+  total.removed+=part.removed;total.kept+=part.kept;total.orphans+=part.orphans;total.dsStore+=part.dsStore??0;
   for(const warning of part.warnings)if(total.warnings.length<MAX_WARNINGS)total.warnings.push(warning);
   for(const warning of part.folderWarnings)if(total.folderWarnings.length<MAX_WARNINGS)total.folderWarnings.push(warning);
   for(const file of part.keptFiles)if(total.keptFiles.length<MAX_DETAILS)total.keptFiles.push(file);
   for(const failure of part.failures)if(total.failures.length<MAX_DETAILS)total.failures.push(failure);
 }
-export const appleDoubleActivity=(report:AppleDoubleReport)=>report.removed+report.kept+report.orphans+report.warnings.length+report.folderWarnings.length>0;
+export const appleDoubleActivity=(report:AppleDoubleReport)=>report.removed+report.kept+report.orphans+(report.dsStore??0)+report.warnings.length+report.folderWarnings.length>0;
 
 /** "._" + name, in the same folder; undefined for a name that already is one. */
 export const sidecarOf=(file:string)=>{const name=path.basename(file);return name.startsWith('._')?undefined:path.join(path.dirname(file),'._'+name);};
 const text=(error:unknown)=>error instanceof Error?error.message:String(error);
+export const DS_STORE='.DS_Store';
+/** Every .DS_Store starts with this: a version of 1, then the "Bud1" buddy-allocator magic. */
+const DS_STORE_MAGIC=Buffer.from([0,0,0,1,0x42,0x75,0x64,0x31]);
 
 /**
  * Removes "._" files under a job's roots. Every operation is bounded by the root it is given, never
@@ -108,6 +114,8 @@ export class AppleDoubleCleaner {
   readonly report:AppleDoubleReport=emptyAppleDoubleReport();
   private readonly protectedNames:Set<string>;
   private readonly existed=new Set<string>();
+  /** Folders whose .DS_Store was already looked at: once per folder per job. */
+  private readonly finderFolders=new Set<string>();
   constructor(protectedNames:Iterable<string>=[]){this.protectedNames=new Set([...protectedNames].map(name=>name.toLowerCase()));}
   private protects(file:string,root:string):boolean {
     return path.relative(root,path.dirname(file)).split(path.sep).some(part=>this.protectedNames.has(part.toLowerCase()));
@@ -127,11 +135,12 @@ export class AppleDoubleCleaner {
   /** Removes the "._" file beside `file` while `file` is still the one just placed: `placed` judges its current stat. */
   async besideFile(file:string,root:string,placed:(stat:import('node:fs').BigIntStats)=>boolean):Promise<void> {
     const sidecar=sidecarOf(file);
-    if(!sidecar||this.protects(sidecar,root)||this.existed.has(sidecar))return;
+    if(!sidecar||this.protects(sidecar,root))return;
     try{
       const stat=await fs.lstat(file,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
       if(!stat||!stat.isFile()||!placed(stat))return;
-      await this.remove(sidecar,root,'removed');
+      await this.finderLayout(path.dirname(file),root);
+      if(!this.existed.has(sidecar))await this.remove(sidecar,root,'removed');
     }catch(error){this.warn(sidecar,error);}
   }
   /** Removes the "._" file left where `file` used to be, once `file` is truly gone from there. */
@@ -141,7 +150,37 @@ export class AppleDoubleCleaner {
     try{
       if(await fs.lstat(file).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;}))return;
       await this.remove(sidecar,root,'removed');
+      await this.finderLayout(path.dirname(file),root);
     }catch(error){this.warn(sidecar,error);}
+  }
+  /** Removes Finder's .DS_Store from `folder`, once per job: only a plain file (never a link) that really is one (its magic),
+   * inside `root`, outside protected folders, and unchanged between being read and removed. Never throws. On Windows and
+   * macOS the name matches whatever its case; on Linux only ".DS_Store" itself. */
+  async finderLayout(folder:string,root:string):Promise<void> {
+    const file=path.join(folder,DS_STORE),key=folder.normalize('NFC').toLowerCase();
+    if(this.finderFolders.has(key)||this.protects(file,root))return;
+    this.finderFolders.add(key);
+    try{
+      const before=await fs.lstat(file,{bigint:true}).catch(error=>{if(code(error)==='ENOENT'||code(error)==='ENOTDIR')return undefined;throw error;});
+      if(!before)return;
+      if(!before.isFile()){log('detailed','appledouble','ds-store-kept',{path:file,reason:'not a plain file'});return;}
+      await contained(file,root);
+      const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+      let head:Buffer;
+      try{
+        const opened=await handle.stat({bigint:true});
+        if(!opened.isFile()||!sameStat(before,opened)){log('detailed','appledouble','ds-store-kept',{path:file,reason:'changed while checked'});return;}
+        head=Buffer.alloc(DS_STORE_MAGIC.length);
+        const {bytesRead}=await handle.read(head,0,head.length,0);
+        head=head.subarray(0,bytesRead);
+      }finally{await handle.close();}
+      if(!head.equals(DS_STORE_MAGIC)){log('detailed','appledouble','ds-store-kept',{path:file,reason:'not a Finder .DS_Store'});return;}
+      if(!sameStat(before,await fs.lstat(file,{bigint:true}))){log('detailed','appledouble','ds-store-kept',{path:file,reason:'changed while checked'});return;}
+      await unlinkEntry(file);
+      logDeletion('appledouble',file,'Finder .DS_Store (window layout only) in a folder this job wrote to or moved files out of',`plain file starting with the .DS_Store magic; ${before.size} bytes; unchanged between reading and removal; "Clean up Mac system files" on`,{bytes:Number(before.size),kind:'ds-store'});
+      this.report.dsStore++;
+      markFolderChanged(folder);
+    }catch(error){this.warn(file,error);}
   }
   /** "._X" files in the given folders (not below them) whose X is a media or companion file beside them, or is gone altogether
    * (orphans). Never throws: a folder that cannot be read is reported and skipped, and a stop ends the sweep quietly. */

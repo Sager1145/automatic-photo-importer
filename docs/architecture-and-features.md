@@ -145,7 +145,7 @@ flowchart TD
 | 移除重复项与附属文件 | `removeDuplicates → beginDuplicateRemoval → recovery.run` | 审核决定保留者，确认身份/内容，处理伴随文件，保留撤销所需记录 |
 | 删除已备份来源原件 | `core/originals.deleteOriginals` | 独立显式操作，仅文件夹导入提供；资格来自实际结果，且须覆盖分配要求的全部目标（镜像两盘、顺序填盘为所分配的盘）；删除前重读各目标，源在 APFS/HFS+ 且身份未变时不重读；停止不丢已删结果 |
 | 目录清理 | `redundant-folders.removeEmptiedFolders`，由日志、删除原件与镜像移除调用 | 唯一实现：只删本次清空的目录，自下而上、同设备、不跟随链接；服务文件可删，`._` 仅当 `inspectAppleDouble` 判定只含记账信息；新日志签名记录清理范围 |
-| AppleDouble 清理 | `AppleDoubleCleaner/inspectAppleDouble` | 判断 `._` 内容；不确定项保留并报告警告；不是任意删除所有隐藏文件 |
+| AppleDouble 与 .DS_Store 清理（设置“清理 Mac 系统文件”，偏好键 `removeAppleDouble`） | `AppleDoubleCleaner/inspectAppleDouble/finderLayout`；来源跳过由 `inventory` 的 `keepMacFiles` 控制 | 判断 `._` 内容；不确定项保留并报告警告；`.DS_Store` 仅当是普通文件（不跟随链接）且以 `Bud1` 魔数开头时，在本次写入或移出的文件夹中各删一次，保护文件夹除外，记录到删除日志；不是任意删除所有隐藏文件；关闭时来源上的这些文件作为系统文件列出（文件与文件夹备份会复制） |
 | 中断残留清理 | `findResidue/cleanResidue` | `resumable` 与 `kept` 分开计数；自动清理两者都保留；显式清理可处理更多残留 |
 
 

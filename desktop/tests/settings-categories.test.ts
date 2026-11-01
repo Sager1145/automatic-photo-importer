@@ -23,7 +23,7 @@ test('each saved policy and live control is grouped under its intended category'
     general: ['App language', 'Text size', 'Appearance'],
     storage: ['Backup location', 'Copy policy', 'Folder structure', 'Edited exports folder'],
     defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Files &amp; folders', 'After an import', 'Offer for folders', 'Eject drives automatically after a clean import'],
-    files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Remove macOS ._ files', 'Collect problem files'],
+    files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Clean up Mac system files', 'Collect problem files'],
     devices: ['Remembered drives', 'Ignored drives'],
     performance: ['Drives at once', 'CPU threads', 'Memory limit'],
     diagnostics: ['Diagnostics', 'Log detail'],

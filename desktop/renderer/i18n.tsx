@@ -508,8 +508,8 @@ Not photos or videos. Change this in Settings.|不是照片或视频。可在设
 Nothing moves until you apply.|应用之前不会移动任何文件。|套用之前不會移動任何檔案。|適用するまで何も移動しません。
 One verified copy.|一份校验过的副本。|一份驗證過的副本。|検証済みコピーを1つ保存します。
 Reads each copy back to confirm it. Off is faster.|重新读取每个副本以确认无误。关闭会更快。|重新讀取每個副本以確認無誤。關閉會更快。|各コピーを読み直して確認します。オフにすると速くなります。
-Remove macOS ._ files|移除 macOS 的 ._ 文件|移除 macOS 的 ._ 檔案|macOS の ._ ファイルを削除
-Deletes the hidden ._ files macOS leaves beside copied and organized files on exFAT and FAT drives, only when they hold no tags or other data.|删除 macOS 在 exFAT 和 FAT 驱动器上于已复制和已整理文件旁留下的隐藏 ._ 文件，仅限不含标签或其他数据的文件。|刪除 macOS 在 exFAT 和 FAT 磁碟機上於已複製和已整理檔案旁留下的隱藏 ._ 檔案，僅限不含標籤或其他資料的檔案。|exFAT や FAT のドライブでコピー・整理したファイルの横に macOS が作る隠しファイル ._ を削除します。タグなどのデータがないものだけが対象です。
+Clean up Mac system files|清理 Mac 系统文件|清理 Mac 系統檔案|Mac のシステムファイルを整理
+Skips Finder's .DS_Store and ._ files when importing and removes them from folders the app writes to. ._ files holding tags or other data are kept.|导入时跳过 Finder 的 .DS_Store 和 ._ 文件，并从本应用写入的文件夹中删除它们。含有标签或其他数据的 ._ 文件会保留。|匯入時略過 Finder 的 .DS_Store 和 ._ 檔案，並從本應用程式寫入的資料夾中刪除它們。含有標籤或其他資料的 ._ 檔案會保留。|読み込み時に Finder の .DS_Store と ._ ファイルをスキップし、このアプリが書き込むフォルダーから削除します。タグなどのデータを含む ._ ファイルは残します。
 Skip files with errors and continue|跳过出错的文件并继续|略過出錯的檔案並繼續|エラーのファイルをスキップして続行
 A file that can't be read or changes while it is checked is listed in All errors and left out; the other files are still copied. Off stops the import at the first such file.|无法读取或在检查时发生变化的文件会列入“所有错误”并被跳过，其余文件照常复制。关闭时，遇到这类文件会停止导入。|無法讀取或在檢查時發生變化的檔案會列入「所有錯誤」並被略過，其餘檔案照常複製。關閉時，遇到這類檔案會停止匯入。|読み取れないファイルや確認中に変更されたファイルは「すべてのエラー」に記録してスキップし、ほかのファイルはコピーを続けます。オフにすると、そのようなファイルでインポートを停止します。
 Run again, skipping files with errors|重新运行，并跳过出错的文件|重新執行，並略過出錯的檔案|エラーのファイルをスキップしてもう一度実行
