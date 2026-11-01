@@ -193,6 +193,12 @@ export async function unboundDirect(entry:PlanEntry,root:string,index:RecoveryIn
  }
  return false;
 }
+/** Whether any authenticated publication receipt names this source and destination, whatever its checksum: looked at before a
+ * checksum is computed to match one, so a file with no receipt there is not read for it. */
+export async function publicationNamed(entry:Pick<PlanEntry,'source'|'destination'>,root:string,index:RecoveryIndex):Promise<boolean>{
+ for(const set of await receiptSets(root,index))for(const record of set.open.values())if(record.kind==='publication'&&record.source===entry.source&&record.destination===entry.destination)return true;
+ return false;
+}
 /** Whether any authenticated direct-copy receipt (not the one written before the name existed) names this destination. */
 export async function directReceiptExists(entry:PlanEntry,root:string,index:RecoveryIndex):Promise<boolean>{
  for(const set of await receiptSets(root,index))for(const record of set.open.values())if(publicationMatch(record,entry)&&record.mode==='direct'&&record.fileIdentity!==CREATING&&record.file===entry.destination&&record.root===root)return true;

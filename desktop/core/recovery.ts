@@ -23,8 +23,10 @@ import { sameBirth, beneath, checkAbort, code, contained, within, digest, identi
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
 export interface ReorganizationResult {copied:number;skipped:number;errors:string[];moved:number;retained:number;retainedBytes:number;notes?:string[];released?:number;releasedBytes?:number;/** What removing macOS "._" files did; present only when it was on. */appleDouble?:AppleDoubleReport;/** Source folders this run removed because it left them empty; present only when there were some. */foldersRemoved?:number;}
 /** kept: a duplicate removal's entry names the copy that stays as its destination; that copy may differ from the removed file's bytes (EXIF-identical duplicates), so its own size and SHA-256 are checked instead. */
-export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;kept?:{digest:string;size:number};}
-interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:StatRecord;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};}
+/** replace (duplicate removal only, with `kept`): once `source` is in recovery storage, the copy kept at `destination` takes its name
+ * (an import's Overwrite of a file with the same name). Undo moves that copy back first, then restores the original. */
+export interface OrganizationEntry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:BigIntStats;move:boolean;kept?:{digest:string;size:number};replace?:true;}
+interface Entry {captureTimeMs?:number;source:string;destination:string;digest:string;size:number;stat:StatRecord;move:boolean;parents:Record<string,string>;kept?:{digest:string;size:number};replace?:true;}
 interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing is copied, each entry's destination is the copy kept. */kind?:'duplicates';id:string;root:string;rootIdentity:string;source:string;sourceIdentity:string;entries:Entry[];/** rename: each file moves on its volume with rename(2), every new organization's. Absent (journals of earlier
  * versions): a verified copy plus a retained original. */strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];
  /** The chosen source folders (the source itself when none were chosen): only folders inside them that the run emptied
@@ -70,7 +72,8 @@ const lockKey=(root:string,id:string)=>{if(!uuid.test(id))throw new Error('Inval
 interface ExclusiveRecord extends StatRecord {birthtimeNs?:string}
 interface JournalState {slots:Map<number,string[]>;exclusive:Map<number,ExclusiveRecord[]>;complete:boolean;finalizing:Set<number>;finalized:Set<number>;superseded?:string;/** Where the successor's journal is when it is not this root: a sibling backup folder its manifest lists. */successorRoot?:string;
  renameIntent:Set<number>;renamed:Map<number,StatRecord>;dated:Map<number,Set<string>>;fallback:Set<number>;published:Set<number>;undone:Set<number>;undoCopy:Set<number>;undoReady:Map<number,StatRecord>;undoComplete:boolean;/** The migrator finished converting this journal (its `migration-complete` event). */migrationComplete:boolean;/** Converted only in part: the earlier version's folder may still hold its kept originals, so it is an old record. */halfConverted?:boolean;
- /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;}
+ /** Entries a later complete organization moved on from their destination; that one owns them now. */handedOff:Map<number,HandOff>;
+ /** Replace entries whose kept copy is taking (replacing) or has taken (replaced) the set-aside file's name. */replacing:Set<number>;replaced:Set<number>;}
 /** A later journal (`successor`, in `successorRoot`) that moved an entry's file from its destination to `destination`. */
 interface HandOff {successor:string;successorRoot:string;destination:string;}
 function originalPath(m:Manifest,index:number,slot:string):string{return path.join(jobFolder(m),'originals',String(index),slot,path.basename(m.entries[index]!.source));}
@@ -88,7 +91,7 @@ async function logMark(handle:fs.FileHandle,offset:number):Promise<LogMark>{
  return {ino:stat.ino,offset,size:stat.size,mtime:stat.mtimeNs,head,tail};
 }
 const finishedJournals=new Map<string,JournalCache>();
-function emptyState():JournalState{return {slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoCopy:new Set(),undoReady:new Map(),undoComplete:false,handedOff:new Map(),migrationComplete:false};}
+function emptyState():JournalState{return {slots:new Map(),exclusive:new Map(),complete:false,finalizing:new Set(),finalized:new Set(),renameIntent:new Set(),renamed:new Map(),dated:new Map(),fallback:new Set(),published:new Set(),undone:new Set(),undoCopy:new Set(),undoReady:new Map(),undoComplete:false,handedOff:new Map(),migrationComplete:false,replacing:new Set(),replaced:new Set()};}
 /** Fully undone, superseded, or complete with every finalize finished and nothing undone. Only these
  * are cached. Anything the app records later (a successor, a hand-off, a finalize or an undo) is an
  * append, which changes the stamp; the app never rewrites events in place. */
@@ -96,7 +99,7 @@ const finished=(state:JournalState)=>state.undoComplete||!!state.superseded||sta
 function copyState(state:JournalState):JournalState{
  return {...state,slots:new Map([...state.slots].map(([index,slots])=>[index,[...slots]])),exclusive:new Map([...state.exclusive].map(([index,stats])=>[index,[...stats]])),
   finalizing:new Set(state.finalizing),finalized:new Set(state.finalized),renameIntent:new Set(state.renameIntent),renamed:new Map(state.renamed),
-  dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),undoCopy:new Set(state.undoCopy),undoReady:new Map(state.undoReady),handedOff:new Map(state.handedOff)};
+  dated:new Map([...state.dated].map(([index,dates])=>[index,new Set(dates)])),fallback:new Set(state.fallback),published:new Set(state.published),undone:new Set(state.undone),undoCopy:new Set(state.undoCopy),undoReady:new Map(state.undoReady),handedOff:new Map(state.handedOff),replacing:new Set(state.replacing),replaced:new Set(state.replaced)};
 }
 /** Applies one authenticated event of journal `m` to `state` (a line is counted once: that is the reader's job). */
 function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=>void {
@@ -122,6 +125,8 @@ function applier(m:Manifest,state:JournalState):(record:Record<string,unknown>)=
   if(record.event==='rename-fallback')state.fallback.add(index);
   if(record.event==='published')state.published.add(index);
   if(record.event==='undone')state.undone.add(index);
+  if(record.event==='replace-intent')state.replacing.add(index);
+  if(record.event==='replaced'){if(!state.replacing.has(index))throw new Error('Invalid replacement record');state.replaced.add(index);}
   if(record.event==='undo-copy-intent')state.undoCopy.add(index);
   if(record.event==='undo-copy-ready'){const stat=record.stat as StatRecord;if(!state.undoCopy.has(index)||!isStatRecord(stat))throw new Error('Invalid restored copy identity');state.undoReady.set(index,stat);}
   if(record.event==='handed-off'){
@@ -223,6 +228,37 @@ async function targetMatches(entry:Entry,m:Manifest,signal?:AbortSignal,verifyCo
  if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==BigInt(expected.size)||(verifyContents&&await (proofs?proofs.digest(entry.destination,signal):digest(entry.destination,signal))!==expected.digest))throw new Error(`Destination changed; original retained: ${entry.destination}`);
  return true;
 }
+/** A replace entry once its kept copy took the replaced file's name: the copy kept is at `source` now. */
+const replacedAt=(entry:Entry):Entry=>({...entry,destination:entry.source});
+const replacing=(state:JournalState,index:number)=>state.replacing.has(index)||state.replaced.has(index);
+/** Put the kept copy of a replace entry at the name of the file set aside (already in recovery storage). Never overwrites: a hard link
+ * then removing the old name, or a rename that refuses an existing name. Journaled before and after, so a crash in between is finished. */
+async function replaceKept(entry:Entry,index:number,m:Manifest,state:JournalState,signal?:AbortSignal,proofs?:Proofs):Promise<void> {
+ await contained(entry.source,m.root);await contained(entry.destination,m.root);
+ const occupied=()=>new Error(`The replaced file's name is occupied; nothing was overwritten: ${entry.source}`);
+ if(!state.replacing.has(index)){
+  if(!await savedOriginal(m,index,state))throw new Error(`The file to replace is not in recovery storage; nothing was replaced: ${entry.source}`);
+  if(await maybeLstat(entry.source))throw occupied();
+  if(!await targetMatches(entry,m,signal,true,proofs))throw new Error(`The copy to keep is missing; nothing was replaced: ${entry.destination}`);
+  await checkpoint(m,'replace-intent',index);state.replacing.add(index);
+ }
+ checkAbort(signal);await roots(m);
+ const at=await maybeLstat(entry.source),kept=await maybeLstat(entry.destination);
+ if(at&&kept&&sameHardLink(at,kept)){await unlinkEntry(entry.destination);logDeletion('replace',entry.destination,'second name of a copy that took the name of the file it replaced','both names are hard links of one inode (same device, inode, link count >= 2)',{at:entry.source});}
+ else if(at&&kept)throw occupied();
+ else if(!at&&kept){
+  try{await fs.link(entry.destination,entry.source);if(!sameHardLink(await fs.lstat(entry.destination,{bigint:true}),await fs.lstat(entry.source,{bigint:true})))throw occupied();await unlinkEntry(entry.destination);}
+  catch(error){
+   if(code(error)==='EEXIST')throw occupied();
+   if(!LINK_UNSUPPORTED.has(code(error)??''))throw error;
+   try{await exclusiveRename(entry.destination,entry.source);}catch(failure){if(code(failure)==='EEXIST')throw occupied();throw failure;}
+  }
+ }else if(!at)throw new Error(`Neither the copy to keep nor the replaced name holds a file: ${entry.destination}`);
+ await syncParents(entry.source,m.root);await syncDirectory(path.dirname(entry.destination));
+ if(!await targetMatches(replacedAt(entry),m,signal,true,proofs))throw new Error(`The copy that replaced a file is missing: ${entry.source}`);
+ log('normal','replace','replaced',{file:entry.source,from:entry.destination,sha256:entry.kept?.digest,journal:m.id,index});
+ await checkpoint(m,'replaced',index);state.replaced.add(index);
+}
 /** Content proofs taken by this process during one run, finalize or undo: each file's SHA-256 with the full stat
  * (birth time included) it was read under. One is reused only while that stat is unchanged, and only where the
  * filesystem keeps a real change time (provable: not FAT or exFAT), so there nothing is reused between steps. */
@@ -257,6 +293,7 @@ function validateManifest(value:unknown,root:string,id:string):Manifest {
   if(path.relative(m.source,entry.source).split(path.sep).some(p=>isRecoveryName(p))||path.relative(root,entry.destination).split(path.sep).some(p=>isRecoveryName(p)))throw new Error('Unsafe recovery storage path in journal');
   if(entry.kept!==undefined&&(m.kind!=='duplicates'||!entry.kept||typeof entry.kept.digest!=='string'||!/^[a-f0-9]{64}$/.test(entry.kept.digest)||!Number.isSafeInteger(entry.kept.size)||entry.kept.size<0||pathKey(entry.source)===pathKey(entry.destination)))throw new Error('Invalid duplicate removal entry');
   if(m.kind==='duplicates'&&pathKey(entry.source)===pathKey(entry.destination))throw new Error('Invalid duplicate removal entry');
+  if(entry.replace!==undefined&&(entry.replace!==true||!entry.kept))throw new Error('Invalid replacement entry');
   if(sources.has(pathKey(entry.source)))throw new Error('Duplicate recovery source');sources.add(pathKey(entry.source));
   const keys=Object.keys(entry.stat).sort().join(',');if(keys!=='ctime,dev,ino,mtime,size'||Object.entries(entry.stat).some(([key,v])=>typeof v!=='string'||!(key==='ino'?/^-?\d+$/:/^\d+$/).test(v))||entry.stat.size!==String(entry.size)||entry.stat.dev!==m.rootIdentity.split(':')[0])throw new Error('Invalid recovery source identity');
   const ancestors:string[]=[];for(let folder=path.dirname(entry.source);folder!==m.source;folder=path.dirname(folder)){if(!beneath(folder,m.source))throw new Error('Unsafe recovery source ancestor');ancestors.push(folder);}
@@ -959,6 +996,13 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    checkAbort(signal);
    // A later organization took this file over; it stays where that one put it.
    if(state.handedOff.has(index)){if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;}
+   // A replace entry whose kept copy has (or was taking) the set-aside file's name: finished first, then checked there.
+   if(replacing(state,index)){
+    if(!state.replaced.has(index))await replaceKept(entry,index,m,state,signal,proofs);
+    else if(!await targetMatches(replacedAt(entry),m,signal,await deep(index,entry),proofs))throw new Error(`The copy that replaced a file is missing: ${entry.source}`);
+    const saved=await savedOriginal(m,index,state);if(saved)await validateOriginal(saved,entry,scopeOf(m),true,signal,await deep(index,entry,saved),proofs);
+    result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;
+   }
    if(state.finalized.has(index)){
     if(!await targetMatches(entry,m,signal,await deep(index,entry),proofs))throw new Error('Finalized destination unavailable');
     if(entry.move)result.moved++;result.skipped++;completed++;progress(path.basename(entry.source));continue;
@@ -985,12 +1029,12 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await tidyCopied(entry);completed++;progress(path.basename(entry.source));
   }
   // Setting aside the originals that were moved is its own step: it can take minutes on a slow drive.
-  const stashing=m.entries.reduce((count,entry,index)=>count+(entry.move&&!state.finalizing.has(index)&&!state.renamed.has(index)&&!state.handedOff.has(index)?1:0),0);
-  let stashed=0,stashedBytes=0;const stashedOf=m.entries.reduce((sum,entry,index)=>sum+(entry.move&&!state.finalizing.has(index)&&!state.renamed.has(index)&&!state.handedOff.has(index)?entry.size:0),0);
+  const stashing=m.entries.reduce((count,entry,index)=>count+(entry.move&&!state.finalizing.has(index)&&!state.renamed.has(index)&&!state.handedOff.has(index)&&!replacing(state,index)?1:0),0);
+  let stashed=0,stashedBytes=0;const stashedOf=m.entries.reduce((sum,entry,index)=>sum+(entry.move&&!state.finalizing.has(index)&&!state.renamed.has(index)&&!state.handedOff.has(index)&&!replacing(state,index)?entry.size:0),0);
   const stash_=(file:string)=>onProgress?.({phase:'copying',step:'stashing',completed:stashed,total:stashing,bytes:stashedBytes,totalBytes:stashedOf,speed:0,file,renames:true});
   if(stashing)stash_('');
   for(const [index,entry]of m.entries.entries()) {
-   checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index))continue;await roots(m);stashed++;stashedBytes+=entry.size;stash_(path.basename(entry.source));let saved=await savedOriginal(m,index,state);
+   checkAbort(signal);if(!entry.move||state.finalizing.has(index)||state.renamed.has(index)||state.handedOff.has(index)||replacing(state,index))continue;await roots(m);stashed++;stashedBytes+=entry.size;stash_(path.basename(entry.source));let saved=await savedOriginal(m,index,state);
    // Unchanged since its last verified pass (decided in the loop above): sizes and identities only.
    if(saved){const contents=!passed.has(index)||verified.get(index)!==passed.get(index);await validateOriginal(saved,entry,scopeOf(m),true,signal,contents,proofs);if(await maybeLstat(entry.source))throw new Error('Original path reappeared during recovery');if(!await targetMatches(entry,m,signal,contents,proofs))throw new Error('Destination unavailable');await observePath(entry.source,entry.stat,saved!,m.kind==='duplicates'?'duplicateRemoval':'organize');continue;}
    await parents(entry,m);
@@ -1017,6 +1061,8 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    await observePath(entry.source,entry.stat,saved,m.kind==='duplicates'?'duplicateRemoval':'organize');
    await sidecars?.besideGone(entry.source,m.source);
   }
+  // Replace entries: with the file set aside, the copy kept takes its name.
+  for(const [index,entry] of m.entries.entries()){if(!entry.replace||state.replaced.has(index)||state.handedOff.has(index))continue;checkAbort(signal);await replaceKept(entry,index,m,state,signal,proofs);}
   // Closing the journal, then the emptied folders: each counted, the journal last.
   const emptied=emptiable(m,state.finalized),folders=emptied.size;
   const tidy=(done:number,file:string)=>onProgress?.({phase:'copying',step:'tidying',completed:done,total:folders+1,bytes:0,totalBytes:0,speed:0,file,renames:true});
@@ -1200,6 +1246,12 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
    job.undoable=!released;let moves:Successors|undefined;
    for(const [index,entry]of m.entries.entries()) {
     looked++;checkAbort(signal);report(position,.5+.5*index/Math.max(1,m.entries.length),id);
+    if(replacing(state,index)){
+     const saved=await savedOriginal(m,index,state);
+     if(saved){await validateOriginal(saved,entry,scopeOf(m),true,undefined,verifyContents);job.retainedFiles!++;job.retainedBytes!+=entry.size;}
+     if(state.replaced.has(index)&&await targetMatches(replacedAt(entry),m,undefined,verifyContents))job.completed++;else all=false;
+     continue;
+    }
     // A later organization took this file over (recorded, or found now and recorded on the next resume or undo).
     if(state.handedOff.has(index)||placed(state,index)&&!await maybeLstat(entry.destination)&&await findHandOff(m,index,state,moves??=await laterMoves(m,(done,total,file)=>report(position,.5,file||id,undefined,{done,total}),signal))){
      // Any kept original of it stays, but is not among those a finalize would release.
@@ -1276,6 +1328,14 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    // (unless an interrupted finalize had already started releasing it).
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index)))continue;
    if(state.renamed.has(index)){const target=await maybeLstat(entry.destination);if(await maybeLstat(entry.source)||!target||!movedIdentity(target,entry,state.dated.get(index)))throw new Error('Moved file changed; nothing released');continue;}
+   // A replacement's kept copy is at the replaced name now; the original it set aside is released like any duplicate's.
+   if(replacing(state,index)){
+    if(!state.replaced.has(index))throw new Error('A replacement is unfinished; recheck it before releasing kept originals');
+    if(!await targetMatches(replacedAt(entry),m,signal,await upFront(entry.source),proofs))throw new Error('Destination unavailable; retained originals preserved');
+    const saved=await savedOriginal(m,index,state);
+    if(saved)await validateOriginal(saved,entry,scopeOf(m),true,signal,await upFront(saved),proofs);else if(!state.finalizing.has(index)&&!state.finalized.has(index))throw new Error('Retained original unavailable without a finalization intent');
+    tick();continue;
+   }
    if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,await upFront(entry.destination),proofs))throw new Error('Finalized destination unavailable');tick();continue;}
    const saved=await savedOriginal(m,index,state),source=await maybeLstat(entry.source);if(!entry.move)await parents(entry,m);
    if(entry.move){
@@ -1292,24 +1352,26 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
    if(state.handedOff.has(index)&&!(state.finalizing.has(index)&&!state.finalized.has(index))){result.handedOff++;continue;}
    // A moved file has no kept duplicate to release.
    if(state.renamed.has(index))continue;
-   if(state.finalized.has(index)){if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Finalized destination unavailable');result.finalized++;continue;}
+   // A replacement's kept copy is at the replaced name, which is therefore never "reappeared".
+   const replaced=state.replaced.has(index),kept=replaced?replacedAt(entry):entry;
+   if(state.finalized.has(index)){if(!await targetMatches(kept,m,signal,true,proofs))throw new Error('Finalized destination unavailable');result.finalized++;continue;}
    if(!entry.move){await parents(entry,m);tick();}
-   if(entry.move&&await maybeLstat(entry.source))throw new Error('Original path reappeared; retained originals preserved');
+   if(entry.move&&!replaced&&await maybeLstat(entry.source))throw new Error('Original path reappeared; retained originals preserved');
    const saved=await savedOriginal(m,index,state);tick();
    // Publish and synchronize the remaining copy before the authenticated intent.
-   const destinationStat=await fs.lstat(entry.destination,{bigint:true});
-   if(!await targetMatches(entry,m,signal,true,proofs))throw new Error('Destination unavailable; retained originals preserved');
-   tick();await syncFile(entry.destination);await syncParents(entry.destination,m.root);tick();
-   if(!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('Destination changed while synchronizing');
+   const destinationStat=await fs.lstat(kept.destination,{bigint:true});
+   if(!await targetMatches(kept,m,signal,true,proofs))throw new Error('Destination unavailable; retained originals preserved');
+   tick();await syncFile(kept.destination);await syncParents(kept.destination,m.root);tick();
+   if(!matches(await fs.lstat(kept.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('Destination changed while synchronizing');
    if(!entry.move){
     if(saved)throw new Error('Unexpected retained original');
     if(!state.finalizing.has(index)){await validateOriginal(entry.source,entry,m.source,false,signal,true,proofs);tick();await checkpoint(m,'finalize-intent',index);tick();state.finalizing.add(index);}
    }else if(saved){
     await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();const originalStat=await fs.lstat(saved,{bigint:true});
     if(!state.finalizing.has(index)){await checkpoint(m,'finalize-intent',index);state.finalizing.add(index);}
-    checkAbort(signal);await roots(m);await contained(saved,scopeOf(m));await contained(entry.destination,m.root);
-    if(await maybeLstat(entry.source)||!matches(await fs.lstat(saved,{bigint:true}),statRecord(originalStat))||!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('A verified file changed before finalization');
-    await unlinkEntry(saved);logDeletion('release',saved,'retained original released after the organization was finalized',`SHA-256 ${entry.digest} validated at the retained copy and at the organized file ${entry.destination}; the original path is empty; both files unchanged until removal`,{bytes:entry.size,destination:entry.destination,duplicatesJournal:m.kind==='duplicates'});tick();await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
+    checkAbort(signal);await roots(m);await contained(saved,scopeOf(m));await contained(kept.destination,m.root);
+    if((!replaced&&await maybeLstat(entry.source))||!matches(await fs.lstat(saved,{bigint:true}),statRecord(originalStat))||!matches(await fs.lstat(kept.destination,{bigint:true}),statRecord(destinationStat)))throw new Error('A verified file changed before finalization');
+    await unlinkEntry(saved);logDeletion('release',saved,'retained original released after the organization was finalized',`SHA-256 ${entry.digest} validated at the retained copy and at the organized file ${kept.destination}; ${replaced?'that copy replaced it at its own name':'the original path is empty'}; both files unchanged until removal`,{bytes:entry.size,destination:kept.destination,duplicatesJournal:m.kind==='duplicates'});tick();await syncDirectory(path.dirname(saved));result.removed++;result.bytes+=entry.size;
    }else if(!state.finalizing.has(index))throw new Error('Retained original disappeared before authorization');
    if(!state.finalized.has(index)){await checkpoint(m,'finalized',index);state.finalized.add(index);}
    tick();
@@ -1430,6 +1492,18 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    return 'none';
   };
   const moved=(index:number)=>state.renamed.has(index)||(state.renameIntent.has(index)&&!state.fallback.has(index)&&!state.slots.get(index)?.length);
+  /** A replacement's copy goes back to the name it was kept under (only checked, with `check`), so the original can return. */
+  const replacedBack=async(entry:Entry,check=false)=>{
+   const at=await maybeLstat(entry.source),kept=await maybeLstat(entry.destination);
+   if(!at)return;
+   if(kept&&sameHardLink(at,kept)){if(!check){await unlinkEntry(entry.source);logDeletion('undo',entry.source,'second name of a copy that replaced a file, removed by Undo','both names are hard links of one inode',{keptAt:entry.destination});await syncParents(entry.source,m.root);}return;}
+   if(kept)throw occupied(entry.destination);
+   if(!await targetMatches(replacedAt(entry),m,signal,true,proofs))throw occupied(entry.source);
+   if(check)return;
+   try{await fs.link(entry.source,entry.destination);if(!sameHardLink(await fs.lstat(entry.source,{bigint:true}),await fs.lstat(entry.destination,{bigint:true})))throw occupied(entry.destination);await unlinkEntry(entry.source);}
+   catch(error){if(code(error)==='EEXIST')throw occupied(entry.destination);if(!LINK_UNSUPPORTED.has(code(error)??''))throw error;try{await exclusiveRename(entry.source,entry.destination);}catch(failure){if(code(failure)==='EEXIST')throw occupied(entry.destination);throw failure;}}
+   await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source));
+  };
   // Check everything before the first change, then undo in reverse order. Moved files that are gone
   // from both places are all named, and nothing is changed.
   const missing:string[]=[];
@@ -1439,6 +1513,8 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
    if(await handedOff(index))continue;tick();
    if(moved(index)){if(await movedState(index,entry)==='none'&&state.renamed.has(index))missing.push(entry.destination);continue;}
    const saved=await savedOriginal(m,index,state);tick();
+   // A replacement: the copy at the original's name must be the one this journal put there, and its own name free to go back to.
+   if(saved&&replacing(state,index)){await replacedBack(entry,true);await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();continue;}
    if(saved){if(await maybeLstat(entry.source)){if(!state.undoCopy.has(index))throw occupied(entry.source);await checkRestoration(saved,index,entry);}await validateOriginal(saved,entry,scopeOf(m),true,signal,true,proofs);tick();}
   }
   if(missing.length)throw new Error(`${missing.length} organized file${missing.length===1?' is':'s are'} no longer where this organization put ${missing.length===1?'it':'them'} and cannot be put back; nothing was changed: ${missing.slice(0,20).join(', ')}${missing.length>20?', …':''}`);
@@ -1463,7 +1539,12 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     }
    } else {
     const saved=await savedOriginal(m,index,state);
+    if(saved&&replacing(state,index))await replacedBack(entry);
     if(saved){if(await maybeLstat(entry.source)&&!state.undoCopy.has(index))throw occupied(entry.source);await restore(saved,entry.source,index,entry);result.restored++;tick();}
+    // The copy that replaced it, back under its own name: removed only when its bytes are the restored original's, both verified.
+    if(replacing(state,index)&&entry.kept?.digest===entry.digest&&await maybeLstat(entry.destination)&&await restored(entry)&&await targetMatches(entry,m,signal,true,proofs)){
+     await unlinkEntry(entry.destination);logDeletion('undo',entry.destination,'copy that replaced a file, removed by Undo once that file was back',`SHA-256 ${entry.digest} verified at the restored file ${entry.source} and at this copy`,{bytes:entry.size});await syncParents(entry.destination,m.root);result.removed++;
+    }
     // An exclusive copy cut off before it published leaves a truncated partial at the library path: remove it once the original is back, but only when it is the file this journal created.
     if(!state.published.has(index)&&state.exclusive.has(index)&&await maybeLstat(entry.source)){
      const partial=await maybeLstat(entry.destination);

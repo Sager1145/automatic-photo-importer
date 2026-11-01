@@ -16,7 +16,7 @@ import { DIRECTORY_SYNC_SUPPORTED, digest, linkRefused, pathKey, posixRelative, 
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
-import { getOrganizationRecovery, listedOnce } from '../core/recovery';
+import { getOrganizationRecovery, listedOnce, undoOrganization } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
 import { evaluateRoutes } from '../core/folder-rules';
 import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan } from '../core/index';
@@ -32,6 +32,8 @@ import { recordPartial, IMPORTS, STAGING } from '../core/import-recovery';
 import { cleanResidue, findRunResidue } from '../core/residue';
 import { runTrace } from '../core/run-trace';
 import { withJob } from '../logger';
+import { ConflictBook } from '../name-conflicts';
+import { applyConflictChoices, nameOnDisk } from '../core/name-conflicts';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -220,6 +222,45 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       const copies = await Promise.all(written.filter(file => /img_0001\.jpg$/i.test(file)).map(file => readFile(join(library, file), 'utf8')));
       assert.deepEqual(copies.sort(), ['first', 'second'], 'both photos are kept, one as a conflict');
       assert.ok(written.every(file => !file.includes('\\') && file === relative(library, join(library, file)).split(sep).join('/')));
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'same-name conflicts: a photo already in the library under its name, in any case, is one conflict; Keep both never adds a name of another case and Overwrite keeps the name the library has': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-conflicts-')));
+    try {
+      const when = new Date(2026, 9, 25, 12), source = join(root, 'card'), library = join(root, 'photobackup'), folder = join(library, '2026', '202610', 'ILCE-7M4');
+      const put = async (file: string, text: string) => { await mkdir(dirname(file), { recursive: true }); await writeFile(file, text); await utimes(file, when, when); };
+      // The library holds DSC00003.JPG; the card has the same photo as dsc00003.jpg, and another photo named DSC00004.JPG
+      // where the library holds dsc00004.jpg with other bytes. macOS and Windows read each pair as one name; Linux tells
+      // them apart, and the app treats them as one name there too (caseVariant), so the drive can move between systems.
+      await put(join(folder, 'DSC00003.JPG'), 'same'); await put(join(folder, 'dsc00004.jpg'), 'library'); await put(join(folder, 'DSC00005.JPG'), 'replaced');
+      await put(join(source, 'DCIM', 'dsc00003.jpg'), 'same'); await put(join(source, 'DCIM', 'DSC00004.JPG'), 'card'); await put(join(source, 'DCIM', 'dsc00005.jpg'), 'replaced');
+      const metadata = async () => ({ fields: {}, camera: 'ILCE-7M4', date: '2026-10-25T10:00:00' });
+      const { plans: [transfer] } = await plan(source, [library], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {} }, metadata);
+      const book = new ConflictBook(), byId = new Map(transfer!.entries.map(entry => [entry.id, entry]));
+      assert.deepEqual((await execute(transfer!, undefined, undefined, { onFileOutcome: outcome => { book.note(outcome, byId.get(outcome.entryId), transfer!, 0); } })).errors, []);
+      // The same photo is one conflict, at the library's own name; the other photo was copied under a conflict name, unasked.
+      // The library file is shown (and later set aside) under the name its folder lists, as the app does.
+      for (const item of book.list()) book.retarget(item.id, await nameOnDisk(item.existing));
+      const conflicts = book.list().sort((a, b) => a.relative.localeCompare(b.relative));
+      assert.equal(conflicts.length, 2);
+      assert.deepEqual(conflicts.map(item => item.existing), [join(folder, 'DSC00003.JPG'), join(folder, 'DSC00005.JPG')], `this system's case rule: ${profile.namesIgnoreCase ? 'ignores case' : 'case-sensitive'}`);
+      assert.equal(conflicts[0]!.relative, 'DCIM/dsc00003.jpg');
+      book.choose('keep', [conflicts[0]!.id]); book.choose('overwrite', [conflicts[1]!.id]);
+      const results = await applyConflictChoices(book.take());
+      assert.ok(results.every(item => item.ok), String(results.map(item => item.error)));
+      // Overwrite keeps the library's own name (the card's case is not taken over), and Undo gives the original back under it.
+      const names = async () => (await readdir(folder)).filter(name => /dsc00005/i.test(name));
+      assert.deepEqual(await names(), ['DSC00005.JPG']);
+      await undoOrganization(library, results.find(item => item.journal)!.journal!);
+      assert.deepEqual(await names(), ['DSC00005.JPG']);
+      assert.equal(await readFile(join(folder, 'DSC00005.JPG'), 'utf8'), 'replaced');
+      const written = (await readdir(library, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile() && !entry.parentPath.includes('Photo Importer Data')).map(entry => posixRelative(library, join(entry.parentPath, entry.name)));
+      assert.ok([...Map.groupBy(written, file => pathKey(file)).values()].every(group => group.length === 1), `no two names differ by case alone: ${written.join(', ')}`);
+      assert.equal(written.filter(file => /dsc00003\.jpg$/i.test(file)).length, 2, 'the kept copy is under the conflict naming');
+      assert.equal(await readFile(join(folder, 'dsc00004.jpg'), 'utf8'), 'library', 'the library file of another case is untouched');
+      assert.ok(written.every(file => !file.includes('\\')));
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera without a drive letter reads as a short path': async profile => {

@@ -3,6 +3,7 @@ import { workspaceTranslationRows } from './workspace-translations';
 import { safetyTranslationRows } from './safety-translations';
 import { settingsTranslationRows } from './settings-translations';
 import { driveFormatTranslationRows } from './drive-format-translations';
+import { conflictTranslationRows } from './conflict-translations';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Language } from '../shared';
 import { formatMessage, type Message } from '../messages';
@@ -1055,7 +1056,7 @@ Remove the partial copies and temporary files this job left|删除此任务留�
 Cleaning up…|正在清理…|正在清理…|クリーンアップ中…
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
-for (const row of [rows, settingsTranslationRows, driveFormatTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
+for (const row of [rows, settingsTranslationRows, driveFormatTranslationRows, conflictTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
   const [english, simplified, traditional, japanese] = row.split('|');
   translationCatalogs['zh-Hans'][english] = simplified;
   translationCatalogs['zh-Hant'][english] = traditional;
