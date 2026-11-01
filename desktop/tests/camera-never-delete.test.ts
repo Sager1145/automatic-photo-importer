@@ -12,6 +12,7 @@ import {digest} from '../core/paths';
 import {sourcePolicy} from '../run-policy';
 import {offersOriginals} from '../source-eject';
 import {normalizePreferences} from '../preferences';
+import {classifyMounted,onCameraCard,parseWindowsVolumes,type MountedVolume} from '../platform/volumes';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const metadata=async()=>({camera:'Sony',date:'2024-02-03',fields:{}});
@@ -95,4 +96,34 @@ test('Clean up (and the leftovers of a mirrored copy to two disks) removes nothi
  assert.equal(await exists(onCard),true,'the card keeps its file');
  assert.equal(await exists(onDisk),false,'the same leftover on the other disk is removed');
  assert.equal(removed.files,1);assert.deepEqual(left.items.map(found=>found.path),[onCard]);
+});
+
+test('Windows drive roots read as roots: a library on the computer disk is not a camera card, whatever list the drive script gives',()=>{
+ // Earlier the drive script lost its backslash and reported "C:", a folder on C: rather than its root: no library path then
+ // matched a drive, an unknown drive counts as a card, and every organization was refused.
+ const volumes=parseWindowsVolumes([{Path:'C:',Label:'',DriveType:'Fixed',BusType:'NVMe',FileSystem:'NTFS'},{Path:'D:\\',Label:'',DriveType:'Removable',BusType:'USB',FriendlyName:'Sony DSC USB Device',FileSystem:'exFAT'}]);
+ assert.deepEqual(volumes.map(volume=>volume.path),['C:\\','D:\\']);
+});
+
+test('a library holding DCIM and "DCIM 2" folders is organized, duplicates released; a card with camera folders at its root is refused',async t=>{
+ // Two drives mounted here, each read by the app's own card test: an external library disk (like I:) and a camera card (like D:).
+ const disk=await folder(t,'camera-library-disk-'),card=await folder(t,'camera-library-card-');
+ const library=path.join(disk.root,'photobackup');
+ await disk.put('photobackup/2024/202402/Sony/JPEG/A.JPG','same bytes');
+ const duplicate=await disk.put('photobackup/Drive backups/Card/DCIM 2/100MSDCF/A.JPG','same bytes');
+ const stray=await disk.put('photobackup/DCIM/100CANON/B.JPG','new bytes');
+ const onCard=await card.put('DCIM/100MSDCF/C.JPG','card bytes');
+ const volumes:MountedVolume[]=[{path:disk.root,name:'A006',external:true,removable:false},{path:card.root,name:'Card',external:true,removable:false}];
+ const restore=useCameraCheck(target=>onCameraCard(target,{volumes:async()=>volumes,classify:volume=>classifyMounted(volume,{cache:new Map()})}));t.after(restore);
+ assert.equal(await onCamera(library),false,'camera-named folders inside a library do not make it a card');
+ assert.equal(await onCamera(card.root),true,'a card, by its DCIM folder at the root');
+ const reviewed=(await core.plan(library,[library],organize,metadata)).plans[0]!;
+ const result=await core.executeReorganization(reviewed,undefined,undefined,{releaseDuplicates:true});
+ assert.deepEqual(result.errors,[]);
+ assert.equal(result.released,1,'the confirmed duplicate in DCIM 2 is released');
+ assert.equal(await exists(duplicate),false);assert.equal(await exists(stray),false,'B moved out of the DCIM folder');
+ assert.equal(await fs.readFile(path.join(library,'2024','202402','Sony','JPEG','B.JPG'),'utf8'),'new bytes');
+ const backup=await disk.put('copies/C.JPG','card bytes');
+ await assert.rejects(deleteOriginals(card.root,[{source:onCard,size:10,sha256:await digest(onCard),destinations:[backup]}]),CameraDeleteRefused);
+ assert.equal(await fs.readFile(onCard,'utf8'),'card bytes');
 });
