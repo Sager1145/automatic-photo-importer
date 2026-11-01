@@ -22,6 +22,7 @@ export const darwin: PlatformProfile = {
   },
   exfatDirect: true,
   folderFlush: true,
+  noHardLinkError: 'ENOTSUP',
   // The A006 SSD's root as macOS reports it (its store.json from 0.3.0 recorded 16777241:18); the device number changes per mount.
   recordsDrive: { dev: 16777241n, ino: 18n, identity: '18' },
   namesIgnoreCase: true,

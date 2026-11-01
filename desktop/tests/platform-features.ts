@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity } from '../platform/camera-bridge';
-import { DIRECTORY_SYNC_SUPPORTED, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
@@ -38,6 +38,8 @@ export interface PlatformProfile {
   cameraPlace: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
+  /** The error this system gives for a hard link on a filesystem without them (exFAT): publishing must then copy. */
+  noHardLinkError: string;
   /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
   namesIgnoreCase: boolean;
   /** The file system of the computer's own disk as the adapter names it (NTFS, APFS, ext4): it has hard links, so files publish by linking. */
@@ -249,6 +251,12 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       finally { await allowWrite(locked); }
       assert.deepEqual(await readdir(locked), []);
     } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'publishing: a drive without hard links (exFAT) gets copies instead of failing': profile => {
+    // Real case: Windows reports a hard link on exFAT as EISDIR, and every new file of an import failed.
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: profile.noHardLinkError }), profile.platform), true, profile.noHardLinkError);
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'ENOENT' }), profile.platform), false, 'a missing file is a real error');
+    assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'EEXIST' }), profile.platform), false, 'an existing name is a real error');
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),

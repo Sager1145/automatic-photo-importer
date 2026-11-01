@@ -18,7 +18,10 @@ export function code(error:unknown):string|undefined { return (error as NodeJS.E
 /** Errors of link(2) that mean this file system has no hard links (or no more of them): exFAT, FAT, some network shares. */
 export const LINK_UNSUPPORTED=new Set(['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK']);
 /** Publishing a staged copy falls back to copying when the link cannot be made: no hard links, or another volume. A full link count (EMLINK) is not that. */
-export const linkRefused=(error:unknown):boolean=>{const name=code(error)??'';return name==='EXDEV'||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
+/** Windows answers a hard link on a filesystem without them (exFAT, FAT32) with ERROR_INVALID_FUNCTION, which
+ * libuv reports as EISDIR. A link's source here is always a regular file, so there it means "no hard links". */
+const windowsNoLinks=(name:string,platform:NodeJS.Platform)=>platform==='win32'&&name==='EISDIR';
+export const linkRefused=(error:unknown,platform:NodeJS.Platform=process.platform):boolean=>{const name=code(error)??'';return name==='EXDEV'||windowsNoLinks(name,platform)||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
 export function beneath(child:string,root:string):boolean {
   const relative=path.relative(root,child);
   return relative!=='' && relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative);
