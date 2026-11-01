@@ -143,11 +143,6 @@ test('a file the user skips is left out with its family even with skipping off, 
  assert.deepEqual(await published(f.root),['2024/a.jpg','2024/c.jpg','b.jpg']);
 });
 
-test('a mirror backup never skips a file, even one the user asks to skip',async t=>{
- const f=await fixture(t,['a.bin']);
- await assert.rejects(plan(f.source,[f.root],{...backup,drive:{name:'Card',identity:'card-id',mirror:true},exclude:[path.join(f.source,'a.bin')]},async()=>({fields:{}})),/mirror/i);
-});
-
 test('a job error in All errors names its job, so its Skip button reaches that job',async()=>{
  const {gatherErrors}=await import('../error-log');
  const error={key:'error.fileFailed' as const,params:{path:'/card/DCIM/B.JPG',error:'EIO'}};

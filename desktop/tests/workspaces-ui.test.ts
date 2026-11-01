@@ -57,7 +57,7 @@ test('queued backup jobs stay in Files mode when the next source run is Media',(
  const f=desk(value,'files'),m=desk(value,'media');
  assert.match(f,/Queue position/);assert.match(f,/Folder backup/);
  assert.doesNotMatch(m,/Queue position/);assert.match(m,/Ready to import/);
- assert.equal(job.backup,true);assert.equal(value.preferences.backupMode,'additive');
+ assert.equal(job.backup,true);
 });
 test('organization scope, affected roots and consequences precede one execution area',()=>{
  const value=state({preferences:normalizePreferences({destinations:['/backup'],mediaLayout:'video-root'}),organizationFolders:{'/backup':['2024','2025']}});
@@ -102,8 +102,13 @@ test('Review stays disabled in both modes while any transfer, organization or du
  }
 });
 
-test('the drive backup mode sits in the Files & folders header, with Change',async()=>{
- const {BackupModeLine}=await import('../renderer/RootApp');
- const html=renderToStaticMarkup(createElement(I18nProvider,{language:'en',children:createElement(BackupModeLine,{mode:'additive',onChange:()=>{}})}));
- assert.match(html,/data-testid="backup-mode-summary"[^>]*><span>Drive backups: Additive<\/span><button[^>]*>Change</);
+test('Files & folders has no Additive/Mirror mode: Settings says where every file goes, in every language',async()=>{
+ const {FilesAndFoldersExplanation}=await import('../renderer/RootApp');
+ const preferences=normalizePreferences({destinations:['/Volumes/A006/photobackup'],template:'{year}/{yyyymm}/{camera}'});
+ const shown=(language:'en'|'zh-Hans'|'zh-Hant'|'ja')=>render(createElement(I18nProvider,{language,children:createElement(FilesAndFoldersExplanation,{preferences})}));
+ const html=shown('en');
+ assert.match(html,/Every file is copied into the library/);assert.match(html,/Files deleted from the drive stay in the library/);
+ assert.deepEqual([...html.matchAll(/<span>([^<]+)<\/span><\/span>/g)].map(match=>match[1]),['photobackup','2026','202610','Unknown files']);
+ assert.doesNotMatch(html,/Drive backups|Mirror|Additive/);
+ assert.match(shown('zh-Hans'),/每个文件都会复制到媒体库/);assert.match(shown('zh-Hant'),/每個檔案都會複製到媒體庫/);assert.match(shown('ja'),/すべてのファイルをライブラリにコピーします/);
 });

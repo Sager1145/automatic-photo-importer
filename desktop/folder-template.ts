@@ -34,6 +34,18 @@ export function safeComponent(value: string): string {
   if (DEVICE_NAME.test(result)) result = '_' + result;
   return result;
 }
+/** One file or folder name as a library writes it, valid on macOS, Windows and Linux alike so the drive can move
+ * between them: characters Windows refuses become "-", trailing dots and spaces go, a reserved device name (CON,
+ * NUL.txt, COM1…) gets a leading "_". A name that is already valid comes back unchanged, Unicode form included. */
+export function portableName(name: string): string {
+  let result = name.replace(/[\\/:\x00-\x1f\x7f<>"|?*]/gu, '-').replace(/[. ]+$/u, '');
+  if (!result.trim() || result === '.' || result === '..') result = '_' + result.replace(/[. ]/gu, '');
+  if (DEVICE_NAME.test(result)) result = '_' + result;
+  return result;
+}
+/** A relative path in this system's form (parts split by `sep` only: a "\" inside a macOS or Linux name is part of
+ * that name, and is replaced) with each part made portable (`portableName`). */
+export const portablePath = (relative: string, sep: string): string => relative.split(sep).filter(part => part && part !== '.').map(portableName).join(sep);
 /** One folder name a user may choose (edited exports, unknown files): `safeComponent` leaves it unchanged (apart from the
  * Unicode form, which macOS file names do not distinguish), and it has no braces, which a template would read as a token. */
 export const validFolderName = (name: unknown): name is string => typeof name === 'string' && name.normalize('NFC') === safeComponent(name) && !/[{}]/.test(name);

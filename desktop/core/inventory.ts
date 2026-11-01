@@ -5,7 +5,7 @@ import { finderAliasFile, knownSystemFile } from './known-files';
 import { formatFolder, mediaKindForPath } from '../media-formats';
 import { isOldReceiptName } from './legacy-names';
 import { noteOldReceipt } from './old-records';
-import { checkAbort, contained, directory, pathKey } from './paths';
+import { beneath, checkAbort, contained, directory, pathKey } from './paths';
 import { validateRelative } from '../folder-template';
 
 /** Entries of a folder looked at (lstat) at once. */
@@ -71,10 +71,12 @@ export function figuresOf(files:readonly InventoryFile[],backup:boolean):Pick<In
 /** An inventory whose figures are derived from its files (for callers that build one by hand). */
 export function withFigures<T extends Omit<Inventory,'formats'|'unknownFiles'|'systemKinds'>>(inventory:T,backup=false):T&Pick<Inventory,'formats'|'unknownFiles'|'systemKinds'>{return {...inventory,...figuresOf(inventory.files,backup)};}
 
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void;
+  /** Folders (absolute) whose every file is taken: unknown types, camera bookkeeping and Finder aliases too, as files (a Files & folders import, a retired Drive backups folder). */everyFileIn?:string[]}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
+  const everyFile=(file:string)=>(options.everyFileIn??[]).some(folder=>file===folder||beneath(file,folder));
   // Listing a large card takes a while; report what has been found so far.
   let listedBytes=0,reported=0,reportedAt=0,topDone=0,topTotal=0;
   const report=(final=false)=>{if(!options.onProgress||(!final&&files.length-reported<500&&performance.now()-reportedAt<100))return;reported=files.length;reportedAt=performance.now();options.onProgress(files.length,listedBytes,topTotal>0?{done:topDone,total:topTotal}:undefined,files.at(-1)?.relative);};
@@ -150,7 +152,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   for(const file of files) {
     checkAbort(signal);
     if(file.kind==='Other') try { file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size); } catch(error) { if(!options.onError) throw error; options.onError(file.path,error); }
-    if(file.system) { file.included=!!options.backup; continue; }
+    if(file.system) { file.included=!!options.backup||everyFile(file.path); continue; }
     // Proxies (DJI LRF, GoPro and Insta360 LRV) contain real video and remain importable on their
     // own. An unambiguous original in the same directory supplies routing/family context.
     if(proxies.has(extension(file.path))) {
@@ -186,7 +188,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;
     const rule=unknownRule(extension(file.path),custom,defaults);
-    file.included=!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
+    file.included=!!options.backup || everyFile(file.path) || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
   }
   // Nothing is dropped silently: every file left out is listed with its reason.
   const skipped:SkippedFile[]=[];

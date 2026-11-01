@@ -102,7 +102,7 @@ const text=(error:unknown)=>error instanceof Error?error.message:String(error);
 /**
  * Removes "._" files under a job's roots. Every operation is bounded by the root it is given, never
  * follows a link, never throws for a file it cannot judge or remove (that becomes a warning and the file
- * stays), and leaves folders in `protectedNames` (recovery storage, Problem files, Drive backups) alone.
+ * stays), and leaves folders in `protectedNames` (recovery storage, Problem files) alone.
  */
 export class AppleDoubleCleaner {
   readonly report:AppleDoubleReport=emptyAppleDoubleReport();
