@@ -5,6 +5,7 @@ import { beneath, checkAbort, code, contained, digest, statKey , unlinkEntry } f
 import { removeEmptiedFolders } from './redundant-folders';
 import { mapPool } from './devices';
 import { log, logDeletion } from '../logger';
+import { refuseOnCamera } from './camera-guard';
 import { destinationEntries } from './allocation';
 import type { DestinationOutcome } from './destinations';
 import type { TransferPlan } from '../shared';
@@ -64,6 +65,24 @@ export function verifiedOriginals(outcomes:ReadonlyMap<string,readonly Destinati
   }
   return {files,withheld};
 }
+/** The source files an import found already in the library (Remove confirmed duplicates for drive transfers): every
+ * destination its plan sends it to already held identical bytes (or an older route did), and this run confirmed them there.
+ * A file this import published itself, also in an earlier run of the same job before a pause, is not one. */
+export function libraryDuplicates(outcomes:ReadonlyMap<string,readonly DestinationOutcome[]>,plans:TransferPlan[]):VerifiedOriginal[] {
+  return verifiedOriginals(outcomes,plans).files.filter(file=>outcomes.get(file.source)!.every(item=>item.disposition!=='published')).map(({identity:_,...file})=>file);
+}
+/** What a review says Remove confirmed duplicates would delete after a clean import: the source files every destination
+ * already holds, by the plan (the run confirms each again, and the deletion re-reads both copies). */
+export function plannedLibraryDuplicates(plans:TransferPlan[]):{files:number;bytes:number} {
+  const seen=new Map<string,{size:number;everywhere:boolean}>();
+  for(const plan of plans) for(const entry of destinationEntries(plan)) {
+    const known=seen.get(entry.source),there=entry.skip&&!!entry.digest;
+    seen.set(entry.source,{size:entry.size,everywhere:(known?.everywhere??true)&&there});
+  }
+  let files=0,bytes=0;
+  for(const item of seen.values()) if(item.everywhere){files++;bytes+=item.size;}
+  return {files,bytes};
+}
 type Outcome={deleted:true}|{kept:KeptReason;error?:string};
 /** Deletes only source files whose checksum is re-confirmed, now, at every backup copy. A file that
  * changed since the import, is gone, was never verified, or whose backup copy is missing or different stays.
@@ -71,7 +90,12 @@ type Outcome={deleted:true}|{kept:KeptReason;error?:string};
  * overlap (each device's stream limit still applies). A file is removed right after its own final re-check;
  * the report is assembled in input order afterwards. */
 export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[],options:{signal?:AbortSignal;/** Folders chosen separately as sources: roots like `sourceRoot`, never removed. */protect?:string[];/** Empty-folder pass: folders looked at so far of all that may have become empty. */onFolders?:(done:number,total:number,folder:string)=>void;/** The source volume keeps real change times (APFS or HFS+, by its file system type): only then may a source
- * whose identity is unchanged since the import read it go unread. */changeTimes?:boolean;/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import; planned before the first read. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
+ * whose identity is unchanged since the import read it go unread. */changeTimes?:boolean;/** duplicates: the files an import found already in the library (Remove confirmed duplicates): every source is read
+ * again whatever `changeTimes` says, each deletion is logged as such, and emptied folders are kept. */purpose?:'originals'|'duplicates';/** bytesDone/bytesTotal: what is re-read, counting each backup copy of every file and each source not known unchanged since its import; planned before the first read. */onProgress?:(completed:number,total:number,file:string,bytesDone?:number,bytesTotal?:number)=>void}={}):Promise<OriginalsResult> {
+  const duplicates=options.purpose==='duplicates';
+  // Nothing on a camera or camera card is deleted: refused before any file is read.
+  await refuseOnCamera(duplicates?'duplicates':'originals',sourceRoot);
+  if(duplicates) options={...options,changeTimes:false};
   const result:OriginalsResult={deleted:[],kept:[],bytes:0,errors:[],folders:0};
   let completed=0,bytesDone=0;
   // Still the very file the import hashed (its identity is only kept for a source the import read itself), on a
@@ -112,7 +136,8 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
       const after=await regular(file.source);
       if(!after||after.dev!==before.dev||after.ino!==before.ino||after.size!==before.size||after.mtimeNs!==before.mtimeNs||known&&after.ctimeNs!==before.ctimeNs) return {kept:'changed'};
       await unlinkEntry(file.source);
-      logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} ${known?'not re-read at the source: unchanged since the import read it (identity + ctime); re-read':'re-read now at the source and'} at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
+      if(duplicates) logDeletion('duplicates',file.source,'source file already in the library before this import (Remove confirmed duplicates)',`sha256 ${file.sha256} re-read now at the source and at ${file.destinations.length} library cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,library:file.destinations});
+      else logDeletion('originals',file.source,'original already verified in the backup (Delete originals)',`sha256 ${file.sha256} ${known?'not re-read at the source: unchanged since the import read it (identity + ctime); re-read':'re-read now at the source and'} at ${file.destinations.length} backup cop${file.destinations.length===1?'y':'ies'}; same inode, size and mtime between check and removal`,{bytes:file.size,backups:file.destinations});
       return {deleted:true};
     } catch(error) {
       if(options.signal?.aborted) return {kept:'stopped'};
@@ -131,7 +156,7 @@ export async function deleteOriginals(sourceRoot:string,files:VerifiedOriginal[]
   });
   options.onProgress?.(completed,files.length,'',bytesDone,bytesTotal);
   // A stop skips the folder pass; one that arrives during it ends the pass early. Neither throws away the deletions.
-  if(!options.signal?.aborted) {
+  if(!options.signal?.aborted&&!duplicates) {
     // The folders the removed files were in, and their ancestors below the source root.
     const emptied=new Set<string>();
     for(const item of result.deleted) for(let folder=path.dirname(item.source);beneath(folder,sourceRoot);folder=path.dirname(folder)) emptied.add(folder);

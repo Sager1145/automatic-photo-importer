@@ -6,10 +6,15 @@ import {DEFAULT_EDITED_FOLDER} from './folder-template';
 import {validNoMetadataFolder} from './no-metadata';
 import {stableDevices} from './device-selection';
 
+/** Settings files before this version had one Remove confirmed duplicates switch (organization only; at first a saved
+ * releaseDuplicatesAfterOrganizing, later a choice for each run). Loading one of them sets today's per-run-kind defaults
+ * once, whatever it held: on for library organization and drive transfers, off for camera imports. The version is saved
+ * with the settings, so a choice made after that is kept. */
+export const DUPLICATE_DEFAULTS_VERSION=1;
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],videoDestinations:[],videoDestinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoTemplate:'',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],videoDestinations:[],videoDestinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoTemplate:'',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,removeDuplicatesOrganize:true,removeDuplicatesDrive:true,removeDuplicatesCamera:false,duplicateDefaultsVersion:DUPLICATE_DEFAULTS_VERSION,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -45,6 +50,19 @@ function chosenFolders(value:Record<string,unknown>,base:Preferences):Pick<Prefe
   return {destinations:destinations.map(drive=>inside(drive,photo)),destinationIds,videoDestinations:video?destinations.map(drive=>inside(drive,video)):[],videoDestinationIds:video?[...destinationIds]:[]};
  }
  return {destinations,destinationIds,videoDestinations:strings(value.videoDestinations,base.videoDestinations??[]),videoDestinationIds:strings(value.videoDestinationIds,base.videoDestinationIds??[])};
+}
+
+function duplicateChoices(value:Record<string,unknown>,base:Preferences):Pick<Preferences,'removeDuplicatesOrganize'|'removeDuplicatesDrive'|'removeDuplicatesCamera'|'duplicateDefaultsVersion'> {
+ // Read from the settings themselves, never from `base`: a file without it is from before the per-run-kind switches and
+ // gets today's defaults, once (see DUPLICATE_DEFAULTS_VERSION). Every change the interface sends carries the saved version.
+ const version=Number.isSafeInteger(value.duplicateDefaultsVersion)?value.duplicateDefaultsVersion as number:0;
+ const current=version>=DUPLICATE_DEFAULTS_VERSION,start=current?base:defaultPreferences;
+ return {
+  removeDuplicatesOrganize:current?flag(value.removeDuplicatesOrganize,start.removeDuplicatesOrganize!==false):defaultPreferences.removeDuplicatesOrganize,
+  removeDuplicatesDrive:current?flag(value.removeDuplicatesDrive,start.removeDuplicatesDrive!==false):defaultPreferences.removeDuplicatesDrive,
+  removeDuplicatesCamera:current?flag(value.removeDuplicatesCamera,start.removeDuplicatesCamera===true):defaultPreferences.removeDuplicatesCamera,
+  duplicateDefaultsVersion:Math.max(version,DUPLICATE_DEFAULTS_VERSION),
+ };
 }
 
 /** The single set of preference rules, for settings read from disk and for every change the
@@ -83,6 +101,7 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   autoEject:flag(value.autoEject,base.autoEject===true),
   deleteOriginalsFolders:flag(value.deleteOriginalsFolders,base.deleteOriginalsFolders!==false),
   deleteOriginalsCards:flag(value.deleteOriginalsCards,base.deleteOriginalsCards===true),
+  ...duplicateChoices(value,base),
   logLevel:oneOf(value.logLevel,LOG_LEVELS,base.logLevel??'normal'),
   editedFolder:text(value.editedFolder,base.editedFolder),
   // The thread pool reads the saved limits by the same rule before anything starts; a limit not given keeps the base one, then this machine's default.

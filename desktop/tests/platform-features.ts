@@ -7,9 +7,12 @@ import assert from 'node:assert/strict';
 import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
-import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
+import { classifyMounted, classifyVolume, onCameraCard, validateDestination, type MountedVolume } from '../platform/volumes';
+import { CameraDeleteRefused, useCameraCheck } from '../core/camera-guard';
+import { deleteOriginals } from '../core/originals';
+import { importOperation } from '../run-policy';
 import { cameraCapacity, cameraOf, cameraSourcesFrom } from '../platform/camera-bridge';
-import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { DIRECTORY_SYNC_SUPPORTED, digest, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
@@ -89,6 +92,35 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
         await validateDestination(join(root, 'backup'), []);
       } finally { await rm(root, { recursive: true, force: true }); }
     }
+  },
+  'never deleting on a camera: a card is camera media, and nothing on it is deleted, also through a folder link': async (profile, t) => {
+    // This system's card is a camera import (Remove confirmed duplicates never deletes there); the SSD's folders are drive transfers.
+    const [card, ssd] = profile.volumes();
+    assert.equal(importOperation({ transport: 'storage', camera: classifyVolume(card!, ['DCIM']).camera }, false), 'camera');
+    assert.equal(importOperation({ transport: 'folder' }, classifyVolume(ssd!, []).source), 'drive');
+    if (!onNative(profile, t)) return;
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-camera-delete-')));
+    try {
+      // Two drives mounted here: a card holding a camera's folders (as a card reader shows one) and an external disk.
+      const cardRoot = join(root, 'card'), diskRoot = join(root, 'disk'), backup = join(root, 'backup');
+      for (const folder of [join(cardRoot, 'DCIM', '100CANON'), join(diskRoot, 'Photos'), backup]) await mkdir(folder, { recursive: true });
+      const volumes: MountedVolume[] = [{ path: cardRoot, name: 'Card', external: true, removable: false }, { path: diskRoot, name: 'Disk', external: true, removable: false }];
+      const check = (folder: string) => onCameraCard(folder, { volumes: async () => volumes, classify: volume => classifyMounted(volume, { cache: new Map() }) });
+      assert.equal(await check(join(cardRoot, 'DCIM')), true, 'the card, by its camera folders');
+      assert.equal(await check(join(diskRoot, 'Photos')), false);
+      await profile.link(join(cardRoot, 'DCIM'), join(diskRoot, 'Linked card'));
+      const restore = useCameraCheck(check);
+      try {
+        const verified = async (file: string) => { await writeFile(file, 'same bytes'); const copy = join(backup, `${randomUUID()}.JPG`); await writeFile(copy, 'same bytes'); return { source: file, size: 10, sha256: await digest(file), destinations: [copy] }; };
+        const onCard = await verified(join(cardRoot, 'DCIM', '100CANON', 'A.JPG')), onDisk = await verified(join(diskRoot, 'Photos', 'B.JPG'));
+        for (const purpose of ['originals', 'duplicates'] as const) {
+          await assert.rejects(deleteOriginals(cardRoot, [onCard], { purpose }), CameraDeleteRefused, `${purpose} on the card`);
+          await assert.rejects(deleteOriginals(join(diskRoot, 'Linked card'), [{ ...onCard, source: join(diskRoot, 'Linked card', '100CANON', 'A.JPG') }], { purpose }), CameraDeleteRefused, `${purpose} through a folder link`);
+        }
+        assert.equal(await readFile(onCard.source, 'utf8'), 'same bytes', 'the card keeps its file');
+        assert.equal((await deleteOriginals(join(diskRoot, 'Photos'), [onDisk], { purpose: 'duplicates' })).deleted.length, 1, 'a duplicate on the disk is deleted');
+      } finally { restore(); }
+    } finally { await rm(root, { recursive: true, force: true }); }
   },
   'durable writes: copies and folders are flushed the way the system allows': async (profile, t) => {
     if (!onNative(profile, t)) return;

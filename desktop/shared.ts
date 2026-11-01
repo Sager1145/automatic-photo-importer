@@ -47,7 +47,23 @@ autoEject:boolean;
 /** Offer Delete originals after a finished folder import. Default true. */
 deleteOriginalsFolders:boolean;
 /** Offer Delete originals after a finished import from a card or drive. Default false. */
-deleteOriginalsCards:boolean;}
+deleteOriginalsCards:boolean;
+/** Remove confirmed duplicates (Settings), per kind of run. Library organization: originals already at their destination
+ * are checked again and removed instead of kept for undo; default true (the Organize page can change it for one run). */
+removeDuplicatesOrganize:boolean;
+/** Drive transfers (imports from a drive or folder that is not camera media): after a clean import, the source files found
+ * already in the library are checked again on both sides and deleted from the source; default true. */
+removeDuplicatesDrive:boolean;
+/** Camera imports (USB cameras and camera cards); default false. Nothing on a camera or camera card is ever deleted, so this
+ * deletes nothing today: duplicates stay on the camera whatever it says. */
+removeDuplicatesCamera:boolean;
+/** Which one-time change of the Remove confirmed duplicates defaults this settings file has had (DUPLICATE_DEFAULTS_VERSION). */
+duplicateDefaultsVersion?:number;}
+/** The kinds of run Remove confirmed duplicates is set for. */
+export type DuplicateOperation='organize'|'drive'|'camera';
+/** What a review says Remove confirmed duplicates will do: which setting applies, whether it is on, and (an import) how many
+ * source files already in the library it would delete from `source` after a clean run. */
+export interface DuplicateRemovalPlan {operation:DuplicateOperation;enabled:boolean;files?:number;bytes?:number;}
 /** threads and limitMB are the configured limits (threads per pool, not a total); memoryMB is the memory the governor counts; memoryMaxMB is the top of the memory limit's range. */
 export interface ResourceUse {threads:number;memoryMB:number;limitMB:number;cores:number;totalMemMB:number;memoryMaxMB:number;defaultThreads:number;defaultMemoryMB:number;warning?:boolean;}
 export interface InventoryFile {path:string;relative:string;size:number;kind:MediaKind;included:boolean;companionOf?:string;system?:SystemFile;}
@@ -115,7 +131,7 @@ export interface DestinationStatus {path:string;total?:number;free?:number;avail
 /** Per-run choices for organizing a folder; both default to on every time, whatever saved preferences say. */
 export interface OrganizeOptions {removeEmptyFolders:boolean;releaseDuplicates:boolean;}
 /** sourceAction: copy leaves the source untouched (imports); move renames files into place and removes the originals from the source (organizing). options: organizing only. */
-export interface Review {id:string;kind:'import'|'reorganize';/** Files an import skips or an organization collects or leaves; see ProblemFile. */problems?:ProblemFile[];/** Organization reviews: whether problem files are collected, and the destination reviewed. */collectProblemFiles?:boolean;scope?:'backup';destinationIndex?:number;source:Source;plans:TransferPlan[];backup:boolean;sourceFolders?:string[];sourceAction?:'copy'|'move';options?:OrganizeOptions;/** Set when unknown files were left or filed apart; the user can still choose file dates for this job. */noMetadata?:NoMetadataSummary;/** The choice made in this review for unknown files (this job only); absent while the saved choice applies. */noMetadataHandling?:NoMetadataHandling;/** With file dates chosen, the unknown files found before, so the choice can be changed back. */fileDated?:NoMetadataSummary;}
+export interface Review {id:string;kind:'import'|'reorganize';/** Files an import skips or an organization collects or leaves; see ProblemFile. */problems?:ProblemFile[];/** Organization reviews: whether problem files are collected, and the destination reviewed. */collectProblemFiles?:boolean;scope?:'backup';destinationIndex?:number;source:Source;plans:TransferPlan[];backup:boolean;sourceFolders?:string[];sourceAction?:'copy'|'move';options?:OrganizeOptions;/** Set when unknown files were left or filed apart; the user can still choose file dates for this job. */noMetadata?:NoMetadataSummary;/** The choice made in this review for unknown files (this job only); absent while the saved choice applies. */noMetadataHandling?:NoMetadataHandling;/** With file dates chosen, the unknown files found before, so the choice can be changed back. */fileDated?:NoMetadataSummary;/** Which Remove confirmed duplicates setting applies to this run, and what it would delete. */duplicateRemoval?:DuplicateRemovalPlan;}
 /** What Delete originals already in the backup would remove for one finished import, measured when its confirmation opens. */
 export interface OriginalsSize {jobId:string;files?:number;bytes?:number;kept?:number;error?:Message;}
 /** retainedFiles/retainedBytes: originals kept for undo; finalizable: they can be released;

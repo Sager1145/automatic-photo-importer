@@ -16,7 +16,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 import {setTimeout as sleep} from 'node:timers/promises';
-import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary} from './shared';
+import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,DuplicateRemovalPlan} from './shared';
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
@@ -72,10 +72,11 @@ import {addErrors,appleDoubleIssues,noMetadataIssues,errorTotal,issuePaths,recor
 import {EtaTracker,stampEstimates} from './eta';
 import {PriorStore,type DriveInfo} from './eta-priors';
 import {normalizePreferences} from './preferences';
-import {sourcePolicy,freshOrganizeOptions} from './run-policy';
+import {sourcePolicy,freshOrganizeOptions,importOperation} from './run-policy';
+import {useCameraCheck,CameraDeleteRefused} from './core/camera-guard';
 import {ejectVolume} from './platform/eject';
 import {autoEjectDecision,ejectDone,ejectingSource,ejectSource,offersOriginals,originalsBlocked,originalsVolumeChanged,type EjectDeps,type EjectView} from './source-eject';
-import {measureOriginals,deleteOriginals,verifiedOriginals,type VerifiedOriginal} from './core/originals';
+import {measureOriginals,deleteOriginals,verifiedOriginals,libraryDuplicates,plannedLibraryDuplicates,type VerifiedOriginal} from './core/originals';
 import {filePath,formatMessage,joined,message,MessageError,savedMessage,text,toMessage,type Message} from './messages';
 import {deferredRefresh} from './deferred-refresh';
 import {configureLogger,activeLogger,log,setLogLevel,withJob} from './logger';
@@ -91,6 +92,8 @@ let qaHooks:QaHooks|undefined;
 const hardwareTest=flags['hardware-test-a006']===true;
 const qaFixtureRoot=qa?(flagText(flags['qa-fixture-root'])||path.join(os.tmpdir(),'photo-importer-electron-fixtures')):undefined;
 
+// Nothing on a camera or camera card is deleted: every core call that removes a source file asks the platform's card test first.
+useCameraCheck(onCameraCard);
 const state:AppState={preferences:normalizePreferences(undefined),sources:[],jobs:[],history:[],platform:process.platform,destinationStatus:[],organizeOptions:freshOrganizeOptions()};
 let catalog:Catalog|undefined,catalogCoordinator:CatalogCoordinator|undefined,catalogSession:CatalogSession|undefined;
 let catalogPublishTimer:NodeJS.Timeout|undefined,catalogClosing=false;
@@ -354,7 +357,7 @@ async function initializeRecoveryKey(){
 }
 /** History saved before entries carried their outcome: classified once from the English text, as the history page used to. */
 function savedOutcome(value:unknown,title:Message,detail:Message):HistoryEntry['outcome']{if(value==='done'||value==='attention'||value==='stopped')return value;const heading=formatMessage(title,'en'),body=formatMessage(detail,'en');return /attention|error|fail/i.test(heading)||/\b[1-9][\d,]* errors?\b/i.test(body)?'attention':/stop|cancel/i.test(heading+' '+body)?'stopped':'done';}
-async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
+async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);state.organizeOptions=freshOrganizeOptions(state.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message,outcome:HistoryEntry['outcome']){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail,outcome});state.history=state.history.slice(0,50);void save().catch(()=>{});}
 async function allowed(file:string){if(isListedPath(file)){if(listedFile(file))return file;throw new Error('Choose this file or its source folder first.');}const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
 /** Connected drives for Settings › Devices › Drive formats: disk images and nameless mounts are left out. */
@@ -559,7 +562,7 @@ function finishJob(job:Job){
  void duplicatesStale(touchedLibraries.get(job.id)??[]);forgetMisplaced(touchedMisplaced(state.misplacedFiles,touchedLibraries.get(job.id)??[]));touchedLibraries.delete(job.id);
  catalogStopped.clear();catalogCoordinator?.markDirty();requestCatalogRefresh();delete job.stopping;active.delete(job.id);organizationJobIds.delete(job.id);reservations.delete(job.id);automaticallyQueued.delete(job.id);
  // A job parked for its review, or queued again to ask later, is not over: it runs with the same choices.
- if(job.organization&&organizationRuns.has(job.id)&&job.phase!=='queued'&&!reviewed&&!state.busyReview)state.organizeOptions=freshOrganizeOptions();
+ if(job.organization&&organizationRuns.has(job.id)&&job.phase!=='queued'&&!reviewed&&!state.busyReview)state.organizeOptions=freshOrganizeOptions(state.preferences);
  emit();pump();if(!active.size&&!state.jobs.some(item=>item.phase==='queued'))scheduleAutomaticChecks();void releaseIfIdle();
  void maybeAutoEject(job);
 }
@@ -960,8 +963,13 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   // Duplicates already on a destination are skipped, so only the bytes the plan writes are compared with free space.
   const space=reorganize?undefined:photoParts.map((item,index)=>destinationSpace(item,available[index]!,!!source.drive&&infos[index]?.volumeId===source.drive.volumeId));
   if(!stage)keepListing(source,record,!reorganize&&!backup);
-  const options=request.options?{...request.options}:freshOrganizeOptions(),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs);
-  return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(request.handling?{handling:request.handling}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(request.useFileDate?{noMetadataHandling:'fileDate' as const}:request.handling?{noMetadataHandling:request.handling}:{}),...(request.useFileDate&&request.earlier?{fileDated:{...request.earlier,files:request.earlier.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
+  const options=request.options?{...request.options}:freshOrganizeOptions(state.preferences);
+  // Which Remove confirmed duplicates setting applies: library organization, or an import from a drive or folder (a drive
+  // transfer) or from a camera or camera card (a camera import, which never deletes anything on the camera).
+  const operation=reorganize?undefined:importOperation(source,source.transport==='folder'&&await onCameraCard(sourcePath)),policy=sourcePolicy(reorganize?'reorganize':'import',options,prefs,operation);
+  const sourceDuplicates=operation?plannedLibraryDuplicates(plans):undefined;
+  const duplicateRemoval:DuplicateRemovalPlan=operation?{operation,enabled:operation==='camera'?prefs.removeDuplicatesCamera===true:policy.removeSourceDuplicates,files:policy.removeSourceDuplicates?sourceDuplicates!.files:0,bytes:policy.removeSourceDuplicates?sourceDuplicates!.bytes:0}:{operation:'organize',enabled:options.releaseDuplicates};
+  return {eta,problems,request,...(request.useFileDate?{useFileDate:true}:{}),...(request.handling?{handling:request.handling}:{}),...(noMetadata?{noMetadata}:{}),review:{id:owner,source,backup,plans,problems,...(request.useFileDate?{noMetadataHandling:'fileDate' as const}:request.handling?{noMetadataHandling:request.handling}:{}),...(request.useFileDate&&request.earlier?{fileDated:{...request.earlier,files:request.earlier.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(noMetadata?{noMetadata:{...noMetadata,files:noMetadata.files.slice(0,NO_METADATA_LIST_LIMIT)}}:{}),...(reorganize?{collectProblemFiles:prefs.collectProblemFiles!==false}:{}),kind:reorganize?'reorganize':'import',sourceAction:policy.sourceAction,duplicateRemoval,...(reorganize?{options}:{}),...(sourceFolders?{sourceFolders}:{})},prefs,options,inventory,stage,...(space?{space}:{}),skipErrors,failures:failures.map(item=>({path:item.path,error:toMessage(item.error),text:errorText(item.error)})),...(duplicates?{duplicates}:{}),...(elsewhere?{elsewhere}:{})};
  }catch(error){reservations.delete(owner);await stage?.cleanup().catch(()=>{});throw error;}
 }
 /** Hands a planned job over to the review screen, so unknown files are confirmed before anything runs. The job itself is dropped; Continue starts a new one from this plan. */
@@ -1031,7 +1039,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const {review:{plans,kind,sourceFolders},prefs,failures}=prepared,reorganize=kind==='reorganize';
   if(!reorganize){copies??=new PausedCopies();ledger??=new JobLedger();}
   // The one place that decides what happens to the source: imports copy and leave it alone, whatever the saved preferences say.
-  const policy=sourcePolicy(kind,prepared.options,prefs);
+  const operation=prepared.review.duplicateRemoval?.operation,policy=sourcePolicy(kind,prepared.options,prefs,operation==='drive'||operation==='camera'?operation:undefined);
   job.skipErrors=prepared.skipErrors;
   // Files skipped while planning are listed with the job's errors, so the job never reads as fully passed.
   for(const item of failures)log('normal','plan','file-skipped',{path:item.path,reason:item.text});
@@ -1084,16 +1092,36 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
   if(!reorganize)job.importResult={copied,skipped,planned:entries,errors:errorTotal(job)};
+  // Remove confirmed duplicates (drive transfers): after an import that finished clean and was not stopped, the source files
+  // it found already in the library are read again at the source and in the library, and only those that still match are
+  // deleted from the source. Never a camera import (the policy), and never on a camera or camera card (the core guard).
+  let sourceDuplicatesLine:Message|undefined;const deletedDuplicates=new Set<string>();
+  if(!reorganize&&policy.removeSourceDuplicates&&job.phase==='complete'&&!errorTotal(job)&&!job.failedFiles&&!prepared.stage&&!signal.aborted){
+   const files=libraryDuplicates(outcomes,plans);
+   if(files.length){
+    job.detail=message('job.removingSourceDuplicates',{count:files.length});progressEmit();
+    try{
+     const result=await deleteOriginals(job.source.path,files,{signal,purpose:'duplicates',protect:state.sources.map(item=>item.path)});
+     for(const item of result.deleted)deletedDuplicates.add(item.source);
+     await saveReport('source-duplicates-deleted.json',{producer:'desktop-app',jobId:job.id,source:job.source.path,finished:new Date().toISOString(),deleted:result.deleted,kept:result.kept,stopped:result.stopped===true,errors:result.errors});
+     log('normal','duplicates','source-duplicates',{deleted:result.deleted.length,bytes:result.bytes,kept:result.kept.length,errors:result.errors.length},job.id);
+     sourceDuplicatesLine=message('job.sourceDuplicatesDeleted',{count:result.deleted.length,size:{bytes:result.bytes},kept:result.kept.length});
+    }catch(error){
+     if(error instanceof CameraDeleteRefused)sourceDuplicatesLine=message('job.sourceDuplicatesCamera');
+     else if(!signal.aborted){log('normal','duplicates','source-duplicates-failed',{error:errorText(error)},job.id);sourceDuplicatesLine=message('job.sourceDuplicatesFailed',{error:errorText(error)});}
+    }
+   }
+  }
   // A finished folder import (and a card or drive import when Settings allow it) can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&offersOriginals(job.source,state.preferences)&&!prepared.stage&&!await onCameraCard(job.source.path)){
-   const {files,withheld}=verifiedOriginals(outcomes,plans);
+   const verified=verifiedOriginals(outcomes,plans),withheld=verified.withheld,files=verified.files.filter(file=>!deletedDuplicates.has(file.source));
    for(const item of withheld)log('detailed','originals','withheld',{path:item.source,reason:item.reason},job.id);
    if(files.length){importedOriginals.set(job.id,{root:job.source.path,files,...(job.source.drive?.volumeId?{volumeId:job.source.drive.volumeId}:{})});job.verifiedOriginals=files.length;}
    if(files.length||withheld.length)await saveReport('verified-originals.json',{root:job.source.path,files,withheld});
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
-  job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:{bytes:releasedBytes??0}}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,dsStoreLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message(policy.verifyCopies!==false?'job.copiedVerified':'job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail,job.phase==='error'?'attention':'done');
+  job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:{bytes:releasedBytes??0}}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,dsStoreLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules}),sourceDuplicatesLine):joined(message(policy.verifyCopies!==false?'job.copiedVerified':'job.copied',{copied,skipped}),sourceDuplicatesLine,olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail,job.phase==='error'?'attention':'done');
  }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');
    // An import keeps what Continue needs: its plan (not a USB camera's, listed anew), staged copies not yet verified, and what it verified.
    if(ledger){const held=reservations.get(job.id);pausedImports.set(job.id,{...(prepared&&!prepared.stage&&prepared.review.kind==='import'?{plan:prepared}:{}),copies:copies??new PausedCopies(),outcomes:ledger.outcomes,...(held?{reserved:structuredClone(held)}:{})});log('normal','job','paused-kept',{plan:!!prepared&&!prepared.stage,staged:copies?.stages.size??0,verified:copies?.checked.size??0,outcomes:ledger.outcomes.size},job.id);}
@@ -1345,7 +1373,7 @@ async function action(input:Action):Promise<void>{
    // Chosen under the folder the destination is organized as a whole from; saved under its photo folder.
    const root=organizationRoot(state.preferences,index),key=state.preferences.destinations[index]!;
    const result=await dialog.showOpenDialog(window!,{title:'Choose folders to organize',defaultPath:root,properties:['openDirectory','multiSelections']});
-   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(!await isOwnRealpath(path.resolve(file),actual)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[key]=selected;state.organizeOptions=freshOrganizeOptions();await save();}break;
+   if(!result.canceled&&result.filePaths.length){const selected:string[]=[];for(const file of result.filePaths){const actual=await fs.realpath(file);if(!await isOwnRealpath(path.resolve(file),actual)||!within(actual,root)||actual===root||!(await fs.lstat(actual)).isDirectory())throw new MessageError('error.foldersOutside');selected.push(path.relative(root,actual));}(state.organizationFolders??={})[key]=selected;state.organizeOptions=freshOrganizeOptions(state.preferences);await save();}break;
   }
   case 'organizeOptions':{
    // This run's choices; a run, or choosing folders again, puts them back to on.
@@ -1362,7 +1390,7 @@ async function action(input:Action):Promise<void>{
    break;
   }
   case 'deleteOriginals':await settle(removeOriginals(input.jobId));break;
-  case 'resetOrganizationFolders':{assertIdle();state.organizeOptions=freshOrganizeOptions();const root=state.preferences.destinations[input.destinationIndex];if(root&&state.organizationFolders){delete state.organizationFolders[root];await save();}break;}
+  case 'resetOrganizationFolders':{assertIdle();state.organizeOptions=freshOrganizeOptions(state.preferences);const root=state.preferences.destinations[input.destinationIndex];if(root&&state.organizationFolders){delete state.organizationFolders[root];await save();}break;}
   case 'organize':{
    const prefs=snapshotPreferences(input.destinationIndex),root=organizationRoot(prefs,0);
    queueOrganization(root,'Library organization',{prefs,reorganize:true,options:takeOrganizeOptions(),sourceFolders:state.organizationFolders?.[prefs.destinations[0]!]?.slice()});break;
@@ -1435,6 +1463,8 @@ async function action(input:Action):Promise<void>{
    const accepted=acceptedPreferences(patch,settingsLocked(state));
    state.preferences=normalizePreferences({...before,...accepted},before);applyLimits();
    logSettings(before,state.preferences,patch,accepted);setLogLevel(state.preferences.logLevel??'normal');
+   // The Organize page's switch starts from Settings: a change shows there at once, unless an open review or a run holds this run's choice.
+   if(before.removeDuplicatesOrganize!==state.preferences.removeDuplicatesOrganize&&!state.review&&!state.jobs.some(job=>job.organization&&isLive(job)))state.organizeOptions={...state.organizeOptions,releaseDuplicates:state.preferences.removeDuplicatesOrganize};
    nativeTheme.themeSource=state.preferences.appearance;
    if(before.automatic&&!state.preferences.automatic)for(const j of state.jobs)if(j.phase==='queued'&&automaticallyQueued.has(j.id)){j.phase='stopped';j.detail=message('job.automaticDisabled');}
    dropStaleMisplaced();

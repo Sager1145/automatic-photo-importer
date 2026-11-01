@@ -33,11 +33,13 @@ async function imported(t:test.TestContext){
 }
 const listing=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).map(slash).sort();
 
-test('an import never touches its source, even with saved preferences that would delete',async t=>{
+test('an import copies and never touches its source, even with saved preferences that would delete; only a drive transfer removes duplicates afterwards',async t=>{
  const prefs=normalizePreferences({removeEmptySourceFolders:true,releaseDuplicatesAfterOrganizing:true,copyMode:'mirror',backupMode:'mirror'});
  for(const choice of [freshOrganizeOptions(),{removeEmptyFolders:true,releaseDuplicates:true}]){
-  const policy=sourcePolicy('import',choice,prefs);
-  assert.deepEqual(policy,{sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,verifyCopies:true});
+  // A camera import, or one whose kind is unknown, deletes nothing at all.
+  for(const operation of ['camera',undefined] as const)assert.deepEqual(sourcePolicy('import',choice,prefs,operation),{sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,removeSourceDuplicates:false,verifyCopies:true});
+  // A drive transfer copies the same way; Remove confirmed duplicates (on by default) acts only after a clean run.
+  assert.deepEqual(sourcePolicy('import',choice,prefs,'drive'),{sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,removeSourceDuplicates:true,verifyCopies:true});
  }
  const {source,files}=await imported(t);
  assert.equal(files.length,3);assert.deepEqual(await listing(source),['DCIM','DCIM/A.JPG','DCIM/B.JPG','DCIM/C.JPG']);
@@ -46,7 +48,7 @@ test('an import never touches its source, even with saved preferences that would
 
 test('organizing defaults to move, remove emptied folders and release duplicates, and each run starts from those defaults',()=>{
  const prefs=normalizePreferences({removeEmptySourceFolders:false,releaseDuplicatesAfterOrganizing:false});
- assert.deepEqual(sourcePolicy('reorganize',undefined,prefs),{sourceAction:'move',removeEmptySourceFolders:true,releaseDuplicates:true,verifyCopies:true});
+ assert.deepEqual(sourcePolicy('reorganize',undefined,prefs),{sourceAction:'move',removeEmptySourceFolders:true,releaseDuplicates:true,removeSourceDuplicates:false,verifyCopies:true});
  const run=freshOrganizeOptions();run.removeEmptyFolders=false;
  assert.equal(sourcePolicy('reorganize',run,prefs).removeEmptySourceFolders,false);
  // The next run does not inherit the previous run's choice.

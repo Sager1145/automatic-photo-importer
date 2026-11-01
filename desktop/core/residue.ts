@@ -8,6 +8,7 @@ import { deleteOrganizationRecovery, deletingPattern, endedJournal, isRecoveryNa
 import { log, logDeletion } from '../logger';
 import { LIBRARIES } from './destination-index';
 import { checkAbort, code, contained, digest, isAbort, maybeLstat, sameStat , unlinkEntry, rmdirEntry } from './paths';
+import { onCamera } from './camera-guard';
 
 /** What a leftover is. resumable: a staged copy (and its receipt) that a re-import of its unchanged
  * source could continue; removing it only means copying that file again. kept: a staged copy not
@@ -310,7 +311,10 @@ function summary(items:ResidueItem[]):Residue {
  * are never removed. Receipts are closed after their file is gone, a store's together in one append. */
 export async function cleanResidue(residue:Residue,options:{keepResumable?:boolean;signal?:AbortSignal;/** Hears each item as it is handled: items done of the total, bytes removed of the bytes to remove. */onProgress?:(done:number,total:number,bytes:number,totalBytes:number,file:string)=>void}={}):Promise<{removed:{files:number;bytes:number};left:Residue}> {
   const removed={files:0,bytes:0},left:ResidueItem[]=[];
-  const keeps=(item:ResidueItem)=>item.kind==='recoverable'||(options.keepResumable===true&&keptKinds.has(item.kind));
+  // Nothing on a camera or camera card is deleted: what was found under such a folder stays (asked once per folder).
+  const cameraRoots=new Set<string>();
+  for(const root of new Set(residue.items.map(item=>item.root))) if(await onCamera(root)) cameraRoots.add(root);
+  const keeps=(item:ResidueItem)=>cameraRoots.has(item.root)||item.kind==='recoverable'||(options.keepResumable===true&&keptKinds.has(item.kind));
   // Only what this run removes counts toward the total: kept copies are not work.
   const doomed=residue.items.filter(item=>!keeps(item)),doomedBytes=doomed.reduce((sum,item)=>sum+item.bytes,0);
   let handled=0,handledBytes=0;
@@ -321,7 +325,7 @@ export async function cleanResidue(residue:Residue,options:{keepResumable?:boole
   for(const item of ordered) {
     checkAbort(options.signal);
     left.push(item);
-    if(keeps(item)) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed':item.kind==='unbound'?'receipt of an earlier direct copy that no longer matches its kept file; the file is never touched':'copy a re-import could continue'});continue;}
+    if(keeps(item)) {log('detailed','residue','kept',{path:item.path,kind:item.kind,bytes:item.bytes,reason:cameraRoots.has(item.root)?'on a camera or camera card, where nothing is deleted':item.kind==='recoverable'?'complete staged copy whose card file changed or vanished; never removed':item.kind==='unbound'?'receipt of an earlier direct copy that no longer matches its kept file; the file is never touched':'copy a re-import could continue'});continue;}
     handled++;handledBytes+=item.bytes;
     try {
       if(item.kind==='journal'&&item.journal){

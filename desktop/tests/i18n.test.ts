@@ -570,7 +570,7 @@ test('main.ts keeps the chosen organize options until the run that uses them end
   const take = source.slice(source.indexOf('function takeOrganizeOptions'), source.indexOf('\n', source.indexOf('function takeOrganizeOptions')));
   assert.ok(take && !take.includes('state.organizeOptions=freshOrganizeOptions()'), 'starting a review or a run no longer resets the switches');
   const finish = source.slice(source.indexOf('function finishJob'), source.indexOf('\nfunction pump'));
-  assert.match(finish, /if\(job\.organization&&organizationRuns\.has\(job\.id\)&&job\.phase!=='queued'&&!reviewed&&!state\.busyReview\)state\.organizeOptions=freshOrganizeOptions\(\);/, 'the run ending puts them back to on, unless it was parked for a review');
+  assert.match(finish, /if\(job\.organization&&organizationRuns\.has\(job\.id\)&&job\.phase!=='queued'&&!reviewed&&!state\.busyReview\)state\.organizeOptions=freshOrganizeOptions\(state\.preferences\);/, 'the run ending puts them back to the Settings defaults, unless it was parked for a review');
   const queue = source.slice(source.indexOf('function queueOrganization'), source.indexOf('\n}', source.indexOf('function queueOrganization')));
   assert.match(queue, /if\(request\.options\)state\.organizeOptions=\{\.\.\.request\.options\};/, 'a queued run (Retry, Continue too) shows its own options');
   const apply = source.slice(source.indexOf('async function applyReview'), source.indexOf('\n}', source.indexOf('async function applyReview')));
