@@ -251,7 +251,7 @@ export default function RootApp() {
   // New-drive prompt: closing it does not answer; unanswered drives are marked on their cards.
   const [dismissedDrives, setDismissedDrives] = useState<string[]>([]);
   const [promptOpen, setPromptOpen] = useState(false);
-  const promptKey = [...(state?.newDevices ?? []), ...(state?.reconnectedDevices ?? [])].filter(id => !dismissedDrives.includes(id) && state?.sources.some(source => source.id === id)).join('|');
+  const promptKey = state ? Object.values(promptDrives(state, dismissedDrives)).flat().join('|') : '';
   useEffect(() => { if (promptKey) setPromptOpen(true); }, [promptKey]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const previewSequence = useRef(0);
@@ -1184,6 +1184,13 @@ type ListingProgress = NonNullable<AppState['scanProgress']>[string];
 function selectionKnown(source: Source): boolean { return source.selected !== undefined; }
 export function sourceSelected(source: Source): boolean { return source.selected !== false; }
 function newDeviceIds(state: AppState): string[] { return state.newDevices ?? []; }
+/** The connected drives the new-drive prompt asks about: new ones, then reconnected ones that are not also new. An id
+ * without a source (a camera listed again under another id, say) is not asked about, so it never holds the prompt open. */
+export function promptDrives(state: AppState, skip: string[] = []): { pending: string[]; back: string[] } {
+  const ask = (id: string) => !skip.includes(id) && state.sources.some(source => source.id === id);
+  const pending = [...new Set(newDeviceIds(state).filter(ask))];
+  return { pending, back: [...new Set((state.reconnectedDevices ?? []).filter(id => ask(id) && !pending.includes(id)))] };
+}
 function rememberedDevices(preferences: Preferences) { return preferences.rememberedDevices; }
 function selectSource(act: Dispatch, sourceId: string, selected: boolean) { act({ type: 'selectSource', sourceId, selected }); }
 function forgetDevice(act: Dispatch, deviceId: string) { act({ type: 'forgetDevice', deviceId }); }
@@ -1192,9 +1199,8 @@ function forgetDevice(act: Dispatch, deviceId: string) { act({ type: 'forgetDevi
 export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { state: AppState; act: Dispatch; skip?: string[]; onDismiss?: (ids: string[]) => void; onDone?: () => void }) {
   const { t, language, formatBytes: bytes } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
-  const pending = newDeviceIds(state).filter(id => !skip.includes(id));
-  // Drives seen before (remembered, or with a finished scan or import) that already have a choice.
-  const back = (state.reconnectedDevices ?? []).filter(id => !pending.includes(id) && !skip.includes(id));
+  // back: drives seen before (remembered, or with a finished scan or import) that already have a choice.
+  const { pending, back } = promptDrives(state, skip);
   const shown = [...pending, ...back];
   // Remember every drive shown here, so one unplugged while the sheet is open stays visible as "Unplugged".
   const seen = useRef(new Map<string, Source>());
@@ -1210,9 +1216,13 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
   unanswered.current = actionable.length;
   const finish = useAnimatedClose(dialog, () => unanswered.current ? false : onDone?.());
   const choosing = rows.some(drive => !back.includes(drive.id));
-  useEffect(() => { const element = dialog.current; showSheet(element); return () => element?.close(); }, []);
-  // Nothing left to answer (all answered or unplugged): close by itself after a moment.
-  useEffect(() => { if (actionable.length) return; const timer = window.setTimeout(finish, rows.length ? 2200 : 0); return () => window.clearTimeout(timer); }, [actionable.length, rows.length]);
+  const listed = rows.length > 0;
+  useEffect(() => { const element = dialog.current; if (!element) return; showSheet(element); return () => element.close(); }, [listed]);
+  // Only unplugged drives left: close by itself after a moment, so "Unplugged" can be read.
+  useEffect(() => { if (actionable.length || !rows.length) return; const timer = window.setTimeout(finish, 2200); return () => window.clearTimeout(timer); }, [actionable.length, rows.length]);
+  // Nothing left to list (all answered): close at once, without waiting on an exit animation, and never show an empty sheet.
+  useEffect(() => { if (!rows.length) onDone?.(); }, [rows.length]);
+  if (!rows.length) return null;
   return <dialog className="activity-dialog new-drive-dialog" ref={dialog} aria-labelledby="new-drive-heading" data-testid="new-drive-prompt" onCancel={event => { event.preventDefault(); close(); }}>
     <div className="dialog-heading"><div><span className="dialog-kicker"><Icon icon={Usb} size={15} />{choosing ? t("Choose drives to import") : t("Drives")}</span><h2 id="new-drive-heading">{choosing ? (rows.length > 1 ? t("New drives connected") : t("New drive connected")) : rows.length > 1 ? t("Drives reconnected") : t("Drive reconnected")}</h2></div><Button kind="quiet" icon={X} data-testid="new-drive-close" aria-label={t("Decide later")} title={t("Decide later")} onClick={close} /></div>
     <div className="activity-content"><ul className="new-drives">{rows.map(drive => {
