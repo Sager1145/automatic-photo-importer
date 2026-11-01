@@ -6,6 +6,7 @@ import type { OrganizationRecovery, Progress, TransferPlan } from '../shared';
 export type { OrganizationRecovery } from '../shared';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import {exclusiveRename} from '../platform/exclusive-rename';
+import {refuseOnCamera} from './camera-guard';
 import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,type RecoveryIndex} from './import-recovery';
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
@@ -1099,6 +1100,8 @@ async function createJournal(spec:JournalSpec,entries:OrganizationEntry[],signal
 /** Organize `entries` of a reviewed plan: every file moves by rename(2) where its volume allows. `folders`: the chosen
  * source folders, the only ones emptied folders are removed from (the whole source when none were chosen). */
 export async function beginOrganization(transfer:TransferPlan,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void,options:{keepFolders?:boolean;libraries?:string[];folders?:string[];releaseDuplicates?:boolean;appleDouble?:AppleDoubleCleaner}={}):Promise<ReorganizationResult> {
+ // An organization moves files out of where they were: never on a camera or camera card.
+ await refuseOnCamera('organize',transfer.root,transfer.source);
  const libraries=options.libraries??[],scope=options.folders?.length?options.folders.map(folder=>path.resolve(transfer.source,folder)):[transfer.source];
  const manifest=await createJournal({root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.source,strategy:'rename',...(options.keepFolders?{keepFolders:true as const}:{cleanupScope:scope}),...(libraries.length?{libraries}:{})},entries,signal);
  const result=await locked(lockKey(transfer.root,manifest.id),()=>run(manifest,signal,onProgress,{appleDouble:options.appleDouble}));
@@ -1116,6 +1119,7 @@ export async function beginOrganization(transfer:TransferPlan,entries:Organizati
  * the copy kept. Nothing is copied unless an entry has no `kept` (a companion carried next to the kept file).
  * `root` is the library; the journal lives in its recovery folder, like an organization's. */
 export async function beginDuplicateRemoval(transfer:Pick<TransferPlan,'root'|'rootIdentity'>,entries:OrganizationEntry[],signal?:AbortSignal,onProgress?:(progress:Progress)=>void):Promise<{id:string;result:ReorganizationResult}> {
+ await refuseOnCamera('duplicates',transfer.root);
  const manifest=await createJournal({kind:'duplicates',root:transfer.root,rootIdentity:transfer.rootIdentity,source:transfer.root,keepFolders:true},entries,signal);
  return {id:manifest.id,result:await locked(lockKey(transfer.root,manifest.id),()=>run(manifest,signal,onProgress))};
 }
@@ -1251,7 +1255,10 @@ export async function finalizeOrganization(root:string,id:string,signal?:AbortSi
  return locked(lockKey(root,id),async()=>{
   // Every slow call inside an entry can repeat the last report, so a long entry never looks frozen.
   let last:OrganizationProgress|undefined;const report=(progress:OrganizationProgress)=>{last=progress;onProgress?.(progress);},tick=()=>{if(last)onProgress?.(last);};
-  checkAbort(signal);const m=await readManifest(root,id),proofs=new Proofs(),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);
+  checkAbort(signal);
+  // Releasing deletes the originals the journal kept: never on a camera or camera card.
+  await refuseOnCamera('release',root);
+  const m=await readManifest(root,id),proofs=new Proofs();await refuseOnCamera('release',m.root,m.source);const state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);
   if(state.halfConverted)throw new MessageError('error.oldRecords',{drive:driveName(m.root)});
   if(state.superseded)throw new Error(`Organization ${m.id} was superseded by ${state.superseded}`);
   if(!state.complete)throw new Error('Finish and verify the entire organization before finalizing retained originals');
@@ -1704,6 +1711,8 @@ function forgetJournal(id:string):void{
  * step (both names checked) before anything is removed, so a stop leaves the journal either whole or out
  * of every listing. */
 export async function deleteOrganizationRecovery(root:string,id:string,signal?:AbortSignal,onProgress?:(progress:OrganizationProgress)=>void,options:{/** The store cleanup: never releases a kept original; refused if one would have to be. */automatic?:boolean}={}):Promise<RecoveryDeletion>{
+ // Deleting recovery files can delete kept originals: never on a camera or camera card.
+ await refuseOnCamera('recovery',root);
  const check=async()=>{
   const m=await readManifest(root,id),state=await readEvents(m,undefined,(read,total,name)=>onProgress?.({step:'history',completed:read,total,file:name??id}),true,signal);deletable(m,state);
   const needed=await dependents(m,(done,total,file)=>onProgress?.({step:'later',completed:done,total,file}),signal);
