@@ -1,4 +1,5 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { sourceAware } from './source-fs';
 import {constants,type BigIntStats} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -8,6 +9,8 @@ import {appendLines,holdLog,LINE_CAPS,openRegular,openV5,readLines,sealedLine,st
 import {checkAbort,code,contained,identity,isAbort,maybeLstat,readdirIfPresent,regularHandle,rootUnchanged,sameBirth,sameStat,statRecord,rebaseDevice,unlinkEntry,type StatRecord} from './paths';
 import {currentJob,log,logDeletion} from '../logger';
 import {noteRoot} from './run-trace';
+// A partial's source may be a USB camera's file (source-fs).
+const fs=sourceAware(nodeFs);
 
 type Kind='stage'|'publication';
 interface RecordData {kind:Kind;file:string;source:string;destination:string;sha256:string;sourceStat:StatRecord;root:string;rootIdentity:string;sourceRoot:string;sourceIdentity:string;parentIdentity:string;fileIdentity:string;/** A direct copy (no staging file): its receipts carry no checksum and the birth times the finished file may show. */mode?:'direct';size?:string;finalBirth?:string[];/** The job that wrote it (absent before this was recorded): Clean up for that job removes only what its receipts name. */job?:string;}

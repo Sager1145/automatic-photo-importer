@@ -76,7 +76,7 @@ flowchart TD
 
 ### 原生辅助程序 interface
 
-`camera-bridge.request` 经 stdin/stdout JSONL 发送带 id 的请求，只有 `list` 和 `stage {cameraID,directory}` 两个命令；返回 result/error/progress。取消 stage 会关闭整个 bridge，所有 pending 请求一起失败，不是单请求取消。相机正在 stage 时来源查询读缓存，避免排队阻塞。
+`camera-bridge.request` 经 stdin/stdout JSONL 发送带 id 的请求：`list`（相机）、`files {cameraID,storage?}`（文件名、文件夹、大小、日期，不下载）、`read {cameraID,objectID,offset,length}`（按范围读取，base64 返回；Windows 用 MTP GetPartialObject）和 `release`；返回 result/error/progress。`prepareCamera` 只列出文件，并通过 `core/source-fs` 把相机挂在一个磁盘上不存在的路径下（Windows `\\?\photo-importer-camera\<id>`，其他系统 `/.photo-importer-camera/<id>`），计划、元数据、哈希和复制都从相机直接读取，新文件只写入目标（与存储卡相同的 partial → 校验 → 发布）。停止只停止等待单个请求。相机导入期间来源查询读缓存。
 
 同一个原生可执行文件另有独立 CLI `--set-file-times created modified`，通过继承的 FD 3 调用 macOS 文件时间操作，不接收目标路径；这是文件时间 adapter，不是第三个 JSONL 命令。见 [camera-bridge.ts:62](../desktop/platform/camera-bridge.ts#L62)、[main.swift:28](../Sources/CameraBridge/main.swift#L28)、[file-timestamps.ts:46](../desktop/platform/file-timestamps.ts#L46)。
 
@@ -112,7 +112,7 @@ flowchart TD
 |---|---|---|
 | 挂载卷发现、容量与物理盘识别 | `mountedVolumes/getSources/volumeInfo/volumeOf` → `platform/volumes.ts` | 三个 OS adapter；每次刷新一份快照（种类直接来自系统描述），路径到卷只经 `volumeOf`；新进程首次查卷只描述该路径所在的挂载；稳定 id 只用卷 UUID 或 `camera:` id |
 | 文件夹来源合并及所属物理盘 | `resolveFolderSources` → `folder-sources.ts`；展示分组 → `drive-groups.ts` | 多个文件夹仍是独立 Source；共享一块盘时由路径最前的来源显示容量，不随置顶变化；同盘读并发受 device 规则控制 |
-| macOS 协议相机 | `cameraSources/prepareCamera` → `platform/camera-bridge.ts` → Swift `DeviceDiscovery` | JSONL list/stage；下载暂存后进入文件系统计划；非 macOS 无 PTP implementation |
+| 协议相机（MTP/PTP） | `cameraSources/prepareCamera` → `platform/camera-bridge.ts` → Swift `DeviceDiscovery`（macOS）/ `windows-camera.ts`（Windows） | JSONL list/files/read；从文件列表计划，名称和大小与库中文件相同者按内容确认（从相机流式哈希），新文件直接写入目标；不使用临时文件夹；Linux 无 PTP implementation |
 | 清单、系统文件、未知格式、空文件 | `inventory` → `core/inventory.ts` | `media-formats.ts` 是格式目录；`known-files.ts` 是系统文件识别。复用记录是 `Listing`（目录 key、名称、大小），不再伪造 Inventory；大小过期时只重读那个父目录 |
 | 伴随文件与 Live Photo | `inventory` 的 `companionOf` + `pairLivePhotos` → `core/index.ts` | XMP/AAE/DOP、LRF/XML/音频、NKSC、ContentIdentifier 等；family 共同分配，不能拆盘。按名字模式配对的（Sony M01.XML/R01.BIM、IMG_O….AAE、GoPro/Insta360 LRV）也接受同名规则加的 ` (n)`，只与相同编号配对 |
 | 相机/镜头汇总 | `analyzeSourceCameras` → `source-cameras.ts` | 元数据证据与盘名/目录提示分开；扫描新增路由结果回传 main |

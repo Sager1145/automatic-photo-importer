@@ -1,5 +1,8 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { sourceAware } from './source-fs';
 import type { SystemFile } from '../shared';
+// Listed sources (a USB camera) read through the same calls as a card; see source-fs.
+const fs=sourceAware(nodeFs);
 
 // Files cameras and card devices write for their own bookkeeping. Each pattern is
 // anchored to the vendor's folder layout, so the same extension elsewhere on a

@@ -1,24 +1,24 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
-import { noteTemporary } from '../core/run-trace';
-import { tmpdir } from 'node:os';
+import { access } from 'node:fs/promises';
 import path from 'node:path';
 import type { Source } from '../shared';
-import { beneath } from '../core/paths';
+import { registerListedSource, type ListedFile } from '../core/source-fs';
 import { windowsCameraBridgeArgs } from './windows-camera';
 
 interface Camera {name:string;cameraID:string;storages?:unknown;}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;/** Restarts the timeout: a request that reports progress is timed from its last report, not its start. */alive():void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
-let stdout='';let stderr='';let staging=0;let cached:Source[]=[];
+let stdout:string[]=[];let stdoutLength=0;let stderr='';let opened=0;let cached:Source[]=[];
 const pending=new Map<string,Pending>();
+/** The longest line the helper may send: a 16 MB read is 22 MB of base64. */
+const MAX_LINE=96*1024*1024;
 function failed(error:Error) {for(const item of pending.values()){clearTimeout(item.timer);item.reject(error);}pending.clear();cached=[];}
 /** Ends the helper (SIGTERM, then SIGKILL after 2 s); resolves once it has exited. */
 export function closeCameraBridge():Promise<void> {
-  const current=child;child=undefined;stdout='';stderr='';failed(new Error('The native camera session closed.'));
+  const current=child;child=undefined;stdout=[];stdoutLength=0;stderr='';failed(new Error('The native camera session closed.'));
   if(!current || current.exitCode!==null || current.signalCode!==null) return Promise.resolve();
   return new Promise<void>(resolve=>{
     const force=setTimeout(()=>{try{current.kill('SIGKILL');}catch{/* Already gone. */}},2000);
@@ -34,28 +34,37 @@ export async function nativeCameraHelperPath():Promise<string|undefined> {
   return undefined;
 }
 /** The camera helper to run: the macOS ImageCaptureCore helper, or on Windows the Portable Devices bridge in
- * PowerShell. Both speak the same JSONL protocol. Other platforms list cameras through their mounted storage. */
+ * PowerShell. Both speak the same JSONL protocol. Other platforms list cameras through their mounted storage.
+ * IMPORTER_NATIVE_BRIDGE names a stand-in on any system (a .js/.mjs one runs in Node), for tests. */
 async function bridgeLaunch():Promise<{command:string;args:string[]}|undefined> {
-  if(process.platform==='win32')return {command:'powershell.exe',args:windowsCameraBridgeArgs()};
+  const standIn=process.env.IMPORTER_NATIVE_BRIDGE;
+  if(standIn&&/\.[cm]?js$/i.test(standIn))return {command:process.execPath,args:[standIn]};
+  if(process.platform==='win32'&&!standIn)return {command:'powershell.exe',args:windowsCameraBridgeArgs()};
   const executable=await nativeCameraHelperPath();return executable?{command:executable,args:[]}:undefined;
+}
+function received(line:string) {
+  let message:any;try{message=JSON.parse(line);}catch{return;}
+  const item=pending.get(message?.id);if(!item)return;
+  if(message.progress){item.alive();const {completed,total}=message.progress;if(Number.isSafeInteger(completed)&&Number.isSafeInteger(total))item.progress?.(completed,total);return;}
+  pending.delete(message.id);clearTimeout(item.timer);
+  if(typeof message.error==='string')item.reject(new Error(message.error));else item.resolve(message.result);
 }
 async function startBridge():Promise<boolean> {
   if(child && child.exitCode===null && !child.killed)return true;
   const launch=await bridgeLaunch();if(!launch)return false;
-  const current=spawn(launch.command,launch.args,{stdio:['pipe','pipe','pipe'],windowsHide:true});child=current;stdout='';stderr='';
+  const current=spawn(launch.command,launch.args,{stdio:['pipe','pipe','pipe'],windowsHide:true});child=current;stdout=[];stdoutLength=0;stderr='';
   current.stdout.setEncoding('utf8');
+  // A reply carrying file data is one long line: pieces are kept until its newline and joined once, never rescanned.
   current.stdout.on('data',(text:string)=>{
-    if(child!==current)return;stdout+=text;
-    if(stdout.length>4*1024*1024){void closeCameraBridge();return;}
+    if(child!==current)return;
     let newline:number;
-    while((newline=stdout.indexOf('\n'))>=0){
-      const line=stdout.slice(0,newline);stdout=stdout.slice(newline+1);
-      let message:any;try{message=JSON.parse(line);}catch{continue;}
-      const item=pending.get(message.id);if(!item)continue;
-      if(message.progress){item.alive();const {completed,total}=message.progress;if(Number.isSafeInteger(completed)&&Number.isSafeInteger(total))item.progress?.(completed,total);continue;}
-      pending.delete(message.id);clearTimeout(item.timer);
-      if(typeof message.error==='string')item.reject(new Error(message.error));else item.resolve(message.result);
+    while((newline=text.indexOf('\n'))>=0){
+      stdout.push(text.slice(0,newline));const line=stdout.join('');stdout=[];stdoutLength=0;text=text.slice(newline+1);
+      received(line);
+      if(child!==current)return;
     }
+    if(text){stdout.push(text);stdoutLength+=text.length;}
+    if(stdoutLength>MAX_LINE)void closeCameraBridge();
   });
   current.stderr.on('data',(text:Buffer)=>{if(child===current)stderr=(stderr+text.toString()).slice(-4096);});
   current.stdin.on('error',error=>{if(child===current)failed(error);});
@@ -74,7 +83,11 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   const current=child!;const id=randomUUID();
   return new Promise((resolve,reject)=>{
     const expire=()=>{if(pending.has(id)){void closeCameraBridge();reject(new Error('The native camera request timed out.'));}};
-    const item:Pending={resolve,reject,timer:setTimeout(expire,timeout),progress,alive(){clearTimeout(item.timer);item.timer=setTimeout(expire,timeout);}};
+    // Stop stops waiting at once; the helper's late answer is dropped.
+    const stop=()=>{const item=pending.get(id);if(item){clearTimeout(item.timer);pending.delete(id);reject(signal!.reason??new DOMException('Import stopped','AbortError'));}};
+    const settle=(done:()=>void)=>{signal?.removeEventListener('abort',stop);done();};
+    const item:Pending={resolve:value=>settle(()=>resolve(value)),reject:error=>settle(()=>reject(error)),timer:setTimeout(expire,timeout),progress,alive(){clearTimeout(item.timer);item.timer=setTimeout(expire,timeout);}};
+    signal?.addEventListener('abort',stop,{once:true});
     pending.set(id,item);
     current.stdin.write(`${JSON.stringify({...command,id})}\n`,error=>{if(error){clearTimeout(item.timer);pending.delete(id);reject(error);}});
   });
@@ -105,50 +118,74 @@ export function cameraSourcesFrom(result:unknown[]):Source[] {
   });
 }
 export async function cameraSources():Promise<Source[]> {
-  if(staging)return cached;
+  // While a camera is being imported its helper serves that import; the last list stands.
+  if(opened)return cached;
   if(!await bridgeLaunch())return [];
-  // The first Windows request also compiles the bridge's copy helper, so it gets longer.
+  // The first Windows request also compiles the bridge's reader, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
   cached=cameraSourcesFrom(result);
   return cached;
 }
-/** The bridge's "stage" request for a camera source: the whole camera, or only the storage the source stands for. */
-export function stageRequest(source:Pick<Source,'path'>,directory:string):{command:'stage';cameraID:string;storageID?:string;directory:string} {
-  const [camera,storage]=source.path.slice('camera://'.length).split('/');
-  return {command:'stage',cameraID:decodeURIComponent(camera!),...(storage?{storageID:decodeURIComponent(storage)}:{}),directory};
+/** One file as the helper lists it: its storage (card slot), folders, name, size, dates (ms) and the helper's own id for it. */
+export interface CameraFile {storage:string;folder:string[];name:string;size:number;modified?:number;created?:number;objectID:string;}
+const part=(value:unknown)=>typeof value==='string'&&value!==''&&value!=='.'&&value!=='..'&&!/[\\/\x00]/.test(value);
+const millis=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&value>0?value:undefined;
+/** The helper's file list, checked: entries without a usable name, folder, size or id are left out (and counted). */
+export function cameraFiles(value:unknown):{files:CameraFile[];invalid:number} {
+  if(!Array.isArray(value))throw new Error('The camera helper returned an invalid file list.');
+  const files:CameraFile[]=[];let invalid=0;
+  for(const item of value){
+    if(part(item?.storage)&&Array.isArray(item.folder)&&item.folder.every(part)&&part(item.name)&&size(item.size)!==undefined&&typeof item.objectID==='string'&&item.objectID)
+      files.push({storage:item.storage,folder:item.folder,name:item.name,size:item.size,...(millis(item.modified)?{modified:item.modified}:{}),...(millis(item.created)?{created:item.created}:{}),objectID:item.objectID});
+    else invalid++;
+  }
+  return {files,invalid};
 }
-/** One stage at a time per camera: a camera serves one transfer session, so its storages are staged one after another. */
-const cameraTurns=new Map<string,Promise<unknown>>();
-export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
+/** Where a camera file is read from in the listing: storage/folders/name, '/' separated. A name the camera repeats
+ * in one folder keeps each file apart, in a folder named after its id, as staging used to. */
+export function listedFiles(files:readonly CameraFile[]):(ListedFile&{objectID:string})[] {
+  const taken=new Set<string>();
+  return files.map(file=>{
+    let relative=[file.storage,...file.folder,file.name].join('/');
+    if(taken.has(relative.toLowerCase()))relative=[file.storage,...file.folder,`duplicate-${file.objectID.replace(/[^\w.-]/g,'_')}`,file.name].join('/');
+    taken.add(relative.toLowerCase());
+    return {relative,size:file.size,modifiedMs:file.modified??file.created??0,...(file.created?{createdMs:file.created}:{}),objectID:file.objectID};
+  });
+}
+/** The camera a camera source reads and, for a source that is one card slot (camera://<camera>/<storage>), the
+ * camera's own id for that storage: its "files" request then lists only that slot. */
+export function cameraOf(source:Pick<Source,'path'|'transport'>):{cameraID:string;storageID?:string} {
   if(source.transport!=='camera'||!source.path.startsWith('camera://'))throw new Error('Choose a native camera source.');
-  signal?.throwIfAborted();
-  const {cameraID}=stageRequest(source,'');
-  const previous=cameraTurns.get(cameraID)??Promise.resolve();
-  // A stop while waiting ends the wait at once; the next stage still waits for the one running.
-  const turn=new Promise<void>((resolve,reject)=>{
-    const abort=()=>reject(signal!.reason);signal?.addEventListener('abort',abort,{once:true});
-    void previous.then(()=>{signal?.removeEventListener('abort',abort);resolve();});
-  }).then(()=>stageCamera(source,signal,onProgress));
-  const settled=Promise.allSettled([previous,turn]);cameraTurns.set(cameraID,settled);
-  try{return await turn;}finally{if(cameraTurns.get(cameraID)===settled)cameraTurns.delete(cameraID);}
+  const [camera,storage]=source.path.slice('camera://'.length).split('/');
+  return {cameraID:decodeURIComponent(camera!),...(storage?{storageID:decodeURIComponent(storage)}:{})};
 }
-async function stageCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
+/** Opens a camera for an import without downloading anything: its files are listed (names, folders, sizes, dates),
+ * then made readable under a folder path of their own (core/source-fs), so the import plans from the list, reads only
+ * what it needs (headers for capture dates, contents to compare with the library) straight from the camera, and writes
+ * new files only into the destination. `cleanup` makes the path unreadable again. */
+export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
+  const {cameraID,storageID}=cameraOf(source);
   signal?.throwIfAborted();
-  const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-camera-'));
-  // The job staging it owns the folder: its Clean up removes it if this run could not.
-  noteTemporary(scratch);
-  const cleanup=()=>rm(scratch,{recursive:true,force:true});
-  const abort=()=>{void closeCameraBridge();};signal?.addEventListener('abort',abort,{once:true});staging++;
+  opened++;
+  let release=true;
   try {
+    // A progress line every 250 files restarts the timeout, so a large card is not cut off while it is listed.
+    const {files}=cameraFiles(await request({command:'files',cameraID,...(storageID?{storageID}:{})},120000,onProgress,signal));
     signal?.throwIfAborted();
-    // Every staged file restarts the 30-minute timeout, so a large card is not cut off while files keep arriving
-    // (a 128 GB card at the 68 MB/s once measured over MTP takes 31 minutes).
-    const result=await request(stageRequest(source,scratch),30*60*1000,onProgress,signal) as {path?:unknown};
-    signal?.throwIfAborted();
-    if(typeof result?.path!=='string')throw new Error('The camera helper did not return its staged folder.');
-    const root=await realpath(scratch);const staged=await realpath(result.path);
-    if(!beneath(staged,root)||!(await stat(staged)).isDirectory())throw new Error('The camera helper returned an unsafe staging folder.');
-    return {path:staged,cleanup};
-  }catch(error){await cleanup();signal?.throwIfAborted();throw error;}finally{staging--;signal?.removeEventListener('abort',abort);}
+    const listed=listedFiles(files);
+    const {root,unregister}=registerListedSource({id:`${cameraID}\0${storageID??''}`,files:listed,
+      async read(file,offset,length){
+        const result=await request({command:'read',cameraID,objectID:(file as typeof listed[number]).objectID,offset,length},120000) as {bytes?:unknown;data?:unknown};
+        if(typeof result?.data!=='string'||!Number.isSafeInteger(result.bytes))throw new Error('The camera helper returned an invalid read.');
+        const data=Buffer.from(result.data,'base64');
+        if(data.length!==result.bytes||data.length>length)throw new Error('The camera helper returned an invalid read.');
+        return data;
+      },
+      release(file){void request({command:'release',objectID:(file as typeof listed[number]).objectID},30000).catch(()=>{});},
+    });
+    release=false;
+    let closed=false;
+    return {path:root,cleanup:async()=>{if(closed)return;closed=true;unregister();opened--;}};
+  } finally { if(release)opened--; }
 }

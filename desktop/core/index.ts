@@ -1,4 +1,5 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { isListedPath, sourceAware } from './source-fs';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -31,6 +32,8 @@ import type {PlacedFile} from '../platform/placement-memory';
 import { log, logDeletion } from '../logger';
 export { placedByEarlierJournals, beginDuplicateRemoval, configureOrganizationRecovery, getOrganizationRecovery, resumeOrganization, finalizeOrganization, undoOrganization, deleteOrganizationRecovery, measureOrganizationRecovery, RECOVERY_FOLDER, setMoveObserver } from './recovery';
 import { refuseOldRecords } from './old-records';
+// Listed sources (a USB camera) read through the same calls as a card; see source-fs.
+const fs=sourceAware(nodeFs);
 export { findOldRecords, acknowledgeOldRecords, refuseOldRecords, driveName, onOldRecordsFound } from './old-records';
 export type { OrganizationRecovery, ReorganizationResult, OrganizationFinalization, OrganizationProgress, OrganizationUndo } from './recovery';
 
@@ -270,6 +273,55 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   // 0-byte files and their families are never imported. An organization may collect them (below); every one is reported.
   const problems:ProblemFile[]=[],scanned=new Map(scan.files.map(file=>[file.path,file]));
   for(const item of scan.skipped??[]) if((item.reason==='empty'||item.reason==='emptyPrimary')&&!organizationOwned(item.path)) problems.push({path:item.path,relative:path.relative(sourceRoot,item.path),reason:item.reason,group:'empty',collected:false});
+  // A camera over USB (a listed source, see source-fs) costs a request per file looked at, so the files the library may
+  // already hold are settled first, from the listing alone: one is a possible duplicate when every destination holds a
+  // file of its name and size. It is confirmed by content: its bytes streamed from the camera through the hasher (read
+  // only, written nowhere), or a checksum remembered from an earlier import (main.ts), against the library file's. A
+  // family (same folder and stem, with its companions) whose every member is confirmed everywhere is planned as already
+  // there, at the library files found, and its metadata is never read. Every other file is planned as from a card; the
+  // checksums taken here are reused, never read again.
+  const knownHashes=new Map<string,string>(),alreadyThere:{entry:Omit<PlanEntry,'destination'|'allocation'>;at:string[]}[]=[];
+  if(isListedPath(sourceRoot)&&!options.backup&&!options.reorganize&&files.length) {
+    const began=performance.now(),byPath=new Map(files.map(file=>[file.path,file]));
+    const familyOf=(file:InventoryFile)=>{let root=file;for(let hops=0;root.companionOf&&hops<16;hops++){const next=byPath.get(root.companionOf);if(!next)break;root=next;}return stem(root.path);};
+    let listedLibrary=0;
+    const libraries=await mapPool(destinations,1,destination=>sizesOf(destination,(count,file)=>onProgress?.(listedLibrary+count,file,{step:'locating',total:0,bytes:0,totalBytes:0})).then(sizes=>{for(const list of sizes.values())listedLibrary+=list.length;return sizes;}),signal);
+    const named=(file:InventoryFile,index:number)=>(libraries[index]!.get(file.size)??[]).filter(found=>path.basename(found).toLowerCase()===path.basename(file.path).toLowerCase());
+    const families=Map.groupBy(files,familyOf),possible=[...families.values()].filter(members=>members.every(file=>file.size>0&&destinations.every((_,index)=>named(file,index).length>0)));
+    const members=possible.flat(),totalBytes=members.reduce((sum,file)=>sum+file.size,0),confirmed=new Map<string,string[]>(),identities=new Map<string,string>();
+    const parts=destinations.flatMap(destination=>[destination,...(destination.videos?[destination.videos]:[])]),indexes=new Map<string,Promise<DestinationIndex>>();
+    const libraryDigest=(file:string)=>{const part=parts.find(item=>beneath(file,item.root));if(!part)return Promise.resolve(undefined);let index=indexes.get(part.root);if(!index){index=destinationIndex(part.root,part.identity);indexes.set(part.root,index);}return index.then(found=>found.hinted.digestOf(file,signal));};
+    let done=0,bytes=0;
+    onProgress?.(0,'',{step:'locating',total:members.length,bytes:0,totalBytes});
+    await mapPool(members,STREAM_CONCURRENCY,async file=>{
+      try {
+        await contained(file.path,sourceRoot);
+        const stat=await fs.lstat(file.path,{bigint:true});
+        if(!stat.isFile()||stat.size!==BigInt(file.size)) return;
+        // The library side first (its checksums are usually indexed): a destination none of whose files can be read
+        // cannot confirm anything, and the camera file is then not read here.
+        const candidates=destinations.map((_,index)=>named(file,index)),library=await Promise.all(candidates.map(list=>Promise.all(list.map(found=>libraryDigest(found).catch(error=>{if(isAbort(error))throw error;return undefined;})))));
+        if(library.some(list=>list.every(value=>value===undefined))) return;
+        // A checksum this app verified for the file unchanged since (same camera, path, size and date) is not read again.
+        const sha=options.sourceDigest?.(file.path,statKey(stat))??await digest(file.path,signal,count=>{bytes+=count;onProgress?.(done,file.relative,{step:'locating',total:members.length,bytes,totalBytes});});
+        if(!sameStat(stat,await fs.lstat(file.path,{bigint:true}))) return;
+        knownHashes.set(file.path,sha);identities.set(file.path,statKey(stat));
+        const at=candidates.map((list,index)=>list.find((_,position)=>library[index]![position]===sha));
+        if(at.every(found=>found!==undefined)) confirmed.set(file.path,at as string[]);
+      } catch(error) { if(isAbort(error)) throw error; /* Planned as from a card, where a failure is reported as always. */ }
+      finally { onProgress?.(++done,file.relative,{step:'locating',total:members.length,bytes,totalBytes}); }
+    },signal);
+    const settled=new Set<string>();
+    for(const family of possible) {
+      if(!family.every(file=>confirmed.has(file.path))) continue;
+      for(const file of family) {
+        settled.add(file.path);
+        alreadyThere.push({at:confirmed.get(file.path)!,entry:{id:file.path,source:file.path,size:file.size,kind:file.kind,sourceIdentity:identities.get(file.path)!,skip:true,family:'listed:'+familyOf(file),digest:knownHashes.get(file.path)!}});
+      }
+    }
+    files=files.filter(file=>!settled.has(file.path));
+    log('detailed','plan','listed-known',{source:sourceRoot,files:byPath.size,possible:members.length,possibleBytes:totalBytes,readBytes:bytes,alreadyThere:settled.size,toPlan:files.length,elapsedMs:Math.round(performance.now()-began)});
+  }
   let listedBytes=files.reduce((sum,file)=>sum+file.size,0),checkedBytes=0;
   const unreadableMeta=new Set<string>(), infos=new Map<string,Metadata>(), hashes=new Map<string,string>(), mtimes=new Map<string,Date>(), sourceStats=new Map<string,import('node:fs').BigIntStats>();
   // Copies hash the bytes they stream, so planning reads file contents only for
@@ -352,7 +404,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   files=routes.filter(route=>route.reason==='route'||route.reason==='keep').map(route=>route.file);
   // Duplicate detection, stage 1: files with the same name or EXIF identity are hashed now to confirm or
   // reject them. The hashes are reused below, so the plan never reads those files twice. Only recorded.
-  const early=new Map<string,string>();let duplicates:PlanDuplicates|undefined;
+  const early=new Map<string,string>(knownHashes);let duplicates:PlanDuplicates|undefined;
   // Edited as routing classifies it (isEditedFile), so a record always matches how its file is filed.
   // Only an import's request asks for it; a request spread from import settings into an organization still does not run it.
   if(options.duplicates&&!options.backup&&!options.reorganize) {
@@ -363,7 +415,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     try {
       await confirmCandidates(items,async item=>{
         // A hash remembered for this exact file (identity unchanged) is reused; planning reuses the result below.
-        const stat=sourceStats.get(item.path)!,known=options.sourceDigest?.(item.path,statKey(stat));
+        const stat=sourceStats.get(item.path)!,known=knownHashes.get(item.path)??options.sourceDigest?.(item.path,statKey(stat));
         if(known) return known;
         const sha=await digest(item.path,signal);
         if(!sameStat(sourceStats.get(item.path)!,await fs.lstat(item.path,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:item.path});
@@ -640,6 +692,8 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       const transfer=await rootPlan(destination,'photos',first);
       if(destination.videos) transfer.videos=await rootPlan(destination.videos,'videos',first);
       if(lookup) partialFamilies+=await findElsewhere(destination,transfer);
+      // Camera files confirmed above, at the library files that hold them.
+      for(const {entry,at} of alreadyThere) {const hit=at[destinations.indexOf(destination)]!,part=destination.videos&&transfer.videos&&beneath(hit,destination.videos.root)?transfer.videos:transfer;part.entries.push({...entry,destination:hit,allocation:{destination:hit,folder:path.dirname(hit)}});}
       if(options.fillFirst&&!first&&destinations.length===2) {
         const kept=options.fillFirst(transfer);first=kept;
         for(const part of destinationParts(transfer)) part.entries=part.entries.filter(entry=>kept.has(entry.source));

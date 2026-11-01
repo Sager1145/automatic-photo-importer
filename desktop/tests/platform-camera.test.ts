@@ -1,28 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, chmod, rm, stat } from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
+import { mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { cameraSources, closeCameraBridge, prepareCamera } from '../platform/camera-bridge';
+import { sourceAware } from '../core/source-fs';
 
-test('native camera protocol stages only into its own temporary folder and aborts safely', {skip:process.platform!=='darwin'}, async () => {
-  const scratch=await mkdtemp(path.join(tmpdir(),'importer-camera-protocol-'));
-  const prior=process.env.IMPORTER_NATIVE_BRIDGE;
-  const helper=path.join(scratch,'fake-camera');
-  await writeFile(helper,`#!${process.execPath}\nconst fs=require('node:fs');const path=require('node:path');const rl=require('node:readline').createInterface({input:process.stdin});const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');rl.on('line',line=>{const c=JSON.parse(line);if(c.command==='list')send({id:c.id,result:[{cameraID:'fixture',name:'Fixture Camera'}]});else if(c.cameraID==='escape')send({id:c.id,result:{path:require('node:os').tmpdir()}});else if(c.cameraID==='hold')send({id:c.id,progress:{completed:0,total:1}});else{const dir=path.join(c.directory,'camera-fixture');fs.mkdirSync(dir);fs.writeFileSync(path.join(dir,'test.jpg'),'fixture');send({id:c.id,result:{path:dir}});}});`);
-  await chmod(helper,0o700);process.env.IMPORTER_NATIVE_BRIDGE=helper;
-  try {
-    const [source]=await cameraSources();assert.equal(source.transport,'camera');assert.equal(source.id,'camera:fixture');assert.equal(source.camera,undefined,'a camera over USB says nothing about DCIM folders');assert.equal(source.path,'camera://fixture');
-    const stage=await prepareCamera(source);assert.equal((await stat(path.join(stage.path,'test.jpg'))).size,7);
-    await stage.cleanup();await assert.rejects(stat(stage.path));
-    await assert.rejects(prepareCamera({...source,path:'camera://escape'}),/unsafe/);
-    const controller=new AbortController();
-    await assert.rejects(prepareCamera({...source,path:'camera://hold'},controller.signal,()=>controller.abort()));
-    assert.equal(controller.signal.aborted,true);
-    assert.equal((await stat(scratch)).isDirectory(),true);
-  }finally{closeCameraBridge();if(prior===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=prior;await rm(scratch,{recursive:true,force:true});}
-});
-
+// The helper protocol (list, files, read by range) is tested on every system in camera-direct.test.ts.
 test('a USB camera reports its card slots, and its capacity is their sum', async () => {
   const { cameraCapacity } = await import('../platform/camera-bridge');
   assert.deepEqual(cameraCapacity([{name:'Slot 1',total:100,free:40},{name:'Slot 2',total:100,free:60}]), {storages:[{name:'Slot 1',total:100,free:40},{name:'Slot 2',total:100,free:60}],total:200,free:100});
@@ -32,7 +17,7 @@ test('a USB camera reports its card slots, and its capacity is their sum', async
 });
 
 test('a camera with two card slots is two sources, each with a stable id, its own capacity and its own stage request', async () => {
-  const { cameraSourcesFrom, stageRequest } = await import('../platform/camera-bridge');
+  const { cameraSourcesFrom, cameraOf } = await import('../platform/camera-bridge');
   const zf={cameraID:'cam\\usb#1',name:'Z f',storages:[{id:'10001',name:'Slot 1',total:124642131968,free:93033594880},{id:'20001',name:'Slot 2',total:124642131968,free:79312322560}]};
   const sources=cameraSourcesFrom([zf]);
   assert.deepEqual(sources.map(source=>[source.id,source.name,source.total,source.free]),[['camera:cam\\usb#1|10001','Z f · Slot 1',124642131968,93033594880],['camera:cam\\usb#1|20001','Z f · Slot 2',124642131968,79312322560]]);
@@ -40,27 +25,38 @@ test('a camera with two card slots is two sources, each with a stable id, its ow
   assert.ok(sources.every(source=>source.transport==='camera'&&source.storages===undefined));
   // The id follows the slot, not its position: listed the other way round, each slot keeps its id.
   assert.deepEqual(cameraSourcesFrom([{...zf,storages:[...zf.storages].reverse()}]).map(source=>source.id).sort(),sources.map(source=>source.id).sort());
-  assert.deepEqual(stageRequest(sources[1]!,'/tmp/x'),{command:'stage',cameraID:'cam\\usb#1',storageID:'20001',directory:'/tmp/x'});
+  assert.deepEqual(cameraOf(sources[1]!),{cameraID:'cam\\usb#1',storageID:'20001'});
   // One storage: one source under the camera's own name and id, staging the whole camera.
   const [single]=cameraSourcesFrom([{cameraID:'x100',name:'X100VI',storages:[{id:'10000001',name:'External Memory',total:100,free:40}]}]);
   assert.deepEqual(single,{id:'camera:x100',name:'X100VI',path:'camera://x100',transport:'camera',storages:[{name:'External Memory',total:100,free:40}],total:100,free:40});
-  assert.deepEqual(stageRequest(single!,'/tmp/x'),{command:'stage',cameraID:'x100',directory:'/tmp/x'});
+  assert.deepEqual(cameraOf(single!),{cameraID:'x100'});
   // Slots without ids (an older helper), or with the same id twice, cannot be told apart: the camera stays one source.
   assert.equal(cameraSourcesFrom([{...zf,storages:zf.storages.map(({id,...rest})=>rest)}]).length,1);
   assert.equal(cameraSourcesFrom([{...zf,storages:zf.storages.map(storage=>({...storage,id:'1'}))}]).length,1);
 });
 
-test('two slots of one camera are staged one after another', {skip:process.platform!=='darwin'}, async () => {
-  const scratch=await mkdtemp(path.join(tmpdir(),'importer-camera-slots-'));
+test('two slots of one camera, each a source: each lists and reads only its own slot, at once, with nothing staged', async () => {
+  const scratch=await realpath(await mkdtemp(path.join(tmpdir(),'importer-camera-slots-')));
   const prior=process.env.IMPORTER_NATIVE_BRIDGE;
-  const helper=path.join(scratch,'fake-camera');
-  await writeFile(helper,`#!${process.execPath}\nconst fs=require('node:fs');const path=require('node:path');const rl=require('node:readline').createInterface({input:process.stdin});const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');let busy=false;rl.on('line',line=>{const c=JSON.parse(line);if(c.command==='list')send({id:c.id,result:[{cameraID:'zf',name:'Z f',storages:[{id:'1',name:'Slot 1'},{id:'2',name:'Slot 2'}]}]});else{if(busy){send({id:c.id,error:'An import is already running for this camera.'});return;}busy=true;setTimeout(()=>{const dir=path.join(c.directory,'camera-'+c.storageID);fs.mkdirSync(dir);fs.writeFileSync(path.join(dir,'slot.txt'),String(c.storageID));busy=false;send({id:c.id,result:{path:dir}});},200);}});`);
-  await chmod(helper,0o700);process.env.IMPORTER_NATIVE_BRIDGE=helper;
+  const helper=path.join(scratch,'fake-camera.cjs');
+  await writeFile(helper,`const rl=require('node:readline').createInterface({input:process.stdin});const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{const c=JSON.parse(line);
+ if(c.command==='list')send({id:c.id,result:[{cameraID:'zf',name:'Z f',storages:[{id:'1',name:'Slot 1'},{id:'2',name:'Slot 2'}]}]});
+ else if(c.command==='files')send({id:c.id,result:['1','2'].filter(id=>!c.storageID||c.storageID===id).map(id=>({storage:'Slot '+id,folder:['DCIM'],name:'slot.txt',size:1,objectID:'o'+id}))});
+ else if(c.command==='read'){const data=Buffer.from(c.objectID.slice(1)).subarray(c.offset,c.offset+c.length);send({id:c.id,result:{bytes:data.length,data:data.toString('base64')}});}
+ else send({id:c.id,result:true});});`);
+  process.env.IMPORTER_NATIVE_BRIDGE=helper;
+  const files=sourceAware(fs),before=new Set(await readdir(tmpdir()));
   try {
     const sources=await cameraSources();
     assert.deepEqual(sources.map(source=>source.name),['Z f · Slot 1','Z f · Slot 2']);
-    const stages=await Promise.all(sources.map(source=>prepareCamera(source)));
-    assert.deepEqual(await Promise.all(stages.map(stage=>import('node:fs/promises').then(fs=>fs.readFile(path.join(stage.path,'slot.txt'),'utf8')))),['1','2']);
-    for(const stage of stages)await stage.cleanup();
+    const opened=await Promise.all(sources.map(source=>prepareCamera(source)));
+    assert.notEqual(opened[0]!.path,opened[1]!.path,'each slot is read under a folder of its own');
+    assert.deepEqual(await Promise.all(opened.map((camera,index)=>files.readdir(path.join(camera.path,`Slot ${index+1}`,'DCIM')))),[['slot.txt'],['slot.txt']]);
+    await assert.rejects(files.readdir(path.join(opened[0]!.path,'Slot 2')),{code:'ENOENT'},'Slot 1 lists only Slot 1');
+    const first=async(file:string)=>{const handle=await files.open(file,'r');try{const buffer=Buffer.alloc(1);await handle.read(buffer,0,1,0);return buffer.toString();}finally{await handle.close();}};
+    assert.deepEqual(await Promise.all(opened.map((camera,index)=>first(path.join(camera.path,`Slot ${index+1}`,'DCIM','slot.txt')))),['1','2']);
+    for(const camera of opened)await camera.cleanup();
+    assert.deepEqual((await readdir(tmpdir())).filter(name=>!before.has(name)&&/photo-importer/i.test(name)),[]);
   }finally{await closeCameraBridge();if(prior===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=prior;await rm(scratch,{recursive:true,force:true});}
 });

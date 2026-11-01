@@ -1,15 +1,19 @@
 import { ExifTool } from 'exiftool-vendored';
 import { ReadRawTask } from 'exiftool-vendored/dist/ReadRawTask';
-import { stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import * as nodeFs from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import type { DuplicateExif, Exposure, Metadata, ShutterNote } from '../shared';
 import { djiProduct } from './dji-models';
 import { streams, STREAMS, ROUTING_BATCH } from '../core/devices';
 import { exactStatKey } from '../core/paths';
+import { isListedPath, listedFile, readListed, sourceAware } from '../core/source-fs';
 import { cpuWorkers, governor, scaledByBudget } from '../resource-limits';
 import { log } from '../logger';
 
+// A camera file (core/source-fs) is looked at like any other.
+const {stat}=sourceAware(nodeFs);
 let reader:ExifTool|undefined;
 /** Today's formula (2 to 6, half the cores), capped by the CPU thread limit. */
 export const exiftoolProcs=()=>cpuWorkers(Math.max(2,Math.min(6,Math.floor(availableParallelism()/2))));
@@ -454,6 +458,56 @@ async function readRouting(file:string,dev:bigint,key:string,background=false,si
   inFlight.set(slot,read);
   return read.finally(()=>inFlight.delete(slot));
 }
+/** What ExifTool reads of a camera file (core/source-fs), taken from the camera by range: nothing is downloaded. Most
+ * formats keep their metadata at the start (EXIF in a JPEG or TIFF-based RAW, the RAF header and its JPEG), so the
+ * first LISTED_HEAD bytes are enough; ExifTool is told how big the whole file is, and -fast keeps it from looking for
+ * trailers. A QuickTime or ISO base media file (MOV, MP4, HEIF, CR3) keeps it in boxes anywhere, its movie box often
+ * after gigabytes of media data: every top-level box but the media data is read, and ExifTool reads those in order. */
+const LISTED_HEAD=1024*1024;
+const skippedBoxes=new Set(['mdat','free','skip','wide']);
+export async function listedBytes(file:string):Promise<Buffer> {
+  const size=listedFile(file)?.size;if(size===undefined)throw new Error('Choose a media file to inspect.');
+  const head=await readListed(file,0,Math.min(size,LISTED_HEAD));
+  if(head.length<12||head.toString('latin1',4,8)!=='ftyp')return head;
+  const parts:Buffer[]=[];let kept=0;
+  for(let offset=0,boxes=0;offset<size&&boxes<4096;boxes++){
+    const header=offset+16<=head.length?head.subarray(offset,offset+16):await readListed(file,offset,16);
+    if(header.length<8)break;
+    let length=header.readUInt32BE(0);const type=header.toString('latin1',4,8);
+    if(length===1){if(header.length<16)break;length=Number(header.readBigUInt64BE(8));}else if(length===0)length=size-offset;
+    if(length<8||offset+length>size)break;
+    if(!skippedBoxes.has(type)){
+      // A movie box of a long clip runs to a few MB; anything far larger is not metadata.
+      if(length>64*1024*1024||kept+length>128*1024*1024)break;
+      parts.push(offset+length<=head.length?head.subarray(offset,offset+length):await readListed(file,offset,length));kept+=length;
+    }
+    offset+=length;
+  }
+  return parts.length?Buffer.concat(parts):head;
+}
+/** ExifTool processes reading camera files from stdin at once; each is one short-lived process (about 0.2 s, 16 at once in 0.35 s on Windows). */
+let listedRunning=0;const listedQueue:(()=>void)[]=[];
+async function listedTags(file:string,args:string[],signal?:AbortSignal):Promise<RawTags> {
+  while(listedRunning>=exiftoolProcs())await new Promise<void>(resolve=>listedQueue.push(resolve));
+  listedRunning++;
+  try {
+    signal?.throwIfAborted();
+    const bytes=await listedBytes(file),tool=exiftool(),executable=await tool.exiftoolPath();
+    const shebang=(tool.options as {ignoreShebang?:boolean}).ignoreShebang===true;
+    const list=await new Promise<RawTags[]>((resolve,reject)=>{
+      const child=spawn(shebang?'perl':executable,[...(shebang?[executable]:[]),'-json','-charset','utf8',...args,'-'],{stdio:['pipe','pipe','pipe'],windowsHide:true,timeout:30000});
+      const out:Buffer[]=[];let err='';
+      child.stdout.on('data',(data:Buffer)=>out.push(data));child.stderr.on('data',(data:Buffer)=>{err=(err+data.toString()).slice(-2048);});
+      child.stdin.on('error',()=>{/* ExifTool may stop reading once it has what it needs. */});
+      child.on('error',reject);
+      child.on('close',status=>{try{const parsed=JSON.parse(Buffer.concat(out).toString('utf8'));if(!Array.isArray(parsed)||!parsed[0])throw new Error();resolve(parsed);}catch{reject(new Error(err.trim()||`ExifTool could not read ${path.basename(file)} (${status})`));}});
+      child.stdin.end(bytes);
+    });
+    // ExifTool names a file read from stdin "-"; the tags name the camera file.
+    const tags=list[0]!;tags.SourceFile=file;
+    return tags;
+  } finally { listedRunning--;listedQueue.shift()?.(); }
+}
 /** details:false reads only the routing fields (camera, date, edited) and caches them by stat; otherwise every tag. */
 export async function metadata(filename:string, options:{details?:boolean;background?:boolean;signal?:AbortSignal}={}):Promise<Metadata> {
   options.signal?.throwIfAborted();
@@ -464,7 +518,7 @@ export async function metadata(filename:string, options:{details?:boolean;backgr
   // trailer scans (-fast keeps maker notes). Full inspection keeps everything.
   // Grouped raw values preserve duplicate tags and the camera's recorded clock.
   // Admitted through the memory governor: above 90% of the limit a new read waits for the running ones.
-  const tags=await governor.govern(async()=>options.details===false?await readRouting(absolute,before.dev,key,options.background===true,options.signal):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
+  const tags=await governor.govern(async()=>isListedPath(absolute)?await listedTags(absolute,options.details===false?routingArgs:['-G1:4','-a','-n'],options.signal):options.details===false?await readRouting(absolute,before.dev,key,options.background===true,options.signal):await exiftool().readRaw(absolute,{readArgs:['-G1:4','-a','-n','-api','RequestAll=3']}));
   const result=metadataFromTags(tags as Record<string,unknown>,{...options,file:absolute});
   if(routing&&statKey(absolute,await stat(absolute,{bigint:true}))===key){const kept=structuredClone(result);remember(key,kept);captured?.set(key,kept);}
   return result;

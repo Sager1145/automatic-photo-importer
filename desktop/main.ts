@@ -56,6 +56,7 @@ import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplic
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
 import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
+import {isListedPath,listedFile} from './core/source-fs';
 import {startScan,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
 import {defaultCpuThreads,defaultMemoryLimitMB,setResourceLimits,resourceLimits,governor,setChildMemory,setMainMemory,privateOrRss,childProcessMemory,limiter,cpuWorkers,hostNow,memoryRange,MB} from './resource-limits';
@@ -221,6 +222,8 @@ const selection=new DeviceSelection(),pausing=new Set<string>();
 // the one remembered across restarts under its UUID (loaded once per connection, verified folder by folder before reuse).
 const listings=new Map<string,Listing>(),scanMemoryLoaded=new Set<string>();
 const memoryVolume=(source:Source)=>source.transport==='storage'?deviceId(source):undefined;
+/** The verified-checksum memory of a USB camera's files (scan-memory), apart from any card's. */
+const cameraMemory=(source:Source)=>source.transport==='camera'?`camera:${source.path}`:undefined;
 /** `save`: also remember it across restarts (a card's import listing). */
 function keepListing(source:Source,listing:Listing|undefined,save=true){
  if(!listing)return;
@@ -335,7 +338,7 @@ async function initializeRecoveryKey(){
 function savedOutcome(value:unknown,title:Message,detail:Message):HistoryEntry['outcome']{if(value==='done'||value==='attention'||value==='stopped')return value;const heading=formatMessage(title,'en'),body=formatMessage(detail,'en');return /attention|error|fail/i.test(heading)||/\b[1-9][\d,]* errors?\b/i.test(body)?'attention':/stop|cancel/i.test(heading+' '+body)?'stopped':'done';}
 async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message,outcome:HistoryEntry['outcome']){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail,outcome});state.history=state.history.slice(0,50);void save().catch(()=>{});}
-async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
+async function allowed(file:string){if(isListedPath(file)){if(listedFile(file))return file;throw new Error('Choose this file or its source folder first.');}const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
 /** Connected drives for Settings › Devices › Drive formats: disk images and nameless mounts are left out. */
 function driveFormatsOf(volumes:MountedVolume[]):NonNullable<AppState['driveFormats']>{
  // The startup disk: "/" on macOS and Linux, the system drive's letter on Windows.
@@ -505,7 +508,6 @@ const recordSteps=['history','later','earlier','cleaning','measuring'];
 /** Planning progress as the interface shows it: checking (and, for organization, reading) files before anything is written. */
 function planningProgress(count:number,file:string,detail?:Parameters<PlanProgress>[2]):Progress{return {phase:'planning',step:detail?.step??'checking',completed:count,total:detail?.total??0,bytes:detail?.bytes??0,totalBytes:detail?.totalBytes??0,...(detail?.share!==undefined?{share:detail.share}:{}),speed:0,file};}
 /** Files staged from a USB camera so far (the camera reports counts, not bytes or names). */
-function downloadProgress(done:number,total:number):Progress{return {phase:'planning',step:'downloading',completed:done,total,bytes:0,totalBytes:0,speed:0,file:''};}
 /** What a listing is measured against, in this order: what this source's last listing found in the scope (`known`), else the
  * remembered size of the last listing of the scope, else the used bytes of the drive (`used`, a whole drive only). */
 async function listingHint(root:string,folders:string[]|undefined,backup:boolean,known?:ListingHint,used=0):Promise<ListingHint|undefined>{
@@ -894,16 +896,15 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
  let stage:Prepared['stage'],sourcePath=source.path;
  try{
   if(source.transport==='camera'){
+   // The camera's files are listed, not downloaded: planning and the copy read them from the camera itself.
    stage=await prepareCamera(source,signal,onCamera);sourcePath=stage.path;approved.add(sourcePath);
-   // Staging may share a destination's disk; measure free space after it.
-   for(const [index,root] of roots.entries()){const info=await volumeInfo(root,volumes);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');infos[index]={...infos[index]!,free:info.free};}
-   for(const [index,root] of (videoRoots??[]).entries())if(apart[index]){const info=await volumeInfo(root,volumes);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');videoInfos![index]={...videoInfos![index]!,free:info.free};}
   }
   // The folder for unknown files must not be one the app files into.
   if(!request.useFileDate&&prefs.noMetadataHandling==='folder')noMetadataFolderName(prefs.noMetadataFolder,[prefs.editedFolder??'']);
   onPlanning?.();
   // Card files copied before and still unchanged are recognised without reading them.
-  const volume=reorganize||stage?undefined:memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,source.path):undefined;
+  // A camera's files are remembered the same way, by camera (and card slot), path, size and date: an unchanged one is not read again.
+  const volume=reorganize?undefined:stage?cameraMemory(source):memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,sourcePath):undefined;
   const skipErrors=request.skipErrors===true||prefs.skipFileErrors!==false;
   // An earlier listing of this scope sizes the estimate; failing that a card's or drive's used space, or the files of its last scan.
   // Selected folders are sized from the files an earlier scan found inside them; the whole drive's used space would overestimate them.
@@ -980,10 +981,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(parts.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
   else{
-   job.phase='discovering';job.progress=undefined;job.importResult=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
+   job.phase='discovering';job.progress=undefined;job.importResult=undefined;job.detail=message(job.source.transport==='camera'?'job.listingCamera':'job.finding');emit();
    await stopResidueCheck();
    if(qaHooks)await qaHooks.gate(job.id,signal);
-   prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   prepared=await prepare(job.id,job.source,job.backup,input,signal,done=>{job.detail=message('job.listing',{count:done});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
   }
   // A job someone started (not an automatic one) that found unknown files stops at the review's confirmation first; nothing has been written.
   if(request&&prepared.noMetadata){
@@ -1011,7 +1012,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{direct:etaTracker.predictDirect(prepared.eta.destinations),totals:etaTotals(plans)})});
   job.phase='copying';
   // What each file actually came to at each destination: the one record duplicates, placement, the source checksums and Delete originals use.
-  const outcomes:Outcomes=new Map(),volume=reorganize||prepared.stage?undefined:memoryVolume(job.source);
+  const outcomes:Outcomes=new Map(),volume=reorganize?undefined:prepared.stage?cameraMemory(job.source):memoryVolume(job.source),mount=prepared.stage?.path??job.source.path;
   let executed;
   // Formal planning may have just created a previously absent backup folder. Bind its read-only catalog now.
   await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
@@ -1024,7 +1025,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   });}finally{
    // Checksums of the source files this job verified, remembered for the next plan even when it stops or fails. Only a cache.
    const sums=importedSums(outcomes);
-   if(volume&&!qa&&Object.keys(sums).length)await rememberImported(app.getPath('userData'),volume,job.source.path,sums).catch(()=>{});
+   if(volume&&!qa&&Object.keys(sums).length)await rememberImported(app.getPath('userData'),volume,mount,sums).catch(()=>{});
   }
   const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=executed;
   addErrors(job,...errors.map(text));recordIssues(job,warnings);
@@ -1106,7 +1107,7 @@ async function openReview(source:Source,backup:boolean,request:RunRequest,organi
  const reorganize=request.reorganize;
  pauseCatalog();cancelAutomaticChecks();misplacedControl?.abort();await stopResidueCheck();await discardReview();const control=new AbortController();reviewControl=control;state.busyReview=true;state.reviewSourceId=source.id;emit();
  try{
-  const reviewId=randomUUID();log('normal','job','review-start',{source:source.name,path:source.path,reorganize},reviewId);reviewed=await withJob(reviewId,()=>prepare(reviewId,source,backup,request,control.signal,(done,total)=>{state.reviewProgress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();}));
+  const reviewId=randomUUID();log('normal','job','review-start',{source:source.name,path:source.path,reorganize},reviewId);reviewed=await withJob(reviewId,()=>prepare(reviewId,source,backup,request,control.signal,done=>{state.reviewProgress=planningProgress(done,'',{step:'listing',total:0,bytes:0,totalBytes:0});progressEmit();},(count,file,detail)=>{state.reviewProgress=planningProgress(count,file,detail);progressEmit();}));
   state.review=reviewed.review;if(reorganize){state.review.destinationIndex=organizationDestination;if(request.backupScope)state.review.scope='backup';}(state.sourceInventories??={})[source.id]=reviewed.inventory;
  }catch(error){if(!control.signal.aborted)throw error;}
  finally{if(reviewControl===control){state.busyReview=false;state.reviewSourceId=undefined;state.reviewProgress=undefined;reviewControl=undefined;}emit();recoveryRefresh.resume();void releaseIfIdle();}

@@ -13,6 +13,7 @@ export const linux: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'Linux x86_64',
   cameraPlace: 'USB/Z f',
+  cameraFolder: '/.photo-importer-camera',
   systemDisk: 'ext4',
   formats: {
     // lsblk FSTYPE (the format on the disk, whichever driver mounts it): ext4, Btrfs, FAT32 (vfat), exFAT, NTFS (ntfs3), HFS+ and APFS (apfs-fuse).

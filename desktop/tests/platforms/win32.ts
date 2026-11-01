@@ -14,6 +14,7 @@ export const win32: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'junction'),
   navigatorPlatform: 'Win32',
   cameraPlace: 'USB\\Z f',
+  cameraFolder: '\\\\?\\photo-importer-camera',
   systemDisk: 'NTFS',
   formats: {
     // Get-Volume FileSystem as Windows names it: NTFS, exFAT, FAT32 and ReFS get drive letters; APFS, HFS+ and ext4 do not.

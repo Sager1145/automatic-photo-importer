@@ -8,7 +8,7 @@ import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, uti
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
-import { cameraCapacity, cameraSourcesFrom, stageRequest } from '../platform/camera-bridge';
+import { cameraCapacity, cameraOf, cameraSourcesFrom } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
@@ -23,9 +23,11 @@ import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type A
 import { probeDestination } from '../core/destination-probe';
 import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
 import { inventory } from '../core/inventory';
+import { registerListedSource, LISTED_PARENT } from '../core/source-fs';
+import { createHash } from 'node:crypto';
 import { recordPartial, IMPORTS, STAGING } from '../core/import-recovery';
 import { cleanResidue, findRunResidue } from '../core/residue';
-import { noteTemporary, runTrace } from '../core/run-trace';
+import { runTrace } from '../core/run-trace';
 import { withJob } from '../logger';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
@@ -40,6 +42,8 @@ export interface PlatformProfile {
   /** navigator.platform in this system's app window, and how a USB camera named "Z f" reads there. */
   navigatorPlatform: string;
   cameraPlace: string;
+  /** The folder a USB camera's files are read under while it is imported (core/source-fs): it exists nowhere on disk. */
+  cameraFolder: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
   /** The error this system gives for a hard link on a filesystem without them (exFAT): publishing must then copy. */
@@ -283,41 +287,71 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.deepEqual(await readdir(locked), []);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
+  'USB camera: planned from its file list and imported straight into the library, nothing downloaded to a temporary folder': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    assert.equal(LISTED_PARENT, profile.cameraFolder);
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-camera-')));
+    const temporary = new Set(await readdir(tmpdir()));
+    try {
+      const library = join(root, 'photobackup'), day = Date.parse('2026-10-25T10:00:00Z');
+      const contents: Record<string, Buffer> = { 'Slot 1/DCIM/100NZ_F/DSC_0001.NEF': Buffer.alloc(300_000, 1), 'Slot 1/DCIM/100NZ_F/DSC_0002.NEF': Buffer.alloc(200_000, 2), 'Slot 2/DCIM/100NZ_F/DSC_0003.JPG': Buffer.alloc(100_000, 3) };
+      await mkdir(join(library, '2026', '202610', 'NIKON Z f'), { recursive: true });
+      await writeFile(join(library, '2026', '202610', 'NIKON Z f', 'DSC_0001.NEF'), contents['Slot 1/DCIM/100NZ_F/DSC_0001.NEF']!);
+      const read = new Map<string, number>();
+      const camera = registerListedSource({ id: `feature-${profile.platform}`, files: Object.entries(contents).map(([relative, data]) => ({ relative, size: data.length, modifiedMs: day })),
+        read: async (file, offset, length) => { read.set(file.relative, (read.get(file.relative) ?? 0) + Math.min(length, contents[file.relative]!.length - offset)); return contents[file.relative]!.subarray(offset, offset + length); } });
+      t.after(camera.unregister);
+      assert.ok(camera.root.startsWith(profile.cameraFolder + sep));
+      const looked: string[] = [];
+      const metadata = async (file: string) => { looked.push(posixRelative(camera.root, file)); return { fields: {}, camera: 'NIKON Z f', date: '2026-10-25T10:00:00' }; };
+      const { plans } = await plan(camera.root, [library], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, metadata);
+      const entries = plans[0]!.entries, name = (entry: { source: string }) => posixRelative(camera.root, entry.source);
+      // The one already in the library is confirmed by content and never looked at again; only the new ones are routed.
+      assert.deepEqual(looked.sort(), ['Slot 1/DCIM/100NZ_F/DSC_0002.NEF', 'Slot 2/DCIM/100NZ_F/DSC_0003.JPG']);
+      assert.deepEqual(entries.filter(entry => entry.skip).map(name), ['Slot 1/DCIM/100NZ_F/DSC_0001.NEF']);
+      assert.equal(read.get('Slot 1/DCIM/100NZ_F/DSC_0001.NEF'), 300_000, 'the possible duplicate is read once, to compare');
+      assert.equal(read.get('Slot 1/DCIM/100NZ_F/DSC_0002.NEF'), undefined, 'a new file is not read to plan it');
+      const result = await execute(plans[0]!);
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.copied, 2);
+      for (const file of ['DSC_0002.NEF', 'DSC_0003.JPG']) {
+        const copy = await readFile(join(library, '2026', '202610', 'NIKON Z f', file)), original = Object.entries(contents).find(([relative]) => relative.endsWith(file))![1];
+        assert.equal(createHash('sha256').update(copy).digest('hex'), createHash('sha256').update(original).digest('hex'));
+      }
+      assert.deepEqual((await readdir(tmpdir())).filter(entry => !temporary.has(entry) && !entry.startsWith('feature-camera-')), [], 'nothing was written to the temporary folder');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
   'publishing: a drive without hard links (exFAT) gets copies instead of failing': profile => {
     // Real case: Windows reports a hard link on exFAT as EISDIR, and every new file of an import failed.
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: profile.noHardLinkError }), profile.platform), true, profile.noHardLinkError);
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'ENOENT' }), profile.platform), false, 'a missing file is a real error');
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'EEXIST' }), profile.platform), false, 'an existing name is a real error');
   },
-  'Clean up for a stopped job: its camera folder in the system temporary folder and its staged copies go, nothing else': async (profile, t) => {
+  'Clean up for a stopped job: the copies it left in the destination go, nothing else; a USB camera import leaves nothing in the temporary folder': async (profile, t) => {
     if (!onNative(profile, t)) return;
     configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
     const base = await realpath(await mkdtemp(join(tmpdir(), 'feature-job-cleanup-')));
-    // The camera helper's folder, made where it makes it: the system temporary folder as Node names it (macOS: a /var link to /private/var).
-    const camera = await mkdtemp(join(tmpdir(), 'photo-importer-camera-')), other = await mkdtemp(join(tmpdir(), 'photo-importer-camera-'));
+    const before = new Set(await readdir(tmpdir()));
+    // A camera import reads the camera where it is (core/source-fs): its only leftovers are partial copies in the destination.
+    const original = Buffer.alloc(4000, 1);
+    const camera = registerListedSource({ id: `feature-cleanup-${profile.platform}`, files: [{ relative: 'Slot 1/DCIM/100NZ_F/DSC_0001.NEF', size: original.length, modifiedMs: Date.parse('2024-02-03T12:00:00Z') }], read: async (_file, offset, length) => original.subarray(offset, offset + length) });
     try {
-      const card = join(base, 'card'), root = join(base, 'backup');
-      await mkdir(card); await mkdir(root);
-      await writeFile(join(card, 'DSC_0001.NEF'), Buffer.alloc(4000, 1)); await writeFile(join(camera, 'DSC_0001.NEF'), Buffer.alloc(800, 2)); await writeFile(join(other, 'DSC_0002.NEF'), 'x');
-      const [transfer] = (await plan(card, [root], { backup: false, template: '{year}/{camera}', layout: 'flat', unknownRules: {} }, async () => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} }))).plans;
+      const root = join(base, 'backup'), other = join(base, 'other.partial');
+      await mkdir(root); await writeFile(other, 'x');
+      const [transfer] = (await plan(camera.root, [root], { backup: false, template: '{year}/{camera}', layout: 'flat', unknownRules: {} }, async () => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} }))).plans;
       const staging = await storeFolder(await storeFor(root), IMPORTS, STAGING);
       await withJob('feature-job', async () => {
-        noteTemporary(camera);
         const staged = join(staging, `${randomUUID()}.partial`); await writeFile(staged, Buffer.alloc(1000, 1));
         await recordPartial('stage', staged, await lstat(staged, { bigint: true }), transfer!.entries[0]!, transfer!, new Map());
       });
       const found = await findRunResidue({ job: 'feature-job', ...runTrace('feature-job')! });
-      // Paths come back as this system writes them, under the canonical temporary folder.
-      const temporary = found.items.find(item => item.kind === 'temporary')!;
-      assert.equal(temporary.path, await realpath(camera));
-      assert.equal(temporary.root, await realpath(tmpdir()));
-      assert.deepEqual(found.items.map(item => item.kind).sort(), ['resumable', 'temporary']);
+      assert.deepEqual(found.items.map(item => item.kind), ['resumable'], 'the partial copy, and no temporary folder');
       await cleanResidue(found);
       assert.deepEqual(await readdir(staging), []);
-      await assert.rejects(lstat(camera));
-      assert.deepEqual(await readdir(other), ['DSC_0002.NEF'], 'another camera folder stays');
-      assert.equal((await stat(join(card, 'DSC_0001.NEF'))).size, 4000, 'the original stays');
-    } finally { for (const folder of [base, camera, other]) await rm(folder, { recursive: true, force: true }); }
+      assert.equal(await readFile(other, 'utf8'), 'x', 'another file stays');
+      assert.deepEqual((await readdir(tmpdir())).filter(name => !before.has(name) && /photo-importer/i.test(name)), []);
+    } finally { camera.unregister(); await rm(base, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),
@@ -328,9 +362,9 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
     const sources = cameraSourcesFrom([camera]);
     assert.deepEqual(sources.map(source => [source.id, source.name, source.total, source.free]),
       [['camera:camera-1|10001', 'Z f · Slot 1', 128, 64], ['camera:camera-1|20001', 'Z f · Slot 2', 128, 32]]);
-    assert.deepEqual(sources.map(source => stageRequest(source, 'scratch').storageID), ['10001', '20001']);
+    assert.deepEqual(sources.map(source => cameraOf(source).storageID), ['10001', '20001']);
     const [single] = cameraSourcesFrom([{ ...camera, storages: camera.storages.slice(0, 1) }]);
-    assert.deepEqual([single!.id, single!.name, stageRequest(single!, 'scratch').storageID], ['camera:camera-1', 'Z f', undefined]);
+    assert.deepEqual([single!.id, single!.name, cameraOf(single!).storageID], ['camera:camera-1', 'Z f', undefined]);
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
     Object.defineProperty(globalThis, 'navigator', { value: { platform: profile.navigatorPlatform }, configurable: true });
     try {

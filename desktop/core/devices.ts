@@ -1,7 +1,10 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { isListedPath, sourceAware } from './source-fs';
 import path from 'node:path';
 import { volumeAt } from '../platform/volumes';
 import { cpuWorkers, governor, memoryBudgetBytes, type MemoryGovernor } from '../resource-limits';
+// Listed sources (a USB camera) read through the same calls as a card; see source-fs.
+const fs=sourceAware(nodeFs);
 
 /** What a storage device is, as far as streaming it is concerned. */
 export type DeviceKind='hdd'|'ssd'|'card'|'unknown';
@@ -16,6 +19,8 @@ export const CHUNK:Record<DeviceKind,number>={hdd:8*1024*1024,card:1024*1024,ssd
 type Classify=(file:string)=>Promise<DeviceKind>;
 /** The medium `file` is on, from the description of its volume (platform/volumes). */
 async function classify(file:string):Promise<DeviceKind> {
+  // A camera over USB serves one transfer at a time (a second session is refused): one stream, long reads.
+  if(isListedPath(file)) return 'hdd';
   return (await volumeAt(file))?.kind ?? 'unknown';
 }
 
