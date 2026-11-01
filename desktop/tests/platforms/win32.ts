@@ -15,6 +15,11 @@ export const win32: PlatformProfile = {
   navigatorPlatform: 'Win32',
   cameraPlace: 'USB\\Z f',
   systemDisk: 'NTFS',
+  formats: {
+    // Get-Volume FileSystem as Windows names it: NTFS, exFAT, FAT32 and ReFS get drive letters; APFS, HFS+ and ext4 do not.
+    volumes: () => parseWindowsVolumes((['NTFS', 'exFAT', 'FAT32', 'ReFS'] as const).map((type, index) => ({ Path: `${'EFGH'[index]}:\\`, Label: type, VolumeId: `\\\\?\\Volume{${type}}\\`, DriveType: 'Fixed', Size: 1e12, SizeRemaining: 5e11, DiskNumber: index + 3, UniqueId: `disk-${type}`, BusType: 'USB', FriendlyName: `${type} USB Device`, FileSystem: type, IsReadOnly: false }))),
+    expect: [{ format: 'ntfs', access: 'readwrite' }, { format: 'exfat', access: 'readwrite' }, { format: 'fat', access: 'readwrite' }, { format: 'refs', access: 'readwrite' }],
+  },
   exfatDirect: false,
   folderFlush: false,
   // The A006 SSD's root (I:\) as Windows reports it: the volume serial 0xA04AA04E, and file id 0 for a volume root.

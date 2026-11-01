@@ -1691,3 +1691,15 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-presets,.browser-presets *{-webkit-app-region:no-drag}
 
 
+/* Settings › Devices › Drive formats */
+.drive-format-list,.drive-format-drivers{list-style:none;margin:0;padding:0;display:grid;gap:.35rem}
+.drive-format-list>li{padding:var(--tile-pad);border-radius:var(--radius-md);background:var(--fill-4);display:grid;gap:.35rem}
+.drive-format-drivers>li{display:grid;gap:.25rem;padding-left:.5rem;border-left:2px solid var(--fill-3)}
+.drive-format-driver-heading{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;min-width:0}
+.drive-format-driver-heading>.muted{overflow-wrap:anywhere}
+.drive-format-ok{color:var(--label-secondary);font-size:var(--text-caption)}
+.drive-format-warn{color:var(--warning);font-size:var(--text-caption);font-weight:600}
+.drive-format-install{margin:0;padding-left:1.25rem;font-size:var(--text-caption)}
+.drive-format-install code{overflow-wrap:anywhere;user-select:text}
+.drive-format-all>summary{cursor:pointer;margin:.5rem 0}
+.drive-format-list .settings-row-note{grid-column:auto}

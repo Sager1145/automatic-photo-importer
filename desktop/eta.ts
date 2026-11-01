@@ -5,6 +5,7 @@ import {RateMeter} from './rate-meter';
 import {FractionHold,JobModel,defaultBook,sharedDriveTotal,type JobKind,type PriorBook,type StepTotal} from './eta-model';
 import {PriorTable,layeredBook,type DriveInfo,type PriorContext,type PriorStore} from './eta-priors';
 import {log} from './logger';
+import {driveFormat} from './core/drive-formats';
 
 /** A job's progress as the tracker needs it (the shape of Progress). */
 export interface EtaInput {phase?:string;step?:string;share?:number;completed:number;total:number;bytes:number;totalBytes:number;work?:Progress['work'];matched?:number;matchedBytes?:number;}
@@ -111,8 +112,7 @@ export class EtaTracker {
  /** Whether files are expected to be published by copying on these destinations: one did before (this session or in saved history), or its file system has no hard links. */
  predictPublish(destinations:DriveInfo[]):'link'|'copy'{
   // NTFS has hard links (Windows publishes with fs.link like APFS and ext4): only FAT-family drives publish by copying.
-  const slow=new Set(['exfat','msdos','fat32','vfat','fat']);
-  return destinations.some(item=>(item.id&&this.copyPublishing.has(item.id))||slow.has((item.fsType??'').toLowerCase()))?'copy':'link';
+  return destinations.some(item=>(item.id&&this.copyPublishing.has(item.id))||['exfat','fat'].includes(driveFormat(item.fsType)??''))?'copy':'link';
  }
  /** How many of these destinations an import writes directly (exFAT on macOS, as the copy decides): each file is checked in place, with no verify step after. */
  predictDirect(destinations:DriveInfo[],platform:string=process.platform):number{

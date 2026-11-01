@@ -30,6 +30,7 @@ import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
+import {checkFileSizes,driverLinks} from './core/drive-formats';
 import {folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,onCameraCard,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
 import {chosenFolders,destinationRoots,libraryAnchor,libraryRoots,type ChosenFolder} from './platform/destination-roots';
@@ -333,11 +334,17 @@ function savedOutcome(value:unknown,title:Message,detail:Message):HistoryEntry['
 async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message,outcome:HistoryEntry['outcome']){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail,outcome});state.history=state.history.slice(0,50);void save().catch(()=>{});}
 async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
+/** Connected drives for Settings › Devices › Drive formats: disk images and nameless mounts are left out. */
+function driveFormatsOf(volumes:MountedVolume[]):NonNullable<AppState['driveFormats']>{
+ // The startup disk: "/" on macOS and Linux, the system drive's letter on Windows.
+ const system=process.platform==='win32'?`${process.env.SystemDrive??'C:'}\\`.toLowerCase():'/';
+ return volumes.filter(volume=>!volume.diskImage&&(volume.fsType||volume.name)).map(volume=>({path:volume.path,name:volume.name||volume.path,...(volume.fsType?{fsType:volume.fsType}:{}),...(volume.readOnly?{readOnly:true}:{}),...(volume.path.toLowerCase()===system?{system:true}:{})}));
+}
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
   const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
-  state.destinationStatus=destinations;await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
+  state.destinationStatus=destinations;state.driveFormats=driveFormatsOf(volumes);await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
   // A drive's records are shared by every computer using it: list this one in each connected store it is not in yet.
@@ -867,6 +874,8 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
    :{...filed,...copy,backup:false,duplicates:true,...(backup?{everyFile:true}:{}),lookElsewhere:async paths=>qa||(await Promise.all(paths.map(async root=>{const index=Math.max(roots.indexOf(root),videoRoots?.indexOf(root)??-1);if(index<0)return true;const {id,scope}=placementOf(prefs,index,request.useFileDate);return await placementScope(app.getPath('userData'),id)!==scope;}))).some(changed=>changed)};
   const {inventory,listing:record,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,planning,p=>metadata(p,{details:false}),signal,onProgress);
   signal.throwIfAborted();
+  // A FAT32 destination cannot hold a file over 4 GiB: the import is refused now, before anything is copied, not midway.
+  if(!reorganize)checkFileSizes(plans,root=>volumeOf(volumes,root)?.fsType);
   const available=availableFor(owner,infos,volumes),videoAvailable=videoInfos?availableFor(owner,videoInfos,volumes):[];
   // A same-drive organization moves files; it never needs room for a second library.
   // A video folder on its own volume is checked against that volume: the photo folder's plan then counts its photos only.
@@ -1313,6 +1322,8 @@ async function action(input:Action):Promise<void>{
   case 'refresh':await refresh();break;
   case 'logOpenFolder':{const logger=activeLogger();if(!logger)break;const target=await logger.latest();if(target)shell.showItemInFolder(target);else await shell.openPath(logger.directory);break;}
   case 'acknowledgeOldRecords':{await acknowledgeDrive(input.drive);break;}
+  // Only the listed drivers' pages, and only in the user's browser: the app never downloads or installs a driver.
+  case 'openDriverLink':{if(!driverLinks().has(input.url))throw new Error('Unknown link');await shell.openExternal(input.url);break;}
   case 'logCopyPath':{const latest=await activeLogger()?.latest();if(latest)clipboard.writeText(latest);break;}
   case 'logExport':{
    const logger=activeLogger();if(!logger)break;await logger.flush();

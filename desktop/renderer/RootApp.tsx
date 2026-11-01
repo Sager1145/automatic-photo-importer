@@ -31,6 +31,7 @@ import { CleanupConfirmation } from './CleanupConfirmation';
 import { Button, CardHeader, ConfirmSheet, Icon, ReleaseConfirm, animateInterfaceChange, interfaceSettled, interfaceTransition, motionMs, nextConfirmStep, reducedMotion, sheetOrder, showSheet, useAnimatedClose, useDismissableDetails, type DeleteRecoveryStep, type Dispatch, type InterfaceChange } from './ui';
 import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, endedResult, formatEstimate, formatRemaining, jobCount, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
 import { BrandLogo } from './BrandLogo';
+import { DriveFormats } from './DriveFormats';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
 
@@ -956,7 +957,7 @@ export function SettingsPage({state,act,busy,requestedCategory,requestKey,onLibr
       <SettingsSection title={t("Same name, different content")} icon={Files}><ConflictNamingSettings preferences={p} act={act} /></SettingsSection>
       <SettingsSection title={t("Problem files")} icon={FileQuestion}><div data-testid="collect-problem-files-setting"><Switch checked={p.collectProblemFiles} onChange={collectProblemFiles => act({ type: 'preferences', patch: { collectProblemFiles } })} label={t("Collect problem files")} detail={t("Move 0-byte files and their companions into Problem files. Undo puts them back.")} /></div><Switch checked={p.removeAppleDouble} onChange={removeAppleDouble => act({ type: 'preferences', patch: { removeAppleDouble } })} label={t("Remove macOS ._ files")} detail={t("Deletes the hidden ._ files macOS leaves beside copied and organized files on exFAT and FAT drives, only when they hold no tags or other data.")} /></SettingsSection>
     </fieldset></>,
-    devices: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /></>,
+    devices: <><RememberedDrives preferences={p} act={act} /><IgnoredDrives preferences={p} act={act} /><DriveFormats state={state} act={act} /></>,
     performance: <>
       {lockNote('performance')}
       <SettingsSection title={t("Drives at once")} icon={Radio}><div className="settings-row"><label htmlFor="settings-parallel">{t("Drives at once")}</label><div className="text-size-control"><input id="settings-parallel" type="range" min={1} max={10} step={1} value={p.parallel} onChange={event => act({ type: 'preferences', patch: { parallel: Number(event.target.value) } })} /><strong>{formatNumber(p.parallel)}</strong></div></div><p className="settings-row-note" data-testid="parallel-lower-note">{t("Current copies finish before a lower limit takes effect.")}</p></SettingsSection>

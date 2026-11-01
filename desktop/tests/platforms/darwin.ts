@@ -14,6 +14,12 @@ export const darwin: PlatformProfile = {
   navigatorPlatform: 'MacIntel',
   cameraPlace: 'USB/Z f',
   systemDisk: 'apfs',
+  formats: {
+    // diskutil info -plist of an APFS, a Mac OS Extended, an exFAT, a FAT32 (MS-DOS) and an NTFS drive (macOS mounts NTFS read-only).
+    volumes: () => ([['APFS-SSD', 'apfs', true], ['TimeMachine', 'hfs', true], ['A006', 'exfat', true], ['CARD', 'msdos', true], ['WINDOWS', 'ntfs', false]] as const).map(([name, type, writable], index) =>
+      parseMacVolume({ MountPoint: `/Volumes/${name}`, VolumeName: name, VolumeUUID: `${name}-UUID`, BusProtocol: 'USB', Internal: false, Writable: writable, TotalSize: 1e12, VolumeFreeSpace: 5e11, FilesystemType: type, DeviceIdentifier: `disk${index + 6}s1`, ParentWholeDisk: `disk${index + 6}` }, `/Volumes/${name}`)),
+    expect: [{ format: 'apfs', access: 'readwrite' }, { format: 'hfs', access: 'readwrite' }, { format: 'exfat', access: 'readwrite' }, { format: 'fat', access: 'readwrite' }, { format: 'ntfs', access: 'read', readOnly: true }],
+  },
   exfatDirect: true,
   folderFlush: true,
   // The A006 SSD's root as macOS reports it (its store.json from 0.3.0 recorded 16777241:18); the device number changes per mount.
