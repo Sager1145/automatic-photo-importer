@@ -48,6 +48,8 @@ export interface PlatformProfile {
   folderFlush: boolean;
   /** The error this system gives for a hard link on a filesystem without them (exFAT): publishing must then copy. */
   noHardLinkError: string;
+  /** Whether a folder's unchanged identity (inode, modified and change time) proves its names unchanged. */
+  folderKeyProvesNames: boolean;
   /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
   namesIgnoreCase: boolean;
   /** The file system of the computer's own disk as the adapter names it (NTFS, APFS, ext4): it has hard links, so files publish by linking. */
@@ -352,6 +354,27 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.equal(await readFile(other, 'utf8'), 'x', 'another file stays');
       assert.deepEqual((await readdir(tmpdir())).filter(name => !before.has(name) && /photo-importer/i.test(name)), []);
     } finally { camera.unregister(); await rm(base, { recursive: true, force: true }); }
+  },
+  'rescans: a photo a camera adds to a folder whose timestamp it restores is still found': async (profile, t) => {
+    const { FOLDER_KEY_PROVES_NAMES } = await import('../core/inventory');
+    if (!onNative(profile, t)) return;
+    assert.equal(FOLDER_KEY_PROVES_NAMES, profile.folderKeyProvesNames);
+    const source = await realpath(await mkdtemp(join(tmpdir(), 'feature-rescan-')));
+    try {
+      const folder = join(source, 'DCIM', '100TEST'), stamp = new Date('2026-01-01T00:00:00Z');
+      await mkdir(folder, { recursive: true });
+      for (const name of ['DSC0.JPG', 'DSC1.JPG']) await writeFile(join(folder, name), 'photo');
+      await utimes(folder, stamp, stamp);
+      const first = await inventory(source, {});
+      // Twenty times, since a missed name depended on timing on Windows.
+      let listing = first.listing;
+      for (let round = 0; round < 20; round++) {
+        await writeFile(join(folder, `NEW${round}.JPG`), 'shot later'); await utimes(folder, stamp, stamp);
+        const again = await inventory(source, { reuse: listing });
+        assert.ok(again.files.some(file => file.relative.endsWith(`NEW${round}.JPG`)), `round ${round}: the new photo is found`);
+        listing = again.listing;
+      }
+    } finally { await rm(source, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),

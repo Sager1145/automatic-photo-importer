@@ -4,6 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {inventory} from '../core';
+import {FOLDER_KEY_PROVES_NAMES} from '../core/inventory';
+
+// Folders a reused listing reads again: on macOS and Linux only the changed ones; on Windows also the unchanged
+// ones it walks, whose names are compared (their files are still not looked at again). See FOLDER_KEY_PROVES_NAMES.
+const relisted=(changed:string[],unchanged:string[])=>(FOLDER_KEY_PROVES_NAMES?changed:[...changed,...unchanged]).sort();
 
 test('the inventory walk reports growing file and byte counts that end at its totals',async t=>{
  const source=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'scan-progress-')));
@@ -26,7 +31,7 @@ test('an import reuses a finished scan listing and lists again only when a folde
  t.mock.method(fs,'readdir',async(...args:Parameters<typeof fs.readdir>)=>{listed.push(String(args[0]));return (readdir as (...values:unknown[])=>Promise<unknown>)(...args);});
  const {syncBuiltinESMExports}=await import('node:module');syncBuiltinESMExports();
  const reused=await inventory(source,{reuse:scan.listing});
- assert.deepEqual(listed,[],'an unchanged card is not listed again');
+ assert.deepEqual([...listed].sort(),relisted([],[source,path.join(source,'DCIM'),path.join(source,'DCIM','100TEST')]),'an unchanged card is not listed again');
  assert.deepEqual(reused.files.map(file=>file.relative),scan.files.map(file=>file.relative));
  await new Promise(resolve=>setTimeout(resolve,20));
  await fs.writeFile(path.join(source,'DCIM','100TEST','DSC9.JPG'),'new photo');
@@ -48,7 +53,7 @@ test('after a change only the changed folder is listed again; unchanged folders 
  const {syncBuiltinESMExports}=await import('node:module');syncBuiltinESMExports();
  const again=await inventory(source,{reuse:scan.listing});
  t.mock.restoreAll();syncBuiltinESMExports();
- assert.deepEqual(listed,[path.join('DCIM','100TEST')]);
+ assert.deepEqual([...listed].sort(),relisted([path.join('DCIM','100TEST')],['','DCIM',path.join('DCIM','101TEST')]));
  assert.deepEqual(again.files.map(file=>file.relative).sort(),[...scan.files.map(file=>file.relative),path.join('DCIM','100TEST','DSC9.JPG')].sort());
  const third=await inventory(source,{reuse:again.listing});
  assert.equal(third.files.length,again.files.length,'the refreshed listing is remembered for the next import');
@@ -70,7 +75,7 @@ test('a file rewritten in place after the scan is re-read with its folder in the
  const {plans:[transfer],listing}=await plan(source,[root],{backup:false as const,template:'{year}',layout:'flat' as const,unknownRules:{},reuse:scan.listing},async file=>{read.push(file);return {fields:{}};});
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.equal(transfer!.entries.find(entry=>entry.source===photo)!.size,Buffer.byteLength('a longer rewritten photo'));
- assert.deepEqual(listed.filter(folder=>!folder.startsWith('..')),['DCIM'],'only the stale file\'s folder is read again');
+ assert.deepEqual(listed.filter(folder=>!folder.startsWith('..')).sort(),relisted(['DCIM'],['','MISC','DCIM']),'only the stale file\'s folder is read again');
  assert.deepEqual(read.sort(),[photo,other].sort(),'each file is checked once: the plan is not run again');
  assert.equal(listing!.files.find(file=>file.relative===path.join('DCIM','DSC0.JPG'))!.size,Buffer.byteLength('a longer rewritten photo'),'the listing remembered for next time has the new size');
 });
@@ -85,7 +90,7 @@ test('a folder-scoped listing reuses the whole-card record and returns no record
  const {syncBuiltinESMExports}=await import('node:module');syncBuiltinESMExports();
  const scoped=await inventory(source,{folders:[path.join('DCIM','101TEST')],reuse:scan.listing});
  t.mock.restoreAll();syncBuiltinESMExports();
- assert.deepEqual(listed,[],'the unchanged folder comes from the whole-card record');
+ assert.deepEqual([...listed].sort(),relisted([],[path.join(source,'DCIM','101TEST')]),'the unchanged folder comes from the whole-card record');
  assert.deepEqual(scoped.files.map(file=>file.relative).sort(),[0,1,2].map(index=>path.join('DCIM','101TEST',`DSC${index}.JPG`)));
  assert.equal(scoped.listing,undefined,'a partial listing never replaces the whole-card record');
  assert.equal(Object.hasOwn(scoped,'listing'),false);

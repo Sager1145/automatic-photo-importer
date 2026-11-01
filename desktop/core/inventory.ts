@@ -37,6 +37,9 @@ export function appArtifactName(name:string):boolean {return artifacts.has(name.
 export function macSystemName(name:string):boolean {return name.startsWith('._') || name.toLowerCase()==='.ds_store';}
 export const macSystemFile:SystemFile={id:'macos-system',vendor:'macOS',label:'Mac system file'};
 /** Names a listing leaves out. `keepMacFiles`: list Mac system files (the setting is off). */
+/** Whether an unchanged folder identity (device, inode, modified and change time) proves its entries unchanged.
+ * Not on Windows: there the change time can stay put when a file is added and the modified time is restored. */
+export const FOLDER_KEY_PROVES_NAMES=process.platform!=='win32';
 export function ignoredName(name:string,keepMacFiles=false):boolean {return appArtifactName(name) || (!keepMacFiles && macSystemName(name));}
 export function extension(file:string):string {return path.extname(file).slice(1).toLowerCase();}
 export function stem(file:string):string {return pathKey(path.join(path.dirname(file),path.basename(file,path.extname(file))));}
@@ -122,7 +125,9 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
       if(isRoot)topTotal=children.filter(child=>!child.file).length;
       for(const child of children) {checkAbort(signal);if(child.file)add(path.join(folder,child.name),child.file.size);else{await walk(path.join(folder,child.name));if(isRoot){topDone++;report(true);}}}
     };
-    if(known && known.key===key) return reuse(known.names);
+    // On Windows a folder's change time does not reliably move when a file is added and its modified time is put
+    // back (camera firmware does that), so an unchanged key there could hide a new file: the names are always read.
+    if(known && known.key===key && FOLDER_KEY_PROVES_NAMES) return reuse(known.names);
     const entries=await fs.readdir(folder,{withFileTypes:true}),names=entries.map(entry=>entry.name).sort();
     if(known && known.names.length===names.length && known.names.every((name,index)=>name===names[index])) return reuse(names);
     listedFolders.push({relative,key,names});
