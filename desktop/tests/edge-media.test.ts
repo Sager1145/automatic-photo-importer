@@ -148,6 +148,20 @@ test('a 64-level-deep source tree and many same-named files in separate folders 
  assert.equal(await fs.readFile(path.join(photos,camera,'JPEG','DEEP.JPG'),'utf8'),'deep bytes');
 });
 
+test('same-named files publish where the plan put them, whichever is copied first',async t=>{
+ const {source,photos}=await drive(t,'edge-order-');
+ for(const [index,name] of ['100NIKON','101NIKON','102NIKON'].entries())await put(path.join(source,name,'DSC_0001.JPG'),`photo ${index}`);
+ const {plans:[transfer]}=await plan(source,[photos],{...base,layout:'format'},fixed);
+ const entries=transfer!.entries,first=entries.find(entry=>entry.source.includes('100NIKON'))!;
+ assert.equal(new Set(entries.map(entry=>entry.destination)).size,3);
+ assert.equal(path.basename(first.destination),'DSC_0001.JPG');
+ // The folders planned into Conflicts are copied before the file the plan gave the plain name: they stay where planned.
+ const later=entries.filter(entry=>entry!==first);
+ assert.equal((await executeAll({...transfer!,entries:later})).errors.length,0);
+ assert.equal((await executeAll({...transfer!,entries:[first]})).errors.length,0);
+ await assertCopied(transfer!);
+});
+
 test('garbled camera names and dates never fail a plan or escape the camera folder',async t=>{
  const {source,photos}=await drive(t,'edge-garbled-');
  const cases:Record<string,Metadata>={

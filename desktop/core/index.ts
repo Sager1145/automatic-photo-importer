@@ -168,7 +168,9 @@ async function caseVariant(file:string,root:string):Promise<string|undefined> {
   const key=pathKey(path.basename(file)),name=(await readdirIfPresent(folder)).find(other=>other!==path.basename(file)&&pathKey(other)===key);
   return name===undefined?undefined:path.join(path.dirname(file),name);
 }
-async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
+/** `planned`: the copy of a reviewed plan, whose first choice is the destination planning gave each member. Files of one name from
+ * several folders publish side by side; starting again from the name before conflicts, whichever family came first would take it. */
+async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal,planned=false):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
@@ -178,7 +180,7 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
     const proposed=new Map<string,PlanEntry>(), allocation=[];
     let conflict=false;
     for(const entry of family) {
-      const destination=target(entry,attempt,family,ids), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
+      const destination=planned&&!attempt?entry.destination:target(entry,attempt,family,ids), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
       const same=reserved===undefined?undefined:reserved.size===entry.size && await resolve(reserved)===await resolve(entry);
       if(same===false) {log('detailed','plan','destination-check',{source:entry.source,destination,decision:'conflict',reason:`another file in this plan is filed at ${destination} with different content`,attempt});conflict=true;break;}
       let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal);
@@ -1206,7 +1208,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     busy(family.map(entry=>entry.destination));
     const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
     const checks=index.section();
-    let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);
+    let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true);
     if(outside(allocated)) throw WIDEN;
     // Before anything is created or finished: a name another copy of this process is writing is waited for, never fought over.
     busy(allocated.map(item=>item.destination));
@@ -1220,7 +1222,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       try { members.push(await begin(entry,item.destination));i++; }
       catch(error) {
         if(error===NOT_DIRECT&&i!==0) throw new Error(`No creation date to bind a copy by: ${item.destination}`);
-        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal);if(outside(allocated))throw WIDEN;busy(allocated.map(next=>next.destination));continue;}
+        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true);if(outside(allocated))throw WIDEN;busy(allocated.map(next=>next.destination));continue;}
         throw error;
       }
     }
@@ -1495,7 +1497,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
             // Allocation and the final duplicate check decide together under this lock: a file
             // the first read is not read again by the second while its stat is unchanged.
             const checks=trusting(index!.section(),options.paused?.checked);
-            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);
+            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true);
             if(outside(allocated))throw WIDEN;
             for(let i=0;i<allocated.length;){
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
@@ -1513,7 +1515,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
                 if(bound&&verification==='content-verified')published.push({file:item.destination,sha256:entry.digest!,stat:bound});
                 outcomes.push({entry,destination:item.destination,disposition:'published',verification,...(bound&&verification==='content-verified'?{bound}:{})});
                 if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}result.copied++;i++;}
-              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);if(outside(allocated))throw WIDEN;continue;}throw error;}
+              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true);if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);
           try { await decide(exact??familyFolders(members)); }
