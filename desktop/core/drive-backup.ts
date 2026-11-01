@@ -5,7 +5,7 @@ import type { MirrorRemoval, PlanEntry, TransferPlan } from '../shared';
 import { ignoredName } from './inventory';
 import type { DestinationIndex } from './destination-index';
 import { beneath, checkAbort, code, contained, makeParent, pathKey, readdirIfPresent, statKey, syncDirectory, syncParents } from './paths';
-import { hostKeyConfigured, openV5, renameChecked, sealV5 } from './app-store';
+import { hostKeyConfigured, openV5, renameChecked, sealV5, storesFor } from './app-store';
 import { removeEmptiedFolders } from './redundant-folders';
 import { safeComponent } from '../folder-template';
 import { log } from '../logger';
@@ -25,7 +25,7 @@ async function owner(folder:string):Promise<string|null|undefined> {
   try { text=await fs.readFile(path.join(folder,marker),'utf8'); } catch { return null; }
   try { return markerIdentity(JSON.parse(text)); } catch { return null; }
 }
-/** A marker's drive identity: the marker must carry this Mac's seal. */
+/** A marker's drive identity: the marker must carry the seal of this computer or of one that writes to a store this app has read. */
 export function markerIdentity(recorded:unknown):string|null {
   try { const opened=openV5('drive',recorded); return typeof opened.identity==='string'?opened.identity:null; } catch { return null; }
 }
@@ -36,6 +36,8 @@ export const markerText=(drive:{identity:string;name:string})=>JSON.stringify(ho
 export async function driveFolder(root:string,drive:Drive):Promise<string> {
   const name=safeComponent(drive.name.trim()||'Drive'),parent=path.join(root,DRIVE_BACKUPS);
   await contained(parent,root);
+  // The destination's store lists the computers that write to this drive, so their markers verify here too.
+  await storesFor(root).catch(()=>{});
   const existing=new Set(await readdirIfPresent(parent));
   let free:string|undefined;
   for(let index=1;index<1000;index++) {
