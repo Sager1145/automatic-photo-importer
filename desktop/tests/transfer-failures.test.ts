@@ -9,6 +9,9 @@ import {createHash} from 'node:crypto';
 import {plan,execute} from '../core';
 import {configureOrganizationRecovery} from '../core/index';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
+import {DIRECTORY_SYNC_SUPPORTED} from '../core/paths';
+// These watch the flush of each folder (handle.sync on it); Windows has no folder flush.
+const noFolderFlush=DIRECTORY_SYNC_SUPPORTED?false:'Windows does not flush folders (DIRECTORY_SYNC_SUPPORTED)';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 /** Directory listing without the app's own data folder (the store, whose staging and receipts are checked separately). */
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>name!=='Photo Importer Data'&&!name.startsWith('photo-importer-index'));
@@ -123,7 +126,7 @@ test('verified copying preserves pre-existing malformed media bytes and does not
  assert.deepEqual(await execute(prepared.plans[0]),{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(prepared.plans[0].entries[0].destination),truncated);assert.deepEqual(await fs.readFile(file),truncated);await f.unchanged();
 });
 
-test('directory-sync failure does not acknowledge a valid publication and retry synchronizes the existing copy',async t=>{
+test('directory-sync failure does not acknowledge a valid publication and retry synchronizes the existing copy',{skip:noFolderFlush},async t=>{
  const f=await fixture(t),prepared=await f.prepare();let injected=false;
  const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{if(await fs.stat(prepared.entries[0].destination).then(()=>false,()=>true))return;injected=true;throw fault('EIO');});});
  const result=await execute(prepared);restore();
@@ -135,7 +138,7 @@ test('directory-sync failure does not acknowledge a valid publication and retry 
  assert.equal(synchronized,true);assert.deepEqual(repeated,{copied:0,skipped:1,errors:[]});await f.unchanged();
 });
 
-test('unsupported directory synchronization cannot be reported as a completed backup',async t=>{
+test('unsupported directory synchronization cannot be reported as a completed backup',{skip:noFolderFlush},async t=>{
  const f=await fixture(t),prepared=await f.prepare();let injected=false;
  const restore=handles(t,(file,_flags,handle)=>{if(file===f.root)t.mock.method(handle,'sync',async()=>{if(await fs.stat(prepared.entries[0].destination).then(()=>false,()=>true))return;injected=true;throw fault('ENOTSUP');});});
  const result=await execute(prepared);restore();
@@ -143,7 +146,7 @@ test('unsupported directory synchronization cannot be reported as a completed ba
  assert.deepEqual(await fs.readFile(prepared.entries[0].destination),f.data);await f.unchanged();
 });
 
-test('new nested destination bindings are synchronized through the selected root before completion',async t=>{
+test('new nested destination bindings are synchronized through the selected root before completion',{skip:noFolderFlush},async t=>{
  const f=await fixture(t),relative='2026/202607/Camera/photo.JPG',source=path.join(f.source,relative);await fs.mkdir(path.dirname(source),{recursive:true});await fs.writeFile(source,'nested original');
  const prepared=await f.prepare(),expected=[path.join(f.root,'2026/202607/Camera'),path.join(f.root,'2026/202607'),path.join(f.root,'2026'),f.root],synced=new Set<string>();let acknowledged=false;
  const restore=handles(t,(file,_flags,handle)=>{if(expected.includes(file)){const sync=handle.sync.bind(handle);t.mock.method(handle,'sync',async()=>{await sync();synced.add(file);});}});
@@ -151,7 +154,7 @@ test('new nested destination bindings are synchronized through the selected root
  assert.equal(acknowledged,true);assert.deepEqual(result,{copied:2,skipped:0,errors:[]});assert.equal(await fs.readFile(path.join(f.root,relative),'utf8'),'nested original');await f.unchanged();
 });
 
-test('exclusive publication durably records intent before copying and releases it after the destination binding is synchronized',async t=>{
+test('exclusive publication durably records intent before copying and releases it after the destination binding is synchronized',{skip:noFolderFlush},async t=>{
  const f=await fixture(t);await fs.rename(f.original,path.join(f.source,'photo.JPG'));
  const prepared=(await plan(f.source,[f.root],{...options,backup:false as const,template:'{year}/{yyyymm}/{camera}'},async()=>({camera:'Fixture Camera',date:'2026-07-01T12:00:00+08:00',fields:{}}))).plans[0];
  const expected=[path.join(f.root,'2026/202607/Fixture Camera'),path.join(f.root,'2026/202607'),path.join(f.root,'2026'),f.root],synced=new Set<string>();let directorySyncs=0,started=false,released=false;

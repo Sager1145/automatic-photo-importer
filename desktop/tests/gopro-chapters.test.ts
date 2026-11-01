@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan} from '../core/index';
 import type {Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 // A recording that starts before midnight on 31 January; its second chapter starts in February.
@@ -36,5 +37,5 @@ test('a file without capture metadata is filed by the local calendar day it was 
  // 23:50 on 31 January where the camera was: in UTC this may already be February.
  const evening=new Date(2024,0,31,23,50);await fs.utimes(clip,evening,evening);
  const reviewed=(await plan(card,[root],options,async()=>({fields:{}}))).plans[0]!;
- assert.match(path.relative(root,reviewed.entries[0]!.destination),/^2024\/202401\//);
+ assert.match(slash(path.relative(root,reviewed.entries[0]!.destination)),/^2024\/202401\//);
 });

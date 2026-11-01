@@ -25,7 +25,7 @@ import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {within,isAbort,unlinkEntry,isOwnRealpath} from './core/paths';
+import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
@@ -795,7 +795,7 @@ function backupLibrary(prefs:Preferences):{source:string;root:string;videoRoot?:
  const [root,videoRoot]=libraryRoots(prefs,0),source=libraryAnchor(prefs,0);
  if(!root)throw new MessageError('error.chooseDestination');
  if(!source)throw new MessageError('error.organizeVideoOtherDrive');
- return videoRoot?{source,root,videoRoot,sourceFolders:[root,videoRoot].map(folder=>path.relative(source,folder))}:{source:root,root};
+ return videoRoot?{source,root,videoRoot,sourceFolders:[root,videoRoot].map(folder=>posixRelative(source,folder))}:{source:root,root};
 }
 /** One destination of `prefs` as the only one, with its photo and video folders. */
 function slotPreferences(prefs:Preferences,index:number):Preferences{

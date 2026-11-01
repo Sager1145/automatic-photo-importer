@@ -138,7 +138,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   if(options.folders){
     const selected:string[]=[];
-    for(const relative of options.folders){validateRelative(relative);const requested=path.join(root,relative);await contained(path.join(requested,'.inventory-scope-check'),root);const folder=await directory(requested);if(!selected.some(parent=>folder===parent||folder.startsWith(parent+path.sep))){for(let index=selected.length-1;index>=0;index--)if(selected[index].startsWith(folder+path.sep))selected.splice(index,1);selected.push(folder);}}
+    // A folder may be spelled natively ('DCIM\101' on Windows); it is checked as the '/' path every system accepts.
+    for(const relative of options.folders){validateRelative(relative.split(path.sep).join('/'));const requested=path.join(root,relative);await contained(path.join(requested,'.inventory-scope-check'),root);const folder=await directory(requested);if(!selected.some(parent=>folder===parent||folder.startsWith(parent+path.sep))){for(let index=selected.length-1;index>=0;index--)if(selected[index].startsWith(folder+path.sep))selected.splice(index,1);selected.push(folder);}}
     topTotal=selected.length;
     for(const folder of selected){await walk(folder);topDone++;report(true);}
   }else await walk(root,true);

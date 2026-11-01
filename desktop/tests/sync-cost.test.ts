@@ -5,9 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import {syncBuiltinESMExports} from 'node:module';
 import {plan,execute} from '../core/index';
-import {contained,makeParent,syncParents} from '../core/paths';
+import {contained,DIRECTORY_SYNC_SUPPORTED,makeParent,syncParents} from '../core/paths';
 import type {Metadata} from '../shared';
 import {configureOrganizationRecovery} from '../core/index';
+import {linkFolder} from './fixtures/os';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -45,12 +46,12 @@ test('checking a deep path resolves it once and still refuses a symbolic link an
  await makeParent(path.join(root,'2025','202501','Nikon Z f','RAW','DSC_0002.NEF'),root);
  t.mock.restoreAll();syncBuiltinESMExports();
  assert.ok(resolved<=4,`realpath called ${resolved} times`);
- await fs.symlink(base,path.join(root,'2024','escape'));
+ await linkFolder(base,path.join(root,'2024','escape'));
  await assert.rejects(contained(path.join(root,'2024','escape','x','y.NEF'),root),/symbolic link/);
  await assert.rejects(makeParent(path.join(root,'2024','escape','x','y.NEF'),root),/symbolic link|Unsafe/);
 });
 
-test('a folder sync still in progress makes a second caller wait for it, and its failure reaches both',async t=>{
+test('a folder sync still in progress makes a second caller wait for it, and its failure reaches both',{skip:DIRECTORY_SYNC_SUPPORTED?false:'Windows does not flush folders (DIRECTORY_SYNC_SUPPORTED)'},async t=>{
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'sync-race-')));
  t.after(()=>fs.rm(base,{recursive:true,force:true}));
  const root=path.join(base,'photobackup'),year=path.join(root,'2026');

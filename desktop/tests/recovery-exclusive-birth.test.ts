@@ -59,7 +59,11 @@ test('undo of an interrupted exclusive publication removes the owned partial and
 test('a foreign file with a different birth time is not owned: resume retains the original and undo leaves the file alone',async t=>{
  const {library,job,target,original,folder}=await interrupted(t);
  const foreign=Buffer.from('somebody else\'s file');
+ const born=(await fs.stat(target,{bigint:true})).birthtimeNs;
  await fs.rm(target);await fs.writeFile(target,foreign);
+ // NTFS and FAT on Windows "tunnel" a name: a file made under a name removed within 15 s takes over the old birth time,
+ // so no foreign file with another birth time can be made here. (The negative-inode rule itself is macOS exFAT's.)
+ if((await fs.stat(target,{bigint:true})).birthtimeNs===born)return t.skip('the file system gave the new file the old birth time (Windows name tunneling)');
  const resumed=await core.resumeOrganization(library,job.id).catch(error=>({errors:[String(error)]}));
  assert.ok(resumed.errors.length>0);
  assert.deepEqual(await fs.readFile(target),foreign);assert.equal(await setAside(folder),0);

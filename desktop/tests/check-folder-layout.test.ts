@@ -8,6 +8,7 @@ import {createTranslator,I18nProvider,languages} from '../renderer/i18n';
 import type {Action,AppState,Language,Progress} from '../shared';
 import {gated} from './gated';
 import { defaultPreferences } from '../preferences';
+import {slash} from './fixtures/os';
 
 const preferences:AppState['preferences']={...defaultPreferences, language:'en',appearance:'system',textScale:1.25,accent:'coral',automatic:false,parallel:2,destinations:['/Volumes/A006'],copyMode:'single',template:'{year}',mediaLayout:'flat',videoTemplate:'',unknownRules:{}};
 const online=[{path:'/Volumes/A006',available:true,volumeId:'a',total:2e12,free:1e12}];
@@ -221,7 +222,7 @@ test('shared catalog placement agrees with the read-only check for a custom temp
   for(const name of names){await fs.mkdir(path.dirname(path.join(root,name)),{recursive:true});await fs.writeFile(path.join(root,name),'image');}
   const options={template:'Trips/{camera}/{year}/{monthName}',layout:'flat' as const},metadata=async()=>({camera:'Camera',date:'2024-02-03T12:00:00',fields:{}});
   const checked=await findMisplaced(root,root,options,metadata);
-  assert.deepEqual(checked.files,['wrong/B.JPG']);
+  assert.deepEqual(checked.files.map(slash),['wrong/B.JPG']);
   const listing=await inventory(root),infos=new Map(),mtimes=new Map();
   for(const file of listing.files){infos.set(file.path,await metadata());mtimes.set(file.path,(await fs.stat(file.path)).mtime);}
   const routes=evaluateRoutes({sourceRoot:root,files:listing.files,scanned:listing.files,metadata:infos,mtimes,roots:[{root,role:'photos'}],options:{...options,reorganize:true}});

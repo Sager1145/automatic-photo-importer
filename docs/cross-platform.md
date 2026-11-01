@@ -24,7 +24,7 @@ This document is the contract. [Shared desktop implementation](multiplatform-mig
 4. **Same records everywhere.** Anything written to disk (records, journals, indexes, receipts) must mean the same thing on every OS. Store relative paths with `/` (use `posixRelative` in `desktop/core/paths.ts`), and never store a drive letter or `/Volumes/…` as identity.
 5. **Every string in every language.** User-facing text goes through `i18n.tsx` with all four languages (`en`, `zh-Hans`, `zh-Hant`, `ja`), on every OS.
 6. **Every platform tests the same features.** Behavior that touches the operating system is tested per platform, but always as the same app feature. See [Platform tests](#platform-tests).
-7. **Shared tests pass on every OS.** Use `path.join`/`path.sep` or `posixRelative` instead of literal `/` in expected paths, and `pathToFileURL(file).href` when importing a module by path. A test that needs a capability one OS lacks skips itself there with a reason; it never fails silently.
+7. **Shared tests pass on every OS.** Use `path.join`/`path.sep` or `posixRelative` instead of literal `/` in expected paths, and `pathToFileURL(file).href` (or `fileURLToPath`) for module paths. `desktop/tests/fixtures/os.ts` has the helpers: `slash`/`native` for in-memory relative paths, `linkFolder` (a junction on Windows without Developer Mode), `denyRead`/`denyWrite` (mode bits, or an `icacls` deny entry on Windows) and the skip reasons `needsFileSymlinks`/`needsUnixPermissions`. A test that needs a capability one OS lacks skips itself there with a reason; it never fails silently.
 
 ## Platform tests
 
@@ -87,7 +87,7 @@ Keep this list current. Remove a line when the gap closes; add one, with the rea
 | A drive's records folder written on one computer is refused on another | All | Records are sealed with a per-computer key, so a backup drive moved between a Mac and a PC cannot record imports on the second one ("belongs to another computer or is damaged"). Needs a design for sharing or adopting a store. |
 | USB cameras in MTP/PTP mode | Linux | No adapter yet (gphoto2 or `/run/user/*/gvfs` are candidates). Mass-storage cameras and card readers work. |
 | macOS "Created" date on copies | Windows, Linux | The Mac sets Created through its helper; other systems keep the modified time only. |
-| Tests that expect `/` in relative paths | Windows | About 25 test files compare against literal `a/b/c` paths while the code (correctly) builds native paths. Convert the expectations with `path.join` or `posixRelative`. |
-| Tests that create symbolic links | Windows | Fail with `EPERM` unless Developer Mode is on; they should skip with a reason instead. |
-| Tests that use Unix permissions (`chmod 0o500` to make a folder unwritable) | Windows | Windows ignores those bits; such tests need a Windows way to deny writes, or a skip. |
+| Tests of symbolic links to files | Windows | Need Developer Mode; without it they skip with the reason (`needsFileSymlinks`). Folder links are tested everywhere: Windows uses a junction. |
+| Tests of folder flushes | Windows | Windows has no folder flush (`DIRECTORY_SYNC_SUPPORTED`), so tests that count or fail `sync` on a folder skip there with that reason. |
+| `heartbeat.test.ts` runs about 3.5 minutes | Windows | It passes. Windows timers stretch the simulated 20 ms drive delay to about 30 ms, and the deeper temp folder means more calls. |
 | Source card after a failed import | All | Can show "N of N files verified" for files that all failed; Activity shows the true counts. |

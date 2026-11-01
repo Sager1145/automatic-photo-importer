@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {syncBuiltinESMExports} from 'node:module';
 import {identity,makeParent} from '../core/paths';
+import {linkFolder} from './fixtures/os';
 
 async function setup(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'make-parent-')));
@@ -41,7 +42,7 @@ test('a missing folder still goes through the creating loop and is created',asyn
 test('a symbolic link as the parent is refused on every path and nothing is created',async t=>{
  const {base,root}=await setup(t),id=await identity(root);
  await fs.mkdir(path.join(base,'elsewhere'));
- await fs.symlink(path.join(base,'elsewhere'),path.join(root,'2024','link'));
+ await linkFolder(path.join(base,'elsewhere'),path.join(root,'2024','link'));
  await assert.rejects(makeParent(path.join(root,'2024','link','DSC.NEF'),root,id),/symbolic link|Unsafe/);
  assert.deepEqual(await fs.readdir(path.join(base,'elsewhere')),[]);
 });

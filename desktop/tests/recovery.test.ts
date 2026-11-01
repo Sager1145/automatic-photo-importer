@@ -7,6 +7,8 @@ import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import * as core from '../core/index';
 import {journalFolderFor,journalFileFor,editJournalLine,organizeByCopy} from './fixtures/records';
+import {DIRECTORY_SYNC_SUPPORTED} from '../core/paths';
+import {linkFolder,needsFileSymlinks} from './fixtures/os';
 
 async function singlePlan(source:string,root:string,...args:Parameters<typeof core.plan> extends [string,string[],...infer Rest]?Rest:never){return (await core.plan(source,[root],...args)).plans[0]!;}
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -50,7 +52,7 @@ async function crash(t:test.TestContext,when:'publish'|'stash'|'copy') {
  const originalRename=filesystem.rename,originalLink=filesystem.link;
  filesystem.rename=async(...args)=>{const r=await originalRename(...args);if(args[0]===original&&${JSON.stringify(when)}==='stash')process.exit(91);return r;};
  filesystem.link=async(...args)=>{if(${JSON.stringify(when)}==='copy')throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});const r=await originalLink(...args);if(!String(args[1]).includes('Photo Importer Data')&&${JSON.stringify(when)}==='publish')process.exit(91);return r;};
- const originalOpen=filesystem.open;filesystem.open=async(...args)=>{const h=await originalOpen(...args);if(${JSON.stringify(when)}==='copy'&&String(args[0]).endsWith('/2024/202402/Sony/JPEG/A.JPG')){const write=h.write.bind(h);h.write=async(...writeArgs)=>{await write(writeArgs[0],writeArgs[1],Math.min(4,writeArgs[2]),writeArgs[3]);process.exit(91);};}return h;};
+ const originalOpen=filesystem.open;filesystem.open=async(...args)=>{const h=await originalOpen(...args);if(${JSON.stringify(when)}==='copy'&&String(args[0]).endsWith(${JSON.stringify(path.sep+path.join('2024','202402','Sony','JPEG','A.JPG'))})){const write=h.write.bind(h);h.write=async(...writeArgs)=>{await write(writeArgs[0],writeArgs[1],Math.min(4,writeArgs[2]),writeArgs[3]);process.exit(91);};}return h;};
  const {plans:[p]}=await plan(root,[root],${JSON.stringify(options)},async()=>({camera:'Sony',date:'2024-02-03',fields:{}}));
  await organizeByCopy(p);process.exit(0);`);
  const child=spawnSync(process.execPath,['--import','tsx',script],{cwd:process.cwd(),encoding:'utf8'});
@@ -76,7 +78,7 @@ test('recovery keeps corrupt published data and original bytes without overwriti
 });
 test('recovery rejects symbolic recovery directories and traversal identifiers',async t=>{
  const {root}=await fixture(t);const outside=await fs.mkdtemp(path.join(os.tmpdir(),'recovery-outside-'));t.after(()=>fs.rm(outside,{recursive:true,force:true}));
- await fs.symlink(outside,path.join(root,'Photo Importer Data'),'dir');
+ await linkFolder(outside,path.join(root,'Photo Importer Data'));
  // A linked records folder is never read, and never written to.
  assert.deepEqual(await core.getOrganizationRecovery(root),[]);
  await assert.rejects(core.executeReorganization(await singlePlan(root,root,options,metadata)),/unsafe/i);
@@ -99,7 +101,7 @@ test('hostile journal traversal and symbolic saved-original paths cannot redirec
  const text=await fs.readFile(journal,'utf8');await editJournalLine(f.root,f.id,1,entries=>{entries.entries[0].source=path.join(f.root,'../outside.JPG');return entries;});
  await assert.rejects(core.resumeOrganization(f.root,f.id),/unsafe|invalid|authentication/i);
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
- await fs.writeFile(journal,text);const saved=path.join(await journalFolderFor(f.root,f.id),'originals');await fs.symlink(path.dirname(f.original),saved,'dir');
+ await fs.writeFile(journal,text);const saved=path.join(await journalFolderFor(f.root,f.id),'originals');await linkFolder(path.dirname(f.original),saved);
  const result=await core.resumeOrganization(f.root,f.id);assert.ok(result.errors.length);assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
 });
 test('an absent recovery root returns no jobs and creates no directories',async t=>{
@@ -109,7 +111,7 @@ test('a replaced source parent is rejected even when the reviewed file is moved 
  const f=await crash(t,'publish');const parent=path.dirname(f.original);await fs.rename(parent,parent+'-old');await fs.mkdir(parent);await fs.rename(path.join(parent+'-old','A.JPG'),f.original);
  const r=await core.resumeOrganization(f.root,f.id);assert.ok(r.errors.length);assert.equal(r.moved,0);assert.equal(await fs.readFile(f.original,'utf8'),'precious original');
 });
-test('unsupported directory synchronization prevents relocation and retains originals',async t=>{
+test('unsupported directory synchronization prevents relocation and retains originals',{skip:DIRECTORY_SYNC_SUPPORTED?false:'Windows does not flush folders (DIRECTORY_SYNC_SUPPORTED)'},async t=>{
  const {root,original}=await fixture(t);const p=await singlePlan(root,root,options,metadata);
  const filesystem=(await import('node:fs/promises')).default,open=filesystem.open;
  t.mock.method(filesystem,'open',async(...args:Parameters<typeof open>)=>{const handle=await open(...args);if((await handle.stat()).isDirectory())handle.sync=async()=>{throw Object.assign(new Error('Directory sync unsupported'),{code:'ENOTSUP'});};return handle;});
@@ -188,7 +190,7 @@ test('explicit finalization removes only retained duplicates and preserves journ
  assert.equal((await core.finalizeOrganization(root,job!.id)).removed,0);
 });
 
-for(const fault of ['missing','corrupt','symlink','source reappeared'] as const)test(`finalization preserves retained originals when ${fault}`,async t=>{
+for(const fault of ['missing','corrupt','symlink','source reappeared'] as const)test(`finalization preserves retained originals when ${fault}`,{skip:fault==='symlink'&&needsFileSymlinks},async t=>{
  const {root,original}=await fixture(t),p=await singlePlan(root,root,options,metadata);await organizeByCopy(p);
  const [job]=await core.getOrganizationRecovery(root),saved=await retained(root,job!.id),destination=p.entries[0]!.destination;
  if(fault==='missing')await fs.unlink(destination);

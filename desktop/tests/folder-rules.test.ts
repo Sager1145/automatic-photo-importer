@@ -14,6 +14,7 @@ import {libraryRoots} from '../platform/destination-roots';
 import {defaultPreferences} from '../preferences';
 import {MessageError} from '../messages';
 import type {Metadata,Preferences} from '../shared';
+import {native} from './fixtures/os';
 
 const prefs:Preferences={...defaultPreferences,unknownRules:{}};
 async function temporary(t:test.TestContext){const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'folder-rules-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));return base;}
@@ -108,6 +109,6 @@ test('the planner refuses an unsafe edited folder with the same message the sett
 
 test('shared expected folders preserve camera-first calendar tokens, static prefixes and independent video layouts',()=>{
   const info:Metadata={camera:'Camera',date:'2024-03-01T00:01:00+14:00',fields:{}},mtime=new Date(2025,5,20);
-  assert.deepEqual(expectedFolder(info,mtime,{video:false,format:'NEF'},{template:'Trips/{camera}/{yearMonthName}/{yyyyMMdd}',layout:'type-format'}),{root:'photos',camera:'Trips/Camera/2024-03 March/20240301',sub:'Photos/NEF'});
+  assert.deepEqual(expectedFolder(info,mtime,{video:false,format:'NEF'},{template:'Trips/{camera}/{yearMonthName}/{yyyyMMdd}',layout:'type-format'}),{root:'photos',camera:'Trips/Camera/2024-03 March/20240301',sub:native('Photos/NEF')});
   assert.deepEqual(expectedFolder(info,mtime,{video:true,format:'MOV'},{template:'{year}/{camera}',videoTemplate:'Clips/{camera}/{month}/{day}',layout:'video-root'}),{root:'videos',camera:'Clips/Camera/03/01',sub:'.'});
 });

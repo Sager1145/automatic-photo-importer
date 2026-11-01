@@ -6,6 +6,7 @@ import path from 'node:path';
 import {plan,executeReorganization,configureOrganizationRecovery,getOrganizationRecovery,resumeOrganization} from '../core/index';
 import {organizeByCopy} from './fixtures/records';
 import type {MediaLayout} from '../shared';
+import {linkFolder,slash} from './fixtures/os';
 configureOrganizationRecovery('edited-organization-fixture-key-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 async function fixture(t:test.TestContext){const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'edited-organization-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));const source=path.join(base,'library'),target=path.join(source,'photobackup');await fs.mkdir(target,{recursive:true});const put=async(relative:string,contents='original')=>{const file=path.join(source,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,contents);return file;};return{base,source,target,put};}
@@ -36,7 +37,7 @@ test('an import source folder named editied does not classify unedited media as 
  await put('editied/A.JPG');await put('editied/A.XMP');
  const {plans:[transfer],failures}=await plan(source,[target],options,originalMetadata);
  assert.deepEqual(failures,[]);
- assert.deepEqual(transfer.entries.map(entry=>path.relative(target,entry.destination)).sort(),['2025/202506/ILCE-7M5/A.JPG','2025/202506/ILCE-7M5/A.XMP']);
+ assert.deepEqual(transfer.entries.map(entry=>slash(path.relative(target,entry.destination))).sort(),['2025/202506/ILCE-7M5/A.JPG','2025/202506/ILCE-7M5/A.XMP']);
 });
 
 test('a duplicate record is edited exactly when its file is routed as an edited export',async t=>{
@@ -54,10 +55,10 @@ test('a duplicate record is edited exactly when its file is routed as an edited 
 test('editor exports use monthly editable folder while RAW and its XMP remain originals',async t=>{
  const{source,target,put}=await fixture(t);await put('2025/wrong/DSC0001.ARW');await put('2025/wrong/DSC0001.XMP');await put('2025/wrong/DSC0001.JPG');
  const prepared=await plan(source,[target],{...options,reorganize:true},metadata);
- const relative=Object.fromEntries(prepared.plans[0].entries.map(entry=>[path.extname(entry.source),path.relative(target,entry.destination)]));
+ const relative=Object.fromEntries(prepared.plans[0].entries.map(entry=>[path.extname(entry.source),slash(path.relative(target,entry.destination))]));
  assert.equal(relative['.ARW'],'2025/202506/ILCE-7M5/DSC0001.ARW');assert.equal(relative['.XMP'],'2025/202506/ILCE-7M5/DSC0001.XMP');assert.equal(relative['.JPG'],'2025/202506/editied/ILCE-7M5/DSC0001.JPG');
  const custom=await plan(source,[target],{...options,reorganize:true,editedFolder:'Finished photos'},metadata);
- assert.ok(custom.plans[0].entries.find(entry=>entry.source.endsWith('.JPG'))?.destination.includes('/202506/Finished photos/'));
+ assert.ok(slash(custom.plans[0].entries.find(entry=>entry.source.endsWith('.JPG'))!.destination).includes('/202506/Finished photos/'));
  await assert.rejects(plan(source,[target],{...options,reorganize:true,editedFolder:'../escape'},metadata));
 });
 
@@ -88,7 +89,7 @@ test('a selected legacy-folder scope excludes unrelated roots and rejects traver
 });
 
 test('selected folder scope rejects symbolic-link aliases instead of widening its scan',async t=>{
- const{source,target,put}=await fixture(t);await put('2024/A.ARW');await put('untouched/B.ARW');await fs.symlink(source,path.join(source,'alias'),'dir');
+ const{source,target,put}=await fixture(t);await put('2024/A.ARW');await put('untouched/B.ARW');await linkFolder(source,path.join(source,'alias'));
  await assert.rejects(plan(source,[target],{...options,reorganize:true,sourceFolders:['alias']},metadata),/symbolic link/i);
 });
 
