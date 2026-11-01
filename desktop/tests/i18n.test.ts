@@ -685,6 +685,29 @@ test('the drive popup shows when a reconnected drive last finished a scan or a v
   }
 });
 
+test('the drive popup is never an empty sheet: with every drive answered, or only ids without a source, it asks about nothing', async () => {
+  const { NewDrivePrompt, promptDrives } = await import('../renderer/RootApp');
+  const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 2, destinations: ['/b'], copyMode: 'single', template: '{year}', mediaLayout:'flat',videoTemplate:'', unknownRules: {}, deviceHistory: { sony: { name: 'Sony', lastImportVerified: '2026-10-20T21:15:00Z' } } };
+  const sony = { id: 'sony', name: 'Sony', path: '/Volumes/SONY', transport: 'storage' as const, selected: false };
+  // A Z f's slots are sources of their own; the whole-camera id it was listed under before is no source.
+  const slot = { id: 'camera:zf|10001', name: 'Z f · Slot 1', path: 'camera://zf/10001', transport: 'camera' as const, selected: false, storage: { id: '10001', name: 'Slot 1', camera: 'Z f' } };
+  const state = (lists: Partial<AppState>): AppState => ({ preferences, sources: [sony, slot], jobs: [], history: [], platform: 'win32', organizeOptions: freshOrganizeOptions(), ...lists });
+  const render = (lists: Partial<AppState>) => renderToStaticMarkup(createElement(I18nProvider, { language: 'en', children: createElement(NewDrivePrompt, { state: state(lists), act: () => {} }) }));
+  // Every drive answered: main has taken each off both lists.
+  assert.deepEqual(promptDrives(state({ newDevices: [], reconnectedDevices: [] })), { pending: [], back: [] });
+  assert.equal(render({ newDevices: [], reconnectedDevices: [] }), '', 'all answered: no sheet');
+  // Ids that name no connected source are not asked about and do not keep the sheet open.
+  const stale = { newDevices: ['camera:zf', 'x100vi'], reconnectedDevices: ['camera:zf'] };
+  assert.deepEqual(promptDrives(state(stale)), { pending: [], back: [] });
+  assert.equal(render(stale), '', 'only ids without a source: no sheet');
+  // Set-aside drives ("Decide later") are not asked about again in this connection.
+  assert.deepEqual(promptDrives(state({ newDevices: ['camera:zf|10001'], reconnectedDevices: ['sony'] }), ['camera:zf|10001', 'sony']), { pending: [], back: [] });
+  // A drive still to answer is listed, and a stale id beside it is not.
+  const mixed = render({ newDevices: ['camera:zf', 'camera:zf|10001'], reconnectedDevices: ['sony', 'camera:zf'] });
+  assert.ok(mixed.includes('data-source-id="camera:zf|10001"') && mixed.includes('data-source-id="sony"') && !mixed.includes('data-source-id="camera:zf"'), 'only connected drives are listed');
+  assert.deepEqual(promptDrives(state({ newDevices: ['camera:zf|10001', 'camera:zf|10001'], reconnectedDevices: ['camera:zf|10001', 'sony'] })), { pending: ['camera:zf|10001'], back: ['sony'] }, 'each drive once, new before reconnected');
+});
+
 test('a drive card can be moved to the top of the queue, and cards follow the source order', async () => {
   const { ImportDesk } = await import('../renderer/RootApp');
   const preferences: AppState['preferences'] = { ...defaultPreferences, language:'en', appearance: 'system', textScale: 1.25, accent: 'coral', automatic: false, parallel: 1, destinations: ['/b'], copyMode: 'single', template: '{year}', mediaLayout:'flat',videoTemplate:'', unknownRules: {} };
