@@ -136,6 +136,16 @@ export class DestinationIndex implements Digests {
     const known=this.files.get(this.key(file));
     return known&&provablySame(known,stat)?known.sha256:undefined;
   }
+  /** A digest known without reading the file: recorded for its provable stat, or read this session under its exact stat. */
+  known(file:string,stat:BigIntStats):string|undefined {
+    const hint=this.hints.get(file);
+    return hint&&hint.stat===full(stat)?hint.sha256:this.cached(file,stat);
+  }
+  /** A digest read by another path (planning's single read of a same-named pair): kept as a hint, and recorded where its stat is provable. */
+  observe(file:string,sha256:string,before:BigIntStats,after:BigIntStats):void {
+    if(!sameStat(before,after)||before.birthtimeNs!==after.birthtimeNs)return;
+    this.hints.set(file,{stat:full(after),sha256});this.remember(file,sha256,after);
+  }
   /** Record a digest computed from bytes this app just wrote or verified. */
   remember(file:string,sha256:string,stat:BigIntStats):void {
     if(!stat.isFile() || !provable(stat)) return;
