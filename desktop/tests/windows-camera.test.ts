@@ -19,7 +19,8 @@ test('the Windows camera bridge compiles and answers list over its JSONL protoco
     child.stdin.write(`${JSON.stringify({command:'list',id:'list'})}\n${JSON.stringify({command:'format',id:'other'})}\n`);
     const listed=await reply('list');
     assert.equal(listed.error,undefined,stderr);assert.ok(Array.isArray(listed.result));
-    for(const camera of listed.result){assert.equal(typeof camera.name,'string');assert.equal(typeof camera.cameraID,'string');}
+    // Each storage (card slot) carries the camera's own id for it, so each slot can be a source of its own.
+    for(const camera of listed.result){assert.equal(typeof camera.name,'string');assert.equal(typeof camera.cameraID,'string');for(const storage of camera.storages??[]){assert.equal(typeof storage.id,'string');assert.ok(storage.id);assert.equal(typeof storage.name,'string');}}
     assert.equal((await reply('other')).error,'Unknown native camera command.');
     // PowerShell reports progress as CLIXML on stderr; only an error record there means something failed.
     assert.doesNotMatch(stderr,/<S S="Error">/);

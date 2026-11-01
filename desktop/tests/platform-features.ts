@@ -8,7 +8,7 @@ import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, uti
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
-import { cameraCapacity } from '../platform/camera-bridge';
+import { cameraCapacity, cameraSourcesFrom, stageRequest } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
@@ -253,6 +253,24 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),
       { storages: [{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }], total: 256, free: 96 });
+  },
+  'USB camera with two card slots: each slot is a source of its own, read as USB, the camera, then the slot': async profile => {
+    const camera = { cameraID: 'camera-1', name: 'Z f', storages: [{ id: '10001', name: 'Slot 1', total: 128, free: 64 }, { id: '20001', name: 'Slot 2', total: 128, free: 32 }] };
+    const sources = cameraSourcesFrom([camera]);
+    assert.deepEqual(sources.map(source => [source.id, source.name, source.total, source.free]),
+      [['camera:camera-1|10001', 'Z f · Slot 1', 128, 64], ['camera:camera-1|20001', 'Z f · Slot 2', 128, 32]]);
+    assert.deepEqual(sources.map(source => stageRequest(source, 'scratch').storageID), ['10001', '20001']);
+    const [single] = cameraSourcesFrom([{ ...camera, storages: camera.storages.slice(0, 1) }]);
+    assert.deepEqual([single!.id, single!.name, stageRequest(single!, 'scratch').storageID], ['camera:camera-1', 'Z f', undefined]);
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { value: { platform: profile.navigatorPlatform }, configurable: true });
+    try {
+      const { sourcePlace } = await import('../renderer/RootApp');
+      // This system's separator, as it reads in the camera's own place ("USB/Z f" or "USB\Z f").
+      const separator = profile.cameraPlace.slice('USB'.length, -'Z f'.length);
+      assert.equal(sourcePlace(sources[0]!), `${profile.cameraPlace}${separator}Slot 1`);
+      assert.equal(sourcePlace(single!), profile.cameraPlace);
+    } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); }
   },
 };
 
