@@ -161,14 +161,44 @@ async function headsAgree(source:string,file:string,size:number,signal?:AbortSig
   const [mine,theirs]=await Promise.all([headDigest(source,size,signal),headDigest(file,size,signal)]);
   return mine===undefined||theirs===undefined||mine===theirs;
 }
-/** null: nothing there. A different size is a different file without reading anything; with `source` (whose checksum is not
- * known yet), a different first 64 KB too. Otherwise SHA-256 values are compared (the destination via its index). */
-async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:Digests,signal?:AbortSignal,source?:string):Promise<boolean|null> {
+/** The copy's check of a file planned without a checksum (no same-size file was there, or planning found its first 64 KB
+ * different): a file now at its name is told apart by its first 64 KB before either is read in full. */
+const headsDiffer=(signal?:AbortSignal)=>async(entry:PlanEntry,destination:string)=>!entry.digest&&!await headsAgree(entry.source,destination,entry.size,signal);
+const PAIR_CHUNK=1024*1024;
+/** A same-named, same-size pair neither of whose checksums is known: each file is opened once, the first 64 KB of both are
+ * compared, and only if they agree are both read on to the end, the bytes already read hashed first. A different pair is
+ * then never read in full, and an identical one is read exactly once each, as a plain comparison would. Undefined: different. */
+async function readPairOnce(source:string,file:string,signal?:AbortSignal,onSourceBytes?:(bytes:number)=>void):Promise<{source:string;destination:string;sourceStat:import('node:fs').BigIntStats;before:import('node:fs').BigIntStats;after:import('node:fs').BigIntStats}|undefined> {
+  const input=await regularHandle(source);
+  try {
+    const output=await regularHandle(file);
+    try {
+      const before=await output.stat({bigint:true});
+      const head=async(handle:Awaited<ReturnType<typeof regularHandle>>)=>{const buffer=Buffer.alloc(HEAD_BYTES);let read=0;while(read<buffer.length){checkAbort(signal);const {bytesRead}=await handle.read(buffer,read,buffer.length-read,read);if(!bytesRead)break;read+=bytesRead;}return buffer.subarray(0,read);};
+      const [mine,theirs]=await Promise.all([head(input),head(output)]);
+      onSourceBytes?.(mine.length);
+      if(!mine.equals(theirs))return undefined;
+      const rest=async(handle:Awaited<ReturnType<typeof regularHandle>>,first:Buffer,count?:(bytes:number)=>void)=>{
+        const hash=hasher(),buffer=Buffer.allocUnsafe(PAIR_CHUNK);let position=first.length;
+        try {
+          await hash.update(first);
+          for(;;){checkAbort(signal);const {bytesRead}=await handle.read(buffer,0,buffer.length,position);if(!bytesRead)break;await hash.update(buffer.subarray(0,bytesRead));position+=bytesRead;count?.(bytesRead);}
+          return await hash.digest();
+        } finally { hash.drop(); }
+      };
+      const [sourceDigest,destinationDigest]=await Promise.all([rest(input,mine,onSourceBytes),rest(output,theirs)]);
+      return {source:sourceDigest,destination:destinationDigest,sourceStat:await input.stat({bigint:true}),before,after:await output.stat({bigint:true})};
+    } finally { await output.close(); }
+  } finally { await input.close(); }
+}
+/** null: nothing there. A different size is a different file without reading anything; so is one `differs` tells apart (its
+ * first 64 KB). Otherwise SHA-256 values are compared (the destination via its index). */
+async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:Digests,signal?:AbortSignal,differs?:()=>Promise<boolean>):Promise<boolean|null> {
   await contained(file,root);
   let stat;
   try { stat=await fs.lstat(file,{bigint:true}); } catch(error) { if(code(error)==='ENOENT') return null; throw error; }
   if(!stat.isFile() || stat.size!==BigInt(size)) return false;
-  if(source!==undefined&&!await headsAgree(source,file,size,signal)) {log('detailed','plan','destination-check',{source,destination:file,decision:'different',reason:'same name and size, different first 64 KB: not read in full'});return false;}
+  if(differs&&await differs()) {log('detailed','plan','destination-check',{destination:file,decision:'different',reason:'same name and size, different first 64 KB: not read in full'});return false;}
   return await index.digestOf(file,signal)===await expected();
 }
 /** Where Keep both puts a file whose planned name already holds the same bytes (`existing`): the first name the plan's
@@ -200,7 +230,7 @@ async function caseVariant(file:string,root:string):Promise<string|undefined> {
 }
 /** `planned`: the copy of a reviewed plan, whose first choice is the destination planning gave each member. Files of one name from
  * several folders publish side by side; starting again from the name before conflicts, whichever family came first would take it. */
-async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal,planned=false):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
+async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal,planned=false,differs?:(entry:PlanEntry,destination:string)=>Promise<boolean>):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
@@ -214,11 +244,10 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
       const same=reserved===undefined?undefined:reserved.size===entry.size && await resolve(reserved)===await resolve(entry);
       if(same===false) {log('detailed','plan','destination-check',{source:entry.source,destination,decision:'conflict',reason:`another file in this plan is filed at ${destination} with different content`,attempt});conflict=true;break;}
       // A same-named file is the same one only if its size, then its first 64 KB, then its SHA-256 agree.
-      const head=entry.digest?undefined:entry.source;
-      let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal,head);
+      let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal,differs&&(()=>differs(entry,destination)));
       // A name taken by case alone is that file's name: the same content is already there, other content is a conflict.
       const variant=exists===null?await caseVariant(destination,root):undefined;
-      if(variant!==undefined)exists=await existingMatches(variant,entry.size,()=>resolve(entry),root,index,signal,head)===true?true:false;
+      if(variant!==undefined)exists=await existingMatches(variant,entry.size,()=>resolve(entry),root,index,signal,differs&&(()=>differs(entry,variant)))===true?true:false;
       const resumable=exists===false&&await publicationNamed({source:entry.source,destination},root,recovery)&&await findPartial('publication',{...entry,destination,digest:await resolve(entry)},root,recovery,signal);
       log('detailed','plan','destination-check',()=>({source:entry.source,destination,attempt,decision:exists===true||same===true?'skip':exists===false&&!resumable?'conflict':'copy',reason:same===true?`same SHA-256 as another file of this plan filed at ${destination}`:exists===true?`skip: same SHA at path ${destination}`:exists===false?(resumable?'copy: an interrupted copy of this file there is resumed':`conflict: ${destination} holds a different file of the same size or an unrelated one`):'copy: no match at the destination',size:entry.size,sha256:entry.digest}));
       if(exists===false&&!resumable) {conflict=true;break;}
@@ -568,6 +597,8 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   // bytes: source data read to compare with same-size files already there (how much is not known ahead).
   let comparingTotal=prepared.length*destinations.length;
   let compared=0,compareBytes=0,matched=0,matchedBytes=0;
+  /** Pairs (source, destination) whose first 64 KB differ: allocation knows them different without a read. */
+  const differentHeads=new Set<string>();
   let lastCompared=files.at(-1)?.relative??'';
   // While files are looked for elsewhere, the reads that settle them count under that step instead.
   let lookingUp=false;
@@ -605,8 +636,16 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
         // The first pass has looked at every pending destination already.
         const existing=looked.has(entry)?looked.get(entry):await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
         if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
-        // Same name and size: the first 64 KB decide whether both are read in full (allocation reads them again only if they agree).
-        if(!entry.digest&&!resolved.has(entry.source)&&!await headsAgree(entry.source,entry.destination,entry.size,signal)) {if(sizedSources.delete(entry.source))compareBytes-=entry.size;return;}
+        // Same name and size, neither checksum known (the index, this session's reads, a checksum remembered for the card file):
+        // both are opened once and read in full only if their first 64 KB agree. Known checksums are compared below without a read.
+        const sourceKnown=entry.digest??resolved.get(entry.source)??early.get(entry.source)??options.sourceDigest?.(entry.source,statKey(sourceStats.get(entry.source)!));
+        if(sourceKnown===undefined&&index.known(entry.destination,existing)===undefined&&!isListedPath(entry.source)) {
+          await contained(entry.source,sourceRoot);credited.add(entry.source);
+          const pair=await readPairOnce(entry.source,entry.destination,signal,bytes=>{readToCompare+=bytes;comparing(path.relative(sourceRoot,entry.source));});
+          if(!pair){differentHeads.add(`${entry.source}\0${entry.destination}`);if(sizedSources.delete(entry.source))compareBytes-=entry.size;return;}
+          if(!sameStat(sourceStats.get(entry.source)!,pair.sourceStat)||!sameStat(sourceStats.get(entry.source)!,await fs.lstat(entry.source,{bigint:true}))) throw new MessageError('error.sourceChanged',{path:entry.source});
+          resolved.set(entry.source,pair.source);index.observe(entry.destination,pair.destination,pair.before,pair.after);
+        }
         // If one side fails, stop the other read and wait for it, so nothing reads a card file after this settles.
         const local=new AbortController(),stopLocal=()=>local.abort();let first:{error:unknown}|undefined;
         if(signal?.aborted) local.abort(); else signal?.addEventListener('abort',stopLocal,{once:true});
@@ -620,12 +659,12 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       catch(error) { if(isAbort(error)) throw error; /* Allocation checks it again and reports it where it always has. */ }
       finally { if(!signal?.aborted) {compared++;comparing(path.relative(sourceRoot,entry.source));} }
     });
-    const reservations=new Map<string,PlanEntry>(),entries:PlanEntry[]=[];
+    const reservations=new Map<string,PlanEntry>(),entries:PlanEntry[]=[],differs=async(entry:PlanEntry,destination:string)=>differentHeads.has(`${entry.source}\0${destination}`);
     for(const family of groups(pending)) {
       if(family.some(entry=>failures.has(entry.source))) continue;
       let allocation;
       // A family is planned whole or not at all; nothing has been written for it yet.
-      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal),familyFolders(family),signal); }
+      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal,false,differs),familyFolders(family),signal); }
       catch(error) { for(const entry of family) skip(entry.source,error); continue; }
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
       comparing(path.relative(sourceRoot,family[0]!.source));
@@ -1287,7 +1326,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
     busy(family.map(entry=>entry.destination));
     const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
     const checks=index.section();
-    let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true);
+    let allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true,headsDiffer(signal));
     if(outside(allocated)) throw WIDEN;
     // Before anything is created or finished: a name another copy of this process is writing is waited for, never fought over.
     busy(allocated.map(item=>item.destination));
@@ -1301,7 +1340,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       try { members.push(await begin(entry,item.destination));i++; }
       catch(error) {
         if(error===NOT_DIRECT&&i!==0) throw new Error(`No creation date to bind a copy by: ${item.destination}`);
-        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true);if(outside(allocated))throw WIDEN;busy(allocated.map(next=>next.destination));continue;}
+        if(code(error)==='EEXIST'&&i===0&&!members.length){allocated=await allocate(family,root,new Map(),recovery,resolve,checks,signal,true,headsDiffer(signal));if(outside(allocated))throw WIDEN;busy(allocated.map(next=>next.destination));continue;}
         throw error;
       }
     }
@@ -1576,7 +1615,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
             // Allocation and the final duplicate check decide together under this lock: a file
             // the first read is not read again by the second while its stat is unchanged.
             const checks=trusting(index!.section(),options.paused?.checked);
-            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true);
+            let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true,headsDiffer(signal));
             if(outside(allocated))throw WIDEN;
             for(let i=0;i<allocated.length;){
               checkAbort(signal);const item=allocated[i]!,entry=item.entry;
@@ -1594,7 +1633,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
                 if(bound&&verification==='content-verified')published.push({file:item.destination,sha256:entry.digest!,stat:bound});
                 outcomes.push({entry,destination:item.destination,disposition:'published',verification,...(bound&&verification==='content-verified'?{bound}:{})});
                 if(run.appleDouble){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined);if(now?.isFile())placed.push({file:item.destination,stat:now});}result.copied++;i++;}
-              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true);if(outside(allocated))throw WIDEN;continue;}throw error;}
+              catch(error){if(code(error)==='EEXIST'&&published.length===0&&i===0){allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal,true,headsDiffer(signal));if(outside(allocated))throw WIDEN;continue;}throw error;}
             }
           },keys,signal);
           try { await decide(exact??familyFolders(members)); }
