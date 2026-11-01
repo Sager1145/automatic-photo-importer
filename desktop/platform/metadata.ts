@@ -375,7 +375,8 @@ async function readBatch(files:string[]):Promise<Map<string,RawTags>> {
   const proto=ReadRawTask.for(files[0]!,{readArgs:routingArgs}) as unknown as {args:string[]};
   const args=[...proto.args.slice(0,-1),...files];
   const list=await exiftool().enqueueTask(()=>new RawBatchTask(files[0]!,args,{readArgs:routingArgs}) as never) as unknown as RawTags[];
-  return new Map(list.flatMap(item=>typeof item?.SourceFile==='string'?[[item.SourceFile,item] as [string,RawTags]]:[]));
+  // ExifTool names files with '/' on every OS ('C:/Users/…' on Windows); the callers ask with native paths.
+  return new Map(list.flatMap(item=>typeof item?.SourceFile==='string'?[[path.normalize(item.SourceFile),item] as [string,RawTags]]:[]));
 }
 interface Waiting {at:number;background:boolean;file:string;dev:bigint;resolve:(tags:RawTags)=>void;reject:(error:unknown)=>void;}
 const waiting:Waiting[]=[],busy=new Map<bigint,number>(),limits=new Map<bigint,Promise<number>>(),limitOf=new Map<bigint,number>(),inFlight=new Map<string,Promise<RawTags>>();

@@ -16,7 +16,7 @@ import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath } from './paths';
+import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath, DIRECTORY_SYNC_SUPPORTED } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -794,7 +794,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
  await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
- const handle=await fs.open(entry.destination,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ const handle=await openForDates(entry.destination);
  let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
@@ -815,6 +815,13 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
  } finally { await handle.close();if(final)observedMove(entry.source,entry.stat,entry.destination,final,m.kind==='duplicates'?'duplicateRemoval':'organize'); }
+}
+/** A moved file opened to read its identity and set its dates. Windows sets dates and flushes only through a handle that
+ * may write (EPERM otherwise); a read-only file still opens there to be checked, and then keeps its date. */
+async function openForDates(file:string):Promise<Awaited<ReturnType<typeof fs.open>>> {
+ const readOnly=constants.O_RDONLY|(constants.O_NOFOLLOW??0);
+ if(DIRECTORY_SYNC_SUPPORTED)return fs.open(file,readOnly);
+ return fs.open(file,constants.O_RDWR).catch(error=>{if(code(error)==='EPERM'||code(error)==='EACCES')return fs.open(file,readOnly);throw error;});
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */
@@ -1390,7 +1397,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     else if(where==='moved')await restore(entry.destination,entry.source,index,entry);
     if(where!=='none'){
      // Restore the reviewed Modified date; the bytes were never changed.
-     const handle=await fs.open(entry.source,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+     const handle=await openForDates(entry.source);
      try{const now=await handle.stat({bigint:true});if(String(now.mtimeNs)!==entry.stat.mtime){
       // Seconds pass through a double and FAT/exFAT truncate to 10 ms; aim mid-step there.
       const fat=now.ctimeNs===now.mtimeNs,milliseconds=Number(BigInt(entry.stat.mtime)/1000000n)+(fat?5:0);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import {plan,execute,configureOrganizationRecovery} from '../core/index';
 import type {Metadata,TransferPlan} from '../shared';
 import {assertCopied,fileSha,leftovers,put,temporary,tree} from './fixtures/edge';
+import {linkFolder} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false as const,template:'{year}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -50,7 +51,7 @@ test('a destination folder renamed away or replaced by a link mid-run is never r
   let done:Promise<void>|undefined;
   const outcome=await execute(transfer!,undefined,progress=>{
    if(done||progress.completed<2)return;
-   done=fs.rename(destination,moved).then(()=>fault==='link'?fs.symlink(elsewhere,destination):undefined);
+   done=fs.rename(destination,moved).then(()=>fault==='link'?linkFolder(elsewhere,destination):undefined);
   }).then(value=>value,error=>error as Error);
   await done;
   if(!(outcome instanceof Error))assert.ok(outcome.errors.length>0,fault);

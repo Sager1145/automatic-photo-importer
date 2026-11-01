@@ -195,7 +195,8 @@ test('a cross-device move falls back to the verified copy that keeps the origina
 
 test('a source changed after review is not moved',async t=>{
  const f=await fixture(t),p=await prepare(f.root);
- await fs.chmod(f.original,0o600);
+ // Read-only and back moves the change time everywhere; Windows keeps only that bit, so a bare chmod 0o600 changes nothing there.
+ await fs.chmod(f.original,0o400);await fs.chmod(f.original,0o600);
  const result=await core.executeReorganization(p,undefined,undefined);
  assert.match(result.errors.join('\n'),/changed/i);assert.equal(result.moved,0);
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');

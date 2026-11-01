@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute} from '../core/index';
 import {driveIdentity} from '../platform/volumes';
+import {slash} from './fixtures/os';
 import {configureOrganizationRecovery} from '../core/index';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
@@ -23,7 +24,7 @@ async function backup(source:string,root:string,drive:{name:string;identity:stri
 }
 async function files(folder:string):Promise<string[]>{
  const found:string[]=[];
- async function walk(current:string){for(const entry of await fs.readdir(current,{withFileTypes:true})){const file=path.join(current,entry.name);if(entry.isDirectory())await walk(file);else found.push(path.relative(folder,file));}}
+ async function walk(current:string){for(const entry of await fs.readdir(current,{withFileTypes:true})){const file=path.join(current,entry.name);if(entry.isDirectory())await walk(file);else found.push(slash(path.relative(folder,file)));}}
  await walk(folder);return found.sort();
 }
 
@@ -31,7 +32,7 @@ test('each drive backs up into its own folder and same-named drives never share 
  const {source,root,put}=await fixture(t);
  await put('DCIM/A.JPG','a');await put('notes.txt','n');
  const first=await backup(source,root,{name:'Untitled',identity:'volume-1',mirror:false});
- assert.deepEqual(first.entries.map(entry=>path.relative(root,entry.destination)).sort(),['Drive backups/Untitled/DCIM/A.JPG','Drive backups/Untitled/notes.txt']);
+ assert.deepEqual(first.entries.map(entry=>slash(path.relative(root,entry.destination))).sort(),['Drive backups/Untitled/DCIM/A.JPG','Drive backups/Untitled/notes.txt']);
  assert.deepEqual(await execute(first),{copied:2,skipped:0,errors:[]});
  const again=await backup(source,root,{name:'Untitled',identity:'volume-1',mirror:false});
  assert.ok(again.entries.every(entry=>entry.skip&&entry.destination.startsWith(path.join(root,'Drive backups','Untitled')+path.sep)));
@@ -61,14 +62,14 @@ test('mirror review lists extra and changed files, then moves them to a dated ho
  await fs.rm(gone);await put('DCIM/changed.txt','version 2');
  const folder=path.join(root,'Drive backups/Card');
  const review=await backup(source,root,{name:'Card',identity:'card',mirror:true});
- assert.deepEqual(review.removals?.map(item=>[path.relative(folder,item.path),item.reason]).sort(),[['DCIM/changed.txt','changed'],['DCIM/gone.JPG','missing']]);
+ assert.deepEqual(review.removals?.map(item=>[slash(path.relative(folder,item.path)),item.reason]).sort(),[['DCIM/changed.txt','changed'],['DCIM/gone.JPG','missing']]);
  assert.equal(review.entries.find(entry=>entry.source.endsWith('changed.txt'))?.destination,path.join(folder,'DCIM/changed.txt'));
  assert.deepEqual(await execute(review),{copied:1,skipped:1,removed:2,errors:[]});
  assert.deepEqual((await files(folder)).filter(file=>!file.startsWith('photo-importer-drive')),['DCIM/changed.txt','same.txt']);
  assert.equal(await fs.readFile(path.join(folder,'DCIM/changed.txt'),'utf8'),'version 2');
  const held=await files(path.join(root,'Drive backups/Removed by mirror'));
  assert.equal(held.length,2);
- assert.ok(held.every(file=>file.split(path.sep)[1]==='Card'));
+ assert.ok(held.every(file=>file.split('/')[1]==='Card'));
  assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('gone.JPG'))!),'utf8'),'gone bytes');
  assert.equal(await fs.readFile(path.join(root,'Drive backups/Removed by mirror',held.find(file=>file.endsWith('changed.txt'))!),'utf8'),'version 1');
 });

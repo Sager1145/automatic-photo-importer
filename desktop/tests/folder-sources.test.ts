@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {resolveFolderSources} from '../folder-sources';
+import {linkFolder} from './fixtures/os';
 
 async function drive(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'folder-sources-')));
@@ -33,7 +34,7 @@ test('a folder inside the backup is rejected without dropping the others',async 
 test('folders already added in the same mode, or picked twice, are skipped',async t=>{
  const d=await drive(t);
  const a=await d.dir('A'),b=await d.dir('B'),link=path.join(d.base,'B link');
- await fs.symlink(b,link);
+ await linkFolder(b,link);
  const existing={id:`folder:${a}`,name:'A',path:a,transport:'folder' as const};
  const {sources}=await resolveFolderSources([a,b,link],{sources:[existing],registered:new Map([[existing.id,{backup:false}]]),backupRoots:[],backup:false});
  assert.deepEqual(sources.map(source=>source.path),[b]);

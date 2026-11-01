@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {inventory,listingOf} from '../core/inventory';
+import {fileSymlinks,slash} from './fixtures/os';
 
 const mod=createRequire(import.meta.url)('node:fs/promises') as {lstat:typeof fs.lstat};
 
@@ -15,7 +16,8 @@ async function tree(t:test.TestContext){
  await fs.mkdir(path.join(root,'DCIM'));
  for(let index=0;index<20;index++)await fs.writeFile(path.join(root,'DCIM',`V${index}.MOV`),'y'.repeat(index+1));
  await fs.writeFile(path.join(root,'half.JPG.partial'),'p');
- await fs.symlink(path.join(root,'IMG_000.JPG'),path.join(root,'link.JPG'));
+ // A file symlink needs Developer Mode on Windows; without it the listing is the same, only the left-out link is untested.
+ if(fileSymlinks)await fs.symlink(path.join(root,'IMG_000.JPG'),path.join(root,'link.JPG'));
  await fs.mkdir(path.join(root,'ZZ'));await fs.writeFile(path.join(root,'ZZ','last.JPG'),'z');
  return root;
 }
@@ -29,7 +31,7 @@ test('entries of a folder are looked at several at a time, in name order, with t
  try{listed=await inventory(root);}finally{mod.lstat=real;}
  assert.ok(peak>1&&peak<=8+1,'lstat calls at once: '+peak);
  assert.deepEqual(listed.files.map(file=>file.relative),serial.files.map(file=>file.relative));
- const names=listed.files.map(file=>file.relative);
+ const names=listed.files.map(file=>slash(file.relative));
  assert.equal(names.length,81);
  assert.ok(!names.some(name=>name.endsWith('.partial')||name==='link.JPG'),'partials and links are still left out');
  assert.deepEqual(names.slice(0,3),['DCIM/V0.MOV','DCIM/V1.MOV','DCIM/V10.MOV'],'folders keep their name order');

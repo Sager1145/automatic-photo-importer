@@ -14,6 +14,7 @@ import {I18nProvider,languages,createTranslator} from '../renderer/i18n';
 import {DeleteOriginals,OriginalsConfirm} from '../renderer/RootApp';
 import {nextConfirmStep} from '../renderer/ui';
 import type {Job,Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -30,7 +31,7 @@ async function imported(t:test.TestContext){
  const files:VerifiedOriginal[]=destinationEntries(transfer!).map(entry=>({source:entry.source,size:entry.size,sha256:verified.get(entry.source)??'',destinations:[entry.destination]}));
  return {base,source,root,files};
 }
-const listing=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).sort();
+const listing=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).map(slash).sort();
 
 test('an import never touches its source, even with saved preferences that would delete',async t=>{
  const prefs=normalizePreferences({removeEmptySourceFolders:true,releaseDuplicatesAfterOrganizing:true,copyMode:'mirror',backupMode:'mirror'});

@@ -6,6 +6,7 @@ import os from 'node:os';
 import {inventory,plan,execute} from '../core';
 import type {Metadata,UnknownFileRule} from '../shared';
 import {configureOrganizationRecovery} from '../core/index';
+import {slash} from './fixtures/os';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -85,7 +86,7 @@ test('one camera spanning capture months supplies its camera but falls back to u
 test('camera imports honor chosen folders and library organization still excludes unknowns',async t=>{
  const {source,root,put}=await fixture(t);await put('A.NEF');await put('INDEX01.DSC');await put('INDEX.DAT');
  const {plans}=await plan(source,[root],{...options,unknownRules:{dsc:'Custom/Files',dat:cameraRule}},metadata);
- assert.deepEqual(plans[0].entries.map(entry=>path.relative(root,entry.destination)).sort(),['2024/202402/Nikon Z6/A.NEF','2024/202402/Nikon Z6/INDEX.DAT','Custom/Files/INDEX01.DSC']);
+ assert.deepEqual(plans[0].entries.map(entry=>slash(path.relative(root,entry.destination))).sort(),['2024/202402/Nikon Z6/A.NEF','2024/202402/Nikon Z6/INDEX.DAT','Custom/Files/INDEX01.DSC']);
  // A request built from import settings may still carry unknown rules: an organization ignores them.
  const imported={...options,unknownRules:{dsc:cameraRule,dat:'Custom/Files'}};
  const organization=await plan(source,[source],{...imported,reorganize:true},metadata);

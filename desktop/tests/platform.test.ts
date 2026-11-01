@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import filesystem from 'node:fs/promises';
 import {syncBuiltinESMExports} from 'node:module';
+import { linkFolder } from './fixtures/os';
 import { metadataFromTags } from '../platform/metadata';
 import { classifyVolume, parseLinuxVolumes, parseWindowsVolumes, parseMacPhysicalStores, resolveMacPhysicalIdentity, validateDestination, volumeInfo } from '../platform/volumes';
 
@@ -154,7 +155,7 @@ test('exposure summary skips invalid grouped values and prefers standard EXIF se
 test('destination rejects nested camera folders through symlinks and reports capacity', async () => {
   const root=await mkdtemp(join(tmpdir(),'importer-platform-'));
   try {
-    const card=join(root,'card'); await mkdir(card); await mkdir(join(card,'DCIM')); await symlink(card,join(root,'alias'),'dir');
+    const card=join(root,'card'); await mkdir(card); await mkdir(join(card,'DCIM')); await linkFolder(card,join(root,'alias'));
     await assert.rejects(validateDestination(join(root,'alias','nested'),[{id:'card',name:'Card',path:card,transport:'storage',camera:true}]),/source|camera|card/i);
     await validateDestination(join(root,'backup'),[]);
     const info=await volumeInfo(root); assert.equal(info.available,true); assert.ok((info.total??0)>0); assert.ok((info.free??0)>0);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHmac} from 'node:crypto';
 import * as store from '../core/app-store';
+import {allowWrite,denyWrite,linkFolder} from './fixtures/os';
 
 store.configureHostKey('fixture-only-host-recovery-secret-32bytes');
 
@@ -40,8 +41,8 @@ test('the base is the configured destination a library lies beneath, else the li
 
 test('an unwritable destination leaves the records in the library',async t=>{
  const root=await drive(t),destination=path.join(root,'locked'),library=path.join(destination,'photos');
- await fs.mkdir(library,{recursive:true});await fs.chmod(destination,0o555);
- try{store.registerDestinations([destination]);assert.equal(await store.baseFor(library),library);}finally{await fs.chmod(destination,0o755);}
+ await fs.mkdir(library,{recursive:true});await denyWrite(destination);
+ try{store.registerDestinations([destination]);assert.equal(await store.baseFor(library),library);}finally{await allowWrite(destination);}
 });
 
 test('readers find every store from the folder up to the top of its drive; a linked store is skipped',async t=>{
@@ -49,7 +50,7 @@ test('readers find every store from the folder up to the top of its drive; a lin
  const outer=await store.ensureStore(root),inner=await store.ensureStore(library);
  assert.deepEqual((await store.storesFor(library)).map(item=>item.path),[inner.path,outer.path]);
  const elsewhere=await fs.mkdtemp(path.join(root,'x-'));await fs.mkdir(path.join(root,'a','Photo Importer Data'));
- await fs.rm(path.join(root,'a','Photo Importer Data'),{recursive:true});await fs.symlink(elsewhere,path.join(root,'a','Photo Importer Data'));
+ await fs.rm(path.join(root,'a','Photo Importer Data'),{recursive:true});await linkFolder(elsewhere,path.join(root,'a','Photo Importer Data'));
  assert.deepEqual((await store.storesFor(library)).map(item=>item.path),[inner.path,outer.path]);
 });
 

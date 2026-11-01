@@ -6,6 +6,7 @@ import path from 'node:path';
 import {plan,execute,findMisplaced,executeReorganization,configureOrganizationRecovery} from '../core/index';
 import {formatFolder} from '../media-formats';
 import type {MediaLayout,Metadata,PlanEntry,TransferPlan} from '../shared';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',unknownRules:{}};
@@ -24,7 +25,7 @@ const parts=(transfer:TransferPlan)=>[transfer,...(transfer.videos?[transfer.vid
 /** source name → destination relative to its own root. */
 function placed(transfer:TransferPlan):Record<string,string>{
  const result:Record<string,string>={};
- for(const part of parts(transfer))for(const entry of part.entries)result[path.relative(path.join(part.root,'..','..','card'),entry.source)]=(part===transfer?'':'[videos] ')+path.relative(part.root,entry.destination);
+ for(const part of parts(transfer))for(const entry of part.entries)result[slash(path.relative(path.join(part.root,'..','..','card'),entry.source))]=(part===transfer?'':'[videos] ')+slash(path.relative(part.root,entry.destination));
  return result;
 }
 const camera='2026/202610/Nikon Z6III';
@@ -45,7 +46,7 @@ for(const layout of Object.keys(expected) as MediaLayout[])test(`${layout}: ever
  const {source,photos,videos}=await fixture(t);
  const {plans:[transfer]}=await plan(source,[photos],{...base,layout,videoRoots:[videos]},metadata);
  assert.equal(!!transfer!.videos,layout==='video-root');
- const want=Object.fromEntries(Object.entries(expected[layout]).map(([name,folder])=>{const video=folder.startsWith('[videos] ');return [name,(video?'[videos] ':'')+path.join(camera,folder.replace('[videos] ',''),path.basename(name))];}));
+ const want=Object.fromEntries(Object.entries(expected[layout]).map(([name,folder])=>{const video=folder.startsWith('[videos] ');return [name,(video?'[videos] ':'')+path.posix.join(camera,folder.replace('[videos] ',''),path.basename(name))];}));
  assert.deepEqual(placed(transfer!),want);
  // A family (RAW+JPEG+sidecars, video+XML/LRF/WAV) shares one conflict folder: the camera folder.
  for(const part of parts(transfer!))for(const entry of part.entries)assert.equal(entry.allocation!.folder,path.join(part.root,camera),entry.source);
@@ -62,7 +63,7 @@ test('edited exports stay flat in the edited folder whatever the layout',async t
  const {source,photos}=await fixture(t,['DSC_0001.JPG']);
  for(const layout of ['format','type-format','videos-flat'] as const){
   const {plans:[transfer]}=await plan(source,[photos],{...base,layout},async()=>({...await metadata(),edited:true}));
-  assert.equal(path.relative(photos,transfer!.entries[0]!.destination),'2026/202610/editied/Nikon Z6III/DSC_0001.JPG',layout);
+  assert.equal(slash(path.relative(photos,transfer!.entries[0]!.destination)),'2026/202610/editied/Nikon Z6III/DSC_0001.JPG',layout);
  }
 });
 
@@ -88,7 +89,7 @@ test('an identical file already at the destination is skipped; a different file 
  const conflict=path.relative(path.join(photos,camera),by('DSC_0001.NEF').destination).split(path.sep);
  assert.equal(conflict[0],'Conflicts');
  // The whole still family moves together and keeps its format folders.
- assert.deepEqual(['DSC_0001.NEF','DSC_0001.JPG','DSC_0001.xmp'].map(name=>path.relative(path.join(photos,camera),by(name).destination)),[`Conflicts/${conflict[1]}/NEF/DSC_0001.NEF`,`Conflicts/${conflict[1]}/JPEG/DSC_0001.JPG`,`Conflicts/${conflict[1]}/NEF/DSC_0001.xmp`]);
+ assert.deepEqual(['DSC_0001.NEF','DSC_0001.JPG','DSC_0001.xmp'].map(name=>slash(path.relative(path.join(photos,camera),by(name).destination))),[`Conflicts/${conflict[1]}/NEF/DSC_0001.NEF`,`Conflicts/${conflict[1]}/JPEG/DSC_0001.JPG`,`Conflicts/${conflict[1]}/NEF/DSC_0001.xmp`]);
  // The identical video is kept; its companion is copied beside it.
  assert.equal(by('C0004.MP4').destination,at('MP4/C0004.MP4'));assert.equal(by('C0004.MP4').skip,true);
  assert.equal(by('C0004M01.XML').destination,at('MP4/C0004M01.XML'));
@@ -100,7 +101,7 @@ test('two different files with the same name on one card do not overwrite each o
  const {source,photos}=await fixture(t,['100NIKON/DSC_0001.NEF','101NIKON/DSC_0001.NEF','100NIKON/DSC_0002.JPG','101NIKON/DSC_0002.jpg']);
  await fs.writeFile(path.join(source,'101NIKON/DSC_0002.jpg'),'bytes of 100NIKON/DSC_0002.JPG');
  const {plans:[transfer]}=await plan(source,[photos],{...base,layout:'format'},metadata);
- const destinations=transfer!.entries.map((entry:PlanEntry)=>path.relative(path.join(photos,camera),entry.destination));
+ const destinations=transfer!.entries.map((entry:PlanEntry)=>slash(path.relative(path.join(photos,camera),entry.destination)));
  assert.ok(destinations.includes('NEF/DSC_0001.NEF'));
  assert.equal(destinations.filter(item=>item.startsWith('Conflicts/')&&item.endsWith('/NEF/DSC_0001.NEF')).length,1,'the second NEF goes to a conflict folder');
  // Same name in another case and same bytes: one copy is enough.
@@ -118,7 +119,7 @@ test('organization moves an existing backup into the new layout, including betwe
  await put(path.join(videos,camera,'DSC_0009.JPG'));
  const options={...base,layout:'video-root' as const,videoRoots:[videos],sourceFolders:['photobackup','videobackup']};
  const misplaced=await findMisplaced(drive,photos,options,metadata);
- assert.deepEqual(misplaced.files.sort(),['photobackup/'+camera+'/RAW/DSC_0001.NEF','photobackup/'+camera+'/RAW/DSC_0001.xmp','photobackup/'+camera+'/Videos/C0004.MP4','photobackup/'+camera+'/Videos/C0004M01.XML','videobackup/'+camera+'/DSC_0009.JPG'].sort());
+ assert.deepEqual(misplaced.files.map(slash).sort(),['photobackup/'+camera+'/RAW/DSC_0001.NEF','photobackup/'+camera+'/RAW/DSC_0001.xmp','photobackup/'+camera+'/Videos/C0004.MP4','photobackup/'+camera+'/Videos/C0004M01.XML','videobackup/'+camera+'/DSC_0009.JPG'].sort());
  const {plans:[transfer]}=await plan(drive,[photos],{...options,reorganize:true},metadata);
  for(const part of parts(transfer!))assert.deepEqual((await executeReorganization(part,undefined,undefined)).errors,[]);
  for(const file of [path.join(photos,camera,'DSC_0001.NEF'),path.join(photos,camera,'DSC_0001.xmp'),path.join(photos,camera,'DSC_0009.JPG'),path.join(videos,camera,'C0004.MP4'),path.join(videos,camera,'C0004M01.XML')])await fs.access(file);

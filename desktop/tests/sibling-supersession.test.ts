@@ -6,6 +6,7 @@ import os from 'node:os';
 import * as core from '../core/index';
 import {appendJournalLine,journalFileFor,organizeAs,pointerDirFor,pointerFilesFor,pointerFor,sealedEvent,sealedRecord} from './fixtures/records';
 import type {Metadata} from '../shared';
+import {linkFolder} from './fixtures/os';
 
 // A library first organized into one backup folder, then split into photobackup and videobackup:
 // the video's later journal lives in the sibling videobackup and must supersede the earlier one.
@@ -90,7 +91,7 @@ test('a tampered successor folder in a signed event is refused',async t=>{
  const {drive,photos,videos,other,earlier}=await fixture(t);
  await split(drive,photos,videos);
  const file=await journalFileFor(photos,earlier),text=await fs.readFile(file,'utf8');
- assert.ok(text.includes(videos));
+ assert.ok(text.includes(JSON.stringify(videos)),'the journal names the successor folder');
  await fs.writeFile(file,text.replaceAll(JSON.stringify(videos),JSON.stringify(other)));
  const visible=(await core.getOrganizationRecovery(photos)).find(job=>job.id===earlier);
  assert.equal(visible!.id,earlier);assert.match(visible!.error!,/authentication/);
@@ -187,7 +188,7 @@ test('a successor folder replaced by a link since is skipped, not refused, when 
  const {drive,photos,videos}=await clips(t);
  const {plans:[split]}=await core.plan(drive,[photos],{...base,layout:'video-root',videoRoots:[videos],sourceFolders:['photobackup','videobackup'],reorganize:true},metadata);
  for(const part of [split!.videos!,split!])assert.deepEqual((await core.executeReorganization(part,undefined,undefined)).errors,[]);
- const elsewhere=path.join(drive,'elsewhere');await fs.rename(videos,elsewhere);await fs.symlink(elsewhere,videos);
+ const elsewhere=path.join(drive,'elsewhere');await fs.rename(videos,elsewhere);await linkFolder(elsewhere,videos);
  const next=(await core.plan(drive,[photos],{...base,template:'{year}/{camera}',layout:'flat',reorganize:true as const,sourceFolders:['photobackup']},metadata)).plans[0]!;
  assert.deepEqual((await core.executeReorganization(next,undefined,undefined)).errors,[]);
 });
@@ -221,7 +222,7 @@ test('a sibling backup folder that now resolves elsewhere stops the organization
  await assert.rejects(core.executeReorganization(split!,stop.signal,stop.progress),{name:'AbortError'});
  const job=(await core.getOrganizationRecovery(photos)).find(item=>item.status==='pending')!;
  const elsewhere=path.join(drive,'elsewhere');await fs.mkdir(elsewhere);
- await fs.rm(videos,{recursive:true});await fs.symlink(elsewhere,videos);
+ await fs.rm(videos,{recursive:true});await linkFolder(elsewhere,videos);
  const resumed=await core.resumeOrganization(photos,job.id);
  assert.match(resumed.errors.join(' '),/Unsafe sibling backup folder/);assert.equal(resumed.moved,0);
 });

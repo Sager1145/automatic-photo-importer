@@ -138,8 +138,9 @@ export function classifyPlacement({route,actual,rulesScope,evaluatedRulesScope}:
   if(!route||evaluatedRulesScope!==undefined&&evaluatedRulesScope!==rulesScope)return {...base,status:'unchecked',reason:'rules changed or not checked'};
   if(route.reason==='exempt')return {...base,status:'inPlace',reason:route.exemption};
   if(route.reason!=='route'||route.relative===undefined)return {...base,status:'unclassifiable',reason:route.reason==='keep'?`keep: ${route.noMetadataReason}`:route.reason};
-  const expectedRoute={role:route.root,relativePath:route.relative};
-  const same=actual.root===route.root&&pathKey(actual.relativePath)===pathKey(route.relative);
+  // Catalog paths use '/' on every OS; routes are native ('\' on Windows).
+  const expectedRoute={role:route.root,relativePath:route.relative.split(path.sep).join('/')};
+  const same=actual.root===route.root&&pathKey(actual.relativePath.split(path.sep).join('/'))===pathKey(expectedRoute.relativePath);
   return {...base,status:same?'inPlace':'misplaced',expectedRoute,reason:same?'matches folder rules':'folder rules choose another path'};
 }
 /** Shared complete route evaluation; hashing, collision allocation and publication stay in the planner. */
@@ -250,7 +251,8 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
       const known=context.get(key)??{camera,dates:new Set<string>()};
       if(date) known.dates.add(date);
       context.set(key,known);contexts.set(ancestor,context);
-      if(ancestor===sourceRoot) break;
+      // Also stop at the top of the drive: a path spelled differently from sourceRoot ('/library' vs '\library' on Windows) would loop forever.
+      if(ancestor===sourceRoot||path.dirname(ancestor)===ancestor) break;
     }
   }
   function unknownContext(file:InventoryFile):Metadata {
@@ -266,7 +268,7 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
         const closest=uniqueMonth?dates.sort((a,b)=>Math.abs(Date.parse(a+'T00:00:00Z')-mtime)-Math.abs(Date.parse(b+'T00:00:00Z')-mtime)||a.localeCompare(b))[0]:undefined;
         return {fields:{},camera:known.camera,date:closest};
       }
-      if(ancestor===sourceRoot) return {fields:{}};
+      if(ancestor===sourceRoot||path.dirname(ancestor)===ancestor) return {fields:{}};
     }
   }
   // Unknown files: no capture date, no camera and no known origin, or metadata that could not be read. A family is
