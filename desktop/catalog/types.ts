@@ -31,9 +31,9 @@ export interface NumericBucket {min?:number;max?:number;maxInclusive:boolean;}
 export interface NumericRange {min?:number;max?:number;maxInclusive?:boolean;}
 /** Values/ranges within a filter are OR; separate filters, including repeated fields, are AND. */
 export type Filter = ({blockId?:string} & (
-  | {kind:'values';field:CategoryField;values:(string|number)[];/** What the rows showed for each value (camera and lens values are match keys); display only. */labels?:string[]}
+  | {kind:'values';field:CategoryField;values:(string|number)[];/** What the rows showed for each value (camera and lens values are match keys); display only. */labels?:string[];/** Also files whose metadata was read but has no value for this field (the Missing details row). */orMissing?:boolean}
   | {kind:'range';field:NumericField;min?:number;max?:number;/** Defaults true for user-entered closed ranges; false preserves a bucket's exclusive upper edge. */maxInclusive?:boolean}
-  | {kind:'ranges';field:NumericField;ranges:NumericRange[]}
+  | {kind:'ranges';field:NumericField;ranges:NumericRange[];orMissing?:boolean}
   | {kind:'missing';field:CategoryField}
   | {kind:'placement';status:PlacementStatus}));
 export interface CatalogQuery {
@@ -152,6 +152,8 @@ export interface Catalog {
   records(libraryId:string,relativePaths:string[]):Promise<CatalogRecord[]>;
   /** includeMissing: also a row marked missing, which keeps its last record (a moved primary's name, for its companions). */
   file(libraryId:string,fileId:string,options?:{includeMissing?:boolean}):Promise<CatalogRecord|undefined>;
+  /** The companion files (sidecars such as .xmp) recorded for at most 500 primary files. */
+  companions(libraryId:string,fileIds:string[]):Promise<CatalogRecord[]>;
   beginScan(libraryId:string,scope:string[]):Promise<string>;
   ingest(runId:string,records:CatalogRecord[]):Promise<void>;
   endScan(runId:string,result:ScanResult):Promise<void>;

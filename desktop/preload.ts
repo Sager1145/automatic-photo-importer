@@ -1,6 +1,7 @@
 import type {CatalogQuery,CategoryField} from './catalog/types';
 import {contextBridge,ipcRenderer} from 'electron';
-import type {Action,DuplicateGroup,Metadata,Thumbnail} from './shared';
+import type {Action,DuplicateGroup,Metadata,PreparedDrag,Thumbnail} from './shared';
+import type {DragRequest} from './core/file-drag';
 import type {StateUpdate} from './state-channel';
 
 // Keep the bridge transparent: reconstructing AppState here would copy every
@@ -11,6 +12,9 @@ contextBridge.exposeInMainWorld('importer',{
  catalogFacets:(query:CatalogQuery,field:CategoryField)=>ipcRenderer.invoke('importer:catalogFacets',query,field),
  catalogStatus:(libraryId:string)=>ipcRenderer.invoke('importer:catalogStatus',libraryId),
  catalogResolve:(libraryId:string,fileId:string)=>ipcRenderer.invoke('importer:catalogResolve',libraryId,fileId),
+ prepareDrag:(request:DragRequest):Promise<PreparedDrag>=>ipcRenderer.invoke('importer:prepareDrag',request),
+ // A send, not an invoke: main must start the system drag while the pointer is still held.
+ startDrag:(token:string,icon:string)=>ipcRenderer.send('importer:startDrag',token,icon),
  state:():Promise<StateUpdate>=>ipcRenderer.invoke('importer:state'),
  action:async(action:Action):Promise<void>=>{await ipcRenderer.invoke('importer:action',action);},
  subscribe:(listener:(update:StateUpdate)=>void)=>{

@@ -1,7 +1,7 @@
 import {openCatalog} from './store';
 import type {Catalog} from './types';
 
-const allowed=new Set<keyof Catalog>(['configure','records','file','beginScan','ingest','endScan','apply','query','directories','facets','status','close']);
+const allowed=new Set<keyof Catalog>(['configure','records','file','companions','beginScan','ingest','endScan','apply','query','directories','facets','status','close']);
 const catalog=openCatalog(process.argv[2]);
 let queue=Promise.resolve();
 // Serialize reads and transactions at the single connection owner, including asynchronous protocol responses.

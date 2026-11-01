@@ -1635,6 +1635,17 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-column{min-width:180px;border-right:1px solid var(--separator);height:100%;display:flex;flex-direction:column;min-height:0}
 .browser-column>header{display:flex;align-items:center;justify-content:space-between;padding:.45rem .6rem;min-height:40px;border-bottom:1px solid var(--separator);gap:.4rem;flex:none}
 .browser-column h3{display:flex;align-items:center;gap:.35rem;font-size:var(--text-footnote)}.browser-column>header small{color:var(--label-secondary);font-size:var(--text-caption)}
+/* Select all / Deselect all sit at the end of every column header. */
+.browser-column>header h3{flex:1;min-width:0}.browser-column>header small{display:flex;align-items:center;white-space:nowrap;font-variant-numeric:tabular-nums}.browser-column-selected{color:var(--accent-text,var(--accent-fill));font-weight:600}
+.browser-column-actions{display:flex;gap:.1rem;flex:none}.browser-column-actions .browser-column-action{min-width:28px;min-height:28px;padding:.25rem}
+/* The selection as a path: one crumb per column with a choice, its values, and how many when there are several. */
+.browser-breadcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;list-style:none;margin:0;padding:0;min-width:0;flex:1}.browser-breadcrumb>li{display:flex;align-items:center;gap:.3rem;min-width:0}.browser-breadcrumb>li+li::before{content:'›';color:var(--label-secondary);font-size:var(--text-body,1rem);padding:0 .1rem}
+.browser-breadcrumb button{display:inline-flex;align-items:baseline;gap:.35rem;padding:.4rem .6rem;border-radius:var(--radius-sm);background:var(--accent-soft);min-height:var(--control-height);overflow-wrap:anywhere;text-align:left}.browser-breadcrumb button small{color:var(--label-secondary);font-size:var(--text-caption)}.browser-selection-count{color:var(--label-secondary);font-variant-numeric:tabular-nums}.browser-selection-files{color:var(--label-secondary)}
+/* The drag-out handle closes the Files column: drag it onto Lightroom Classic or a file manager. */
+.browser-drag-out{flex:none;border-top:1px solid var(--separator);padding:.5rem;display:grid;gap:.3rem}
+.browser-drag-handle{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .45rem;padding:.55rem .7rem;border:1px dashed var(--accent-fill);border-radius:var(--radius-md);background:var(--accent-soft);cursor:grab;font-size:var(--text-footnote);font-weight:600;user-select:none}.browser-drag-handle:active{cursor:grabbing}.browser-drag-handle:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
+.browser-drag-handle .browser-drag-label{flex:1;min-width:0;line-height:1.25}.browser-drag-handle small{color:var(--label-secondary);font-weight:400;font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
+.browser-drag-handle.is-disabled{cursor:not-allowed;opacity:.5;border-color:var(--separator-strong);background:var(--fill-4)}.browser-drag-note{font-size:var(--text-caption);color:var(--label-secondary);overflow-wrap:anywhere}
 .browser-coverage{font-size:var(--text-caption);color:var(--label-secondary);padding:.3rem .6rem;overflow-wrap:anywhere;flex:none}
 .browser-virtual-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;position:relative;outline-offset:-3px!important;border-radius:0!important}
 .browser-row{display:flex;align-items:center;justify-content:space-between;gap:.4rem;padding:.5rem .65rem;cursor:default;border-bottom:1px solid var(--separator);font-size:var(--text-footnote)}

@@ -49,7 +49,7 @@ export function createCatalogClient(child:CatalogChild,options:Pick<CatalogProce
  };
  return {
   async configure(definitions){await request<void>('configure',[definitions]);for(const definition of definitions)libraries.set(definition.libraryId,definition);},
-  records:(...args)=>request('records',args),file:(...args)=>request('file',args),
+  records:(...args)=>request('records',args),file:(...args)=>request('file',args),companions:(...args)=>request('companions',args),
   beginScan:(...args)=>request('beginScan',args),ingest:(...args)=>request('ingest',args),endScan:(...args)=>request('endScan',args),
   apply:(...args)=>request('apply',args),query:(...args)=>request('query',args),directories:(...args)=>request('directories',args),facets:(...args)=>request('facets',args),
   async status(id){

@@ -29,6 +29,10 @@ import { recordPartial, IMPORTS, STAGING } from '../core/import-recovery';
 import { cleanResidue, findRunResidue } from '../core/residue';
 import { runTrace } from '../core/run-trace';
 import { withJob } from '../logger';
+import { openCatalog } from '../catalog/store';
+import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
+import { resolveCatalogFile } from '../catalog/access';
+import { collectDragFiles } from '../core/file-drag';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -52,6 +56,8 @@ export interface PlatformProfile {
   folderKeyProvesNames: boolean;
   /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
   namesIgnoreCase: boolean;
+  /** How a file's path reads in a drop this system's apps (Lightroom Classic, the file manager) receive. */
+  dropPath: RegExp;
   /** The file system of the computer's own disk as the adapter names it (NTFS, APFS, ext4): it has hard links, so files publish by linking. */
   systemDisk: string;
   /** exFAT destinations are written directly, each file checked in place (macOS, core/paths directCapable); elsewhere staged, then published by copying. */
@@ -396,6 +402,34 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
         listing = again.listing;
       }
     } finally { await rm(source, { recursive: true, force: true }); }
+  },
+  'Library browser drag to Lightroom: files go out as native paths of this system, each RAW with its .xmp sidecar': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'drag-out-'))), root = join(dir, 'Photos'), month = join(root, '2026', '202609');
+    const catalog = openCatalog(':memory:');
+    try {
+      await mkdir(month, { recursive: true });
+      for (const name of ['DSC_0001.NEF', 'DSC_0001.xmp', 'DSC_0002.NEF', 'DSC_0003.JPG']) await writeFile(join(month, name), name);
+      const binding = await bindLibrary({ root, mountPath: dir, volumeId: 'disk', name: 'Photos', role: 'photos', rulesScope: 'r', online: true });
+      const coordinator = new CatalogCoordinator(catalog, { metadata: async () => ({ fields: {} }), options: () => ({ template: '{year}/{camera}', layout: 'flat' }) });
+      await coordinator.configure([binding]); await coordinator.refresh(binding.library.libraryId, new AbortController().signal);
+      const libraryId = binding.library.libraryId;
+      const query = { libraryId, filters: [], sort: { field: 'name' as const, direction: 'asc' as const }, limit: 200 };
+      const rows = (await catalog.query(query)).rows;
+      assert.deepEqual(rows.map(row => row.relativePath), ['2026/202609/DSC_0001.NEF', '2026/202609/DSC_0002.NEF', '2026/202609/DSC_0003.JPG'], 'the catalog keeps / paths; the sidecar is a companion, not a row');
+      const source = { query: (q: typeof query) => catalog.query(q), companions: (id: string, ids: string[]) => catalog.companions(id, ids), resolve: (fileId: string) => resolveCatalogFile(catalog, binding, fileId, async () => true) };
+      const expected = (...names: string[]) => names.map(name => join(month, name));
+      const all = await collectDragFiles({ libraryId, query, except: [] }, source);
+      assert.deepEqual(all.files, expected('DSC_0001.NEF', 'DSC_0001.xmp', 'DSC_0002.NEF', 'DSC_0003.JPG'), 'every photo shown, each RAW followed by its sidecar');
+      for (const file of all.files) { assert.match(file, profile.dropPath, `${file} reads as a ${profile.platform} path`); assert.ok((await stat(file)).isFile()); }
+      const chosen = await collectDragFiles({ libraryId, fileIds: [rows[0]!.fileId] }, source);
+      assert.deepEqual(chosen.files, expected('DSC_0001.NEF', 'DSC_0001.xmp'), 'only the chosen photo, with its sidecar');
+      const except = await collectDragFiles({ libraryId, query, except: [rows[0]!.fileId] }, source);
+      assert.deepEqual(except.files, expected('DSC_0002.NEF', 'DSC_0003.JPG'));
+      await rm(join(month, 'DSC_0002.NEF'));
+      const gone = await collectDragFiles({ libraryId, query, except: [] }, source);
+      assert.equal(gone.skipped, 1, 'a file removed since indexing is left out'); assert.equal(gone.files.length, 3);
+    } finally { await catalog.close(); await rm(dir, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),
