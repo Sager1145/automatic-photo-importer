@@ -5,13 +5,18 @@ import { mediaKindForPath } from '../media-formats';
 import { sidecars } from './inventory';
 import { code, contained, markFolderChanged, sameStat , unlinkEntry } from './paths';
 import { log, logDeletion } from '../logger';
+import { DRIVE_MARKER } from './drive-backup';
+import { takeOwn } from './own-entries';
 
 /**
  * macOS AppleDouble "._<name>" files. On exFAT, FAT and other volumes without extended attributes, macOS
  * writes a "._<name>" file beside every file it attaches an attribute to; the kernel attaches
  * com.apple.provenance to everything this app writes, so the app cannot prevent them. This module
- * removes only the ones that carry nothing but that bookkeeping. The same cleaner also removes Finder's ".DS_Store"
- * (window layout only) from the folders a job wrote to or moved files out of.
+ * removes only the ones that carry nothing but that bookkeeping: beside the files it placed or moved, beside the folders
+ * it created (own-entries.ts) and in its records folders, and, in the folders a job touched, beside media, companions and
+ * folders, or left without their main file, whoever wrote them (a library a Mac wrote, organized on Windows or Linux).
+ * A "._" there before the app made its name, or holding tags, comments, a label or a resource fork, stays. The same
+ * cleaner also removes Finder's ".DS_Store" (window layout only) from the folders a job wrote to or moved files out of.
  */
 export const APPLEDOUBLE_MAX_BYTES=64*1024;
 const MAGIC=0x00051607,VERSION=0x00020000,ATTR_MAGIC=0x41545452;
@@ -143,6 +148,50 @@ export class AppleDoubleCleaner {
       if(!this.existed.has(sidecar))await this.remove(sidecar,root,'removed');
     }catch(error){this.warn(sidecar,error);}
   }
+  /** Removes the bookkeeping "._" of `folder` itself, in the folder above it (a library's own "._photobackup"). Never throws. */
+  async besideFolder(folder:string):Promise<void> {
+    const parent=path.dirname(folder),sidecar=sidecarOf(folder);
+    if(!sidecar||parent===folder||this.existed.has(sidecar))return;
+    try{
+      const stat=await fs.lstat(folder);
+      if(!stat.isDirectory()||stat.isSymbolicLink())return;
+      await this.remove(sidecar,parent,'removed','AppleDouble sidecar beside the library folder');
+    }catch(error){if(code(error)!=='ENOENT')this.warn(sidecar,error);}
+  }
+  /** Removes the "._" files of what this app created or renamed on the drives of `roots` (own-entries.ts): beside the
+   * library folders it made (unless one by that name was already there, which is kept and counted) and every one in
+   * the records folders it wrote to. Never throws; a stop ends it quietly, and what is left waits for the next job. */
+  async own(roots:string[],signal?:AbortSignal):Promise<void> {
+    const {entries,folders}=takeOwn(roots);
+    for(const {entry,scope,existed} of entries){
+      if(signal?.aborted)return;
+      const sidecar=sidecarOf(entry);
+      if(!sidecar||this.existed.has(sidecar))continue;
+      try{
+        // Usually there is none (always on Windows and Linux): one lstat.
+        if(!await fs.lstat(sidecar).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;}))continue;
+        if(existed){this.existed.add(sidecar);this.keep(sidecar,'there before the app made this name');continue;}
+        const present=await fs.lstat(entry).then(()=>true,error=>{if(code(error)==='ENOENT')return false;throw error;});
+        await this.remove(sidecar,scope,present?'removed':'orphans',present?'AppleDouble sidecar of a folder or file this app created':'orphan AppleDouble sidecar of an entry this app created and later removed or renamed');
+      }catch(error){this.warn(sidecar,error);}
+    }
+    for(const {folder,scope} of folders){
+      if(signal?.aborted)return;
+      try{await contained(path.join(folder,'.x'),scope);await this.sweepRecords(folder,scope);}
+      catch(error){if(code(error)!=='ENOENT'&&code(error)!=='ENOTDIR')this.warnFolder(folder,error);}
+    }
+  }
+  /** Every "._" file in one of the app's records folders: everything there is the app's own. */
+  private async sweepRecords(folder:string,scope:string):Promise<void> {
+    const entries=await fs.readdir(folder,{withFileTypes:true});
+    const names=new Set(entries.map(entry=>entry.name.normalize('NFC').toLowerCase()));
+    for(const entry of entries){
+      if(!entry.name.startsWith('._')||entry.name.length<3||!entry.isFile())continue;
+      const file=path.join(folder,entry.name),present=names.has(entry.name.slice(2).normalize('NFC').toLowerCase());
+      if(this.existed.has(file))continue;
+      await this.remove(file,scope,present?'removed':'orphans',present?'AppleDouble sidecar in the app records folder':'orphan AppleDouble sidecar in the app records folder: its main file is gone');
+    }
+  }
   /** Removes the "._" file left where `file` used to be, once `file` is truly gone from there. */
   async besideGone(file:string,root:string):Promise<void> {
     const sidecar=sidecarOf(file);
@@ -182,8 +231,8 @@ export class AppleDoubleCleaner {
       markFolderChanged(folder);
     }catch(error){this.warn(file,error);}
   }
-  /** "._X" files in the given folders (not below them) whose X is a media or companion file beside them, or is gone altogether
-   * (orphans). Never throws: a folder that cannot be read is reported and skipped, and a stop ends the sweep quietly. */
+  /** "._X" files in the given folders (not below them) whose X is a media or companion file, a folder or a retired drive
+   * marker beside them, or is gone altogether (orphans). Never throws: a folder that cannot be read is reported and skipped, and a stop ends the sweep quietly. */
   async sweep(root:string,folders:Iterable<string>,signal?:AbortSignal,onFolder?:(done:number,folder:string)=>void):Promise<void> {
     let device:bigint;
     try{device=(await fs.lstat(root,{bigint:true})).dev;}catch(error){this.warnFolder(root,error);return;}
@@ -201,15 +250,16 @@ export class AppleDoubleCleaner {
   }
   private async sweepFolder(folder:string,root:string):Promise<void> {
     const entries=await fs.readdir(folder,{withFileTypes:true});
-    const names=new Set(entries.map(entry=>entry.name.normalize('NFC').toLowerCase()));
+    const names=new Map(entries.map(entry=>[entry.name.normalize('NFC').toLowerCase(),entry]));
     for(const entry of entries){
       if(!entry.name.startsWith('._')||entry.name.length<3||!entry.isFile())continue;
-      const file=path.join(folder,entry.name),main=entry.name.slice(2);
-      if(names.has(main.normalize('NFC').toLowerCase())){
-        // The main file is there: only media and their companions count, and it must be a plain file.
-        if(mediaKindForPath(main)==='Other'&&!sidecars.has(path.extname(main).slice(1).toLowerCase()))continue;
-        try{if(!(await fs.lstat(path.join(folder,main))).isFile())continue;}catch(error){this.warn(file,error);continue;}
-        await this.remove(file,root,'removed');
+      const file=path.join(folder,entry.name),main=entry.name.slice(2),listed=names.get(main.normalize('NFC').toLowerCase());
+      if(listed){
+        // The main entry is there: a folder, or a plain file that is media, a companion or a retired drive marker.
+        const kind=listed.isDirectory()?'folder':mediaKindForPath(main)!=='Other'||sidecars.has(path.extname(main).slice(1).toLowerCase())||main.toLowerCase()===DRIVE_MARKER?'file':undefined;
+        if(!kind)continue;
+        try{const stat=await fs.lstat(path.join(folder,listed.name));if(kind==='folder'?!stat.isDirectory()||stat.isSymbolicLink():!stat.isFile())continue;}catch(error){this.warn(file,error);continue;}
+        await this.remove(file,root,'removed',kind==='folder'?'AppleDouble sidecar beside its folder':undefined);
       } else {
         // Gone from the listing: confirm with the filesystem before treating it as an orphan.
         try{await fs.lstat(path.join(folder,main));continue;}catch(error){if(code(error)!=='ENOENT'){this.warn(file,error);continue;}}
@@ -218,7 +268,7 @@ export class AppleDoubleCleaner {
     }
   }
   /** The safety check and the removal of one "._" file; a missing file is nothing to do. */
-  private async remove(sidecar:string,root:string,count:'removed'|'orphans'):Promise<void> {
+  private async remove(sidecar:string,root:string,count:'removed'|'orphans',why=count==='removed'?'AppleDouble sidecar beside its media file':'orphan AppleDouble sidecar: its main file is gone'):Promise<void> {
     try{
       const before=await fs.lstat(sidecar,{bigint:true}).catch(error=>{if(code(error)==='ENOENT')return undefined;throw error;});
       if(!before)return;
@@ -235,7 +285,7 @@ export class AppleDoubleCleaner {
       // Unchanged since it was read, so what is removed is what was judged.
       if(!sameStat(before,await fs.lstat(sidecar,{bigint:true}))){this.keep(sidecar);return;}
       await unlinkEntry(sidecar);
-      logDeletion('appledouble',sidecar,count==='removed'?'AppleDouble sidecar beside its media file':'orphan AppleDouble sidecar: its main file is gone',`inspectAppleDouble: safe (bookkeeping attributes only); ${before.size} bytes; unchanged between reading and removal; lstat of the main file ${count==='removed'?'found a plain file':'found nothing'}`,{bytes:Number(before.size),kind:count});
+      logDeletion('appledouble',sidecar,why,`inspectAppleDouble: safe (bookkeeping attributes only); ${before.size} bytes; unchanged between reading and removal; the main entry ${count==='removed'?'is there':'is gone'}; "Clean up Mac system files" on`,{bytes:Number(before.size),kind:count});
       this.report[count]++;
       markFolderChanged(path.dirname(sidecar));
     }catch(error){this.warn(sidecar,error);}
