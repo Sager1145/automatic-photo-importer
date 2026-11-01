@@ -86,11 +86,17 @@ test('existing edited ancestry classifies exports and companions, while RAW stay
 });
 
 test('legal special directories and numbered conflict names are accepted by existing policy',()=>{
-  const files=[file('2024/Camera/Conflicts/content/A.JPG'),file('Problem files/Empty/A.JPG'),file('Drive backups/SSD/A.JPG'),file('Photo Importer Data/Organizations/A.JPG'),file('Trips/NIKON Z f/2024/02 February/A (2).JPG')];
+  const files=[file('2024/Camera/Conflicts/content/A.JPG'),file('Problem files/Empty/A.JPG'),file('Photo Importer Data/Organizations/A.JPG'),file('Trips/NIKON Z f/2024/02 February/A (2).JPG')];
   const decisions=routes(files);
   for(const d of decisions)assert.equal(classifyPlacement({route:d,actual:{root:'photos',relativePath:d.file.relative},rulesScope:'r'}).status,'inPlace');
-  assert.deepEqual(decisions.slice(0,4).map(d=>d.reason),['exempt','exempt','exempt','exempt']);
-  assert.equal(rel(decisions[4]),'Trips/NIKON Z f/2024/02 February/A (2).JPG');
+  assert.deepEqual(decisions.slice(0,3).map(d=>d.reason),['exempt','exempt','exempt']);
+  assert.equal(rel(decisions[3]),'Trips/NIKON Z f/2024/02 February/A (2).JPG');
+});
+
+test('a Drive backups folder is not part of a library: its files are misplaced, so organization files them',()=>{
+  const [d]=routes([file('Drive backups/SSD/A.JPG')]);
+  assert.notEqual(d!.reason,'exempt');
+  assert.equal(classifyPlacement({route:d!,actual:{root:'photos',relativePath:d!.file.relative},rulesScope:'r'}).status,'misplaced');
 });
 
 test('unknown camera rules use nearby media context while explicit unknown folders retain their paths',()=>{
