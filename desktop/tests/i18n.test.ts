@@ -673,7 +673,11 @@ test('the drive popup shows when a reconnected drive last finished a scan or a v
     const row = back.match(/<li[^>]*data-source-id="known"[\s\S]*$/)?.[0] ?? '';
     assert.ok(row.includes(t('Last import verified {date}', { date: formatWhen('2026-10-20T21:15:00Z', language) })) && row.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-19T08:30:00Z', language) })), `${language}: both times`);
     assert.ok(back.includes(t('Drive reconnected')), `${language}: reconnected heading`);
-    assert.ok(row.includes(t('Import now')) && row.includes(t('OK')), `${language}: remembered drive offers Import now and OK`);
+    const dontImport = t("Don't import").replaceAll("'", '&#x27;');
+    assert.ok(row.includes(t('Import now')) && row.includes(dontImport) && row.includes('data-testid="reconnected-dont-import"') && !/>OK</.test(row), `${language}: verified drive offers Import now and Don't import, not OK`);
+    const ignored = render({ reconnectedDevices: ['fresh'] });
+    const ignoredRow = ignored.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
+    assert.ok(ignoredRow.includes(t('Import from this drive')) && ignoredRow.includes(dontImport) && !/>OK</.test(ignoredRow), `${language}: reconnected unselected drive offers Don't import, not OK`);
     const both = render({ newDevices: ['fresh'], reconnectedDevices: ['fresh'] });
     const freshRow = both.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
     assert.ok(freshRow.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-18T09:00:00Z', language) })) && !freshRow.includes(t('Last import verified {date}', { date: '@@' }).split('@@')[0]), `${language}: new drive with history shows its scan`);
