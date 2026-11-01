@@ -19,13 +19,26 @@ export interface ThumbnailDecoders {
 }
 const exec = promisify(execFile);
 const run = (command: string, args: string[], timeout = 30000) => exec(command, args, { timeout }).then(() => true, () => false);
-/** sips decodes through ImageIO, including camera RAW; it is built into macOS. */
-export const systemDecoders = (embedded: ThumbnailDecoders['embedded']): ThumbnailDecoders => ({
+/** The app's own picture decoder (Electron's nativeImage), passed in so this module stays free of Electron. `shell`: the
+ * system thumbnailer, a JPEG of at most `size` pixels (Windows Explorer's: pictures, the RAW formats whose codecs are
+ * installed, and video poster frames). `image`: a JPEG of a JPEG/PNG decoded by Chromium. Each resolves undefined when it cannot. */
+export interface NativeDecoder {
+  shell(file: string, size: number): Promise<Buffer | undefined>;
+  image(file: string, size: number): Promise<Buffer | undefined>;
+}
+const written = async (output: string, jpeg: Buffer | undefined) => { if (!jpeg?.length) return false; await writeFile(output, jpeg); return true; };
+/** macOS: sips decodes through ImageIO, including camera RAW, and Quick Look makes video posters; both are built in.
+ * Windows: the shell thumbnailer, as Explorer shows it. Linux: Chromium's decoder for JPEG and PNG only (no RAW, no posters yet). */
+export const systemDecoders = (embedded: ThumbnailDecoders['embedded'], native?: NativeDecoder): ThumbnailDecoders => ({
   async decode(file, output, size) {
+    if (process.platform === 'win32') return !!native && await written(output, await native.shell(file, size).catch(() => undefined));
+    if (process.platform === 'linux') return !!native && await written(output, await native.image(file, size).catch(() => undefined));
     if (process.platform !== 'darwin') return false;
     return await run('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '75', '-Z', String(size), file, '--out', output]) && await stat(output).then(info => info.size > 0, () => false);
   },
   async poster(file, output, size) {
+    if (process.platform === 'win32') return !!native && await written(output, await native.shell(file, size).catch(() => undefined));
+    // Linux has no poster frames yet (see Known gaps in docs/cross-platform.md).
     if (process.platform !== 'darwin') return false;
     // Quick Look writes <name>.png into a folder.
     const folder = await mkdtemp(path.join(tmpdir(), 'photo-importer-poster-'));

@@ -49,7 +49,7 @@ import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {forgetPlacement,loadPlacement,placedMatches,placedOutcomes,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntriesUnder,cachedRouting,carryRouting,embeddedPreview} from './platform/metadata';
-import {thumbnail,systemDecoders} from './platform/thumbnails';
+import {thumbnail,systemDecoders,type NativeDecoder} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,findRunResidue,runLeftoverGroups,type Residue,type ResidueItem} from './core/residue';
@@ -91,6 +91,9 @@ import {appliedReviewJob} from './review-job';
 const {values:flags}=parseArgs({args:process.argv.slice(1),strict:false,options:{qa:{type:'boolean'},'hardware-test-a006':{type:'boolean'},'qa-fixture-root':{type:'string'},'hardware-report-root':{type:'string'},'codex-test':{type:'boolean'},'codex-ui-only':{type:'boolean'},'codex-organization-only':{type:'boolean'},'codex-only':{type:'string'},'codex-deadline':{type:'string'},'codex-real-drives':{type:'string'}}});
 const flagText=(value:unknown)=>typeof value==='string'?value:undefined;
 const qa=flags.qa===true||process.execPath.includes(' QA.app/');
+// The automated QA measures animation frames: a QA window keeps painting while another window covers it. Windows stops
+// a covered window's frames (native occlusion tracking); macOS and Linux only throttle, which backgroundThrottling covers.
+if(qa&&process.platform==='win32')app.commandLine.appendSwitch('disable-features','CalculateNativeWinOcclusion');
 /** Synthetic state and the import gate for the automated QA; only an unpackaged --codex-test launch has them. */
 let qaHooks:QaHooks|undefined;
 const hardwareTest=flags['hardware-test-a006']===true;
@@ -313,6 +316,12 @@ const applyLimits=()=>{setResourceLimits({maxCpuThreads:state.preferences.maxCpu
 let lastUsageMB=0,overLimit=false;
 const resourceUse=():ResourceUse=>{const host=hostNow(),limits=resourceLimits();return {threads:limits.maxCpuThreads,memoryMB:Math.round(lastUsageMB),limitMB:limits.memoryLimitMB,cores:host.cores,totalMemMB:Math.round(host.totalMemBytes/MB),memoryMaxMB:memoryRange(host).max,defaultThreads:defaultCpuThreads(host),defaultMemoryMB:defaultMemoryLimitMB(host),...(overLimit?{warning:true}:{})};};
 const thumbnailSlots=limiter(()=>cpuWorkers(4));
+/** Pictures for previews on Windows and Linux (macOS uses its own sips and Quick Look). Empty results mean "cannot". */
+const jpegOf=(image:Electron.NativeImage,size:number)=>{if(image.isEmpty())return undefined;const {width,height}=image.getSize(),scale=Math.min(1,size/Math.max(width,height,1));return (scale<1?image.resize({width:Math.max(1,Math.round(width*scale)),height:Math.max(1,Math.round(height*scale)),quality:'good'}):image).toJPEG(75);};
+const nativeDecoder:NativeDecoder={
+ shell:async(file,size)=>jpegOf(await nativeImage.createThumbnailFromPath(file,{width:size,height:size}),size),
+ image:async(file,size)=>jpegOf(nativeImage.createFromPath(file),size),
+};
 const stateChannel=createStateChannel(update=>{if(window&&!window.isDestroyed())window.webContents.send('importer:updated',update);});
 // Each job carries when it started running and when its current phase began, so elapsed time
 // can be shown; both are stamped as the state is published.
@@ -1680,7 +1689,7 @@ async function boot(){
  if(qaFixtureRoot){const root=await fs.realpath(qaFixtureRoot);if(!within(root,await fs.realpath(os.tmpdir())))throw new Error('QA fixtures must be in the system temporary directory.');const destination=path.join(root,'destination');const info=await volumeInfo(destination);const drives=[destination,path.join(root,'destination-2')];state.preferences.destinations=drives.map(drive=>path.join(drive,'photobackup'));state.preferences.destinationIds=[info.volumeId??'',info.volumeId??''];state.preferences.videoDestinations=drives.map(drive=>path.join(drive,'videobackup'));state.preferences.videoDestinationIds=[info.volumeId??'',info.volumeId??''];for(let i=1;i<=6;i++){const folder=await fs.realpath(path.join(root,`source-${i}`));const source:Source={id:`fixture:${i}`,name:`Fixture card ${i}`,path:folder,transport:'folder',total:info.total,free:info.free};folders.set(source.id,{source,backup:true});approved.add(folder);}}
  session.defaultSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
  const renderer=path.join(__dirname,'../renderer/index.html');
- window=new BrowserWindow({frame:process.platform==='darwin',...(process.platform==='darwin'?{titleBarStyle:'hidden' as const,trafficLightPosition:{x:18,y:15}}:{}),title:'Automatic Photo Importer',width:1440,height:940,minWidth:1000,minHeight:720,backgroundColor:'#151c24',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,scrollBounce:true}});
+ window=new BrowserWindow({frame:process.platform==='darwin',...(process.platform==='darwin'?{titleBarStyle:'hidden' as const,trafficLightPosition:{x:18,y:15}}:{}),title:'Automatic Photo Importer',width:1440,height:940,minWidth:1000,minHeight:720,backgroundColor:'#151c24',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,scrollBounce:true,...(qa?{backgroundThrottling:false}:{})}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
  function trusted(event:Electron.IpcMainInvokeEvent|Electron.IpcMainEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
@@ -1703,7 +1712,7 @@ async function boot(){
   try{event.sender.startDrag({file:files[0]!,files,icon:image});}catch(error){log('normal','catalog','drag-failed',{error});}});
  ipcMain.handle('importer:summary',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file),{details:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
- ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview,nativeDecoder)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
  ipcMain.handle('importer:conflicts',(event,jobId:unknown)=>{trusted(event);return typeof jobId==='string'?conflictBooks.get(jobId)?.list()??[]:[];});

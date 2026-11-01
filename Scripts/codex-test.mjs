@@ -42,7 +42,9 @@ if(flags['browser-fixtures']===true||(flags.only??[]).some(value=>String(value).
 }
 console.log(`Codex QA fixtures and results: ${root}`);
 const require=createRequire(import.meta.url);const electron=require('electron');
-const deadlineMs=realDrives?6*3600000:420000+large*300;
+// Windows gets half as long again: it has no load average (os.loadavg() is always 0), so the harness never stretches its
+// per-check budgets there, and the same checks take longer on its file system and window compositor.
+const deadlineMs=realDrives?6*3600000:Math.round((420000+large*300)*(process.platform==='win32'?1.5:1));
 // The app writes its report by 45 s before the kill: enough to close and exit on a loaded machine.
 try{await run(packagedExecutable??electron,[...(packagedExecutable?[]:['.']), '--qa',`--qa-fixture-root=${root}`,`--codex-deadline=${Date.now()+deadlineMs-45000}`,...(flags['reduced-motion']===true?['--force-prefers-reduced-motion']:[]),...(interactive?[]:['--codex-test']),...((flags['ui-only']===true||flags['organization-only']===true||realDrives)?['--codex-ui-only']:[]),...(realDrives?[`--codex-real-drives=${JSON.stringify(realDrives)}`,'--codex-only=^real-drives']:[]),...(flags['organization-only']===true?['--codex-organization-only']:[]),...(realDrives?[]:(flags.only??[]).map(value=>`--codex-only=${value}`))],interactive?0:deadlineMs);}
 catch(error){console.error(String(error));process.exitCode=1;}

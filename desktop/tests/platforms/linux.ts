@@ -32,6 +32,7 @@ export const linux: PlatformProfile = {
   // File managers take POSIX paths with forward slashes.
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
+  previews: { photos: 'image', posters: false },
 };
 
 /** What this process has open under the root: its descriptors in /proc (lsof is not on every distribution). */

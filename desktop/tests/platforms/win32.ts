@@ -33,6 +33,7 @@ export const win32: PlatformProfile = {
   // Explorer and Lightroom take drive-letter paths with backslashes (C:\…).
   dropPath: /^[A-Za-z]:\\(?!.*\/)/,
   heldOpen,
+  previews: { photos: 'shell', posters: true },
 };
 
 // Every file and folder under the root opened as another program would to have it alone: CreateFileW with no sharing
