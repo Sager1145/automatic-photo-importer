@@ -13,6 +13,7 @@ export const darwin: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'MacIntel',
   cameraPlace: 'USB/Z f',
+  cameraFolder: '/.photo-importer-camera',
   systemDisk: 'apfs',
   formats: {
     // diskutil info -plist of an APFS, a Mac OS Extended, an exFAT, a FAT32 (MS-DOS) and an NTFS drive (macOS mounts NTFS read-only).

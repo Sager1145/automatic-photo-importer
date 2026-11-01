@@ -23,6 +23,8 @@ import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type A
 import { probeDestination } from '../core/destination-probe';
 import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
 import { inventory } from '../core/inventory';
+import { registerListedSource, LISTED_PARENT } from '../core/source-fs';
+import { createHash } from 'node:crypto';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -36,6 +38,8 @@ export interface PlatformProfile {
   /** navigator.platform in this system's app window, and how a USB camera named "Z f" reads there. */
   navigatorPlatform: string;
   cameraPlace: string;
+  /** The folder a USB camera's files are read under while it is imported (core/source-fs): it exists nowhere on disk. */
+  cameraFolder: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
   /** Whether file names match whatever their case (".ds_store" is ".DS_Store"). */
@@ -248,6 +252,41 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       try { await assert.rejects(probeDestination(locked), (error: any) => error.key === 'error.destinationReadOnly'); }
       finally { await allowWrite(locked); }
       assert.deepEqual(await readdir(locked), []);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'USB camera: planned from its file list and imported straight into the library, nothing downloaded to a temporary folder': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    assert.equal(LISTED_PARENT, profile.cameraFolder);
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-camera-')));
+    const temporary = new Set(await readdir(tmpdir()));
+    try {
+      const library = join(root, 'photobackup'), day = Date.parse('2026-10-25T10:00:00Z');
+      const contents: Record<string, Buffer> = { 'Slot 1/DCIM/100NZ_F/DSC_0001.NEF': Buffer.alloc(300_000, 1), 'Slot 1/DCIM/100NZ_F/DSC_0002.NEF': Buffer.alloc(200_000, 2), 'Slot 2/DCIM/100NZ_F/DSC_0003.JPG': Buffer.alloc(100_000, 3) };
+      await mkdir(join(library, '2026', '202610', 'NIKON Z f'), { recursive: true });
+      await writeFile(join(library, '2026', '202610', 'NIKON Z f', 'DSC_0001.NEF'), contents['Slot 1/DCIM/100NZ_F/DSC_0001.NEF']!);
+      const read = new Map<string, number>();
+      const camera = registerListedSource({ id: `feature-${profile.platform}`, files: Object.entries(contents).map(([relative, data]) => ({ relative, size: data.length, modifiedMs: day })),
+        read: async (file, offset, length) => { read.set(file.relative, (read.get(file.relative) ?? 0) + Math.min(length, contents[file.relative]!.length - offset)); return contents[file.relative]!.subarray(offset, offset + length); } });
+      t.after(camera.unregister);
+      assert.ok(camera.root.startsWith(profile.cameraFolder + sep));
+      const looked: string[] = [];
+      const metadata = async (file: string) => { looked.push(posixRelative(camera.root, file)); return { fields: {}, camera: 'NIKON Z f', date: '2026-10-25T10:00:00' }; };
+      const { plans } = await plan(camera.root, [library], { backup: false, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, metadata);
+      const entries = plans[0]!.entries, name = (entry: { source: string }) => posixRelative(camera.root, entry.source);
+      // The one already in the library is confirmed by content and never looked at again; only the new ones are routed.
+      assert.deepEqual(looked.sort(), ['Slot 1/DCIM/100NZ_F/DSC_0002.NEF', 'Slot 2/DCIM/100NZ_F/DSC_0003.JPG']);
+      assert.deepEqual(entries.filter(entry => entry.skip).map(name), ['Slot 1/DCIM/100NZ_F/DSC_0001.NEF']);
+      assert.equal(read.get('Slot 1/DCIM/100NZ_F/DSC_0001.NEF'), 300_000, 'the possible duplicate is read once, to compare');
+      assert.equal(read.get('Slot 1/DCIM/100NZ_F/DSC_0002.NEF'), undefined, 'a new file is not read to plan it');
+      const result = await execute(plans[0]!);
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.copied, 2);
+      for (const file of ['DSC_0002.NEF', 'DSC_0003.JPG']) {
+        const copy = await readFile(join(library, '2026', '202610', 'NIKON Z f', file)), original = Object.entries(contents).find(([relative]) => relative.endsWith(file))![1];
+        assert.equal(createHash('sha256').update(copy).digest('hex'), createHash('sha256').update(original).digest('hex'));
+      }
+      assert.deepEqual((await readdir(tmpdir())).filter(entry => !temporary.has(entry) && !entry.startsWith('feature-camera-')), [], 'nothing was written to the temporary folder');
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {

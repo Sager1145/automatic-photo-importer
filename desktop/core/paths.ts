@@ -1,4 +1,5 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { sourceAware } from './source-fs';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { hasher } from './hasher';
@@ -7,6 +8,8 @@ import { volumeAt } from '../platform/volumes';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+// Listed sources (a USB camera) read through the same calls as a card; see source-fs.
+const fs=sourceAware(nodeFs);
 
 const exec=promisify(execFile);
 

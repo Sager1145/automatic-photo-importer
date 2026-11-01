@@ -7,44 +7,83 @@ private struct Command: Decodable, Sendable {
     let id: String
     let command: String
     let cameraID: String?
-    let directory: String?
+    let storage: String?
+    let objectID: String?
+    let offset: Int64?
+    let length: Int64?
 }
 
-/// JSONL process boundary around the existing non-deleting ImageCaptureCore adapter.
+/// JSONL process boundary around the non-deleting ImageCaptureCore adapter. The protocol is the Windows bridge's
+/// (desktop/platform/windows-camera.ts): "list" the cameras, "files" of one (names, folders, sizes, dates; nothing
+/// downloaded), "read" a byte range of one file (base64 in the reply), "release" what a reader held. The app plans from
+/// the list, reads only what it needs, and writes new files only into the destination.
 @main
 @MainActor
 struct NativeCameraBridge {
+    static func line(_ data: Data) {
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data([10]))
+    }
+
     static func emit(_ value: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data([10]))
+        line(data)
+    }
+
+    /// A string's characters as they stand inside a JSON string literal.
+    static func escaped(_ text: String) -> String {
+        var result = ""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\"": result += "\\\""
+            case "\\": result += "\\\\"
+            case _ where scalar.value < 0x20: result += String(format: "\\u%04x", scalar.value)
+            default: result.unicodeScalars.append(scalar)
+            }
+        }
+        return result
+    }
+
+    static func milliseconds(_ date: Date?) -> Int64? {
+        guard let date, date.timeIntervalSince1970 > 0 else { return nil }
+        return Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
     static func serve() async {
         let discovery = DeviceDiscovery()
         defer { discovery.stop() }
         do {
-            for try await line in FileHandle.standardInput.bytes.lines {
-                guard let data = line.data(using: .utf8),
+            for try await text in FileHandle.standardInput.bytes.lines {
+                guard let data = text.data(using: .utf8),
                       let command = try? JSONDecoder().decode(Command.self, from: data) else { continue }
                 do {
                     switch command.command {
                     case "list":
                         let cameras = discovery.sources.map { ["name": $0.name, "cameraID": $0.id] }
                         emit(["id": command.id, "result": cameras])
-                    case "stage":
-                        guard let cameraID = command.cameraID, let directory = command.directory,
-                              directory.hasPrefix("/"), FileManager.default.fileExists(atPath: directory) else {
-                            emit(["id": command.id, "error": "Camera staging requires an existing absolute temporary folder."])
-                            continue
-                        }
-                        let staged = try await discovery.stageCamera(id: cameraID, to: URL(fileURLWithPath: directory, isDirectory: true)) { completed, total in
-                            Task { @MainActor in
-                                emit(["id": command.id, "progress": ["completed": completed, "total": total]])
-                            }
-                        }
-                        emit(["id": command.id, "result": ["path": staged.path]])
+                    case "files":
+                        guard let cameraID = command.cameraID else { throw CameraAdapterError.unavailable }
+                        let files = try await discovery.files(id: cameraID, storage: command.storage)
+                        emit(["id": command.id, "result": files.map { file -> [String: Any] in
+                            var entry: [String: Any] = ["storage": file.storage, "folder": file.folder, "name": file.name, "size": file.size, "objectID": file.objectID]
+                            if let modified = milliseconds(file.modified) { entry["modified"] = modified }
+                            if let created = milliseconds(file.created) { entry["created"] = created }
+                            return entry
+                        }])
+                    case "read":
+                        guard let cameraID = command.cameraID, let objectID = command.objectID, let offset = command.offset, let length = command.length else { throw CameraAdapterError.invalidRead }
+                        let bytes = try await discovery.read(id: cameraID, objectID: objectID, offset: offset, length: length)
+                        // Written by hand: a 16 MB range is 22 MB of base64, which JSONSerialization would copy again.
+                        var reply = Data("{\"id\":\"".utf8)
+                        reply.append(Data(escaped(command.id).utf8))
+                        reply.append(Data("\",\"result\":{\"bytes\":\(bytes.count),\"data\":\"".utf8))
+                        reply.append(bytes.base64EncodedData())
+                        reply.append(Data("\"}}".utf8))
+                        line(reply)
+                    case "release":
+                        // Each range is its own request on the camera; nothing stays open between them.
+                        emit(["id": command.id, "result": true])
                     default:
                         emit(["id": command.id, "error": "Unknown native camera command."])
                     }

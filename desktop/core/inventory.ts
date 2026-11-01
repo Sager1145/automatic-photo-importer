@@ -1,4 +1,5 @@
-import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
+import { sourceAware } from './source-fs';
 import path from 'node:path';
 import type { Inventory, InventoryFile, Listing, SkippedFile, SystemFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
@@ -7,6 +8,8 @@ import { isOldReceiptName } from './legacy-names';
 import { noteOldReceipt } from './old-records';
 import { beneath, checkAbort, contained, directory, pathKey } from './paths';
 import { validateRelative } from '../folder-template';
+// Listed sources (a USB camera) read through the same calls as a card; see source-fs.
+const fs=sourceAware(nodeFs);
 
 /** Entries of a folder looked at (lstat) at once. */
 const LISTING_STATS=8;
