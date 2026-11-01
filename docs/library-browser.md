@@ -24,4 +24,4 @@ Choose **Exact values** to see the recorded values, including intermediate setti
 
 Browsing and hierarchy editing do not change media bytes, formats, EXIF, names or paths, create classification folders, or change organization preferences. **Open organization tool** only navigates to the separate organization page. Review and apply any physical reorganization there.
 
-The SQLite catalog and thumbnail/browser caches live in local application data. Indexing a large existing library takes time; results show current coverage. Removing or corrupting a catalog requires reindexing, rather than changing originals.
+The SQLite catalog and thumbnail/browser caches live in local application data. Filtered columns and file lists read their matches from indexes that hold the filtered fields, so choosing several values or combining columns stays fast in libraries of 100,000 files; the first start after an update that changes these indexes rebuilds them once (about five seconds for 100,000 files). Indexing a large existing library takes time; results show current coverage. Removing or corrupting a catalog requires reindexing, rather than changing originals.
