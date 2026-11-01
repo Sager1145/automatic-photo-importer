@@ -115,3 +115,18 @@ test('a connected drive is joined without waiting for a write, and a drive with 
  assert.equal(await store.joinStore(root),false,'already joined');
  assert.deepEqual((await readRecord(file)).computers.map((item:{id:string})=>item.id),[mine]);
 });
+
+test('a path a record names under any place the drive has had is read under its place here',async t=>{
+ const {root}=await drive(t),here={base:root,bases:['/Volumes/A006','I:\\','E:\\']};
+ assert.equal(store.recordedPath(here,'/Volumes/A006/photobackup/2024'),path.join(root,'photobackup','2024'));
+ assert.equal(store.recordedPath(here,String.raw`i:\PhotoBackup\2024`),path.join(root,'PhotoBackup','2024'));
+ assert.equal(store.recordedPath(here,path.join(root,'videobackup')),path.join(root,'videobackup'));
+ assert.equal(store.recordedPath(here,'/Users/someone/Pictures'),undefined);
+ assert.equal(store.recordedPath(here,String.raw`F:\photobackup`),undefined);
+});
+
+test('each system keeps its own index and duplicate store for a library, so moving the drive never rebuilds the other one',()=>{
+ const partition=store.libraryPartition({base:path.join(os.tmpdir(),'A006')},path.join(os.tmpdir(),'A006','photo','backup'));
+ const darwin=store.hash8('photo/backup'),system=store.hash8(`${process.platform}\nphoto/backup`);
+ assert.equal(partition,`backup ${process.platform==='darwin'?darwin:system}`,'macOS keeps the name earlier versions gave it');
+});

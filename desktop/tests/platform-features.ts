@@ -12,6 +12,8 @@ import { cameraCapacity } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
+import { getOrganizationRecovery } from '../core/recovery';
+import { randomUUID } from 'node:crypto';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -95,6 +97,13 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.equal(record.identities[process.platform], storeIdentity(here));
       assert.equal(record.base, root);
       assert.deepEqual((await storesFor(root)).map(store => [store.verified, store.joined]), [[true, true]]);
+      // Its journal names the library under its own path for the drive: listed here as recorded there, never acted on.
+      const library = join(root, 'photobackup'), id = randomUUID();
+      const recordedRoot = profile.volumes()[1]!.path.replace(/[\\/]+$/, '') + (profile.platform === 'win32' ? '\\' : '/') + 'photobackup';
+      await mkdir(library); await mkdir(join(root, 'Photo Importer Data', 'Organizations', id), { recursive: true });
+      await writeFile(join(root, 'Photo Importer Data', 'Organizations', id, 'journal.jsonl'), other.line('organization', { id, root: recordedRoot }) + '\n');
+      const jobs = await getOrganizationRecovery(library);
+      assert.deepEqual(jobs.map(job => [job.id, job.recordedElsewhere, job.undoable, job.finalizable]), [[id, recordedRoot, false, false]]);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera without a drive letter reads as a short path': async profile => {

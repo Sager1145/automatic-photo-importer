@@ -10,7 +10,7 @@ import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,ty
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
 import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES, type AppleDoubleReport } from './appledouble';
-import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
+import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, recordedPath, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
@@ -281,6 +281,8 @@ function manifestFrom(header:Record<string,unknown>,entries:Record<string,unknow
   ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{}),...(header.cleanupScope!==undefined?{cleanupScope:header.cleanupScope}:{})};
  return validateManifest(m,root,id);
 }
+/** The listing's error for a journal recorded with the drive elsewhere (see journalsIn). */
+export const RECORDED_ELSEWHERE='Recorded with the drive at another place or on another system; finish or undo it there.';
 interface Found {store:Store;folder:string;journal:string;}
 /** Where journal `id` of library `root` is: its folder in exactly one of the stores readers consult. Refused when
  * two stores hold it. */
@@ -304,7 +306,7 @@ async function readManifest(root:string,id:string):Promise<Manifest> {
  return openJournal(await locateJob(root,id),root,id);
 }
 /** The journals whose header names `folder` (by path key) as their library, in every store readers consult for it. */
-async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):Promise<{id:string;root:string;found:Found}[]>{
+async function journalsIn(folder:string,unreadable?:{id:string;error:string;recordedAt?:string}[]):Promise<{id:string;root:string;found:Found}[]>{
  const journals:{id:string;root:string;found:Found}[]=[];
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
@@ -324,6 +326,9 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):
     throw new Error(`The organization record ${found.journal} cannot be read, so it is not known which library it belongs to: ${text}`);
    }
    if(typeof root==='string'&&pathKey(root)===pathKey(folder))journals.push({id,root,found});
+   // This folder's journal, recorded with the drive at another place or on another system (/Volumes/A006 against I:):
+   // its paths and file identities are that system's, so it is listed there and never acted on here.
+   else if(unreadable&&typeof root==='string'){const here=recordedPath(store,root);if(here&&pathKey(here)===pathKey(folder))unreadable.push({id,error:RECORDED_ELSEWHERE,recordedAt:root});}
   }
  }
  return journals;
@@ -1125,9 +1130,9 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(!await isOwnRealpath(root))throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
- const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string}[]=[];
+ const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string;recordedAt?:string}[]=[];
  const ids=[...new Set((await journalsIn(root,unreadable)).map(journal=>journal.id))].sort();let looked=0;
- for(const {id,error} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error});
+ for(const {id,error,recordedAt} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error,...(recordedAt?{recordedElsewhere:recordedAt}:{})});
  const report=(position:number,within:number,file:string,counts?:{read:number;total:number},later?:{done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(later?{later}:{})});
  const {signal}=options;
  report(0,0,'');

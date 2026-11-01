@@ -39,6 +39,7 @@ written before this change and after it are sealed the same way.
 {"v":5,"kind":"store","base":"I:\\","minVersion":"0.3.0",
  "computers":[{"id":"<16 hex>","platform":"darwin","key":"<base64>"},{"id":"…","platform":"win32","key":"…"}],
  "identities":{"darwin":"18","win32":"2689245262:0"},
+ "bases":["/Volumes/A006","I:\\"],
  "legacy":{…the store record an earlier version wrote, with its seal…},
  "seal":"<HMAC with the key of the computer that wrote this file>"}
 ```
@@ -100,16 +101,36 @@ A store written before this change has a single-computer `store.json` (`baseIden
 A `store.json` that is not a version 5 store record at all, or a shared one whose seal matches none of its listed
 keys, is damaged and still refused.
 
-## What is not shared yet
+## Moving the drive between systems
 
-Seals no longer tie records to a computer, but records still name absolute paths and system file identities. So:
+Everything the app writes on a drive is meant to work wherever the drive goes:
 
-- On another computer of the same system, with the drive at the same path (`/Volumes/A006` on two Macs), everything
-  is shared: history, resume, undo, receipts and indexes.
-- Across systems, records of the other system are history. Their paths (`/Volumes/A006/photobackup` against
-  `I:\photobackup`) and identities differ, so journals do not match the library and are never acted on, and an
-  index is rebuilt by scanning the first time the drive is used on the other system. Finish or undo an
-  organization on the system that started it.
+- **Names.** Every name in the records folder is valid on macOS, Windows and Linux: fixed English names
+  (`Photo Importer Data`, `Organizations`, `Imports`, `Libraries`, `Pointers`), UUIDs, `receipts-000001.jsonl`, and a
+  library's or file's own name, which already exists on the drive.
+- **Separators.** Library partitions hash the library's place under the base written with `/` (`posixRelative`).
+- **Identity.** The store's identity of its base is kept per system (above), so `/Volumes/A006` and `I:\` both
+  recognize the same folder, and a drive letter change is not a different drive.
+- **Seals.** Records written on Windows verify on the Mac and the other way round (above).
+- **Places.** `store.json` keeps `bases`: every path a computer has had the base at (`/Volumes/A006`, `I:\`, `E:\`).
+  `recordedPath` reads a path a record names under any of them as the same path under the base here, with this
+  system's separator.
+- **Indexes.** An index and a duplicate store record file identities the way one system reports them, so each system
+  keeps its own (`Libraries/<library> <hash>`, the hash covering the system; macOS keeps the name earlier versions
+  gave it). A drive used on both never makes either system rebuild the other's.
+
+What is still per system: organization journals and import receipts record file identities (inode or file id) as
+the system that wrote them saw them, and those differ between systems for the same file on exFAT. They cannot prove
+on one system that a file is the one another system moved, so they are never acted on there:
+
+- An organization journal recorded with the drive at another place or on another system is listed for its library
+  ("Recorded with the drive at /Volumes/A006/photobackup. Finish or undo it on the computer that recorded it.") and
+  never resumed, undone, finalized or cleaned up here. On another computer of the same system with the drive at the
+  same path (two Macs), it is fully shared: resume, undo and finalize work.
+- An import receipt from another system grants nothing here: its root does not exist under the path it names, so it is
+  skipped, and its receipt segment is never removed while it is open.
+- Sibling pointers are kept per folder path, so one system does not see pointers another wrote; they only matter for
+  journals that are acted on, which those are not.
 
 These are listed in [cross-platform.md](cross-platform.md#known-gaps).
 
@@ -122,6 +143,7 @@ These are listed in [cross-platform.md](cross-platform.md#known-gaps).
 | This system's identity does not match | `<folder> was copied from another folder; its records are not used. Use First Aid.` |
 | Earlier store this computer cannot verify (log only) | `Records in <folder> were written by another computer with an earlier version; they are kept as history and not acted on here until that computer uses this drive again.` |
 | Journal that does not verify (listing) | `Recovery journal authentication failed; originals retained` (unchanged) |
+| Journal recorded with the drive elsewhere (listing, all four languages) | `Recorded with the drive at <recorded path>. Finish or undo it on the computer that recorded it.` |
 
 ## Code
 

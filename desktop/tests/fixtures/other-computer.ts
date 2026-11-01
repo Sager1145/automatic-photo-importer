@@ -11,7 +11,7 @@ export function otherComputer(platform:NodeJS.Platform=process.platform,key=rand
  return {key,platform,id:listed.id,seal,
   line:(kind:string,value:Record<string,unknown>)=>JSON.stringify(seal(kind,value)),
   /** store.json as this version writes it on that computer, which sees the base at `base` with `identity`. */
-  storeRecord:(base:string,identity:string)=>seal('store',{base,minVersion:'0.3.0',computers:[listed],identities:{[platform]:identity}}),
+  storeRecord:(base:string,identity:string)=>seal('store',{base,minVersion:'0.3.0',computers:[listed],identities:{[platform]:identity},bases:[base]}),
   /** store.json as an earlier version wrote it there (`baseIdentity` is `dev:ino` as that computer saw the base). */
   legacyStoreRecord:(base:string,baseIdentity:string)=>seal('store',{base,baseIdentity,minVersion:'0.3.0'}),
  };
