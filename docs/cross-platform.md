@@ -30,7 +30,7 @@ This document is the contract. [Shared desktop implementation](multiplatform-mig
 
 Each platform has its own test file, and all of them check the same app features:
 
-- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, a records folder made on another system, how a USB camera's location reads, and a camera's card slots and capacity.
+- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, a records folder made on another system, library names valid on every system (`portableName`, no two names differing only by case in one folder), how a USB camera's location reads, and a camera's card slots and capacity.
 - `desktop/tests/platforms/darwin.ts`, `win32.ts` and `linux.ts` are the profiles. Each supplies that system's real data and setup: `diskutil` output, `/Volumes` and symbolic links on macOS; `Get-Volume` JSON, `D:\` and junctions on Windows; `lsblk` output, `/media` and symbolic links on Linux.
 - `platform-darwin.test.ts`, `platform-win32.test.ts` and `platform-linux.test.ts` each run the whole list with their profile. Features that use recorded tool output run on any machine; features that need the real filesystem run on their own system and skip elsewhere, saying why.
 - `platform-parity.test.ts` checks that all three files run the shared list, and that the builds match `release-targets.json`.
@@ -48,6 +48,7 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | Publishing a verified copy (and its time left, `EtaTracker.predictPublish`/`predictDirect`) | Hard link on APFS; exFAT written directly, each file checked in place | Hard link on NTFS; exFAT staged, then published by copying | Hard link on ext4 and the like; exFAT staged, then published by copying |
 | Flushing a file | Any handle | Needs a handle that may write (`syncFile` reopens with `O_RDWR`) | Any handle |
 | Paths | `/`, case-insensitive by default (APFS) | `\`, case-insensitive, reserved names (`CON`, `NUL` …), no `<>:"/\|?*` | `/`, case-sensitive |
+| Names a library writes | Same rule everywhere: `portableName`/`portablePath` (`desktop/folder-template.ts`) replace what Windows refuses, drop trailing dots and spaces and prefix reserved names; allocation treats names that differ only by case as one, and on a case-sensitive volume (`caseVariant` in `desktop/core/index.ts`) a file already there under another case is that name | same | same |
 | Symbolic links | Allowed | Need Developer Mode or admin | Allowed |
 | Release build | arm64 DMG | x64 MSI with branded dialogs, plus an x64 portable exe | Not released yet |
 | Record seal key | Per computer, listed in each drive's `store.json` ([shared-records.md](shared-records.md)) | Same | Same |
@@ -93,4 +94,5 @@ Keep this list current. Remove a line when the gap closes; add one, with the rea
 | Tests of symbolic links to files | Windows | Need Developer Mode; without it they skip with the reason (`needsFileSymlinks`). Folder links are tested everywhere: Windows uses a junction. |
 | Tests of folder flushes | Windows | Windows has no folder flush (`DIRECTORY_SYNC_SUPPORTED`), so tests that count or fail `sync` on a folder skip there with that reason. |
 | `heartbeat.test.ts` runs about 3.5 minutes | Windows | It passes. Windows timers stretch the simulated 20 ms drive delay to about 30 ms, and the deeper temp folder means more calls. |
+| A file already in a library under another case, on a case-sensitive volume | Linux (and case-sensitive APFS) | `caseVariant` handles it, but the `library names` platform feature runs natively only where the tests run; until a Linux machine runs it, the Linux profile skips that part. |
 | Source card after a failed import | All | Can show "N of N files verified" for files that all failed; Activity shows the true counts. |

@@ -4,17 +4,21 @@
 // profile must supply what it needs; TypeScript and platform-parity.test.ts refuse a platform that skips one.
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { link, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity } from '../platform/camera-bridge';
-import { DIRECTORY_SYNC_SUPPORTED, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { DIRECTORY_SYNC_SUPPORTED, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
 import { getOrganizationRecovery } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
+import { evaluateRoutes } from '../core/folder-rules';
+import { configureOrganizationRecovery, execute, plan } from '../core/index';
+import { portableName, portablePath } from '../folder-template';
+import type { InventoryFile } from '../shared';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -109,6 +113,40 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       await writeFile(join(root, 'Photo Importer Data', 'Organizations', id, 'journal.jsonl'), other.line('organization', { id, root: recordedRoot }) + '\n');
       const jobs = await getOrganizationRecovery(library);
       assert.deepEqual(jobs.map(job => [job.id, job.recordedElsewhere, job.undoable, job.finalizable]), [[id, recordedRoot, false, false]]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'library names: every name a library writes is valid on macOS, Windows and Linux, so the drive can move between them': async (profile, t) => {
+    // A name another system refuses is changed; a valid one, whatever its Unicode form, never is.
+    const fixed: Record<string, string> = { 'CON.txt': '_CON.txt', 'aux': '_aux', 'nul.tar.gz': '_nul.tar.gz', 'COM1.JPG': '_COM1.JPG', 'a:b?.zip': 'a-b-.zip', 'notes. ': 'notes', 'pipe|star*.txt': 'pipe-star-.txt', '...': '_' };
+    for (const [name, portable] of Object.entries(fixed)) assert.equal(portableName(name), portable, name);
+    for (const name of ['DSC_0001.NEF', 'JPG的替身', 'Café.jpg', 'Café.jpg', 'CONSOLE.txt', '.hidden']) assert.equal(portableName(name), name);
+    const native = profile.platform === 'win32' ? '\\' : '/';
+    assert.equal(portablePath(['Unknown files', 'old.', 'CON.txt'].join(native), native), ['Unknown files', 'old', '_CON.txt'].join(native));
+    // On macOS and Linux a "\" is part of a name, which Windows would read as a folder: it is replaced.
+    if (profile.platform !== 'win32') assert.equal(portablePath('Unknown files/a\\b.txt', '/'), 'Unknown files/a-b.txt');
+    // Routing applies it to every file it files, photos and other files alike, with "/" in what is stored.
+    const card = join(tmpdir(), 'card'), when = new Date(2026, 9, 25, 12);
+    const listed: InventoryFile[] = ['CON.ARW', 'a:b.zip', 'trailing. '].map(name => ({ path: join(card, name), relative: name, size: 1, kind: name.endsWith('.ARW') ? 'RAW' : 'Other', included: true }));
+    const routes = evaluateRoutes({ sourceRoot: card, files: listed, metadata: new Map([[listed[0]!.path, { fields: {}, camera: 'ILCE-7M4', date: '2026-10-25T10:00:00' }]]), mtimes: new Map(listed.map(file => [file.path, when])), options: { template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {} } });
+    assert.deepEqual(routes.map(route => route.relative!.split(sep).join('/')), ['2026/202610/ILCE-7M4/_CON.ARW', '2026/202610/Unknown files/a-b.zip', '2026/202610/Unknown files/trailing']);
+    if (!onNative(profile, t)) return;
+    // Names that differ only by case are one name on macOS and Windows: a library never holds both, on any system.
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-names-')));
+    try {
+      const source = join(root, 'card'), library = join(root, 'photobackup'), put = async (file: string, text: string) => { await mkdir(dirname(file), { recursive: true }); await writeFile(file, text); await utimes(file, when, when); };
+      await put(join(library, '2026', '202610', 'ILCE-7M4', 'DSC00003.JPG'), 'same');
+      await put(join(source, 'A', 'dsc00003.jpg'), 'same'); await put(join(source, 'B', 'IMG_0001.JPG'), 'first'); await put(join(source, 'C', 'img_0001.jpg'), 'second');
+      const metadata = async () => ({ fields: {}, camera: 'ILCE-7M4', date: '2026-10-25T10:00:00' });
+      const { plans } = await plan(source, [library], { backup: false, everyFile: true, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {} }, metadata);
+      assert.deepEqual((await execute(plans[0]!)).errors, []);
+      const written = (await readdir(library, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile() && !entry.parentPath.includes('Photo Importer Data')).map(entry => posixRelative(library, join(entry.parentPath, entry.name)));
+      const folders = Map.groupBy(written, file => pathKey(file));
+      assert.ok([...folders.values()].every(group => group.length === 1), `no two names differ by case alone: ${written.join(', ')}`);
+      assert.ok(written.includes('2026/202610/ILCE-7M4/DSC00003.JPG') && !written.some(file => file.endsWith('dsc00003.jpg')), 'the same photo under another case is already there');
+      const copies = await Promise.all(written.filter(file => /img_0001\.jpg$/i.test(file)).map(file => readFile(join(library, file), 'utf8')));
+      assert.deepEqual(copies.sort(), ['first', 'second'], 'both photos are kept, one as a conflict');
+      assert.ok(written.every(file => !file.includes('\\') && file === relative(library, join(library, file)).split(sep).join('/')));
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera without a drive letter reads as a short path': async profile => {

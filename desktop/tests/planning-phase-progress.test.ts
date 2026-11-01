@@ -33,17 +33,6 @@ test('the planner counts "Preparing destinations" file by file up to the total',
  for(let index=1;index<preparing.length;index++)assert.ok(preparing[index]!.count>=preparing[index-1]!.count);
 });
 
-test('a drive backup also counts the comparison of the backup with the drive',async t=>{
- const {source,root}=await fixture(t,6);
- const drive={name:'Card',identity:'mine',mirror:true};
- await execute((await plan(source,[root],{...base,drive},noMetadata)).plans[0]!);
- const calls:Call[]=[];
- await plan(source,[root],{...base,drive},noMetadata,undefined,record(calls));
- const mirroring=calls.filter(call=>call.detail?.step==='mirroring');
- assert.ok(mirroring.length>=6,'reported while the drive folder is walked');
- assert.equal(mirroring.at(-1)!.count,6);assert.equal(mirroring.at(-1)!.detail!.total,6);
-});
-
 test('loading a destination index reports the bytes read, up to its size',async t=>{
  const {source,root}=await fixture(t,40);
  await execute((await plan(source,[root],{...base},noMetadata)).plans[0]!);

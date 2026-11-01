@@ -5,9 +5,9 @@ import {defaultPreferences,normalizePreferences} from '../preferences';
 import {acceptedPreferences,jobPreferences,lockedPreferenceKeys} from '../settings-lock';
 
 test('saved settings and live changes pass through the same rules',()=>{
- const loaded=normalizePreferences({textScale:9,parallel:'17',language:'fr',copyMode:'raid',backupMode:'x',verifyCopies:0,autoOrganizeBackup:'auto',unknownDefault:'never',sourceLayout:'table'});
+ const loaded=normalizePreferences({textScale:9,parallel:'17',language:'fr',copyMode:'raid',backupMode:'mirror',verifyCopies:0,autoOrganizeBackup:'auto',unknownDefault:'never',sourceLayout:'table'});
  assert.equal(loaded.textScale,2);assert.equal(loaded.parallel,10);
- assert.equal(loaded.language,'en');assert.equal(loaded.copyMode,'single');assert.equal(loaded.backupMode,'additive');
+ assert.equal(loaded.language,'en');assert.equal(loaded.copyMode,'single');assert.ok(!('backupMode' in loaded),'retired: Files & folders imports have no Additive/Mirror mode');
  assert.equal(loaded.verifyCopies,true,'only an explicit false turns verification off');
  assert.ok(!('autoOrganizeBackup' in loaded),'retired: the folder check is a button, not a setting');assert.ok(!('autoOrganizeBackup' in defaultPreferences));assert.ok(!jobPreferences.has('autoOrganizeBackup'));assert.equal(loaded.unknownDefault,'skip');assert.equal(loaded.sourceLayout,'list');
 });

@@ -5,7 +5,7 @@ import type {CatalogPlacement} from '../catalog/types';
 import {noMetadataFolderName} from '../no-metadata';
 import {captureTimestamp,parseCapture} from '../capture-time';
 import {formatFolder,layoutFolders} from '../media-formats';
-import {CONFLICTS_FOLDER,DEFAULT_EDITED_FOLDER,editedTemplate,expandTemplate,inEditedFolder,safeComponent,templateValues,validateRelative,validFolderName} from '../folder-template';
+import {CONFLICTS_FOLDER,DEFAULT_EDITED_FOLDER,editedTemplate,expandTemplate,inEditedFolder,portablePath,safeComponent,templateValues,validateRelative,validFolderName} from '../folder-template';
 import {MessageError} from '../messages';
 import {extension,stem,rules,nkscEdit,captureOneEdit,unknownRule,ignoredName,type RuleDefaults} from './inventory';
 import {beneath,checkAbort,pathKey} from './paths';
@@ -114,12 +114,13 @@ export interface RouteDecision {
   exemption?:string;
 }
 /** Policy-owned directories are accepted by library checks rather than routed as ordinary media.
- * Drive backups/Problem files are root-level; Conflicts can sit under any camera template. */
+ * Problem files is root-level; Conflicts can sit under any camera template. A Drive backups folder an earlier version
+ * wrote is not exempt: its files are misplaced until organization files them. */
 export function placementExemption(file:string,roots:readonly {root:string}[]):string|undefined {
   for(const {root} of roots) {
     if(!beneath(file,root))continue;
     const parts=path.relative(root,file).split(path.sep),parents=parts.slice(0,-1);
-    if(parts[0]===DRIVE_BACKUPS||parts[0]===PROBLEM_FILES_FOLDER)return parts[0];
+    if(parts[0]===PROBLEM_FILES_FOLDER)return parts[0];
     if(parents.includes(CONFLICTS_FOLDER))return CONFLICTS_FOLDER;
     if(parts.some(ignoredName))return 'application or system files';
   }
@@ -286,6 +287,8 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
   const unknownRelative=(file:InventoryFile)=>{
     const owner=options.reorganize?libraryParts.find(part=>beneath(file.path,part.root)):undefined;
     const sub=(owner?path.relative(owner.root,path.dirname(file.path)):path.dirname(file.relative)).split(path.sep).filter(part=>part&&part!=='.');
+    // A retired Drive backups folder adds nothing to where a file came from: its drive's folder follows.
+    if(sub[0]===DRIVE_BACKUPS)sub.shift();
     if(sub[0]?.toLowerCase()===unknownFolder.toLowerCase())sub.shift();
     return path.join(unknownFolder,...sub.filter(part=>part.toLowerCase()!==LEGACY_UNKNOWN_CAMERA_FOLDER.toLowerCase()),path.basename(file.path));
   };
@@ -322,6 +325,8 @@ export function evaluateRoutes(input:RoutingInput):RouteDecision[] {
       // NX Studio reads NKSC_PARAM beside the original.
       relative=path.join(place.camera,place.sub,nksc?'NKSC_PARAM':captureOne??'',path.basename(file.path));
     }
+    // Every name is one macOS, Windows and Linux all accept, so the library can move between them.
+    relative=portablePath(relative,path.sep);
     log('trace','plan','route',()=>({source:file.path,destination:relative,camera:place?.camera??info.camera,date:info.date,kind:file.kind,companionOf:file.companionOf,reason:options.backup?'drive backup keeps the source layout':file.kind==='Other'&&!file.companionOf&&typeof rule==='string'?`rule for .${extension(file.path)}: folder ${rule}`:place?info.camera&&info.date?'camera and capture date from metadata':info.date?'capture date from metadata, no camera name':info.camera?'camera from metadata, date from the file modification time':'no metadata: file modification time':'filed with its original',origin:info.origin}));
     decisions.push({file,relative,root:forcedRoot??place?.root??'photos',camera:place?.camera,effectiveMetadata,effectiveMtime,captureTimeMs:options.backup?undefined:captureTimestamp(info.date),family:(info.edited?'edited:':'')+familyFor.get(file.path)!,reason:'route',...(unknown?{noMetadataReason:unknown}:{})});
   }

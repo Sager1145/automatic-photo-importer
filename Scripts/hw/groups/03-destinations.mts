@@ -185,9 +185,9 @@ export default async function run(ctx:Context):Promise<void>{
   await sourceUnchanged('reservation');
  });
 
- // ---- 5. drive backup ----
- await scenario('5. Drive backup: additive keeps removed files; mirror moves them to "Removed by mirror"; restore verified',async()=>{
-  const {a,b}=await fresh('drive');
+ // ---- 5. Files & folders ----
+ await scenario('5. Files & folders: every file filed into the library, never a Drive backups folder; files deleted from the drive stay',async()=>{
+  const {a,b}=await fresh('files-folders');
   const driveSource=path.join(sourceBox,'drive-source');
   const files=new Map<string,Buffer>();
   files.set('root.txt',randomBytes(5_000));
@@ -195,83 +195,23 @@ export default async function run(ctx:Context):Promise<void>{
   files.set('notes/readme.md',Buffer.from('keep me'));
   for(const [rel,data] of files)await gWrite(path.join(driveSource,rel),data);
   const origin=new Map<string,string>();for(const [rel,data] of files)origin.set(rel,ctx.sha(data));
-  const drive=(mirror:boolean)=>({name:'HWDRIVE',identity:'volume:PIHWT03-'+path.basename(a)+':',mirror});
-  const request=(mirror:boolean)=>({backup:true as const,unknownRules:{},drive:drive(mirror)});
-  const folderIn=(root:string)=>path.join(root,driveBackup.DRIVE_BACKUPS,'HWDRIVE');
-  const backupOf=async(root:string)=>{const t=await treeOf(folderIn(root));return t;};
-
-  // Additive.
-  const first=await core.plan(driveSource,[a,b],request(false),metadata);
-  check('additive plan has no failures, two destinations',first.failures.length===0&&first.plans.length===2,first.failures.map(f=>String(f.error)));
-  check('additive plan lists no removals',first.plans.every(p=>!p.removals));
+  const request={...importOptions,everyFile:true};
+  const first=await core.plan(driveSource,[a,b],request,metadata);
+  check('plan has no failures, two destinations',first.failures.length===0&&first.plans.length===2,first.failures.map(f=>String(f.error)));
   const r1=await exec(first.plans);
-  check('first drive backup reports no errors',r1.errors.length===0&&r1.copied===files.size*2,r1);
-  for(const root of [a,b]){const t=await backupOf(root);check(`backup on ${root===a?'disk 1':'disk 2'} mirrors the drive layout with the drive SHA-256s`,t.size===files.size&&[...files.keys()].every(rel=>t.get(rel.split('/').join(path.sep))===origin.get(rel)),{files:t.size});}
-  const removedA='DCIM/100HWT/IMG_0001.JPG',removedB='notes/readme.md',changed='DCIM/101HWT/IMG_0000.JPG';
-  await gRm(path.join(driveSource,removedA));await gRm(path.join(driveSource,removedB));
-  const newBytes=randomBytes(files.get(changed)!.length);                       // same size, different content
-  await gWrite(path.join(driveSource,changed),newBytes);
-  const newSha=ctx.sha(newBytes);
-  const additive=await core.plan(driveSource,[a,b],request(false),metadata);
-  check('additive re-plan finds no removals',additive.plans.every(p=>!p.removals?.length));
-  const ra=await exec(additive.plans);
-  check('additive re-run reports no errors',ra.errors.length===0,ra.errors);
+  check('first import reports no errors and copies every file to both',r1.errors.length===0&&r1.copied===files.size*2,r1);
   for(const root of [a,b]){
-   check(`additive keeps the files deleted from the drive (${root===a?'disk 1':'disk 2'})`,await exists(path.join(folderIn(root),removedA))&&await exists(path.join(folderIn(root),removedB)));
+   const label=root===a?'disk 1':'disk 2',t=await treeOf(root),hashes=new Set(t.values());
+   check(`${label}: every drive file is in the library (SHA-256)`,[...origin.values()].every(hash=>hashes.has(hash)),{files:t.size});
+   check(`${label}: no Drive backups folder`,!await exists(path.join(root,driveBackup.DRIVE_BACKUPS)));
+   check(`${label}: files other than photos are in Unknown files`,[...t.keys()].filter(rel=>/\.(?:txt|md)$/.test(rel)).every(rel=>rel.split(path.sep).includes('Unknown files')),[...t.keys()].filter(rel=>/\.(?:txt|md)$/.test(rel)));
   }
-  // Mirror: a fresh pair of destinations seeded by a full additive backup of the original content, so the review sees 2 missing + 1 changed.
-  const m=await fresh('drive-mirror');
-  // Seed both mirror destinations with the ORIGINAL drive content through the real code path (claims the folder with its marker).
-  const seedSource=path.join(sourceBox,'drive-seed');
-  for(const [rel,data] of files)await gWrite(path.join(seedSource,rel),data);
-  const seedPlan=await core.plan(seedSource,[m.a,m.b],request(true),metadata);
-  check('seed mirror plan (nothing to remove yet) lists no removals',seedPlan.plans.every(p=>!p.removals?.length),seedPlan.plans.map(p=>p.removals));
-  const rs=await exec(seedPlan.plans);
-  check('seed backup reports no errors',rs.errors.length===0&&rs.copied===files.size*2,rs);
-  const seeded=await backupOf(m.a);
-  check('seeded mirror destination holds the original drive',seeded.size===files.size);
-  const reviewed=await core.plan(driveSource,[m.a,m.b],request(true),metadata);
-  check('mirror review has no failures',reviewed.failures.length===0,reviewed.failures.map(f=>String(f.error)));
-  for(const [i,p] of reviewed.plans.entries()){
-   const removals=p.removals??[];
-   const rels=removals.map(r=>path.relative(folderIn(i?m.b:m.a),r.path).split(path.sep).join('/')).sort();
-   check(`mirror detects the 2 removed files and the changed one on disk ${i+1}`,rels.length===3&&rels.join()===[changed,removedA,removedB].sort().join(),rels);
-   check(`removal reasons are missing/changed on disk ${i+1}`,removals.filter(r=>r.reason==='missing').length===2&&removals.filter(r=>r.reason==='changed').length===1,removals.map(r=>r.reason));
-  }
-  const beforeRun=await backupOf(m.a);
-  check('review alone moves nothing (backup unchanged until executed)',beforeRun.size===files.size&&beforeRun.get(removedA.split('/').join(path.sep))===origin.get(removedA));
-  const rm=await exec(reviewed.plans);
-  check('mirror run reports no errors',rm.errors.length===0,rm.errors);
-  check('mirror run moved 3 files aside on each disk',rm.removed===6,{removed:rm.removed});
-  for(const [i,root] of [m.a,m.b].entries()){
-   const label=`disk ${i+1}`,t=await backupOf(root);
-   check(`${label}: removed files are gone from the drive folder`,!t.has(removedA.split('/').join(path.sep))&&!t.has(removedB.split('/').join(path.sep)));
-   check(`${label}: the changed file now has the drive's new content`,t.get(changed.split('/').join(path.sep))===newSha);
-   const holdingRoot=path.join(root,driveBackup.DRIVE_BACKUPS,'Removed by mirror');
-   const held=await treeOf(holdingRoot);
-   const heldByRel=new Map([...held].map(([k,v])=>[k.split(path.sep).slice(2).join('/'),v]));   // <stamp>/<drive folder>/<rel>
-   check(`${label}: the holding folder keeps the removed files with their original SHA-256 (never deleted)`,heldByRel.get(removedA)===origin.get(removedA)&&heldByRel.get(removedB)===origin.get(removedB),[...heldByRel.keys()]);
-   check(`${label}: the replaced version of the changed file is kept too`,heldByRel.get(changed)===origin.get(changed));
-   check(`${label}: nothing was lost (kept + held cover every file ever backed up)`,t.size+held.size===files.size+1,{kept:t.size,held:held.size});
-   check(`${label}: the emptied "notes" folder is removed from the drive folder`,!await exists(path.join(folderIn(root),'notes')));
-  }
-  // Restore: copy the backup back and compare with the drive.
-  const restore=path.join(sourceBox,'restore');
-  const t=await backupOf(m.a);
-  for(const rel of t.keys())await gCopy(path.join(folderIn(m.a),rel),path.join(restore,rel));
-  const restored=await treeOf(restore),drive0=await treeOf(driveSource);
-  check('restore from the mirror backup equals the drive (SHA-256)',sameTree(restored,drive0),{restored:restored.size,drive:drive0.size});
-  // The additive destinations still restore the old files too.
-  const restoreAdd=path.join(sourceBox,'restore-additive');
-  for(const rel of (await backupOf(a)).keys())await gCopy(path.join(folderIn(a),rel),path.join(restoreAdd,rel));
-  const ra2=await treeOf(restoreAdd);
-  check('additive backup restores every file ever backed up, removed ones included',[...files.keys()].every(rel=>rel===changed||ra2.get(rel.split('/').join(path.sep))===origin.get(rel)),ra2.size);
-  // A foreign folder under the drive's name is not claimed.
-  check('driveFolder gives the same drive the same folder',await driveBackup.driveFolder(m.a,drive(true))==='HWDRIVE');
-  check('driveFolder gives another drive a numbered folder',await driveBackup.driveFolder(m.a,{...drive(true),identity:'volume:OTHER:'})==='HWDRIVE 2');
-  const mirrorAgain=await core.plan(driveSource,[m.a,m.b],request(true),metadata);
-  check('after the mirror run a new review finds nothing to remove',mirrorAgain.plans.every(p=>!p.removals?.length),mirrorAgain.plans.map(p=>p.removals?.length));
-  await sourceUnchanged('drive backup (sources dir)');
+  const removed='notes/readme.md';await gRm(path.join(driveSource,removed));
+  const again=await core.plan(driveSource,[a,b],request,metadata);
+  const ra=await exec(again.plans);
+  check('re-run reports no errors and copies nothing',ra.errors.length===0&&ra.copied===0,ra);
+  for(const root of [a,b])check(`the file deleted from the drive stays in the library (${root===a?'disk 1':'disk 2'})`,[...(await treeOf(root)).values()].includes(origin.get(removed)!));
+  await sourceUnchanged('files & folders (sources dir)');
  });
 
  // ---- 6. destination validation ----

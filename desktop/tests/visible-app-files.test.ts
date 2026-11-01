@@ -15,7 +15,6 @@ import type {Metadata} from '../shared';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Nikon Z f',date:'2024-02-03T12:00:00Z',fields:{}});
-const drive={name:'Travel SSD',identity:'volume-visible-1',mirror:false};
 async function fixture(t:test.TestContext){
  const base=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'visible-files-')));t.after(()=>fs.rm(base,{recursive:true,force:true}));
  const source=path.join(base,'source'),root=path.join(base,'destination');await fs.mkdir(source);await fs.mkdir(root);
@@ -28,18 +27,17 @@ const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
 const UUID_V4='11111111-1111-4111-8111-111111111111';
 
 /** Files directly in `folder` or beneath it that the app names photo-importer-* (records the earlier version kept beside media). */
-const appNamed=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).map(String).filter(name=>!name.split(path.sep).includes('Photo Importer Data')&&/^(?:\.?photo-importer-(?!drive\.json)|\.import-)/.test(path.basename(name)));
-test('an import, a drive backup and an organization leave no hidden file, and no record beside the media: every record is in the one Photo Importer Data folder',async t=>{
+const appNamed=async(folder:string)=>(await fs.readdir(folder,{recursive:true})).map(String).filter(name=>!name.split(path.sep).includes('Photo Importer Data')&&/^(?:\.?photo-importer-|\.import-)/.test(path.basename(name)));
+test('an import, a Files & folders import and an organization leave no hidden file, and no record beside the media: every record is in the one Photo Importer Data folder',async t=>{
  const f=await fixture(t);
  assert.deepEqual((await execute((await plan(f.source,[f.root],options,metadata)).plans[0]!)).errors,[]);
  assert.deepEqual(await dotted(f.root),[]);assert.deepEqual(await appNamed(f.root),[]);
  assert.equal(await exists(path.join(f.root,'photo-importer-index.json')),false,'the index is in the records folder');
  assert.ok((await fs.readdir(path.join(f.root,'Photo Importer Data','Libraries'))).length,'the index is in the records folder');
  assert.deepEqual(await fs.readdir(await stagingFor(f.root)),[],'no staged copy left');assert.equal((await openReceiptsFor(f.root)).size,0,'no receipt left open');
- const backup=await plan(f.source,[f.root],{...options,backup:true,drive},metadata);
- assert.deepEqual((await execute(backup.plans[0]!)).errors,[]);
- const folder=path.join(f.root,'Drive backups','Travel SSD');
- assert.ok(await exists(path.join(folder,'photo-importer-drive.json')));assert.deepEqual(await dotted(f.root),[]);
+ const everyFile=await plan(f.source,[f.root],{...options,everyFile:true},metadata);
+ assert.deepEqual((await execute(everyFile.plans[0]!)).errors,[]);
+ assert.equal(await exists(path.join(f.root,'Drive backups')),false,'no Drive backups folder');assert.deepEqual(await dotted(f.root),[]);assert.deepEqual(await appNamed(f.root),[]);
  const library=path.join(f.base,'library');await fs.mkdir(path.join(library,'stray'),{recursive:true});await fs.writeFile(path.join(library,'stray','B.JPG'),'bytes of B');
  const reviewed=(await plan(library,[library],{...options,reorganize:true},metadata)).plans[0]!;
  const result=await executeReorganization(reviewed,undefined,undefined);
