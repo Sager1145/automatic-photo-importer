@@ -2,8 +2,8 @@ import type {DestinationSpace,PlanEntry,Preferences,TransferPlan} from '../share
 import {MessageError} from '../messages';
 import {volumeOf} from '../platform/volumes';
 
-/** A destination's plans: its backup folder and, in the video-root layout, its video folder. */
-export function destinationParts(plan:TransferPlan):TransferPlan[]{return plan.videos?[plan,plan.videos]:[plan];}
+/** A destination's plans: its backup folder, in the video-root layout its video folder, and its other-files folder when a file goes there. */
+export function destinationParts(plan:TransferPlan):TransferPlan[]{return [plan,...(plan.videos?[plan.videos]:[]),...(plan.other?[plan.other]:[])];}
 /** What an import found already in the backup under older folder rules: for the report, one line per file (source, where it is, where the rules wanted it). */
 export function olderRulesPaths(plans:TransferPlan[]):{source:string;existing:string;routed:string}[]{
  const seen=new Set<string>();
@@ -70,7 +70,7 @@ export function allocateDestinations(plans:TransferPlan[],available:number[],mod
 export function allocateVideoFolders(plans:TransferPlan[],available:number[],apart:boolean[]):(number|undefined)[]{
  return plans.map((plan,index)=>{
   if(!apart[index])return undefined;
-  const space=destinationSpace(plan.videos??{...plan,entries:[],videos:undefined},available[index]??0);
+  const space=destinationSpace(plan.videos??{...plan,entries:[],videos:undefined,other:undefined},available[index]??0);
   if(space.needed<=space.free)return space.needed;
   throw new MessageError('error.videoFolderNeedsSpace',{index:index+1,needed:{bytes:space.needed},free:{bytes:space.free},existing:{bytes:space.existing}});
  });

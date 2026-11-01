@@ -6,7 +6,7 @@ import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep, posix, win32 } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity, cameraOf, cameraSourcesFrom } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
@@ -16,7 +16,9 @@ import { otherComputer } from './fixtures/other-computer';
 import { getOrganizationRecovery, listedOnce } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
 import { evaluateRoutes } from '../core/folder-rules';
-import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan } from '../core/index';
+import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan, undoOrganization } from '../core/index';
+import { destinationParts } from '../core/allocation';
+import { otherFilesPlace, otherFilesRoot } from '../core/other-files';
 import { portableName, portablePath } from '../folder-template';
 import type { InventoryFile } from '../shared';
 import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type Access, type DriveFormat } from '../core/drive-formats';
@@ -60,6 +62,9 @@ export interface PlatformProfile {
   recordsDrive: { dev: bigint; ino: bigint; identity: string };
   /** This system's drive tool output for drives in each format people bring, and what this system can do with each one. */
   formats: { volumes(): MountedVolume[]; expect: { format: DriveFormat; access: Access; readOnly?: boolean }[] };
+  /** A library on an external drive as this system names it and its other-files folder beside it; a library that is a drive's
+   * own top folder (nothing beside it is on that drive) and its other-files folder inside it. */
+  otherFiles: { library: string; beside: string; top: string; inside: string };
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -169,7 +174,7 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
     const card = join(tmpdir(), 'card'), when = new Date(2026, 9, 25, 12);
     const listed: InventoryFile[] = ['CON.ARW', 'a:b.zip', 'trailing. '].map(name => ({ path: join(card, name), relative: name, size: 1, kind: name.endsWith('.ARW') ? 'RAW' : 'Other', included: true }));
     const routes = evaluateRoutes({ sourceRoot: card, files: listed, metadata: new Map([[listed[0]!.path, { fields: {}, camera: 'ILCE-7M4', date: '2026-10-25T10:00:00' }]]), mtimes: new Map(listed.map(file => [file.path, when])), options: { template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {} } });
-    assert.deepEqual(routes.map(route => route.relative!.split(sep).join('/')), ['2026/202610/ILCE-7M4/_CON.ARW', '2026/202610/Unknown files/a-b.zip', '2026/202610/Unknown files/trailing']);
+    assert.deepEqual(routes.map(route => `${route.root}:${route.relative!.split(sep).join('/')}`), ['photos:2026/202610/ILCE-7M4/_CON.ARW', 'other:Other files/2026/202610/a-b.zip', 'other:Other files/2026/202610/trailing']);
     if (!onNative(profile, t)) return;
     // Names that differ only by case are one name on macOS and Windows: a library never holds both, on any system.
     configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -418,6 +423,35 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.equal(sourcePlace(sources[0]!), `${profile.cameraPlace}${separator}Slot 1`);
       assert.equal(sourcePlace(single!), profile.cameraPlace);
     } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); }
+  },
+  'other files: what is not a camera photo or video goes to the folder beside the library, moved there by an undoable organization': async (profile, t) => {
+    // This system's paths: beside the library on the same drive, or inside a library that is the top of its drive.
+    const paths = profile.platform === 'win32' ? win32 : posix;
+    assert.equal(otherFilesPlace(profile.otherFiles.library, true, paths), profile.otherFiles.beside);
+    assert.equal(otherFilesPlace(profile.otherFiles.top, false, paths), profile.otherFiles.inside);
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-other-')));
+    try {
+      const library = join(root, 'photobackup'), other = join(root, 'photobackup-otherfiles'), when = new Date(2026, 0, 15, 12);
+      const put = async (file: string, text: string) => { await mkdir(dirname(file), { recursive: true }); await writeFile(file, text); await utimes(file, when, when); };
+      await put(join(library, '2026', '202601', 'NIKON Z f', 'DSC_0001.NEF'), 'raw');
+      await put(join(library, '2026', '202601', 'Screenshots', 'Screenshot_20260115-093000.png'), 'shot');
+      await put(join(library, '2022', '202203', 'Unknown files', '_R6_1149.png'), 'unknown');
+      await put(join(library, 'Problem files', 'Empty files', 'photobackup', 'Drive backups', 'photobackup', 'DCIM 2', 'EMPTY.JPG'), '');
+      await put(join(library, 'archive.zip'), 'zip');
+      assert.equal(await otherFilesRoot(library), other);
+      const metadata = async (file: string) => file.endsWith('.NEF') ? { fields: {}, camera: 'NIKON Z f', date: '2026-01-15T10:00:00' } : { fields: {} };
+      const found = await plan(library, [library], { backup: false, reorganize: true, collectProblems: true, template: '{year}/{yyyymm}/{camera}', layout: 'flat', noMetadata: 'folder' }, metadata);
+      for (const part of destinationParts(found.plans[0]!)) assert.deepEqual((await executeReorganization(part)).errors, []);
+      const listed = async (folder: string) => (await readdir(folder, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile() && !/Photo Importer/.test(entry.parentPath)).map(entry => posixRelative(folder, join(entry.parentPath, entry.name))).sort();
+      assert.deepEqual(await listed(library), ['2026/202601/NIKON Z f/DSC_0001.NEF']);
+      // Stored with "/" whatever the system; no old folder rebuilt, nothing nested again.
+      assert.deepEqual(await listed(other), ['Broken files/Empty files/EMPTY.JPG', 'Other files/2026/202601/archive.zip', 'Screenshots/2026/202601/Screenshot_20260115-093000.png', 'Unknown files/2022/202203/_R6_1149.png']);
+      const { getOrganizationRecovery } = await import('../core/recovery');
+      for (const folder of [other, library]) for (const job of await getOrganizationRecovery(folder)) await undoOrganization(folder, job.id);
+      assert.deepEqual(await listed(library), ['2022/202203/Unknown files/_R6_1149.png', '2026/202601/NIKON Z f/DSC_0001.NEF', '2026/202601/Screenshots/Screenshot_20260115-093000.png', 'Problem files/Empty files/photobackup/Drive backups/photobackup/DCIM 2/EMPTY.JPG', 'archive.zip']);
+    } finally { await rm(root, { recursive: true, force: true }); }
   },
 };
 

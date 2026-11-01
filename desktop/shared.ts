@@ -16,9 +16,15 @@ export type UnknownFileRule = string|null|{action:'camera'};
 export type UnknownDefault = 'skip'|'other'|'ask';
 export interface SystemFile {id:string;vendor:string;label:string;}
 export interface SkippedFile {path:string;reason:'system'|'unknown-rule'|'unknown-skip'|'unknown-ask'|'empty'|'emptyPrimary';label?:string;}
-/** Organization moves files it cannot file by date and camera into <backup root>/Problem files/<group>/<path relative to the organized folder>. */
+/** Earlier versions collected 0-byte and unreadable files in <backup root>/Problem files/<group>/…; organization now moves them to
+ * Broken files/<group>/ in the other-files folder (core/other-files.ts), and the groups keep these names. */
 export const PROBLEM_FILES_FOLDER='Problem files';
 export const UNKNOWN_FILES_FOLDER='Unknown files';
+/** Everything in a library that is not a camera photo or video goes to its other-files folder, named after the library
+ * with this suffix and kept beside it (core/other-files.ts), in these category folders. Unknown files takes the
+ * name chosen for unknown files (`noMetadataFolder`). */
+export const OTHER_FILES_SUFFIX='-otherfiles';
+export const OTHER_FOLDERS={screenshots:'Screenshots',chat:'Chat images',broken:'Broken files',unknown:UNKNOWN_FILES_FOLDER,other:'Other files'} as const;
 export const DEFAULT_TEXT_SCALE=1.25;
 /** The folder older versions made for files without a camera; never made any more, but libraries may hold it. */
 export const LEGACY_UNKNOWN_CAMERA_FOLDER='Unknown Camera';
@@ -33,7 +39,7 @@ export interface NoMetadataSummary {handling:'keep'|'folder';folder:string;count
 export const NO_METADATA_LIST_LIMIT=5000;
 export const PROBLEM_FILE_GROUPS={empty:'Empty files',unreadable:'Unreadable files'} as const;
 /** A file that is never imported or filed normally. empty: 0 bytes; emptyPrimary: companion of an empty file (a family stays together); unreadable: could not be read or accessed.
- * collected: an organization moves it into the Problem files folder; otherwise it stays where it is (imports never copy these). */
+ * collected: an organization moves it into Broken files in the other-files folder; otherwise it stays where it is (imports never copy these). */
 export interface ProblemFile {path:string;relative:string;reason:'empty'|'emptyPrimary'|'unreadable';group:keyof typeof PROBLEM_FILE_GROUPS;collected:boolean;}
 /** The drive a chosen folder lives on. physicalId is the physical disk (several volumes can share one); kind sets how many jobs may read it at once. */
 export interface SourceDrive {volumeId:string;name:string;mount:string;physicalId?:string;kind?:'hdd'|'ssd'|'card'|'unknown';}
@@ -78,7 +84,7 @@ export type ShutterNote='mechanical'|'mechanical-total-conflict'|'mechanical-con
  * only when a same-size file already sits at a candidate destination. sourceIdentity is the
  * plan-time dev:ino:size:mtimeNs:ctimeNs of the source. */
 export interface PlanEntry {captureTimeMs?:number;allocation?:{destination:string;folder:string;/** Absent: folder. */conflictNaming?:'number'};id:string;source:string;destination:string;size:number;kind:MediaKind;digest?:string;sourceIdentity?:string;skip:boolean;family:string;/** Set when the folder rules wanted this file at `routed` but identical bytes already sit at `destination` (an older route or the other root); never written, never remembered as placed. */routed?:string;}
-export interface TransferPlan {source:string;root:string;entries:PlanEntry[];rootIdentity:string;/** video-root: the same destination's video backup folder, planned and executed as its own root. */videos?:TransferPlan;}
+export interface TransferPlan {source:string;root:string;entries:PlanEntry[];rootIdentity:string;/** video-root: the same destination's video backup folder, planned and executed as its own root. */videos?:TransferPlan;/** The same destination's other-files folder (core/other-files.ts), planned and executed as its own root, present only when a file goes there. */other?:TransferPlan;}
 /** completed: files staged (copying) or verified/published (verifying); failed: files in a failed group. */
 /** phase 'planning': files checked before anything is written (step 'listing': files found so far; total is an estimate, 0 when none, and `share` the estimated fraction listed; step 'checking': metadata of every file;
  * step 'reading': library organization reading the files it will move; step 'comparing': planned files compared with each destination;

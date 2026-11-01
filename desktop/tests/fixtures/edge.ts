@@ -49,8 +49,8 @@ export async function listedExtensions():Promise<string[]> {
  const block=source.slice(source.indexOf('Object.entries({'),source.indexOf('})) {'));
  return [...block.matchAll(/^\s*\w+: '([a-z0-9 ]+)',?$/gm)].flatMap(match=>match[1]!.split(' '));
 }
-export const parts=(transfer:TransferPlan)=>[transfer,...(transfer.videos?[transfer.videos]:[])];
-/** Execute both parts of a plan (photos and, in video-root, videos) and return the summed result. */
+export const parts=(transfer:TransferPlan)=>[transfer,...(transfer.videos?[transfer.videos]:[]),...(transfer.other?[transfer.other]:[])];
+/** Execute every part of a plan (photos, in video-root videos, and the other-files folder) and return the summed result. */
 export async function executeAll(transfer:TransferPlan,options:Parameters<typeof execute>[3]={}){
  const total={copied:0,skipped:0,errors:[] as string[]};
  for(const part of parts(transfer)){const result=await execute(part,undefined,undefined,options);total.copied+=result.copied;total.skipped+=result.skipped;total.errors.push(...result.errors);}

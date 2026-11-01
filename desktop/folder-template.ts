@@ -86,6 +86,51 @@ export function templateMatcher(template: string, editedFolder = DEFAULT_EDITED_
   };
 }
 
+/** The template's levels fixed by date alone ({year}, {yyyymm}…), in order; a level that names the camera is left out. */
+export const dateLevels = (template: string): string[] => template.split('/').filter(level => {
+  const keys = [...level.matchAll(/\{([^{}]+)\}/g)].map(match => match[1]!);
+  return keys.length > 0 && keys.every(key => DATE_ONLY.has(key));
+});
+/** The date folders of one day by the template's date levels: "2026/202601" for {year}/{yyyymm}/{camera}; empty when it has none. */
+export const datePath = (template: string, capture: Date): string => dateLevels(template).map(level => expandTemplate(level, templateValues(capture, ''))).join('/');
+/** What each date token captures, in order: y(ear), m(onth), d(ay). */
+const DATE_CAPTURES: Record<string, { pattern: string; fields: ('y' | 'm' | 'd')[] }> = {
+  year: { pattern: '(\\d{4})', fields: ['y'] }, month: { pattern: '(\\d{2})', fields: ['m'] }, day: { pattern: '(\\d{2})', fields: ['d'] },
+  yyyymm: { pattern: '(\\d{4})(\\d{2})', fields: ['y', 'm'] }, yyyyMMdd: { pattern: '(\\d{4})(\\d{2})(\\d{2})', fields: ['y', 'm', 'd'] },
+  monthName: { pattern: `(\\d{2}) (?:${MONTHS.join('|')})`, fields: ['m'] }, yearMonthName: { pattern: `(\\d{4})-(\\d{2}) (?:${MONTHS.join('|')})`, fields: ['y', 'm'] },
+};
+/** The day that date folders laid out by `template` name, read from the first place in `parts` (folder names) where all the
+ * template's date levels follow each other: 2022/202203 inside "Unknown files/2022/202203". Undefined without a year, or when
+ * the folders disagree (a year 2022 beside 202303). A month or day the template does not fix is the first. */
+export function dateFromFolders(template: string, parts: readonly string[]): Date | undefined {
+  const levels = dateLevels(template).map(level => {
+    const fields: ('y' | 'm' | 'd')[] = [];
+    const source = level.split(/(\{[^{}]+\})/).map(piece => {
+      const key = /^\{([^{}]+)\}$/.exec(piece)?.[1], capture = key === undefined ? undefined : DATE_CAPTURES[key];
+      if (!capture) return escapeText(piece);
+      fields.push(...capture.fields);
+      return capture.pattern;
+    }).join('');
+    return { pattern: new RegExp(`^${source}$`, 'u'), fields };
+  });
+  if (!levels.length || !levels.some(level => level.fields.includes('y'))) return undefined;
+  for (let start = 0; start + levels.length <= parts.length; start++) {
+    const found: Partial<Record<'y' | 'm' | 'd', number>> = {};
+    const agrees = levels.every((level, at) => {
+      const match = level.pattern.exec(parts[start + at]!);
+      return !!match && level.fields.every((field, index) => {
+        const value = Number(match[index + 1]);
+        if (found[field] !== undefined && found[field] !== value) return false;
+        found[field] = value; return true;
+      });
+    });
+    if (!agrees) continue;
+    const year = found.y!, month = found.m ?? 1, day = found.d ?? 1, date = new Date(Date.UTC(year, month - 1, day));
+    if (month >= 1 && month <= 12 && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && year >= 1900) return date;
+  }
+  return undefined;
+}
+
 export const monthToken = ({ full, english }: FolderPath['month']) => english ? (full ? '{yearMonthName}' : '{monthName}') : (full ? '{yyyymm}' : '{month}');
 const dayToken = ({ full }: FolderPath['day']) => full ? '{yyyyMMdd}' : '{day}';
 

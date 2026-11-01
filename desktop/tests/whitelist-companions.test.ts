@@ -69,12 +69,12 @@ test('Capture One settings are filed beside the original in CaptureOne/Settings*
  assert.equal(entries.find(e=>e.source===cos)!.family,entries.find(e=>e.source===nef)!.family);
 });
 
-test('unpaired srt goes to Other files/srt and unpaired bwf to the camera folder',async t=>{
+test('unpaired srt goes to the other-files folder and unpaired bwf to the camera folder',async t=>{
  const {source,root,put}=await fixture(t);
  await put('DCIM/A/IMG_0001.JPG');const srt=await put('DCIM/A/notes.srt');const bwf=await put('DCIM/A/memo.bwf');
  const found=await plan(source,[root],{...options,unknownDefault:'other'},camera);
- const dest=(file:string)=>path.relative(root,found.plans[0]!.entries.find(entry=>entry.source===file)!.destination).split(path.sep).join('/');
- assert.equal(dest(srt),'Other files/srt/notes.srt');
+ const dest=(file:string)=>path.relative(root,[...found.plans[0]!.entries,...found.plans[0]!.other?.entries??[]].find(entry=>entry.source===file)!.destination).split(path.sep).join('/');
+ assert.match(dest(srt),/^\.\.\/destination-otherfiles\/Other files\/\d{4}\/\d{6}\/notes\.srt$/,'by its modified time');
  assert.equal(dest(bwf),'2024/202403/Cam/memo.bwf');
 });
 

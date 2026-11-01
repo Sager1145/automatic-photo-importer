@@ -38,7 +38,8 @@ test('missing EXIF: keep is unclassifiable, folder and fileDate still have compa
   assert.equal(kept.reason,'keep');assert.equal(kept.noMetadataReason,'noDate');
   assert.equal(classifyPlacement({route:kept,actual:{root:'photos',relativePath:f.relative},rulesScope:'r'}).status,'unclassifiable');
   const [unknown]=routes([f],metadata,{noMetadata:'folder',noMetadataFolder:'Unsorted'});
-  assert.equal(rel(unknown),'Unsorted/DCIM/A.JPG');
+  // In the other-files folder, under the chosen name: never the folders it came from.
+  assert.equal(unknown.root,'other');assert.equal(rel(unknown),'Unsorted/A.JPG');
   assert.equal(classifyPlacement({route:unknown,actual:{root:'photos',relativePath:f.relative},rulesScope:'r'}).status,'misplaced');
   const [dated]=routes([f],metadata,{noMetadata:'fileDate',template:'{year}/{yyyymm}/{camera}'});
   assert.equal(rel(dated),'2024/202402/Unknown files/A.JPG');
@@ -86,11 +87,14 @@ test('existing edited ancestry classifies exports and companions, while RAW stay
 });
 
 test('legal special directories and numbered conflict names are accepted by existing policy',()=>{
-  const files=[file('2024/Camera/Conflicts/content/A.JPG'),file('Problem files/Empty/A.JPG'),file('Photo Importer Data/Organizations/A.JPG'),file('Trips/NIKON Z f/2024/02 February/A (2).JPG')];
+  const files=[file('2024/Camera/Conflicts/content/A.JPG'),file('Photo Importer Data/Organizations/A.JPG'),file('Trips/NIKON Z f/2024/02 February/A (2).JPG')];
   const decisions=routes(files);
   for(const d of decisions)assert.equal(classifyPlacement({route:d,actual:{root:'photos',relativePath:d.file.relative},rulesScope:'r'}).status,'inPlace');
-  assert.deepEqual(decisions.slice(0,3).map(d=>d.reason),['exempt','exempt','exempt']);
-  assert.equal(rel(decisions[3]),'Trips/NIKON Z f/2024/02 February/A (2).JPG');
+  assert.deepEqual(decisions.slice(0,2).map(d=>d.reason),['exempt','exempt']);
+  assert.equal(rel(decisions[2]),'Trips/NIKON Z f/2024/02 February/A (2).JPG');
+  // An earlier version's Problem files folder is no longer the app's: its files belong in the other-files folder.
+  const [problem]=routes([file('Problem files/Empty/A.JPG')]);
+  assert.equal(classifyPlacement({route:problem,actual:{root:'photos',relativePath:problem.file.relative},rulesScope:'r'}).status,'misplaced');
 });
 
 test('a Drive backups folder is not part of a library: its files are misplaced, so organization files them',()=>{

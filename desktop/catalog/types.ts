@@ -72,7 +72,8 @@ export interface CatalogLibrary {
 export interface CatalogPlacement {
   status:PlacementStatus;
   actualRelativePath:string;
-  expectedRoute?:{role:RootRole;relativePath:string};
+  /** other: the library's other-files folder (core/other-files.ts). */
+  expectedRoute?:{role:RootRole|'other';relativePath:string};
   rulesScope:string;
   reason?:string;
   checkedAt?:string;

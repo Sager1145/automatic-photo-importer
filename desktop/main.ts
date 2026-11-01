@@ -25,7 +25,8 @@ import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,listedOnce,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative} from './core/paths';
+import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative,pathKey} from './core/paths';
+import {siblingOtherFiles} from './core/other-files';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {discardPausedCopies,releasePausedCopies} from './core/index';
@@ -434,6 +435,8 @@ async function listOrganizations(signal:AbortSignal){
  const add=(root:string,destination:string,volumeId:string)=>{if(within(root,destination)&&!locations.some(item=>item.root===root))locations.push({root,destination,volumeId});};
  // Every chosen backup folder, the video ones too whatever the current layout: a journal may be in either.
  for(const folder of configured)add(folder.path,recordsBase(folder.path),folder.volumeId);
+ // And each photo folder's other-files folder beside it: the moves an organization made there are journaled there.
+ for(const folder of configured)if(folder.role==='photos')add(siblingOtherFiles(folder.path),recordsBase(folder.path),folder.volumeId);
  // The previous list stays until each folder is read again, and is replaced folder by folder.
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
@@ -472,8 +475,9 @@ async function listOrganizations(signal:AbortSignal){
  }finally{state.organizationRecoveryLoading=false;delete state.organizationRecoveryProgress;emit();}
 }
 async function rememberOrganization(root:string,prefs:Preferences){
- // A backup folder is remembered at the folder holding it (as its drive was), a folder organized in place at itself.
- const chosen=chosenFolders(prefs).find(item=>within(root,item.path)),volumeId=chosen?.volumeId;if(!chosen||!volumeId)throw new MessageError('error.organizationDestination');
+ // A backup folder is remembered at the folder holding it (as its drive was), a folder organized in place at itself;
+ // a photo folder's other-files folder beside it with that photo folder.
+ const chosen=chosenFolders(prefs).find(item=>within(root,item.path)||item.role==='photos'&&pathKey(root)===pathKey(siblingOtherFiles(item.path))),volumeId=chosen?.volumeId;if(!chosen||!volumeId)throw new MessageError('error.organizationDestination');
  const folder=!chosenFolders(state.preferences).some(item=>item.path===chosen.path&&item.volumeId===volumeId),destination=folder?chosen.path:recordsBase(chosen.path);
  if(!organizationLocations.some(item=>item.root===root&&item.volumeId===volumeId))organizationLocations.push({root,destination,volumeId,...(folder?{folder:true}:{})});await save();
 }
@@ -724,6 +728,8 @@ let residueControl:AbortController|undefined,residueTask:Promise<void>|undefined
 async function residueRoots():Promise<string[]>{
  const prefs=state.preferences,roots:string[]=[];
  for(const folder of chosenFolders(prefs))if(folderOnline(folder))roots.push(folder.path);
+ // Each photo folder's other-files folder beside it, once something went there: imports stage and publish there too.
+ for(const folder of chosenFolders(prefs))if(folder.role==='photos'&&folderOnline(folder)){const other=siblingOtherFiles(folder.path);if(await fs.stat(other).then(stat=>stat.isDirectory(),()=>false))roots.push(other);}
  for(const location of organizationLocations){const status=location.folder?await volumeInfo(location.destination).catch(()=>undefined):locationStatus(location);if(status?.available&&status.volumeId===location.volumeId)roots.push(location.root);}
  // A folder inside another one is looked through with it.
  return [...new Set(roots)].filter((root,_index,all)=>!all.some(other=>other!==root&&within(root,other)));
@@ -1045,7 +1051,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   await saveReport('plan.json',{producer:'desktop-app',jobId:job.id,kind,sourceFolders,plans,skipped:job.inventory?.skipped??[],failed,inventory:job.inventory});
   await saveReport('context.json',{producer:'desktop-app',started:new Date().toISOString(),preferences:prefs,source:job.source});
   const reserved=reservations.get(job.id)!;
-  touchedLibraries.set(job.id,plans.flatMap(item=>[item.root,...(item.videos?[item.videos.root]:[])]));
+  touchedLibraries.set(job.id,plans.flatMap(item=>destinationParts(item).map(part=>part.root)));
   etaTracker.plan(job.id,{kind:reorganize?'organization':'import',verify:policy.verifyCopies,...prepared.eta,publish:etaTracker.predictPublish(prepared.eta.destinations),...(reorganize?{}:{direct:etaTracker.predictDirect(prepared.eta.destinations),totals:etaTotals(plans)})});
   job.phase='copying';
   // What each file actually came to at each destination: the one record duplicates, placement, the source checksums and Delete originals use.

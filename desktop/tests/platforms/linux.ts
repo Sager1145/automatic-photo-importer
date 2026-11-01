@@ -26,5 +26,6 @@ export const linux: PlatformProfile = {
   folderKeyProvesNames: true,
   // An exFAT root under /media as Linux reports it (illustrative: no Linux reading of A006 yet); the device number changes per mount.
   recordsDrive: { dev: 2065n, ino: 1n, identity: '1' },
+  otherFiles: { library: '/media/sager/A006/photobackup', beside: '/media/sager/A006/photobackup-otherfiles', top: '/media/sager/A006', inside: '/media/sager/A006/A006-otherfiles' },
   namesIgnoreCase: false,
 };

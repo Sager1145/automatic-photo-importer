@@ -10,6 +10,7 @@ import {defaultPreferences} from '../preferences';
 import {safeComponent} from '../folder-template';
 import type {Metadata} from '../shared';
 import {slash} from './fixtures/os';
+import {parts} from './fixtures/edge';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -31,7 +32,10 @@ async function fixture(t:test.TestContext){
   return {root,source,library,videos,put};
 }
 const exists=(file:string)=>fs.lstat(file).then(()=>true,()=>false);
-const entries=(found:Awaited<ReturnType<typeof plan>>)=>found.plans.flatMap(item=>[...item.entries,...item.videos?.entries??[]]);
+const entries=(found:Awaited<ReturnType<typeof plan>>)=>found.plans.flatMap(item=>parts(item).flatMap(part=>part.entries));
+/** Every part of the first destination: the library, its video folder, and the other-files folder beside the library. */
+const executeAll=async(found:Awaited<ReturnType<typeof plan>>,options:Parameters<typeof execute>[3]={})=>{const errors:string[]=[];for(const part of parts(found.plans[0]!))errors.push(...(await execute(part,undefined,undefined,options)).errors);return {errors};};
+const organizeAll=async(found:Awaited<ReturnType<typeof plan>>)=>{const errors:string[]=[];for(const part of parts(found.plans[0]!))errors.push(...(await executeReorganization(part,undefined,undefined)).errors);return {errors};};
 const sources=(found:Awaited<ReturnType<typeof plan>>)=>entries(found).map(entry=>path.basename(entry.source)).sort();
 
 test('import keep: unknown files are not copied, known origins are, and nothing unverified is claimed',async t=>{
@@ -43,9 +47,10 @@ test('import keep: unknown files are not copied, known origins are, and nothing 
   assert.deepEqual(found.noMetadata?.counts,{noDate:1,noCamera:1,unreadable:1});
   assert.equal(found.noMetadata?.count,3);
   assert.equal(found.noMetadata?.handling,'keep');
-  assert.ok(entries(found).find(entry=>entry.source.endsWith('SHOT_4.PNG'))!.destination.includes(path.join('2021','202103','Screenshots')));
+  // A screenshot is identified, so it is filed in the other-files folder whatever is chosen for unknown files.
+  assert.equal(entries(found).find(entry=>entry.source.endsWith('SHOT_4.PNG'))!.destination,path.join(f.root,'library-otherfiles','Screenshots','2021','202103','SHOT_4.PNG'));
   const verified:string[]=[];
-  const result=await execute(found.plans[0]!,undefined,undefined,{verify:true,onFileOutcome:outcome=>verified.push(path.basename(outcome.source))});
+  const result=await executeAll(found,{verify:true,onFileOutcome:outcome=>verified.push(path.basename(outcome.source))});
   assert.deepEqual(result.errors,[]);
   assert.deepEqual(verified.sort(),['IMG_1.JPG','SHOT_4.PNG']);
   for(const name of ['NOCAM_2.JPG','SNAP_3.PNG','BROKEN_5.JPG'])assert.equal(await exists(path.join(f.source,'DCIM',name)),true);
@@ -74,16 +79,17 @@ test('fileDate and an unset option file by file time, and no folder is ever call
   assert.equal(safeComponent(''),'Unknown files');
 });
 
-test('import folder files unknown files under the default name, and under the video root for videos',async t=>{
+test('import folder files unknown files in the other-files folder under the default name, by date when known, videos too',async t=>{
   const f=await fixture(t);
   await f.put(f.source,'DCIM/SNAP_1.PNG','screenshot');await f.put(f.source,'DCIM/SNAP_2.MP4','clip');await f.put(f.source,'DCIM/NOCAM_3.JPG','no camera');await f.put(f.source,'DCIM/IMG_4.JPG','dated');
   const found=await plan(f.source,[f.library],{...base,layout:'video-root' as const,videoRoots:[f.videos],noMetadata:'folder'},metadata);
-  const photo=found.plans[0]!.entries.find(entry=>entry.source.endsWith('SNAP_1.PNG'))!,video=found.plans[0]!.entries.find(entry=>entry.source.endsWith('SNAP_2.MP4'))!,nocam=found.plans[0]!.entries.find(entry=>entry.source.endsWith('NOCAM_3.JPG'))!;
-  assert.equal(photo.destination,path.join(f.library,'Unknown files/DCIM/SNAP_1.PNG'));
-  assert.equal(nocam.destination,path.join(f.library,'Unknown files/DCIM/NOCAM_3.JPG'));
-  assert.equal(video.destination,path.join(f.library,'Unknown files/DCIM/SNAP_2.MP4'),'unknown videos go under the photo root too');
+  const other=found.plans[0]!.other!.entries,unknown=path.join(f.root,'library-otherfiles','Unknown files');
+  const photo=other.find(entry=>entry.source.endsWith('SNAP_1.PNG'))!,video=other.find(entry=>entry.source.endsWith('SNAP_2.MP4'))!,nocam=other.find(entry=>entry.source.endsWith('NOCAM_3.JPG'))!;
+  assert.equal(photo.destination,path.join(unknown,'SNAP_1.PNG'),'no date known: no date folders, and never the card folders');
+  assert.equal(nocam.destination,path.join(unknown,'2021/202103/NOCAM_3.JPG'));
+  assert.equal(video.destination,path.join(unknown,'SNAP_2.MP4'),'unknown videos go there too');
   assert.equal(found.noMetadata?.count,3);assert.equal(found.noMetadata?.folder,'Unknown files');
-  const result=await execute(found.plans[0]!,undefined,undefined,{verify:true});
+  const result=await executeAll(found,{verify:true});
   assert.deepEqual(result.errors,[]);
   assert.equal(await fs.readFile(photo.destination,'utf8'),'screenshot');
 });
@@ -111,10 +117,10 @@ test('organization folder moves unknown files under the named folder, removes em
   const options={...base,reorganize:true as const,noMetadata:'folder' as const,noMetadataFolder:'Not dated'};
   const found=await plan(f.library,[f.library],options,metadata);
   assert.equal(found.noMetadata?.folder,'Not dated');
-  const result=await executeReorganization(found.plans[0]!,undefined,undefined);
+  const result=await organizeAll(found);
   assert.deepEqual(result.errors,[]);
-  assert.equal(await fs.readFile(path.join(f.library,'Not dated/old/trip/SNAP_1.PNG'),'utf8'),'screenshot');
-  assert.equal(await fs.readFile(path.join(f.library,'Not dated/2021/202103/NOCAM_3.JPG'),'utf8'),'no camera');
+  assert.equal(await fs.readFile(path.join(f.root,'library-otherfiles','Not dated/SNAP_1.PNG'),'utf8'),'screenshot');
+  assert.equal(await fs.readFile(path.join(f.root,'library-otherfiles','Not dated/2021/202103/NOCAM_3.JPG'),'utf8'),'no camera');
   assert.equal(await exists(path.join(f.library,'2021/202103/Unknown Camera')),false,'the emptied legacy folder is removed');
   const again=await findMisplaced(f.library,f.library,{template:base.template,layout:base.layout,noMetadata:'folder',noMetadataFolder:'Not dated'},metadata);
   assert.equal(again.count,0);
@@ -137,12 +143,13 @@ test('rules from preferences that omit the handling file unknown files in a fold
   assert.equal(ruleOptions({...rest,noMetadataHandling:'keep'}).noMetadata,'keep');
 });
 
-test('video-root: an unknown video and its sidecar go under the photo root, none under the video root',async t=>{
+test('video-root: an unknown video and its sidecar go to the other-files folder, none under the video root',async t=>{
   const f=await fixture(t);
   await f.put(f.source,'DCIM/SNAP_2.MP4','clip');await f.put(f.source,'DCIM/SNAP_2.xmp','side');await f.put(f.source,'DCIM/IMG_4.MP4','known');
   const found=await plan(f.source,[f.library],{...base,layout:'video-root' as const,videoRoots:[f.videos],noMetadata:'folder'},metadata);
-  const plan0=found.plans[0]!;
-  assert.deepEqual(plan0.entries.map(entry=>entry.destination).sort(),[path.join(f.library,'Unknown files/DCIM/SNAP_2.MP4'),path.join(f.library,'Unknown files/DCIM/SNAP_2.xmp')]);
+  const plan0=found.plans[0]!,unknown=path.join(f.root,'library-otherfiles','Unknown files');
+  assert.deepEqual(plan0.entries,[]);
+  assert.deepEqual(plan0.other!.entries.map(entry=>entry.destination).sort(),[path.join(unknown,'SNAP_2.MP4'),path.join(unknown,'SNAP_2.xmp')]);
   assert.deepEqual(plan0.videos!.entries.map(entry=>path.basename(entry.source)),['IMG_4.MP4']);
 });
 
@@ -151,11 +158,11 @@ test('organize moves unknown videos out of the video root and Unknown Camera, th
   await f.put(f.videos,'2024/202408/Unknown Camera/SNAP_x.mp4','clip');await f.put(f.library,'2024/202408/Unknown Camera/SNAP_y.png','pic');
   const options={...base,layout:'video-root' as const,videoRoots:[f.videos],reorganize:true as const,noMetadata:'folder' as const};
   const found=await plan(f.root,[f.library],{...options,sourceFolders:['library','videos']},metadata);
-  const all=[...found.plans[0]!.entries,...found.plans[0]!.videos?.entries??[]];
+  const all=entries(found),unknown=path.join(f.root,'library-otherfiles','Unknown files');
   const video=all.find(entry=>entry.source.endsWith('SNAP_x.mp4'))!;
-  assert.equal(video.destination,path.join(f.library,'Unknown files/2024/202408/SNAP_x.mp4'));
+  assert.equal(video.destination,path.join(unknown,'2024/202408/SNAP_x.mp4'),'the date folders it sat in are kept');
   for(const entry of all)assert.ok(!/unknown camera/i.test(entry.destination),entry.destination);
-  assert.equal(all.find(entry=>entry.source.endsWith('SNAP_y.png'))!.destination,path.join(f.library,'Unknown files/2024/202408/SNAP_y.png'));
+  assert.equal(all.find(entry=>entry.source.endsWith('SNAP_y.png'))!.destination,path.join(unknown,'2024/202408/SNAP_y.png'));
 });
 
 test('keep leaves unknown files in the video root untouched',async t=>{
@@ -165,12 +172,12 @@ test('keep leaves unknown files in the video root untouched',async t=>{
   assert.deepEqual(sources(found),[]);
 });
 
-test('layout check: unknown files filed in the folder are in place, those in date folders are misplaced under folder handling',async t=>{
+test('layout check: under folder handling every unknown file still in the library is misplaced, an earlier Unknown files folder too',async t=>{
   const f=await fixture(t);
   await f.put(f.library,'Unknown files/2024/202408/SNAP_a.png','ok');await f.put(f.library,'2024/202408/Cam/SNAP_b.png','date folder');await f.put(f.library,'2024/202408/Unknown Camera/SNAP_c.png','legacy');
   const rules={template:base.template,layout:base.layout,noMetadata:'folder' as const};
   const found=await findMisplaced(f.library,f.library,rules,metadata);
-  assert.deepEqual(found.files.map(file=>path.basename(file)).sort(),['SNAP_b.png','SNAP_c.png']);
+  assert.deepEqual(found.files.map(file=>path.basename(file)).sort(),['SNAP_a.png','SNAP_b.png','SNAP_c.png']);
   const kept=await findMisplaced(f.library,f.library,{...rules,noMetadata:'keep'},metadata);
   assert.equal(kept.count,0);
 });

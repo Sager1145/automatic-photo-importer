@@ -21,11 +21,11 @@ export async function executeDestinations(plans:TransferPlan[],options:{
  // Slots: every plan to run, with the destination it belongs to.
  const slots=plans.flatMap((plan,index)=>destinationParts(plan).map(part=>({part,index})));
  const bytesOf=(plan:TransferPlan,all=false)=>destinationEntries(plan).reduce((sum,entry)=>sum+(entry.skip&&!all?0:entry.size),0);
- const pending=slots.map(({part})=>bytesOf({...part,videos:undefined}));
+ const pending=slots.map(({part})=>bytesOf({...part,videos:undefined,other:undefined}));
  const initialPending=[...pending];
  // Publication workspace is one related family per destination, as requiredTransferSpace reserved it.
  const workspace=plans.map(plan=>requiredTransferSpace(plan)-bytesOf(plan));
- const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
+ const fullWorkspace=plans.map(plan=>{const all=(part:TransferPlan):TransferPlan=>({...part,entries:part.entries.map(entry=>({...entry,skip:false})),...(part.videos?{videos:all(part.videos)}:{}),...(part.other?{other:all(part.other)}:{})});return requiredTransferSpace(all(plan))-bytesOf(plan,true);});
  const total=slots.reduce((sum,{part})=>sum+part.entries.length,0),latest=slots.map(()=>({bytes:0,completed:0})),existing=slots.map(()=>0),phases=slots.map(()=>'copying' as NonNullable<Progress['phase']>),works=slots.map(()=>undefined as Progress['work']);
  const finished=new Set<number>();
  const result={copied:0,skipped:0,moved:0,retained:0,retainedBytes:0,removed:0,errors:[] as string[],notes:[] as string[]} as {copied:number;skipped:number;routed?:number;moved:number;retained:number;retainedBytes:number;released?:number;releasedBytes?:number;foldersRemoved?:number;removed:number;errors:string[];warnings?:ExecutionIssue[];notes:string[];appleDouble?:import('./appledouble').AppleDoubleReport};

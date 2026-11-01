@@ -61,7 +61,8 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li><b class="ui">Use a separate video folder</b>: keep videos in their own folder, on the same drive, another drive, or any folder depth (for example photos on <code>Drive1/photobackup</code>, videos on <code>Drive2/folder1/folder2</code>).</li>
 <li><b class="ui">Copy policy</b>: <b class="ui">One destination</b>, <b class="ui">Copy to both destinations</b> (a verified copy on two disks) or <b class="ui">Fill first, then second</b>.</li>
 <li><b class="ui">Folder structure</b>: choose <b class="ui">Date, then camera</b> or <b class="ui">Camera, then date</b>, turn date levels on or off, and choose how photos and videos are split by format. The previews show exactly where the next photo, video, JPEG and voice memo will land.</li>
-<li><b class="ui">Edited exports folder</b>: the folder name used for edited exports inside each month.</li>
+<li><b class="ui">Edited exports folder</b>: the folder name used for edited exports inside each month. Exports are recognized from what the editor writes into them (Lightroom, Capture One, Photoshop, Snapseed, NX Studio, phone editors and others) and stay in the library under their camera, or directly in the edited folder when they have none.</li>
+<li><b class="ui">Other files</b>: everything that is not a camera photo or video goes to a folder beside the library on the same drive, named after it with <code>-otherfiles</code> (<code>I:\photobackup</code> → <code>I:\photobackup-otherfiles</code>, <code>/Volumes/A006/photobackup</code> → <code>/Volumes/A006/photobackup-otherfiles</code>). Inside it: <code>Screenshots</code> (screenshots and screen recordings), <code>Chat images</code> (saved from WeChat, WhatsApp, LINE, Telegram and other messaging apps), <code>Broken files</code> (empty and unreadable files), <code>Unknown files</code> (photos and videos with no date, camera or known origin) and <code>Other files</code> (archives, camera index files, aliases). Each keeps date folders when a date is known, for example <code>Screenshots/2026/202601/</code>. Screenshots and chat images are recognized by their metadata first and their names second; a photo with a camera is never treated as a screenshot. The settings page shows the location and the folders.</li>
 </ul>
 
 <h2 id="en-import">3. Import page</h2>
@@ -76,7 +77,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li>With <b class="ui">Automatic import</b> on (Settings → Importing), imports start as soon as a chosen card connects.</li>
 </ul>
 <h3>Files &amp; folders tab (every file of a drive or folder)</h3>
-<ul><li><b class="ui">Back up drives or folders…</b>: copy every file into the library, not only photos and videos. Photos and videos are filed by your date and camera rules like any import; every other file (documents, archives, camera index files, Finder aliases) goes to <code>Unknown files</code> in the folder of its date, for example <code>2026/202610/Unknown files/</code>. macOS <code>._</code> files and <code>.DS_Store</code> are not copied.</li>
+<ul><li><b class="ui">Back up drives or folders…</b>: copy every file into the library, not only photos and videos. Photos and videos are filed by your date and camera rules like any import; every other file (documents, archives, camera index files, Finder aliases) goes to <code>Other files</code> in the other-files folder beside the library, in the folder of its date, for example <code>photobackup-otherfiles/Other files/2026/202610/</code>. macOS <code>._</code> files and <code>.DS_Store</code> are not copied.</li>
 <li>There is no Additive or Mirror mode. A file you later delete from the drive stays in the library; nothing is ever removed or moved aside because it left the drive. Files already in the library are recognized by their contents and not copied twice.</li>
 <li>Every name the app writes is valid on macOS, Windows and Linux (characters Windows refuses, trailing dots or spaces and names such as <code>CON</code> are adjusted, and two names differing only by case never share a folder), so a library drive can move between computers.</li></ul>
 <h3>Import overview and Destinations</h3>
@@ -114,7 +115,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li><b class="ui">Review changes…</b>: preview the new structure; <b class="ui">Organize now</b> applies it. Originals wait in a recovery area until you release them, so you can undo.</li>
 <li><b class="ui">Organize a folder</b> → <b class="ui">Choose folder…</b>: organize another folder in place.</li>
 <li><b class="ui">Edit folder rules</b>: opens Settings → Storage &amp; folders.</li>
-<li>A <code>Drive backups</code> folder made by an earlier version is organized into the library too: <b class="ui">Check folder layout</b> lists its files as misplaced, and <b class="ui">Review changes…</b> → <b class="ui">Organize now</b> files its photos and videos by date and camera and everything else (Finder aliases included) in <code>Unknown files</code>. A file the library already has is kept in the recovery area as a duplicate, not deleted. Removable <code>._</code> files follow <b class="ui">Remove macOS ._ files</b>; the drive marker and <code>.DS_Store</code> go with the emptied folder, and the <code>Drive backups</code> folder is removed once empty. The whole move is listed under <b class="ui">Organization recovery</b> and can be undone.</li>
+<li>A <code>Drive backups</code> folder made by an earlier version is organized into the library too: <b class="ui">Check folder layout</b> lists its files as misplaced, and <b class="ui">Review changes…</b> → <b class="ui">Organize now</b> files its photos and videos by date and camera and everything else (Finder aliases included) in the other-files folder beside the library. Organizing also moves what earlier versions kept inside the library (<code>Unknown files</code>, <code>Problem files</code>, <code>Screenshots</code> folders) to the other-files folder; a broken file goes to <code>Broken files/Empty files/</code> by its date when one is known, never under its old folders. Those moves are listed under <b class="ui">Organization recovery</b> with the other-files folder and can be undone. A file the library already has is kept in the recovery area as a duplicate, not deleted. Removable <code>._</code> files follow <b class="ui">Remove macOS ._ files</b>; the drive marker and <code>.DS_Store</code> go with the emptied folder, and the <code>Drive backups</code> folder is removed once empty. The whole move is listed under <b class="ui">Organization recovery</b> and can be undone.</li>
 </ul>
 <h3>Duplicates</h3>
 <ul>
@@ -176,7 +177,8 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li>「为视频使用单独的文件夹」：视频单独存放，可在同一硬盘、另一块硬盘或任意多层文件夹中（例如照片放在 <code>Drive1/photobackup</code>，视频放在 <code>Drive2/folder1/folder2</code>）。</li>
 <li>「复制策略」：一个目标、复制到两个目标（两块磁盘各一份校验过的副本），或先存满第一块再用第二块。</li>
 <li>「文件夹结构」：选择先按日期或先按相机，开关各级日期文件夹，并选择照片和视频如何按格式分开。预览会显示下一张照片、视频、JPEG 和语音备忘录的确切位置。</li>
-<li>「编辑导出文件夹」：每个月份文件夹内存放编辑后导出文件的文件夹名称。</li>
+<li>「编辑导出文件夹」：每个月份文件夹内存放编辑后导出文件的文件夹名称。编辑导出的文件按编辑软件写入的信息识别（Lightroom、Capture One、Photoshop、Snapseed、NX Studio、手机修图应用等），留在媒体库中对应相机的文件夹下；没有相机信息的直接放在编辑文件夹中。</li>
+<li>「其他文件」：不是相机照片或视频的文件都会放到媒体库旁边、同一磁盘上的文件夹，名称为媒体库名称加 <code>-otherfiles</code>（<code>I:\photobackup</code> → <code>I:\photobackup-otherfiles</code>，<code>/Volumes/A006/photobackup</code> → <code>/Volumes/A006/photobackup-otherfiles</code>）。其中包括：<code>Screenshots</code>（截屏和屏幕录制）、<code>Chat images</code>（从微信、WhatsApp、LINE、Telegram 等聊天应用保存的图片）、<code>Broken files</code>（空文件和无法读取的文件）、<code>Unknown files</code>（没有日期、相机或已知来源的照片和视频）和 <code>Other files</code>（压缩包、相机索引文件、替身等）。已知日期的文件按日期文件夹存放，例如 <code>Screenshots/2026/202601/</code>。截屏和聊天图片先按元数据识别，再按文件名识别；带有相机信息的照片绝不会被当作截屏。设置页面会显示其位置和各文件夹。</li>
 </ul>
 
 <h3 id="zh-import">3. 导入页面</h3>
@@ -185,7 +187,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li>「扫描」/「扫描全部」：只读取不复制，显示数量、格式和相机。</li>
 <li>「开始」：规划、审核后复制，每份副本都用 SHA-256 校验。「停止」：取消进行中的任务，已完成的文件保留，再次导入会继续。</li>
 <li>列表/网格视图切换；点击文件查看预览和 EXIF。在「设置 → 导入」中开启「自动导入」后，插卡即开始导入。</li>
-<li><b>文件和文件夹</b>：「备份磁盘或文件夹…」把每个文件都复制到媒体库，不只是照片和视频。照片和视频与普通导入一样按日期和相机规则归档；其他文件（文档、压缩包、相机索引文件、Finder 替身）放入对应日期文件夹中的 <code>Unknown files</code>，例如 <code>2026/202610/Unknown files/</code>。macOS 的 <code>._</code> 文件和 <code>.DS_Store</code> 不会复制。不再有「累加」或「镜像」模式：之后从磁盘删除的文件仍保留在媒体库中，任何文件都不会因为离开磁盘而被删除或移走；媒体库中已有的文件按内容识别，不会重复复制。应用写入的每个名称在 macOS、Windows 和 Linux 上都有效（Windows 不允许的字符、结尾的点或空格以及 <code>CON</code> 等名称会被调整，只有大小写不同的两个名称不会放在同一文件夹），媒体库磁盘可以在不同电脑之间使用。</li>
+<li><b>文件和文件夹</b>：「备份磁盘或文件夹…」把每个文件都复制到媒体库，不只是照片和视频。照片和视频与普通导入一样按日期和相机规则归档；其他文件（文档、压缩包、相机索引文件、Finder 替身）放入媒体库旁边其他文件文件夹中的 <code>Other files</code>，按日期分文件夹，例如 <code>photobackup-otherfiles/Other files/2026/202610/</code>。macOS 的 <code>._</code> 文件和 <code>.DS_Store</code> 不会复制。不再有「累加」或「镜像」模式：之后从磁盘删除的文件仍保留在媒体库中，任何文件都不会因为离开磁盘而被删除或移走；媒体库中已有的文件按内容识别，不会重复复制。应用写入的每个名称在 macOS、Windows 和 Linux 上都有效（Windows 不允许的字符、结尾的点或空格以及 <code>CON</code> 等名称会被调整，只有大小写不同的两个名称不会放在同一文件夹），媒体库磁盘可以在不同电脑之间使用。</li>
 <li>「目标」显示每个备份文件夹所在硬盘（如“A006 › photobackup”）、视频文件夹、存储条和硬盘活动；「检查文件夹结构」检查现有文件是否符合文件夹规则。</li>
 </ul>
 
@@ -203,7 +205,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 
 <h3 id="zh-tools">5. 资料库工具</h3>
 <ul>
-<li><b>整理</b>：「检查文件夹结构」找出位置不符合规则的文件；「预览更改…」预览新结构，「立即整理」执行。原文件会保留在恢复区直到你释放，可以撤销。「整理文件夹 → 选择文件夹…」原地整理其他文件夹；「编辑文件夹规则」打开设置。旧版本建立的 <code>Drive backups</code> 文件夹也会整理进媒体库：「检查文件夹结构」会把其中的文件列为位置不符，「预览更改…」→「立即整理」把照片和视频按日期和相机归档，其他文件（包括 Finder 替身）放入 <code>Unknown files</code>。媒体库中已有的文件作为重复项保留在恢复区，不会删除。可移除的 <code>._</code> 文件按「移除 macOS ._ 文件」设置处理；磁盘标记和 <code>.DS_Store</code> 随清空的文件夹一起移除，<code>Drive backups</code> 清空后也会被移除。整个过程列在「整理恢复」中，可以撤销。</li>
+<li><b>整理</b>：「检查文件夹结构」找出位置不符合规则的文件；「预览更改…」预览新结构，「立即整理」执行。原文件会保留在恢复区直到你释放，可以撤销。「整理文件夹 → 选择文件夹…」原地整理其他文件夹；「编辑文件夹规则」打开设置。旧版本建立的 <code>Drive backups</code> 文件夹也会整理进媒体库：「检查文件夹结构」会把其中的文件列为位置不符，「预览更改…」→「立即整理」把照片和视频按日期和相机归档，其他文件（包括 Finder 替身）放入媒体库旁边的其他文件文件夹。整理还会把旧版本放在媒体库内的 <code>Unknown files</code>、<code>Problem files</code>、<code>Screenshots</code> 等文件夹移到其他文件文件夹；损坏的文件放入 <code>Broken files/Empty files/</code>，已知日期时按日期存放，绝不会重建原来的文件夹路径。这些移动和其他文件文件夹一起列在「整理恢复」中，可以撤销。媒体库中已有的文件作为重复项保留在恢复区，不会删除。可移除的 <code>._</code> 文件按「移除 macOS ._ 文件」设置处理；磁盘标记和 <code>.DS_Store</code> 随清空的文件夹一起移除，<code>Drive backups</code> 清空后也会被移除。整个过程列在「整理恢复」中，可以撤销。</li>
 <li><b>重复文件</b>：在「查找位置」中「选择文件夹…」，然后「扫描重复文件」；可以逐组自行选择保留的文件，或让应用为完全相同的文件建议保留项。移除的副本进入恢复区，可以撤销。</li>
 <li><b>恢复与清理</b>：「整理恢复」列出可撤销的整理；「刷新列表」重新读取；「维护 → 清理」在说明后果后释放不再需要的恢复数据。</li>
 </ul>
