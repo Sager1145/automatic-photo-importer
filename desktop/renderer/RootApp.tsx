@@ -29,6 +29,7 @@ import { validNoMetadataFolder } from '../no-metadata';
 import { DuplicatesPage, RemovedDuplicates } from './DuplicatesPage';
 import { CleanupConfirmation } from './CleanupConfirmation';
 import { JobCleanup } from './JobCleanup';
+import { ConflictsPanel } from './ConflictsPanel';
 import { cleanupLocked } from '../job-cleanup';
 import { Button, CardHeader, ConfirmSheet, Icon, ReleaseConfirm, animateInterfaceChange, interfaceSettled, interfaceTransition, motionMs, nextConfirmStep, reducedMotion, sheetOrder, showSheet, useAnimatedClose, useDismissableDetails, type DeleteRecoveryStep, type Dispatch, type InterfaceChange } from './ui';
 import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, endedResult, formatEstimate, formatRemaining, jobCount, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
@@ -1543,6 +1544,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
     {progress && !already && progressSkippedNote(progress, t, formatNumber) && <p className="source-quiet-note" data-testid="already-in-backup"><Icon icon={CheckCheck} size={13} />{progressSkippedNote(progress, t, formatNumber)}</p>}
     {job && <SkipFileNotice job={job} act={act} />}
     {job && <DeleteOriginals job={job} size={originalsSize} act={act} busy={!!reviewBusy} />}
+    {job && !job.organization && <ConflictsPanel job={job} act={act} />}
     {reviewing && !active && !queued && <OperationProgress progress={reviewProgress} label={t("Review progress")} testId="source-review-progress" className="progress-in-card" />}
     <div className="source-step-row" data-testid="source-step-row">
       <SourceSteps job={job} inventory={inventory} scanning={!!scanning} verifyOff={verifyOff} reviewing={reviewing} />
@@ -1872,6 +1874,7 @@ function QueueRow({ job, act, queuePosition, verifyOff, onShow, cleanupBlocked =
       speed={active && progress ? progress : undefined} {...jobTiming(job, t, held)} step={!progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job, !verifyOff)} paused={jobPaused(job)} />}
     {job.detail && !(job.phase === 'error') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <SkipFileNotice job={job} act={act} />
+    {!organization && <ConflictsPanel job={job} act={act} />}
   </li>;
 }
 

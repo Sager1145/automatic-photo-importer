@@ -127,6 +127,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <h2 id="en-activity">6. Activity</h2>
 <ul>
 <li><b class="ui">Queue</b>: running and waiting jobs. <b class="ui">Stop all</b> cancels them.</li>
+<li><b class="ui">Same name, same contents</b>: when a file of an import is already in the library under its name, the app compares them: the size first, then the first 64 KB (where a photo keeps its date, camera and dimensions), and only if those agree, the SHA-256 of that one pair. A different file is copied under a new name (Conflicts folder or a number), without asking. The same file is not copied and is listed on the import's card and in Activity while the import goes on; nothing waits for you. Expand a row to see both files, then choose <b class="ui">Skip</b> (the default), <b class="ui">Overwrite</b> or <b class="ui">Keep both</b>, or use <b class="ui">Skip all</b>, <b class="ui">Overwrite all</b>, <b class="ui">Keep both for all</b>. Choices made during the import are applied when it ends; later choices are applied at once. <b class="ui">Stop all</b> skips every conflict not applied yet and stops the import. Overwrite never deletes the library file: it goes to recovery storage, a verified copy takes its name, and <b class="ui">Undo overwrite</b> puts it back. On every system a name that differs only in upper and lower case counts as the same name.</li>
 <li><b class="ui">History</b>: finished imports and what they did.</li>
 <li><b class="ui">Issues</b>: errors and warnings grouped by cause. <b class="ui">Copy all details</b> for support; <b class="ui">Clear all errors</b> when done.</li>
 </ul>
@@ -151,7 +152,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <h2 id="en-safety">9. Safety rules</h2>
 <ul>
 <li>Nothing on a card or source is moved, changed or deleted (unless you confirm deleting verified originals).</li>
-<li>Identical files are skipped. A different file with the same name never overwrites: it goes to a Conflicts folder or gets a number.</li>
+<li>Identical files are skipped and listed so you can choose. A different file with the same name never overwrites: it goes to a Conflicts folder or gets a number. Overwrite, when you choose it, keeps the replaced file in recovery storage until you undo or release it.</li>
 <li>Stop or unplug at any time; import again and the app checks what was written and continues.</li>
 </ul>
 </section>
@@ -209,7 +210,8 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 </ul>
 
 <h3 id="zh-activity">6. 活动</h3>
-<ul><li>「队列」：进行中和等待中的任务，「全部停止」可取消。「历史记录」：已完成的导入。「问题」：按原因分组的错误和警告，可「复制全部详情」或「清除所有错误」。</li></ul>
+<ul><li>「队列」：进行中和等待中的任务，「全部停止」可取消。「历史记录」：已完成的导入。「问题」：按原因分组的错误和警告，可「复制全部详情」或「清除所有错误」。</li>
+<li>「同名且内容相同」：导入的文件在图库中已有同名文件时，应用会依次比较：先比大小，再比前 64 KB（照片的日期、相机和尺寸都在这里），两者都一致时才计算这一对文件的 SHA-256。内容不同的文件会直接以新名称复制（冲突文件夹或编号），不会询问。内容相同的文件不会复制，而是在导入继续进行的同时列在该导入的卡片和「活动」中，不会让导入等待你。展开一行可查看两个文件，然后选择「跳过」（默认）、「覆盖」或「保留两者」，也可以使用「全部跳过」「全部覆盖」「全部保留两者」。导入过程中做出的选择会在导入结束时执行，之后的选择会立即执行。「全部停止」会跳过所有尚未执行的冲突并停止导入。「覆盖」绝不会删除图库中的文件：它会移入恢复存储，由一份已校验的副本取代其名称，「撤销覆盖」可将其放回。在所有系统上，仅大小写不同的名称都视为同一名称。</li></ul>
 
 <h3 id="zh-settings">7. 设置</h3>
 <ul>
@@ -226,7 +228,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <ul><li>「来源」：已连接的存储卡、相机和文件夹；刷新按钮重新扫描，推出按钮安全推出存储卡。「目标」：各备份文件夹的可用空间和当前活动。</li></ul>
 
 <h3 id="zh-safety">9. 安全规则</h3>
-<ul><li>存储卡或来源上的任何内容都不会被移动、修改或删除（除非你确认删除已校验的原文件）。</li><li>相同的文件会被跳过；同名但内容不同的文件绝不会覆盖，而是放进冲突文件夹或添加编号。</li><li>随时可以停止或拔出；再次导入时应用会检查已写入的内容并继续。</li></ul>
+<ul><li>存储卡或来源上的任何内容都不会被移动、修改或删除（除非你确认删除已校验的原文件）。</li><li>相同的文件会被跳过并列出供你选择；同名但内容不同的文件绝不会覆盖，而是放进冲突文件夹或添加编号。你选择「覆盖」时，被替换的文件会保存在恢复存储中，直到你撤销或释放它。</li><li>随时可以停止或拔出；再次导入时应用会检查已写入的内容并继续。</li></ul>
 </section>
 </main>
 </body>

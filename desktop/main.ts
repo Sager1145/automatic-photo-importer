@@ -16,7 +16,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 import {setTimeout as sleep} from 'node:timers/promises';
-import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary} from './shared';
+import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,PlanEntry} from './shared';
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
@@ -30,6 +30,8 @@ import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {discardPausedCopies,releasePausedCopies} from './core/index';
 import {JobLedger,PausedCopies,sourcesUnchanged,type PausedImport} from './import-resume';
+import {ConflictBook} from './name-conflicts';
+import {applyConflictChoices,nameOnDisk,type ConflictOutcome} from './core/name-conflicts';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {checkFileSizes,driverLinks} from './core/drive-formats';
@@ -222,6 +224,9 @@ const reservations=new Map<string,{volume:string;bytes:number}[]>();
 const selection=new DeviceSelection(),pausing=new Set<string>();
 /** Paused imports, by job: Continue runs the same job on from here (its plan, staged copies not yet verified, files verified, counts). */
 const pausedImports=new Map<string,PausedImport<Prepared>>();
+/** Each import's files already in the library with the same name and bytes (kept across Pause and Continue), and the
+ * follow-up applying the keeps and overwrites chosen for them once the import has ended. */
+const conflictBooks=new Map<string,ConflictBook>(),conflictRuns=new Map<string,AbortController>();
 /** A paused import that will not continue (stopped, cleaned up, gone from the list) gives up the staged copies it kept. */
 async function dropPausedImports(){
  for(const [id,carry] of [...pausedImports]){
@@ -767,7 +772,8 @@ const emptyLeftovers=()=>({direct:{files:0,bytes:0},staged:{files:0,bytes:0},org
 function jobForCleanup(jobId:string):Job{
  const job=state.jobs.find(item=>item.id===jobId);
  if(!job||!cleanupOffered(job)||active.has(job.id)||originalsControls.has(job.id))throw new MessageError('error.cleanupStale');
- if(cleanupLocked(state)||active.size||resumingOrganizations.size||duplicateControl)throw new MessageError('error.cleanupBusy');
+ // Choices being applied to its same-name conflicts are writing for it: Clean up waits for them.
+ if(cleanupLocked(state)||active.size||resumingOrganizations.size||duplicateControl||conflictRuns.has(job.id))throw new MessageError('error.cleanupBusy');
  return job;
 }
 function residueWork<T>(work:(signal:AbortSignal)=>Promise<T>):Promise<T>{
@@ -992,6 +998,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  const saveReport=async(name:string,value:unknown)=>{if(reporting)await writeReport(job.id,name,value);};
  const signal=control.signal;
  const request='review' in input?undefined:input;job.excluded=request?.exclude;
+ let book:ConflictBook|undefined;
  // Continue on a paused import: what its earlier runs kept. `copies` and `ledger` carry this run's on if it is paused again.
  const resumed=request&&!request.reorganize?pausedImports.get(job.id):undefined;pausedImports.delete(job.id);
  let copies:PausedCopies|undefined,ledger=resumed?new JobLedger(resumed.outcomes):undefined,reused=false;
@@ -1030,6 +1037,11 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   }
   const {review:{plans,kind,sourceFolders},prefs,failures}=prepared,reorganize=kind==='reorganize';
   if(!reorganize){copies??=new PausedCopies();ledger??=new JobLedger();}
+  // Same-name conflicts: an import's (a folder backup mirrors a folder as it is, so the files it finds there are no conflicts).
+  // Choices being applied for an earlier run of this job stop first: this run reads the same files.
+  if(!reorganize&&!job.backup){book=conflictBooks.get(job.id)??new ConflictBook();conflictBooks.set(job.id,book);conflictRuns.get(job.id)?.abort();}
+  const planned=new Map<string,{entry:PlanEntry;transfer:TransferPlan;index:number}>(),listings=new Map<string,Promise<string[]>>();
+  if(book)for(const [index,item] of plans.entries())for(const part of destinationParts(item))for(const entry of part.entries)planned.set(`${part.root}\0${entry.id}`,{entry,transfer:part,index});
   // The one place that decides what happens to the source: imports copy and leave it alone, whatever the saved preferences say.
   const policy=sourcePolicy(kind,prepared.options,prefs);
   job.skipErrors=prepared.skipErrors;
@@ -1054,7 +1066,12 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // Formal planning may have just created a previously absent backup folder. Bind its read-only catalog now.
   await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   try{executed=await executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,...(copies?{paused:copies}:{}),onFileOutcome:found=>{const outcome=ledger?ledger.note(found):found;void catalogCoordinator?.observeOutcome(outcome);const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);},
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,...(copies?{paused:copies}:{}),onFileOutcome:found=>{const outcome=ledger?ledger.note(found):found;void catalogCoordinator?.observeOutcome(outcome);const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);
+    // A file already in the library under its planned name, with its bytes: a conflict, listed at once; the copy goes on.
+    const hit=book&&planned.get(`${outcome.root}\0${outcome.entryId}`);if(book&&hit&&book.note(outcome,hit.entry,hit.transfer,hit.index)){
+     const id=book.lastId!,noted=book;job.conflicts=book.summary();progressEmit();
+     void nameOnDisk(outcome.destination,listings).then(real=>{if(noted.retarget(id,real)){job.conflicts=noted.summary();progressEmit();}}).catch(()=>{});
+    }},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});if(!reorganize&&plans[index]?.videos)await validateDestination(prefs.videoDestinations[index]!,state.sources,{identity:prefs.videoDestinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    // A video folder's own reservation (after the destinations') is released with its destination.
@@ -1102,7 +1119,48 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail,signal.aborted?'stopped':'attention');}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  await writeExcerpt(job,reporting?path.join(app.getPath('userData'),'operation-reports',job.id):undefined,[prepared?.review.id,prepared?.origin?.jobId]);
- if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();emit();
+ if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();
+ if(book){job.conflicts=book.summary();log('normal','conflicts','found',{count:book.size,toApply:book.hasWork()},job.id);}
+ emit();
+ // Keeps and overwrites chosen while it ran: applied now that it has ended (not after a stop or a pause).
+ if(book?.hasWork()&&!signal.aborted)void applyConflicts(job);
+}
+/** Apply the keeps and overwrites chosen for an import's same-name conflicts: a short follow-up on the same card, only while
+ * the import is not running (Continue or Retry stops it first). Choices made meanwhile are taken in the next round. */
+async function applyConflicts(job:Job):Promise<void>{
+ const book=conflictBooks.get(job.id);
+ if(!book||book.applying||isLive(job)||(job.phase==='stopped'&&job.paused)||job.leftovers?.cleaning)return;
+ const control=new AbortController(),prefs=state.preferences;conflictRuns.set(job.id,control);book.applying=true;
+ try{
+  for(let work=book.take();work.length&&!control.signal.aborted;work=book.take()){
+   job.conflicts=book.summary();emit();
+   log('normal','conflicts','apply',{files:work.length,keep:work.filter(item=>item.choice==='keep').length,overwrite:work.filter(item=>item.choice==='overwrite').length},job.id);
+   let outcomes:ConflictOutcome[];
+   // Written for this job: its trace (and so its Clean up) covers what a stopped round leaves.
+   try{outcomes=await withJob(job.id,()=>applyConflictChoices(work,{signal:control.signal,onProgress:progress=>{book.progress=progress;job.conflicts=book.summary();progressEmit();},execution:{verify:prefs.verifyCopies!==false,removeAppleDouble:prefs.removeAppleDouble!==false}}));}
+   // Stopped: what was not finished waits again (or is skipped, after Stop all). An error fails the round's items, each kept to retry.
+   catch(error){outcomes=control.signal.aborted?[]:work.map(item=>({id:item.id,ok:false,error:errorText(error)}));}
+   book.settle(outcomes);book.progress=undefined;
+   for(const item of outcomes)if(!item.ok)log('normal','conflicts','not-applied',{id:item.id,error:item.error},job.id);
+  }
+ }finally{
+  book.applying=false;book.progress=undefined;if(conflictRuns.get(job.id)===control)conflictRuns.delete(job.id);
+  job.conflicts=book.summary();recoveryRefresh.request();emit();
+ }
+}
+/** Undo of an overwrite: its journal puts the replaced library files back (the copies that took their names go back first). */
+async function undoConflicts(job:Job,journal:string):Promise<void>{
+ const book=conflictBooks.get(job.id),root=book?.journalRoot(journal);
+ if(!book||!root)throw new MessageError('error.recoveryListStale');
+ if(book.applying)throw new MessageError('error.busyResume');
+ const control=new AbortController();conflictRuns.set(job.id,control);book.applying=true;job.conflicts=book.summary();emit();
+ try{
+  const undone=await withJob(job.id,()=>undoOrganization(root,journal,control.signal,progress=>{book.progress={phase:progress.step==='checking'?'verifying':'copying',step:progress.step,completed:progress.completed,total:progress.total,bytes:0,totalBytes:0,speed:0,file:progress.file};job.conflicts=book.summary();progressEmit();}));
+  book.undone(journal);log('normal','conflicts','undone',{journal,restored:undone.restored,removed:undone.removed},job.id);
+ }finally{
+  book.applying=false;book.progress=undefined;if(conflictRuns.get(job.id)===control)conflictRuns.delete(job.id);
+  job.conflicts=book.summary();recoveryRefresh.request();emit();
+ }
 }
 /** The job's own lines of the diagnostic log, at the level now set, saved with its operation report. Never fails the job. */
 async function writeExcerpt(job:Job,directory:string|undefined,alsoIds:(string|undefined)[]=[]){
@@ -1329,6 +1387,21 @@ async function action(input:Action):Promise<void>{
   }
   case 'measureJobCleanup':await measureJobCleanup(String(input.jobId));break;
   case 'cleanJob':await cleanJob(String(input.jobId));break;
+  case 'conflictChoice':{
+   const job=state.jobs.find(item=>item.id===input.jobId),book=conflictBooks.get(String(input.jobId));
+   if(!job||!book||!['skip','overwrite','keep'].includes(input.choice))throw new MessageError('error.recoveryListStale');
+   book.choose(input.choice,Array.isArray(input.ids)?input.ids.map(String):undefined);job.conflicts=book.summary();emit();
+   if(!isLive(job))void applyConflicts(job);
+   break;
+  }
+  case 'conflictStopAll':{
+   const job=state.jobs.find(item=>item.id===input.jobId),book=conflictBooks.get(String(input.jobId));
+   if(!job||!book)break;
+   book.stopAll();conflictRuns.get(job.id)?.abort();job.conflicts=book.summary();emit();
+   if(isLive(job))await action({type:'stop',jobId:job.id});
+   break;
+  }
+  case 'conflictUndo':{const job=state.jobs.find(item=>item.id===input.jobId);if(!job)throw new MessageError('error.recoveryListStale');await undoConflicts(job,String(input.journal));break;}
   case 'cleanResidue':{if(!residueIdle(true))throw new MessageError('error.busy');await stopResidueCheck();if(!residueIdle(true))throw new MessageError('error.busy');await checkResidue(true);break;}
   case 'recovery':{if(!['resume','finalize','undo','delete'].includes(input.op))throw new Error('Invalid recovery operation');await resumeOrganizationJob(input.root,input.id,input.op,undefined,undefined,input.op==='resume'&&input.full===true);break;}
   case 'measureOrganizationRecovery':{
@@ -1583,6 +1656,7 @@ async function boot(){
  ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
+ ipcMain.handle('importer:conflicts',(event,jobId:unknown)=>{trusted(event);return typeof jobId==='string'?conflictBooks.get(jobId)?.list()??[]:[];});
  await window.loadFile(renderer);await refresh();timer=setInterval(()=>void refresh(),5000);
  // A new sample rides along with the next publish; it forces one only when nothing else published for a second.
  if(process.platform==='darwin'&&!hardwareTest){activityLoop=startActivityLoop({sampler:driveSampler,wanted:()=>!!window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized()||busy()||scanControls.size>0||!!state.review||!!state.busyReview,publish:activity=>{state.driveActivity=activity;activityLog.observe(activity,Date.now());if(Date.now()-lastEmit>=1000)emit();}});window.on('show',()=>activityLoop?.wake());window.on('restore',()=>activityLoop?.wake());window.on('focus',()=>activityLoop?.wake());}

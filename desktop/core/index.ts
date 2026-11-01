@@ -22,7 +22,7 @@ import { beginOrganization, importRecoveryAvailable, RECOVERY_FOLDER, LEGACY_REC
 import { AppleDoubleCleaner, type AppleDoubleReport } from './appledouble';
 import { ownRecordWrite } from './own-entries';
 export type { AppleDoubleReport } from './appledouble';
-import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,unboundDirect,directReceiptExists,openPartial,clearPartialRecord,stagingFolder,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
+import {recordPartial,recordCreation,releaseCreations,findPartial,findPublication,publicationNamed,unboundDirect,directReceiptExists,openPartial,clearPartialRecord,stagingFolder,type DirectFields,type OwnedPartial,type RecoveryIndex} from './import-recovery';
 import {constants} from 'node:fs';
 import {MessageError,toMessage} from '../messages';
 import {expectedFolder as folder,evaluateRoutes,isEditedFile,placementExemption,type FolderRules} from './folder-rules';
@@ -139,14 +139,42 @@ function numbered(entry:PlanEntry,n:number,family:PlanEntry[]):string {
   let cut=0;while(cut<over&&characters.length)cut+=Buffer.byteLength(characters.pop()!);
   return characters.join('')+suffix+rest;
 }
-/** null: nothing there. A different size is a different file without reading
- * anything; equal sizes compare SHA-256 values (the destination via its index). */
-async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:Digests,signal?:AbortSignal):Promise<boolean|null> {
+/** The first 64 KB of a photo hold its header (capture time, camera, dimensions); a video's, its first frames or atoms. */
+const HEAD_BYTES=64*1024;
+/** SHA-256 of a file's first 64 KB: only a filter in front of the full SHA-256, which stays the proof. Undefined for a file
+ * no larger than that (its full read costs the same) and for a USB camera's file (read only to copy or to prove). */
+async function headDigest(file:string,size:number,signal?:AbortSignal):Promise<string|undefined> {
+  if(size<=HEAD_BYTES||isListedPath(file))return undefined;
+  checkAbort(signal);
+  const handle=await regularHandle(file);
+  try {
+    const buffer=Buffer.alloc(HEAD_BYTES);let read=0;
+    while(read<buffer.length) {const {bytesRead}=await handle.read(buffer,read,buffer.length-read,read);if(!bytesRead)break;read+=bytesRead;}
+    return createHash('sha256').update(buffer.subarray(0,read)).digest('hex');
+  } finally { await handle.close(); }
+}
+/** Whether a same-named, same-size pair can still be the same file by what is cheap to read: their first 64 KB. False only
+ * when both were read and differ; the pair is then different without either being read in full. */
+async function headsAgree(source:string,file:string,size:number,signal?:AbortSignal):Promise<boolean> {
+  const [mine,theirs]=await Promise.all([headDigest(source,size,signal),headDigest(file,size,signal)]);
+  return mine===undefined||theirs===undefined||mine===theirs;
+}
+/** null: nothing there. A different size is a different file without reading anything; with `source` (whose checksum is not
+ * known yet), a different first 64 KB too. Otherwise SHA-256 values are compared (the destination via its index). */
+async function existingMatches(file:string,size:number,expected:()=>Promise<string>,root:string,index:Digests,signal?:AbortSignal,source?:string):Promise<boolean|null> {
   await contained(file,root);
   let stat;
   try { stat=await fs.lstat(file,{bigint:true}); } catch(error) { if(code(error)==='ENOENT') return null; throw error; }
   if(!stat.isFile() || stat.size!==BigInt(size)) return false;
+  if(source!==undefined&&!await headsAgree(source,file,size,signal)) {log('detailed','plan','destination-check',{source,destination:file,decision:'different',reason:'same name and size, different first 64 KB: not read in full'});return false;}
   return await index.digestOf(file,signal)===await expected();
+}
+/** Where Keep both puts a file whose planned name already holds the same bytes (`existing`): the first name the plan's
+ * conflict rule gives (Conflicts/<content id>/… or `<name> (n)`) that is not `existing` itself, as a family of its own. The
+ * copy allocates on from there if that name is taken by other content. */
+export async function keepBothDestination(entry:PlanEntry,sha256:string,root:string,existing:string):Promise<string> {
+  const family=[entry],ids=entry.allocation?.conflictNaming==='number'?undefined:await conflictIds(family,new Map([[entry.id,sha256]]),root);
+  for(let attempt=1;;attempt++){const destination=target(entry,attempt,family,ids);if(pathKey(destination)!==pathKey(existing))return destination;}
 }
 /** Per library root: whether its file system tells names apart by case alone (Linux ext4, ntfs3, case-sensitive APFS). */
 const caseSensitiveRoots=new Map<string,boolean>();
@@ -183,11 +211,13 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
       const destination=planned&&!attempt?entry.destination:target(entry,attempt,family,ids), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
       const same=reserved===undefined?undefined:reserved.size===entry.size && await resolve(reserved)===await resolve(entry);
       if(same===false) {log('detailed','plan','destination-check',{source:entry.source,destination,decision:'conflict',reason:`another file in this plan is filed at ${destination} with different content`,attempt});conflict=true;break;}
-      let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal);
+      // A same-named file is the same one only if its size, then its first 64 KB, then its SHA-256 agree.
+      const head=entry.digest?undefined:entry.source;
+      let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal,head);
       // A name taken by case alone is that file's name: the same content is already there, other content is a conflict.
       const variant=exists===null?await caseVariant(destination,root):undefined;
-      if(variant!==undefined)exists=await existingMatches(variant,entry.size,()=>resolve(entry),root,index,signal)===true?true:false;
-      const resumable=exists===false&&await findPartial('publication',{...entry,destination,digest:await resolve(entry)},root,recovery,signal);
+      if(variant!==undefined)exists=await existingMatches(variant,entry.size,()=>resolve(entry),root,index,signal,head)===true?true:false;
+      const resumable=exists===false&&await publicationNamed({source:entry.source,destination},root,recovery)&&await findPartial('publication',{...entry,destination,digest:await resolve(entry)},root,recovery,signal);
       log('detailed','plan','destination-check',()=>({source:entry.source,destination,attempt,decision:exists===true||same===true?'skip':exists===false&&!resumable?'conflict':'copy',reason:same===true?`same SHA-256 as another file of this plan filed at ${destination}`:exists===true?`skip: same SHA at path ${destination}`:exists===false?(resumable?'copy: an interrupted copy of this file there is resumed':`conflict: ${destination} holds a different file of the same size or an unrelated one`):'copy: no match at the destination',size:entry.size,sha256:entry.digest}));
       if(exists===false&&!resumable) {conflict=true;break;}
       if(!reserved) proposed.set(key,entry);
@@ -533,6 +563,8 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
         // The first pass has looked at every pending destination already.
         const existing=looked.has(entry)?looked.get(entry):await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
         if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
+        // Same name and size: the first 64 KB decide whether both are read in full (allocation reads them again only if they agree).
+        if(!entry.digest&&!resolved.has(entry.source)&&!await headsAgree(entry.source,entry.destination,entry.size,signal)) {if(sizedSources.delete(entry.source))compareBytes-=entry.size;return;}
         // If one side fails, stop the other read and wait for it, so nothing reads a card file after this settles.
         const local=new AbortController(),stopLocal=()=>local.abort();let first:{error:unknown}|undefined;
         if(signal?.aborted) local.abort(); else signal?.addEventListener('abort',stopLocal,{once:true});

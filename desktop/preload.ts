@@ -1,6 +1,6 @@
 import type {CatalogQuery,CategoryField} from './catalog/types';
 import {contextBridge,ipcRenderer} from 'electron';
-import type {Action,DuplicateGroup,Metadata,Thumbnail} from './shared';
+import type {Action,DuplicateGroup,ImportConflict,Metadata,Thumbnail} from './shared';
 import type {StateUpdate} from './state-channel';
 
 // Keep the bridge transparent: reconstructing AppState here would copy every
@@ -22,5 +22,6 @@ contextBridge.exposeInMainWorld('importer',{
  summary:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:summary',path),
  exif:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:exif',path),
  duplicateGroups:():Promise<DuplicateGroup[]>=>ipcRenderer.invoke('importer:duplicates'),
- errorPaths:(jobId:string,code:string):Promise<string[]>=>ipcRenderer.invoke('importer:errorPaths',jobId,code)
+ errorPaths:(jobId:string,code:string):Promise<string[]>=>ipcRenderer.invoke('importer:errorPaths',jobId,code),
+ conflicts:(jobId:string):Promise<ImportConflict[]>=>ipcRenderer.invoke('importer:conflicts',jobId)
 });
