@@ -8,7 +8,7 @@ import { PROBLEM_FILES_FOLDER, PROBLEM_FILE_GROUPS, UNKNOWN_FILES_FOLDER } from 
 import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, type RuleDefaults } from './inventory';
-import { destinationIndex, flushIndex, provable, type DestinationIndex, type Digests } from './destination-index';
+import { destinationIndex, flushIndex, full, provable, type DestinationIndex, type Digests } from './destination-index';
 import { DRIVE_BACKUPS } from './drive-backup';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { destinationParts } from './allocation';
@@ -740,6 +740,57 @@ async function familyPaths(family:PlanEntry[]):Promise<string[]|undefined> {
 const WIDEN=Symbol('widen');
 interface Staged {streamDigest?:string;sourceStat?:import('node:fs').BigIntStats;verifiedStat?:import('node:fs').BigIntStats;file:string;dev:bigint;ino:bigint;birthtime:bigint;record?:OwnedPartial;recovery:RecoveryIndex;/** The records folder the staged copy is inside (it is removed only while still there), and the folder it is published into. */scope:string;target:string;}
 const claimedStages=new Set<string>();
+interface KeptStage {staged:Staged;/** The staged file as it was kept: it is taken again only while every stat field is unchanged. */stat:import('node:fs').BigIntStats;root:string;destination:string;}
+/** What a paused import keeps for Continue in the same app session (ExecutionOptions.paused). `stages`: staged copies not yet
+ * verified, by destination root and entry; a resumed run takes one only while it and its source are exactly as they were, and
+ * reads it back and compares it before publishing it, as an uninterrupted run would. `checked`: files this job verified at their
+ * destination (published or found there) with their whole stat then (birth time included); while it is unchanged they are not
+ * read again. Kept staged copies stay claimed: no other copy resumes into them. Stop discards it all (discardPausedCopies). */
+export class PausedCopies {
+  readonly stages=new Map<string,KeptStage>();
+  readonly checked=new Map<string,Checked>();
+}
+/** A file this job verified at its destination: its SHA-256, its whole stat then, and the source file it is a copy of with that file's identity. */
+interface Checked {sha256:string;stat:string;source:string;sourceIdentity?:string;}
+const keptKey=(root:string,entry:Pick<PlanEntry,'id'>)=>`${pathKey(root)}\0${entry.id}`;
+/** Remove the staged copies a paused job kept (it was stopped, cleaned up or planned again) and forget what it had checked. */
+export async function discardPausedCopies(paused:PausedCopies):Promise<void> {
+  const items=[...paused.stages.values()];paused.stages.clear();paused.checked.clear();
+  await removeKept(items);
+}
+/** Forget a paused job's kept copies without removing them, for Clean up to remove as the leftovers it measured. */
+export function releasePausedCopies(paused:PausedCopies):void {
+  for(const item of paused.stages.values())claimedStages.delete(item.staged.file);
+  paused.stages.clear();paused.checked.clear();
+}
+async function removeKept(items:KeptStage[]):Promise<void> {
+  if(!items.length) return;
+  await exclusive(async()=>{
+    await mapPool(items,16,item=>cleanStage(item.staged,item.root,false,line=>log('normal','exec','paused-stage-left',{line})));
+    for(const folder of new Set(items.map(item=>path.dirname(item.staged.file))))await syncDirectory(folder).catch(()=>{});
+  },[...new Set(items.flatMap(item=>[path.dirname(item.staged.file),item.staged.target]))]);
+}
+/** A file this job verified before it was paused, every stat field unchanged since: its digest without reading it again. */
+const trusting=(digests:Digests,checked:Map<string,Checked>|undefined):Digests=>!checked?.size?digests:{digestOf:async(file,signal)=>{
+  const known=checked.get(pathKey(file)),now=known&&await fs.lstat(file,{bigint:true}).catch(()=>undefined);
+  return known&&now?.isFile()&&full(now)===known.stat?known.sha256:digests.digestOf(file,signal);
+}};
+/** A staged copy a paused run kept for this entry, still exactly the file it was and its source unchanged; otherwise it is removed. */
+async function keptStage(carried:Map<string,KeptStage>,transfer:TransferPlan,entry:PlanEntry,note:(text:string,issue?:ExecutionIssue)=>void):Promise<Staged|undefined> {
+  const key=keptKey(transfer.root,entry),item=carried.get(key);
+  if(!item) return undefined;
+  carried.delete(key);
+  try {
+    await contained(item.staged.file,item.staged.scope);await contained(entry.source,transfer.source);
+    const now=await fs.lstat(item.staged.file,{bigint:true}),source=await fs.lstat(entry.source,{bigint:true});
+    const same=pathKey(item.destination)===pathKey(entry.destination)&&now.isFile()&&now.size===BigInt(entry.size)&&sameStat(now,item.stat)&&now.birthtimeNs===item.stat.birthtimeNs
+      &&!!item.staged.sourceStat&&sameStat(source,item.staged.sourceStat)&&(entry.sourceIdentity===undefined||statKey(source)===entry.sourceIdentity)&&(entry.digest===undefined||entry.digest===item.staged.streamDigest);
+    log('detailed','exec','paused-stage',{source:entry.source,stage:item.staged.file,decision:same?'reuse':'remove',reason:same?'kept at Pause; it and its source are unchanged, verified before publishing':'it or its source changed since Pause'});
+    if(same) return item.staged;
+  } catch(error) { if(isAbort(error)) {carried.set(key,item);throw error;} log('detailed','exec','paused-stage',{source:entry.source,stage:item.staged.file,decision:'remove',error}); }
+  await exclusive(()=>cleanStage(item.staged,transfer.root,true,note),[path.dirname(item.staged.file),item.staged.target]);
+  return undefined;
+}
 interface StageTarget {entry:PlanEntry;transfer:TransferPlan;recovery:RecoveryIndex;onBytes:(bytes:number)=>void;}
 interface OpenStage {target:StageTarget;staged:Staged;output:Awaited<ReturnType<typeof fs.open>>;initialSize:number;error?:unknown;}
 /** Wait for `work`, or stop waiting (without stopping it) as soon as `signal` aborts. */
@@ -928,6 +979,9 @@ export interface ExecutionOptions {
   onFileOutcome?:(outcome:FileOutcome,position:number)=>void;
   /** Remove the macOS "._" file beside each published file (see appledouble.ts); results are in ExecutionResult.appleDouble. */
   removeAppleDouble?:boolean;
+  /** Pause and Continue: what an earlier run of this job kept is used, and when this run is stopped its staged copies not yet
+   * verified are kept here instead of removed (see PausedCopies). Whoever passes it discards it when the job will not continue. */
+  paused?:PausedCopies;
 }
 /** The file just published: unlinking a hard-linked stage moves its ctime, so identity here is device, inode (birth time where no inode is reliable), size and modification time. */
 /** Folders no "._" cleanup touches: recovery storage and Problem files. */
@@ -1310,6 +1364,8 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   // Errors of families handled side by side, in file order.
   const report=(run:Run)=>{for(const batch of run.batches){run.result.errors.push(...batch.errors);batch.errors=[];}};
   const settled=new Set<number>();
+  // Staged copies a paused run of this job kept: each is taken once, by the entry it was made for; any left over are removed at the end.
+  const carried=new Map(options.paused?.stages);options.paused?.stages.clear();
   try {
     // Setup per destination: the duplicate preflight. A
     // reviewed skip is only a hint: a removed/replaced duplicate is staged again.
@@ -1326,8 +1382,12 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       for(const batch of run.batches) try {
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);
+          // Copied and verified before a pause: the source's checksum is the one that run streamed and read back, while the
+          // source keeps the identity it was planned with (checked again below before the file counts).
+          const before=!entry.digest&&entry.sourceIdentity!==undefined?options.paused?.checked.get(pathKey(entry.destination)):undefined;
+          if(before&&before.source===entry.source&&before.sourceIdentity===entry.sourceIdentity)entry.digest=before.sha256;
           // A hint: the verification phase reads the destination again before trusting it.
-          const matches=entry.digest?await exclusive(()=>existingMatches(entry.destination,entry.size,async()=>entry.digest!,transfer.root,run.index!.hinted,signal),[entry.destination],signal):undefined;
+          const matches=entry.digest?await exclusive(()=>existingMatches(entry.destination,entry.size,async()=>entry.digest!,transfer.root,trusting(run.index!.hinted,options.paused?.checked),signal),[entry.destination],signal):undefined;
           log('detailed','exec','preflight',{source:entry.source,destination:entry.destination,decision:matches===true?'skip':'copy',reason:matches===true?'destination already holds this checksum':entry.digest?'no matching file at the destination':'no checksum planned'});
           // A file found elsewhere under older rules is never copied: if it changed since planning, the whole family waits for a retry.
           if(entry.routed!==undefined&&matches!==true)throw new Error(`Destination changed after copy preparation; retry: ${entry.destination}`);
@@ -1361,6 +1421,14 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       checkAbort(signal);
       const targets:{run:Run;position:number;batch:Run['batches'][number];entry:PlanEntry}[]=[];
       runs.forEach((run,position)=>{if(run.error||!run.pending.has(id))return;const {batch,entry}=owners[position]!.get(id)!;if(!batch.failed&&batch.mode==='staged')targets.push({run,position,batch,entry});});
+      if(!targets.length) return;
+      // A copy staged before Pause and unchanged since is not copied again; it is verified below like the others.
+      if(carried.size)for(const target of [...targets]){
+        const {run,position,batch,entry}=target,kept=await keptStage(carried,run.transfer,entry,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else run.result.errors.push(line);});
+        if(!kept) continue;
+        targets.splice(targets.indexOf(target),1);
+        batch.staged.set(entry.id,kept);if(!batch.failed){run.counted.add(entry.id);run.completed++;}run.stagedBytes+=entry.size;run.bytes+=entry.size;progress(position,path.basename(entry.source));
+      }
       if(!targets.length) return;
       const results=await stageMany(targets.map(({run,position,entry})=>({entry,transfer:run.transfer,recovery:run.recovery,onBytes:count=>{run.bytes+=count;progress(position,path.basename(entry.source));}})),signal);
       results.forEach((value,slot)=>{const {run,position,batch,entry}=targets[slot]!;if(value instanceof Error)fail(run,batch,value);else{batch.staged.set(entry.id,value);if(!batch.failed){run.counted.add(entry.id);run.completed++;}run.stagedBytes+=entry.size;progress(position,path.basename(entry.source));}});
@@ -1426,7 +1494,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
             const outside=(items:{destination:string}[])=>keys===exact&&items.some(item=>!keys.includes(item.destination));
             // Allocation and the final duplicate check decide together under this lock: a file
             // the first read is not read again by the second while its stat is unchanged.
-            const checks=index!.section();
+            const checks=trusting(index!.section(),options.paused?.checked);
             let allocated=await allocate(members,transfer.root,new Map(),recovery,known,checks,signal);
             if(outside(allocated))throw WIDEN;
             for(let i=0;i<allocated.length;){
@@ -1453,18 +1521,22 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
           run.completed+=family.length;
         }catch(error){if(isAbort(error))stopped=error;else{run.failed+=family.length;batch.errors.push(`${path.basename(family[0]!.source)}: ${message(error)}`);log('normal','exec','file-failed',{source:family[0]!.source,files:family.length,error});}}
         const identities=new Map<string,string>();
+        // Paused: the members not yet published keep their staged copies for Continue (removed in the end below if they cannot be kept).
+        const settledIds=new Set(outcomes.map(item=>item.entry.id)),keeping=stopped!==undefined&&!!options.paused;
         await exclusive(async()=>{
-          for(const temporary of staged.values())await cleanStage(temporary,transfer.root,'lazy',(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});
+          for(const [id,temporary] of staged)if(!keeping||settledIds.has(id)){await cleanStage(temporary,transfer.root,'lazy',(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else batch.errors.push(line);});}
           // Unlinking a hard-linked stage moves the published file's ctime. Index it
           // afterwards, and only while it is still the inode and bytes just published.
           for(const item of published){const now=await fs.lstat(item.file,{bigint:true}).catch(()=>undefined);if(now?.isFile()&&sameFileIgnoringCtime(now,item.stat)){index!.remember(item.file,item.sha256,now);if(provable(now))identities.set(item.file,statKey(now));}}
           for(const item of outcomes)if(item.disposition!=='published'){const known=await vouched(index!,item.destination,item.entry.digest!);if(known)identities.set(item.destination,known);}
+          // What this job has verified at the destination, for a later Continue: published here or found here, as it is now.
+          if(options.paused)for(const item of outcomes){const now=await fs.lstat(item.destination,{bigint:true}).catch(()=>undefined),bound=published.find(file=>file.file===item.destination);if(now?.isFile()&&(!bound||sameFileIgnoringCtime(now,bound.stat))&&(item.disposition!=='published'||bound))options.paused.checked.set(pathKey(item.destination),{sha256:item.entry.digest!,stat:full(now),source:item.entry.source,...(item.entry.sourceIdentity!==undefined?{sourceIdentity:item.entry.sourceIdentity}:{})});}
           // After the last write, timestamps, sync and the staged copy's removal: the "._" beside each file just published, while it is still that file.
           if(run.appleDouble)for(const item of placed)await run.appleDouble.besideFile(item.file,transfer.root,now=>sameFileIgnoringCtime(now,item.stat));
         },[...[...staged.values()].map(temporary=>temporary.file),...published.map(item=>item.file),...placed.map(item=>item.file)]);
         for(const item of outcomes)run.emit(outcomeOf(run,item.entry,item.destination,item.entry.digest!,item.disposition,item.verification,identities.get(item.destination)));
         if(!batch.failed)run.verifiedBytes+=family.reduce((sum,entry)=>sum+(staged.has(entry.id)?entry.size:0),0);
-        staged.clear();
+        if(keeping)for(const id of settledIds)staged.delete(id);else staged.clear();
         if(stopped)throw stopped;
         progress(position,path.basename(family[family.length-1]!.source));
       });
@@ -1475,8 +1547,24 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   } finally {
     // After Stop every file staged so far is removed: many at once, each folder synchronized
     // once rather than once per file, so stopping during verification returns promptly.
+    // Paused: copies staged and not yet verified are kept for Continue (only a single-link file, never one already linked into place),
+    // and so are the kept copies this run did not reach. Otherwise those are removed too.
+    const keep=signal?.aborted&&options.paused;
+    if(keep)for(const [key,item] of carried)keep.stages.set(key,item);
+    else await removeKept([...carried.values()]).catch(()=>{});
+    carried.clear();
     for(const run of runs) {
-      const stages=run.batches.flatMap(batch=>[...batch.staged.values()]);
+      let stages=run.batches.flatMap(batch=>[...batch.staged.values()]);
+      if(keep){
+        const kept=new Set<Staged>();
+        for(const batch of run.batches)if(!batch.failed)for(const [id,staged] of batch.staged){
+          const entry=batch.family.find(member=>member.id===id)!,now=await fs.lstat(staged.file,{bigint:true}).catch(()=>undefined);
+          if(!now?.isFile()||now.nlink!==1n||!staged.streamDigest||!staged.sourceStat) continue;
+          keep.stages.set(keptKey(run.transfer.root,entry),{staged,stat:now,root:run.transfer.root,destination:entry.destination});kept.add(staged);
+        }
+        log('normal','exec','paused-stages-kept',{root:run.transfer.root,kept:kept.size});
+        stages=stages.filter(staged=>!kept.has(staged));
+      }
       await exclusive(async()=>{
         await mapPool(stages,16,temporary=>cleanStage(temporary,run.transfer.root,false,(line,issue)=>{if(issue)(run.result.warnings??=[]).push(issue);else run.result.errors.push(line);}));
         for(const folder of new Set(stages.map(temporary=>path.dirname(temporary.file))))await syncDirectory(folder).catch(()=>{});

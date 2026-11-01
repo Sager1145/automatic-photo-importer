@@ -28,6 +28,8 @@ import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
+import {discardPausedCopies,releasePausedCopies} from './core/index';
+import {JobLedger,PausedCopies,sourcesUnchanged,type PausedImport} from './import-resume';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
 import {checkFileSizes,driverLinks} from './core/drive-formats';
@@ -218,6 +220,22 @@ const approved=new Set<string>();
 /** Remaining bytes each job may still write, by destination index. */
 const reservations=new Map<string,{volume:string;bytes:number}[]>();
 const selection=new DeviceSelection(),pausing=new Set<string>();
+/** Paused imports, by job: Continue runs the same job on from here (its plan, staged copies not yet verified, files verified, counts). */
+const pausedImports=new Map<string,PausedImport<Prepared>>();
+/** A paused import that will not continue (stopped, cleaned up, gone from the list) gives up the staged copies it kept. */
+async function dropPausedImports(){
+ for(const [id,carry] of [...pausedImports]){
+  const job=state.jobs.find(item=>item.id===id);
+  if(job&&(job.phase==='queued'||job.phase==='stopped'&&job.paused))continue;
+  pausedImports.delete(id);await discardPausedCopies(carry.copies).catch(()=>{});
+ }
+}
+/** Continue on a paused import: the same job goes back to the queue, its results so far kept, as a new job would start. */
+function reviveImport(job:Job){
+ job.phase='queued';job.paused=false;job.detail=message('job.waiting');job.errors=[];
+ for(const key of ['groups','acknowledged','failedFiles','problemFiles','importResult','progress','eta','fraction','etaRange','retryable','skippablePath','leftovers','alreadyImported','space'] as const)delete job[key];
+ log('normal','job','continue',{plan:pausedImports.get(job.id)?.plan?'kept':'planned again'},job.id);
+}
 // The last whole-source listing of each connected source, for the next listing to reuse: this session's, or for a card
 // the one remembered across restarts under its UUID (loaded once per connection, verified folder by folder before reuse).
 const listings=new Map<string,Listing>(),scanMemoryLoaded=new Set<string>();
@@ -523,10 +541,13 @@ function errorText(error:unknown){return error instanceof Error?error.message:St
 function enqueue(source:Source,backup=false,automatic=false){
  const existing=state.jobs.find(j=>j.source.id===source.id&&isLive(j));
  if(existing){if(!automatic)automaticallyQueued.delete(existing.id);return;}
+ // A paused import of this source continues: the same job, from where it stopped.
+ const paused=state.jobs.find(j=>j.source.id===source.id&&j.phase==='stopped'&&j.paused&&!j.organization&&pausedImports.has(j.id));
+ if(paused){reviveImport(paused);if(automatic)automaticallyQueued.add(paused.id);seen.add(source.id);return;}
  const job:Job={id:randomUUID(),source,phase:'queued',detail:message('job.waiting'),errors:[],backup};
  for(const previous of state.jobs)if(previous.source.id===source.id&&['complete','stopped','error'].includes(previous.phase))delete previous.inventory;
  state.jobs.unshift(job);if(automatic)automaticallyQueued.add(job.id);seen.add(source.id);
- const finished=state.jobs.filter(j=>['complete','stopped','error'].includes(j.phase));if(finished.length>30){const remove=new Set(finished.slice(30).map(j=>j.id));state.jobs=state.jobs.filter(j=>!remove.has(j.id));}
+ const finished=state.jobs.filter(j=>['complete','stopped','error'].includes(j.phase));if(finished.length>30){const remove=new Set(finished.slice(30).map(j=>j.id));state.jobs=state.jobs.filter(j=>!remove.has(j.id));void dropPausedImports();}
 }
 /** The one way a job starts running: it can be stopped, and it holds the queue and the automatic checks. */
 function startJob(job:Job):AbortController{
@@ -770,6 +791,8 @@ async function cleanJob(jobId:string){
  jobForCleanup(jobId);await stopResidueCheck();const job=jobForCleanup(jobId);
  const found=jobCleanupFound.get(job.id);if(!found||!job.leftovers?.checkedAt)throw new MessageError('error.cleanupStale');
  jobCleanupFound.delete(job.id);
+ // A paused import's kept copies are among what was measured: Clean up removes them, and the job no longer continues.
+ const carry=pausedImports.get(job.id);if(carry){pausedImports.delete(job.id);releasePausedCopies(carry.copies);}
  const measured=job.leftovers;job.leftovers={...measured,cleaning:true};emit();
  try{
   // Exactly what the confirmation listed, each item only while it is still the file found.
@@ -968,6 +991,9 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
  const saveReport=async(name:string,value:unknown)=>{if(reporting)await writeReport(job.id,name,value);};
  const signal=control.signal;
  const request='review' in input?undefined:input;job.excluded=request?.exclude;
+ // Continue on a paused import: what its earlier runs kept. `copies` and `ledger` carry this run's on if it is paused again.
+ const resumed=request&&!request.reorganize?pausedImports.get(job.id):undefined;pausedImports.delete(job.id);
+ let copies:PausedCopies|undefined,ledger=resumed?new JobLedger(resumed.outcomes):undefined,reused=false;
  try{
   // A cleanup in progress stops first. The phase changes before this wait, so pump() never takes this job again.
   if('review' in input){
@@ -984,15 +1010,25 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    job.phase='discovering';job.progress=undefined;job.importResult=undefined;job.detail=message(job.source.transport==='camera'?'job.listingCamera':'job.finding');emit();
    await stopResidueCheck();
    if(qaHooks)await qaHooks.gate(job.id,signal);
+   // The plan it paused in is kept while every source file is as planned (and it is not a USB camera's listing, made anew each time):
+   // nothing is listed, read or compared again. Otherwise it is planned again; what it verified still counts.
+   if(resumed?.plan&&!resumed.plan.stage&&state.sources.some(source=>source.id===job.source.id&&source.path===job.source.path)&&await sourcesUnchanged(resumed.plan.review.plans)){
+    prepared=resumed.plan;copies=resumed.copies;reused=true;
+    reservations.set(job.id,structuredClone(resumed.reserved??prepared.review.plans.map(()=>({volume:'',bytes:0}))));
+    log('normal','job','continue-plan',{decision:'kept',stagedKept:copies.stages.size,verifiedKept:copies.checked.size},job.id);
+   }else{
+    if(resumed){await discardPausedCopies(resumed.copies);log('normal','job','continue-plan',{decision:'planned again',reason:resumed.plan?'a source file changed or the source is not connected':'paused before it was planned'},job.id);}
    prepared=await prepare(job.id,job.source,job.backup,input,signal,done=>{job.detail=message('job.listing',{count:done});progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
+   }
   }
   // A job someone started (not an automatic one) that found unknown files stops at the review's confirmation first; nothing has been written.
-  if(request&&prepared.noMetadata){
+  if(request&&!reused&&prepared.noMetadata){
    const decision=unknownDecision({found:true,automatic:request.automatic===true,confirmed:request.confirmed===true,queuedAutomatically:automaticallyQueued.has(job.id),reviewOpen:!!reviewed||!!state.review||!!state.busyReview,othersRunning:active.size>1||!!duplicateControl});
    if(decision==='park'){const parked=prepared;prepared=undefined;parkForConfirmation(job,parked);return;}
    if(decision==='defer'){const held=prepared;prepared=undefined;await deferForConfirmation(job,held,request);return;}
   }
   const {review:{plans,kind,sourceFolders},prefs,failures}=prepared,reorganize=kind==='reorganize';
+  if(!reorganize){copies??=new PausedCopies();ledger??=new JobLedger();}
   // The one place that decides what happens to the source: imports copy and leave it alone, whatever the saved preferences say.
   const policy=sourcePolicy(kind,prepared.options,prefs);
   job.skipErrors=prepared.skipErrors;
@@ -1017,7 +1053,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   // Formal planning may have just created a previously absent backup folder. Bind its read-only catalog now.
   await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   try{executed=await executeDestinations(plans,{
-   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,onFileOutcome:outcome=>{void catalogCoordinator?.observeOutcome(outcome);const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);},
+   signal,reorganize,removeAppleDouble:prefs.removeAppleDouble!==false,verify:policy.verifyCopies,keepSourceFolders:!policy.removeEmptySourceFolders,releaseDuplicates:policy.releaseDuplicates,...(copies?{paused:copies}:{}),onFileOutcome:found=>{const outcome=ledger?ledger.note(found):found;void catalogCoordinator?.observeOutcome(outcome);const list=outcomes.get(outcome.source);if(list)list.push(outcome);else outcomes.set(outcome.source,[outcome]);},
    validate:async index=>{await validateDestination(prefs.destinations[index],state.sources,{identity:prefs.destinationIds?.[index]??''});if(!reorganize&&plans[index]?.videos)await validateDestination(prefs.videoDestinations[index]!,state.sources,{identity:prefs.videoDestinationIds?.[index]??''});},
    progress:(index,progress,pending)=>{job.phase=progress.phase==='verifying'||progress.phase==='planning'?'verifying':'copying';job.progress=progress;reserved[index].bytes=pending;job.detail=recordsDetail(progress)??(progress.step==='existing'?message('job.confirmingExisting',{count:progress.completed,total:progress.total,file:path.basename(progress.file)}):(plans.length>1?message('job.destinationLabel',{index:index+1,count:plans.length}):undefined));progressEmit();},
    // A video folder's own reservation (after the destinations') is released with its destination.
@@ -1027,6 +1063,8 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    const sums=importedSums(outcomes);
    if(volume&&!qa&&Object.keys(sums).length)await rememberImported(app.getPath('userData'),volume,mount,sums).catch(()=>{});
   }
+  // The whole job's counts: files published before a pause are copies of this job, not files already in the backup.
+  if(ledger)executed=ledger.totals(executed);
   const {copied,skipped,routed,moved,retained,retainedBytes,released,releasedBytes,foldersRemoved=0,removed,errors,warnings=[],notes,appleDouble}=executed;
   addErrors(job,...errors.map(text));recordIssues(job,warnings);
   for(const error of errors)log('normal','job','error',{message:text(error)});for(const issue of warnings)log('normal','job',issue.severity==='error'?'error':'warning',{...issue});
@@ -1055,7 +1093,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
   job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:{bytes:releasedBytes??0}}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,dsStoreLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message(policy.verifyCopies!==false?'job.copiedVerified':'job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail,job.phase==='error'?'attention':'done');
- }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)addErrors(job,job.detail);
+ }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');
+   // An import keeps what Continue needs: its plan (not a USB camera's, listed anew), staged copies not yet verified, and what it verified.
+   if(ledger){const held=reservations.get(job.id);pausedImports.set(job.id,{...(prepared&&!prepared.stage&&prepared.review.kind==='import'?{plan:prepared}:{}),copies:copies??new PausedCopies(),outcomes:ledger.outcomes,...(held?{reserved:structuredClone(held)}:{})});log('normal','job','paused-kept',{plan:!!prepared&&!prepared.stage,staged:copies?.stages.size??0,verified:copies?.checked.size??0,outcomes:ledger.outcomes.size},job.id);}
+  }else{if(copies)await discardPausedCopies(copies).catch(()=>{});job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)addErrors(job,job.detail);
   // A planning error about one file can be skipped by hand: never for a USB camera (staged anew each time).
   const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail,signal.aborted?'stopped':'attention');}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
@@ -1490,7 +1531,7 @@ async function action(input:Action):Promise<void>{
   }
   case 'stopBackupCheck':misplacedControl?.abort();break;
   case 'unknownRule':{if(state.busyReview)throw new MessageError('error.rulesDuringReview');const ext=input.extension.replace(/^\.+/,'').trim().toLowerCase();const rule=rules({[ext]:input.folder})[ext];sessionRules[ext]=rule;if(input.remember){state.preferences.unknownRules[ext]=rule;await save();}dropStaleMisplaced();emit();if(reviewed?.review.kind==='import')await discardReview();break;}
-  case 'stop':{if(input.jobId===undefined&&input.scope===undefined)misplacedControl?.abort();await stopOperations(input,{jobs:state.jobs,sources:state.sources,active,originalsControls,scanControls,pausing,seen,discardReview,organizationJobIds});break;}
+  case 'stop':{if(input.jobId===undefined&&input.scope===undefined)misplacedControl?.abort();await stopOperations(input,{jobs:state.jobs,sources:state.sources,active,originalsControls,scanControls,pausing,seen,discardReview,organizationJobIds});await dropPausedImports();break;}
   case 'reveal':{
    // A file that is gone (moved, or its drive disconnected) shows the nearest folder that still exists, within the same allowed places.
    let target=input.path;
@@ -1568,6 +1609,8 @@ app.on('before-quit',event=>{
   event.preventDefault();
   const finish=async()=>{
    await Promise.allSettled([...settling,scansSettled(),misplacedTask,residueTask,oldRecordsTask,...(reviewed||reviewControl?[discardReview()]:[])]);
+   // Paused imports cannot continue after the app quits: their kept staged copies are removed like a stopped job's.
+   await Promise.allSettled([...pausedImports.values()].map(carry=>discardPausedCopies(carry.copies)));pausedImports.clear();
    await catalogCoordinator?.settled();await catalog?.close();
    await Promise.allSettled([closeMetadata(),closeCameraBridge(),terminateHasher()]);
    await activeLogger()?.close();
