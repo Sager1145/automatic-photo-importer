@@ -5,6 +5,7 @@ import {errorLayers} from '../probes';
 import type {Check,Harness} from '../harness';
 import {manyRunningJobs,syntheticJob} from '../synthetic';
 import {scanned} from './imports';
+import {filedByFileDate} from './context';
 
 let fresh=0;
 /** A new app error, so a new error toast opens (each toast stays 7 s). */
@@ -54,7 +55,8 @@ export const errorChecks=():Check[]=>[
   if(h.hooks)assert.ok(during.every(layers=>layers.length===1),'The toast was on screen while pages switched');
   for(const layers of during)for(const layer of layers)assert.deepEqual(layer,{...layer,topLayer:true,misses:[],transition:false});
  }},
- {id:'errors-above-sheets-and-animations',stage:'errors',title:'Running animations never paint above an error toast, and the toast stays above a sheet opened before or after it',covers:['animation layering','error toasts always on top','popovers and sheets'],skip:needsHook,run:async h=>{
+ {id:'errors-above-sheets-and-animations',stage:'errors',title:'Running animations never paint above an error toast, and the toast stays above a sheet opened before or after it',covers:['animation layering','error toasts always on top','popovers and sheets'],skip:needsHook,run:h=>filedByFileDate(h,async()=>{
+  // photo.png is opened from the review's file list, so it must be planned: see filedByFileDate.
   // The review for the sheet is built first: a real preview would wait behind synthetic jobs that never finish.
   await h.action({type:'preview',sourceId:'fixture:1'});await h.until('per-file review preview',"document.querySelector('.review-source-button')");
   // Spinners, indeterminate bars and meters animate on the desk while the toast is up.
@@ -104,7 +106,7 @@ export const errorChecks=():Check[]=>[
 
 
   }}finally{await h.js("for(const [proto,name] of [[HTMLElement.prototype,'showPopover'],[HTMLElement.prototype,'hidePopover'],[HTMLDialogElement.prototype,'showModal'],[HTMLDialogElement.prototype,'close']])if(proto['qa_'+name])proto[name]=proto['qa_'+name];true");}
- }},
+ })},
  {id:'errors-grouped-skip',stage:'errors',title:'Grouped errors and warnings show one row per kind with counts, paged paths and skip buttons; Skip these clears the group',covers:['grouped errors and warnings','skip buttons','All errors panel'],skip:needsHook,run:async h=>{
   const job={...syntheticJob('grouped',{phase:'error'}),retryable:true,groups:[
    {code:'copy-failed',severity:'error' as const,count:350,items:Array.from({length:MAX_GROUP_ITEMS},(_,i)=>({path:`/Volumes/QA synthetic/grouped/DCIM/IMG_${i}.CR3`,detail:'EIO'}))},

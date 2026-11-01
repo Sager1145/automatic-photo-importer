@@ -33,6 +33,7 @@ export const darwin: PlatformProfile = {
   // Finder and Lightroom take POSIX paths: /Volumes/… with forward slashes.
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
+  previews: { photos: 'system', posters: true },
 };
 
 /** What any process has open under the root, as lsof lists it (exit 1: nothing). */

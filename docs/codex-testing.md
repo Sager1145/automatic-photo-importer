@@ -16,7 +16,7 @@ npm run codex:test -- --ui-only
 | `--organization-only` | UI and language checks, read-only source scanning, organization with changed folder settings, recovery recheck, and repeated Apply/Resume requests. Skips the bulk-copy queue/retry scenario. |
 | `--ui-only` | UI, language, read-only scan and fixture-preservation checks. Skips both organization/recovery and bulk-copy scenarios. |
 
-The command builds the app, creates a unique temporary fixture root and isolated Electron user data, runs the selected self-test, and exits. Automated runs have a three-minute deadline and report launch failures. The full transfer scenario uses six folder sources, five concurrent transfers and a queued sixth source.
+The command builds the app, creates a unique temporary fixture root and isolated Electron user data, runs the selected self-test, and exits. Automated runs have a seven-minute deadline (ten and a half on Windows, which reports no load average for the harness to scale by) and report launch failures. The full transfer scenario uses six folder sources, five concurrent transfers and a queued sixth source.
 
 For a repeat against an already built app, add `--no-build`:
 

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type {AppState,Job,Progress} from '../../../shared';
+import {OTHER_FOLDERS,type AppState,type Job,type Progress} from '../../../shared';
 import {pages,settingsCategories,type Check,type Harness,type Page} from '../harness';
 import {brokenText,clippedControls,latinPhrases,lowContrast,progressDisplays,statsGeometry,wideButtons} from '../probes';
 import {groupedErrorJobs,LONG_NAME,syntheticJob} from '../synthetic';
@@ -141,7 +141,9 @@ export const ruleChecks=():Check[]=>[
   await h.size(1000,720);
   const s=await h.state();
   // User data is the same in every language: drive names, paths and folder names.
-  const userData=[...s.sources.map(source=>source.name),...s.preferences.destinations,'Automatic Photo Importer','Nikon Z6III','Fixture'];
+  // The connected drives Settings lists are this computer's own (a Windows card reader reads "Sony DSC (D:)"), and the
+  // other-files folders are shown by their names on disk, which are the same in every language.
+  const userData=[...s.sources.map(source=>source.name),...s.preferences.destinations,...(s.driveFormats??[]).map(drive=>drive.name),...Object.values(OTHER_FOLDERS),s.preferences.noMetadataFolder,'Automatic Photo Importer','Nikon Z6III','Fixture'].filter(Boolean);
   // Known, reported: the main process names the library an organization reads 'Existing library' in English (main.ts previewOrganization).
   const knownUntranslated=['Existing library'];
   const english=new Map<string,Set<string>>(),problems:Record<string,unknown>[]=[];

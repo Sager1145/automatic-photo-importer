@@ -40,6 +40,7 @@ import { openCatalog } from '../catalog/store';
 import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
 import { resolveCatalogFile } from '../catalog/access';
 import { collectDragFiles } from '../core/file-drag';
+import { systemDecoders } from '../platform/thumbnails';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -79,6 +80,9 @@ export interface PlatformProfile {
   /** Files and folders under `root` held open right now, found the way this system can: exclusive opens on Windows
    * (what another program needs to rename or delete), lsof on macOS, this process's /proc descriptors on Linux. */
   heldOpen(root: string): Promise<string[]>;
+  /** Who makes preview pictures: macOS's own sips and Quick Look (photos, RAW and video posters), Windows's shell
+   * thumbnailer through the app's decoder (photos, installed RAW codecs and posters), or on Linux the app's decoder for JPEG/PNG only. */
+  previews: { photos: 'system' | 'shell' | 'image'; posters: boolean };
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -590,6 +594,25 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       const { plans: [organization] } = await plan(library, [library], { ...options, reorganize: true }, metadata);
       assert.deepEqual((await executeReorganization(organization!)).errors, []);
       assert.deepEqual(await profile.heldOpen(root), [], 'after an organization');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'previews: the system\'s decoder makes the picture, or the app\'s own one where the system has none': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-previews-')));
+    try {
+      // A 1×1 PNG every decoder reads, and a stand-in for the app's Electron decoder that records what it is asked.
+      const photo = join(root, 'photo.png'), clip = join(root, 'clip.mp4'), output = join(root, 'out.jpg'), asked: string[] = [];
+      await writeFile(photo, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6XHgAAAAASUVORK5CYII=', 'base64')); await writeFile(clip, 'not a video');
+      const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+      const decoders = systemDecoders(async () => undefined, { shell: async file => { asked.push('shell ' + file); return jpeg; }, image: async file => { asked.push('image ' + file); return jpeg; } });
+      assert.equal(await decoders.decode(photo, output, 64), true, 'a photo gets a picture');
+      assert.ok((await stat(output)).size > 0);
+      assert.deepEqual(asked, profile.previews.photos === 'system' ? [] : [`${profile.previews.photos} ${photo}`], 'the decoder this system uses');
+      asked.length = 0;
+      // Quick Look's poster of a real video is the Mac's own; elsewhere the poster comes from the app's decoder or not at all.
+      if (profile.previews.photos === 'system') return;
+      assert.equal(await decoders.poster(clip, output, 64), profile.previews.posters, 'a video gets a poster frame where the system makes them');
+      assert.deepEqual(asked, profile.previews.posters ? [`shell ${clip}`] : []);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
 };

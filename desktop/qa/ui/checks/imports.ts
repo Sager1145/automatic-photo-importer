@@ -5,8 +5,9 @@ import {ipcMain} from 'electron';
 import type {Metadata} from '../../../shared';
 import {formatMessage} from '../../../messages';
 import type {Check,Harness} from '../harness';
-import {digests,photoFolders,savedPreferences,type Context} from './context';
+import {digests,filedByFileDate,photoFolders,savedPreferences,type Context} from './context';
 import {capacityLayoutChecks} from './capacity-layout';
+import {otherFilesRoot} from '../../../core/other-files';
 
 const english=(message?:Parameters<typeof formatMessage>[0])=>message?formatMessage(message,'en'):'';
 const ended=(phase:string)=>['complete','error','stopped'].includes(phase);
@@ -177,26 +178,32 @@ export const importChecks=(ctx:Context):Check[]=>[
  }},
  {id:'import-retry-duplicates',stage:'imports',suite:'import',title:'Importing copies all source contents and a second run verifies duplicates without copying',covers:['import flow end to end','duplicate detection on re-import'],budgetMs:150000,run:async h=>{
   await h.prefs({parallel:5});
+  await filedByFileDate(h,async()=>{
   const run=async()=>{const before=new Set((await h.state()).jobs.map(j=>j.id));await h.action({type:'start'});
    await h.waitFor('copy completion',async()=>{const jobs=(await h.state()).jobs.filter(j=>!before.has(j.id));return jobs.length===6&&jobs.every(j=>ended(j.phase));},{timeoutMs:60000,seen:async()=>(await h.state()).jobs.filter(j=>!before.has(j.id)).map(j=>j.phase)});
    const jobs=(await h.state()).jobs.filter(j=>!before.has(j.id));assert.ok(jobs.every(j=>j.phase==='complete'),JSON.stringify(jobs.map(j=>({phase:j.phase,detail:j.detail,errors:j.errors.slice(0,2)}))));return jobs;};
   await run();
   const backup=path.join(ctx.root,'destination','photobackup');
-  const copied=await digests(backup);for(const [file,hash] of ctx.originals)if(file.startsWith(path.join(ctx.root,'source-')))assert.ok(copied.includes(hash),`Missing copied content: ${file}`);
+  // Videos go to the video folder (the fixture's layout keeps them apart), and files that are not photos or videos to the
+  // library's other-files folder beside it.
+  const videos=(await h.state()).preferences.videoDestinations![0]!;
+  const library=async()=>[...await digests(backup),...await digests(videos),...await digests(await otherFilesRoot(backup)).catch(()=>[])];
+  const copied=await library();for(const [file,hash] of ctx.originals)if(file.startsWith(path.join(ctx.root,'source-')))assert.ok(copied.includes(hash),`Missing copied content: ${file}`);
   const repeated=await run();assert.ok(repeated.every(j=>j.alreadyImported||english(j.detail).startsWith('0 copied')),'Repeated imports must not copy duplicates');
-  assert.equal((await digests(backup)).length,copied.length,'Repeated imports must not add files to the backup');
+  assert.equal((await library()).length,copied.length,'Repeated imports must not add files to the backup');
+  });
  }},
  {id:'import-nested-folder',stage:'imports',suite:'import',title:'Concurrent sources create a fresh nested backup folder without directory races',covers:['parallel imports into a new folder'],budgetMs:120000,run:async h=>{
   const before=new Set((await h.state()).jobs.map(job=>job.id));
   const nested=path.join(ctx.root,'destination','fresh-backup','nested');
   assert.equal(await fs.stat(nested).then(()=>true,()=>false),false);
-  try{
+  await filedByFileDate(h,async()=>{try{
    await h.prefs({...photoFolders(ctx,'fresh-backup/nested'),parallel:5});
    await h.action({type:'start'});
    await h.waitFor('concurrent new destination folders',async()=>{const jobs=(await h.state()).jobs.filter(job=>!before.has(job.id));return jobs.length===6&&jobs.every(job=>ended(job.phase));},{timeoutMs:60000});
    const jobs=(await h.state()).jobs.filter(job=>!before.has(job.id));assert.ok(jobs.every(job=>job.phase==='complete'),JSON.stringify(jobs.map(job=>({phase:job.phase,errors:job.errors.slice(0,2)}))));
    assert.ok((await fs.stat(nested)).isDirectory());
-   const hashes=new Set(await digests(nested));for(const [file,hash] of ctx.originals)if(file.startsWith(path.join(ctx.root,'source-')))assert.ok(hashes.has(hash),`Concurrent import missing ${file}`);
-  }finally{await h.prefs(photoFolders(ctx,'photobackup'));}
+   const hashes=new Set([...await digests(nested),...await digests((await h.state()).preferences.videoDestinations![0]!),...await digests(await otherFilesRoot(nested))]);for(const [file,hash] of ctx.originals)if(file.startsWith(path.join(ctx.root,'source-')))assert.ok(hashes.has(hash),`Concurrent import missing ${file}`);
+  }finally{await h.prefs(photoFolders(ctx,'photobackup'));}});
  }},
 ];
