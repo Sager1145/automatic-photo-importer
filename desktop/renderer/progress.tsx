@@ -110,8 +110,19 @@ function ProgressBar({ value, label, indeterminate = false, layers = [] }: { val
 export const ended = (job: Job) => job.phase === 'complete' || job.phase === 'error' || job.phase === 'stopped';
 /** Every file was verified and none failed: whatever else ended the job (cleanup leftovers), the copy itself is done. */
 export function allVerified(job: Job): boolean {
-  const progress = job.progress;
+  const progress = job.progress, result = job.importResult;
+  // The import's result is what History reports; the last progress event only says how far its step got.
+  if (result && ended(job)) return result.planned > 0 && result.copied + result.skipped >= result.planned;
   return !!progress && progress.phase === 'verifying' && !progress.step && progress.total > 0 && progress.completed === progress.total && !progress.failed;
+}
+/** An import that ended short of every file verified, with its result: its row shows that result, not the last step's count. */
+export function endedResult(job?: Job): Job['importResult'] {
+  return job && ended(job) && !job.organization && !jobFinished(job) ? job.importResult : undefined;
+}
+/** A job's counter: an import that ended short shows what it did, as History does ("0 copied · 0 already in the backup"); otherwise its step's count. */
+export function jobCount(job: Job, progress: Progress, t: ReturnType<typeof createTranslator>, formatNumber: (value: number) => string, organization = false, formatBytes?: (value: number) => string): string {
+  const result = endedResult(job);
+  return result ? t("{copied} copied · {skipped} already in the backup", { copied: formatNumber(result.copied), skipped: formatNumber(result.skipped) }) : progressCount(progress, t, formatNumber, organization, formatBytes);
 }
 /** Complete, or ended with an error only after every file was verified. */
 export const jobFinished = (job: Job) => job.phase === 'complete' || (job.phase === 'error' && allVerified(job));
@@ -235,6 +246,9 @@ export function jobTiming(job: Job, t: ReturnType<typeof createTranslator>, held
  * full. Undefined while nothing is measured, so the bar is indeterminate rather than guessed. */
 export function cardFraction(job: Job): number | undefined {
   if (job.phase === 'complete' || ended(job) && allVerified(job)) return 1;
+  // An import that ended short: the share of its planned copies that are verified, never the step's last count.
+  const result = endedResult(job);
+  if (result?.planned) return Math.min(.99, (result.copied + result.skipped) / result.planned);
   // A listing's total is only an estimate and its counter shows none: no share of the job is claimed yet.
   if (!job.progress || job.progress.phase === 'planning' && job.progress.step === 'listing') return undefined;
   // Full only once finished: a step at its end (or one that failed its last file) is not a finished job.

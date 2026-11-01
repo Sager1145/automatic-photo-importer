@@ -23,6 +23,13 @@ function plannedTotals(plan:EtaPlan):Record<string,StepTotal>|undefined{
  const verifying=plan.totals?.verifying,share=verifyShare(plan);
  return verifying&&share<1?{...plan.totals,verifying:{...verifying,files:verifying.files*share,bytes:verifying.bytes*share}}:plan.totals;
 }
+/** File systems of a computer's own disks; a drive is internal only when its volume says so and it has one of these (a network share has none). */
+const localFileSystems=new Set(['ntfs','refs','apfs','hfs','ext2','ext3','ext4','btrfs','xfs','f2fs','zfs']);
+/** Every drive of a job is an internal disk: a first run there starts from disk rates, not a card's (eta-model localDefaults). */
+export function localDrives(context:PriorContext):boolean{
+ const drives=[...(context.source?[context.source]:[]),...context.destinations];
+ return !!context.source&&context.destinations.length>0&&drives.every(item=>item.external===false&&localFileSystems.has((item.fsType??'').toLowerCase()));
+}
 /** Files compared before their share found identical is trusted to stand for the rest. */
 const COMPARED_SAMPLE=20;
 /** Seconds: a listing never shows more time left than this. */
@@ -98,12 +105,13 @@ export class EtaTracker {
  }
  private contextOf(plan:EtaPlan):PriorContext|undefined{return plan.source||plan.destinations?.length?{source:plan.source,destinations:plan.destinations??[]}:undefined;}
  private bookOf(plan:EtaPlan,context:PriorContext|undefined):PriorBook{
-  const fallback=defaultBook(plan.backups??1);
+  const fallback=defaultBook(plan.backups??1,!!context&&localDrives(context));
   return context?layeredBook(context,this.session,this.store?.table??new PriorTable('none'),fallback):fallback;
  }
  /** Whether files are expected to be published by copying on these destinations: one did before (this session or in saved history), or its file system has no hard links. */
  predictPublish(destinations:DriveInfo[]):'link'|'copy'{
-  const slow=new Set(['exfat','msdos','fat32','vfat','ntfs','fat']);
+  // NTFS has hard links (Windows publishes with fs.link like APFS and ext4): only FAT-family drives publish by copying.
+  const slow=new Set(['exfat','msdos','fat32','vfat','fat']);
   return destinations.some(item=>(item.id&&this.copyPublishing.has(item.id))||slow.has((item.fsType??'').toLowerCase()))?'copy':'link';
  }
  /** How many of these destinations an import writes directly (exFAT on macOS, as the copy decides): each file is checked in place, with no verify step after. */

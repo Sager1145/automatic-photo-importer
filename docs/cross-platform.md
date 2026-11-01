@@ -45,6 +45,7 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | USB camera without a drive (MTP/PTP) | ImageCaptureCore helper (`Sources/CameraBridge`) | Portable Devices bridge (`desktop/platform/windows-camera.ts`) | Not yet: see Known gaps |
 | Camera shown as | `USB/<name>` | `USB\<name>`, with each card slot and its capacity | — |
 | Folder durability | `fsync` on the folder | Folders cannot be flushed; file contents are flushed before publishing (`DIRECTORY_SYNC_SUPPORTED`) | `fsync` on the folder |
+| Publishing a verified copy (and its time left, `EtaTracker.predictPublish`/`predictDirect`) | Hard link on APFS; exFAT written directly, each file checked in place | Hard link on NTFS; exFAT staged, then published by copying | Hard link on ext4 and the like; exFAT staged, then published by copying |
 | Flushing a file | Any handle | Needs a handle that may write (`syncFile` reopens with `O_RDWR`) | Any handle |
 | Paths | `/`, case-insensitive by default (APFS) | `\`, case-insensitive, reserved names (`CON`, `NUL` …), no `<>:"/\|?*` | `/`, case-sensitive |
 | Symbolic links | Allowed | Need Developer Mode or admin | Allowed |

@@ -469,6 +469,7 @@ Verification after copy is off|复制后校验已关闭|複製後驗證已關閉
 {completed} of {total} files copied|已复制 {completed}/{total} 个文件|已複製 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピー済み
 {completed} of {total} files copied or confirmed|已复制或确认 {completed}/{total} 个文件|已複製或確認 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピーまたは確認済み
 {count} failed|{count} 个失败|{count} 個失敗|{count} 件失敗
+{copied} copied · {skipped} already in the backup|已复制 {copied} 个 · {skipped} 个已在备份中|已複製 {copied} 個 · {skipped} 個已在備份中|{copied} 件コピー · {skipped} 件はバックアップ済み
 Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン
 Copying|复制|複製|コピー

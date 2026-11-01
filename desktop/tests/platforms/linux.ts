@@ -13,5 +13,7 @@ export const linux: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'Linux x86_64',
   cameraPlace: 'USB/Z f',
+  systemDisk: 'ext4',
+  exfatDirect: false,
   folderFlush: true,
 };

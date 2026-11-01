@@ -4,12 +4,13 @@
 // profile must supply what it needs; TypeScript and platform-parity.test.ts refuse a platform that skips one.
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, posixRelative, syncDirectory, syncFile } from '../core/paths';
+import { EtaTracker, localDrives } from '../eta';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -25,6 +26,10 @@ export interface PlatformProfile {
   cameraPlace: string;
   /** Whether the system can flush a folder's entries to disk. */
   folderFlush: boolean;
+  /** The file system of the computer's own disk as the adapter names it (NTFS, APFS, ext4): it has hard links, so files publish by linking. */
+  systemDisk: string;
+  /** exFAT destinations are written directly, each file checked in place (macOS, core/paths directCapable); elsewhere staged, then published by copying. */
+  exfatDirect: boolean;
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -80,6 +85,27 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.equal(sourcePlace({ name: 'Z f', path: 'camera://%3A%3A%7B20D04FE0%7D', transport: 'camera' }), profile.cameraPlace);
       assert.equal(sourcePlace({ name: 'Card', path: profile.volumes()[0]!.path, transport: 'storage' }), profile.volumes()[0]!.path);
     } finally { if (saved) Object.defineProperty(globalThis, 'navigator', saved); }
+  },
+  'time left: publishing is priced as this system publishes on each file system': async (profile, t) => {
+    const tracker = new EtaTracker(), [card, ssd] = profile.volumes(), drive = (fsType?: string, external = false) => ({ id: fsType, transport: 'storage', fsType, external });
+    // The adapter's own names: an exFAT card or SSD (no hard links) publishes by copying, or is written directly where the system does that.
+    for (const volume of [card!, ssd!]) {
+      assert.equal(tracker.predictPublish([drive(volume.fsType, true)]), 'copy', `${volume.name}: ${volume.fsType}`);
+      assert.equal(tracker.predictDirect([drive(volume.fsType, true)], profile.platform), profile.exfatDirect ? 1 : 0, `${volume.name} written directly`);
+    }
+    // The system's own disk links, and a job between two of its internal disks starts from disk rates, not a card's.
+    assert.equal(tracker.predictPublish([drive(profile.systemDisk)]), 'link', profile.systemDisk);
+    assert.equal(tracker.predictDirect([drive(profile.systemDisk)], profile.platform), 0);
+    assert.ok(localDrives({ source: drive(profile.systemDisk), destinations: [drive(profile.systemDisk)] }));
+    assert.ok(!localDrives({ source: drive(card!.fsType, true), destinations: [drive(profile.systemDisk)] }), 'a card is not an internal disk');
+    if (!onNative(profile, t)) return;
+    const root = await mkdtemp(join(tmpdir(), 'feature-publish-'));
+    try {
+      // What 'link' assumes: a staged copy is published as a hard link on this system's own disk.
+      const staged = join(root, 'A.JPG.partial'), published = join(root, 'A.JPG'); await writeFile(staged, 'jpeg');
+      await link(staged, published);
+      assert.equal((await stat(published)).nlink, 2);
+    } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),
