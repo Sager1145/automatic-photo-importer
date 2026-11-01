@@ -13,7 +13,7 @@ import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDire
 import { EtaTracker, localDrives } from '../eta';
 import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
-import { getOrganizationRecovery } from '../core/recovery';
+import { getOrganizationRecovery, listedOnce } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
 import { evaluateRoutes } from '../core/folder-rules';
 import { appleDoubleCleaner, configureOrganizationRecovery, execute, executeReorganization, plan } from '../core/index';
@@ -133,6 +133,27 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       await writeFile(join(root, 'Photo Importer Data', 'Organizations', id, 'journal.jsonl'), other.line('organization', { id, root: recordedRoot }) + '\n');
       const jobs = await getOrganizationRecovery(library);
       assert.deepEqual(jobs.map(job => [job.id, job.recordedElsewhere, job.undoable, job.finalizable]), [[id, recordedRoot, false, false]]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'records: journals a computer the drive does not list yet wrote are notes, each listed once for the whole drive': async profile => {
+    // docs/shared-records.md: an earlier version on that system made the store; this computer cannot verify its journals until it joins.
+    if (!hostKeyConfigured()) configureHostKey('fixture-only-host-recovery-secret-32bytes');
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-unlisted-')));
+    try {
+      const other = otherComputer(profile.platform), drive = profile.volumes()[1]!.path.replace(/[\\/]+$/, ''), native = profile.platform === 'win32' ? '\\' : '/';
+      const data = join(root, 'Photo Importer Data');
+      await mkdir(data);
+      await writeFile(join(data, 'store.json'), JSON.stringify(other.legacyStoreRecord(profile.volumes()[1]!.path, '1:18')));
+      const libraries = ['photobackup', 'videobackup'], ids = libraries.map(() => randomUUID());
+      for (const [index, library] of libraries.entries()) {
+        await mkdir(join(root, library));
+        await mkdir(join(data, 'Organizations', ids[index]!), { recursive: true });
+        await writeFile(join(data, 'Organizations', ids[index]!, 'journal.jsonl'), other.line('organization', { id: ids[index], root: drive + native + library }) + '\n');
+      }
+      // Both backup folders read the one store at the drive's base: each journal is listed once, under its own folder, as a note.
+      const jobs = listedOnce((await Promise.all(libraries.map(library => getOrganizationRecovery(join(root, library))))).flat());
+      assert.deepEqual(jobs.map(job => [job.id, job.root, job.error, job.recordedOn?.system, job.recordedOn?.place, job.undoable, job.finalizable]).sort(),
+        libraries.map((library, index) => [ids[index], join(root, library), undefined, profile.platform, drive + native + library, false, false]).sort());
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'library names: every name a library writes is valid on macOS, Windows and Linux, so the drive can move between them': async (profile, t) => {

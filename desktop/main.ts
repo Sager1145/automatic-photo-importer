@@ -23,7 +23,7 @@ import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-result
 import {checkFolderPair,checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
-import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
+import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,listedOnce,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
 import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative} from './core/paths';
 import {rules} from './core/inventory';
@@ -419,7 +419,8 @@ async function listOrganizations(signal:AbortSignal){
  // The previous list stays until each folder is read again, and is replaced folder by folder.
  const byRoot=new Map<string,NonNullable<AppState['organizationRecovery']>>();
  for(const job of state.organizationRecovery??[])byRoot.set(job.root,[...byRoot.get(job.root)??[],job]);
- const publish=()=>{state.organizationRecovery=[...byRoot.values()].flat();emit();};
+ // A journal of a records folder every backup folder on the drive reads is shown once.
+ const publish=()=>{state.organizationRecovery=listedOnce([...byRoot.values()].flat());emit();};
  const listed=new Set<string>();state.organizationRecoveryLoading=true;state.organizationRecoveryPaused=false;emit();
  let looked=0;
  try{

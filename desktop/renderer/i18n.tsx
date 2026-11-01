@@ -153,7 +153,9 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
 Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
 Recorded with the drive at {place}. Finish or undo it on the computer that recorded it.|此记录是在驱动器位于 {place} 时写入的。请在写入它的电脑上完成或撤销。|此記錄是在磁碟機位於 {place} 時寫入的。請在寫入它的電腦上完成或復原。|この記録はドライブが {place} にあったときに作成されました。記録したコンピューターで完了するか元に戻してください。
-Recorded with the drive at another place or on another system; finish or undo it there.|此记录是在驱动器位于其他位置或其他系统上时写入的；请在那里完成或撤销。|此記錄是在磁碟機位於其他位置或其他系統上時寫入的；請在那裡完成或復原。|この記録はドライブが別の場所または別のシステムにあったときに作成されました。そちらで完了するか元に戻してください。
+Recorded on another computer|在另一台电脑上记录|在另一台電腦上記錄|別のコンピューターで記録
+Recorded on another computer ({system}, {place}). Open the drive there to finish or undo it.|此记录是在另一台电脑上写入的（{system}，{place}）。请在那台电脑上打开此驱动器以完成或撤销。|此記錄是在另一台電腦上寫入的（{system}，{place}）。請在那台電腦上開啟此磁碟機以完成或復原。|この記録は別のコンピューター（{system}、{place}）で作成されました。そのコンピューターでドライブを開いて、完了するか元に戻してください。
+Recorded on another computer ({place}). Open the drive there to finish or undo it.|此记录是在另一台电脑上写入的（{place}）。请在那台电脑上打开此驱动器以完成或撤销。|此記錄是在另一台電腦上寫入的（{place}）。請在那台電腦上開啟此磁碟機以完成或復原。|この記録は別のコンピューター（{place}）で作成されました。そのコンピューターでドライブを開いて、完了するか元に戻してください。
 {completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
 {step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
 {count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。

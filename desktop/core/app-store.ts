@@ -230,7 +230,20 @@ export interface Store {/** The "Photo Importer Data" folder. */path:string;/** 
  joined:boolean;
  /** Every path a computer writing to the store has had the base at (`/Volumes/A006`, `I:\`, `E:\`): records name
   * paths under these, and `recordedPath` reads them as paths under `base`. */
- bases:string[];}
+ bases:string[];
+ /** A computer the store's key list does not name has written here (an earlier version's store, kept as `legacy`):
+  * a record that verifies with no known key is most likely its, and cannot be checked until it joins. */
+ unlisted?:Writer;}
+/** A computer that wrote to a store, as far as its earlier record tells: the base path it had, and the system that path is from. */
+export interface Writer {base?:string;system?:'darwin'|'win32'|'linux';}
+/** The system a base path is from, by its form: a drive letter is Windows, /Volumes macOS, /media and /mnt Linux. */
+export function pathSystem(base:string):Writer['system']{
+ if(/^[A-Za-z]:([\\/]|$)/.test(base)||base.startsWith('\\\\'))return 'win32';
+ if(/^\/Volumes(\/|$)/.test(base))return 'darwin';
+ if(/^\/(media|mnt|run\/media)(\/|$)/.test(base))return 'linux';
+ return undefined;
+}
+const writerOf=(record:Record<string,unknown>):Writer=>{const base=typeof record.base==='string'?record.base:undefined,system=base?pathSystem(base):undefined;return {...(base?{base}:{}),...(system?{system}:{})};};
 let destinations:string[]=[];
 /** The configured destinations (and folders organized in place on their own drive): a library beneath one keeps
  * its records in that destination's store, on the same volume. */
@@ -245,7 +258,7 @@ export const storeIdentity=(stat:Pick<BigIntStats,'dev'|'ino'>,platform:NodeJS.P
 /** A computer that writes to a store, as its record lists it. */
 interface Computer {id:string;platform:string;key:string;}
 /** What a store record says, checked. `computers` is undefined for a record an earlier version wrote. */
-interface StoreRecord {computers?:Computer[];/** Each system's identity of the base, by `process.platform`. */identities:Record<string,string>;/** Every path a computer has had the base at. */bases:string[];/** An earlier version's record, kept as it was. */legacy?:Record<string,unknown>;verified:boolean;}
+interface StoreRecord {computers?:Computer[];/** Each system's identity of the base, by `process.platform`. */identities:Record<string,string>;/** Every path a computer has had the base at. */bases:string[];/** An earlier version's record, kept as it was. */legacy?:Record<string,unknown>;verified:boolean;/** Its writer, when no listed key sealed it. */unlisted?:Writer;}
 const damagedRecord=(file:string)=>new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);
 const isObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 /** An earlier version's record verified with this computer's key: its base identity, in this system's form (it wrote
@@ -265,7 +278,7 @@ async function readStoreRecord(folder:string,file:string,stat:BigIntStats):Promi
  if(value.computers===undefined){
   const identity=ownLegacyIdentity(value);
   const bases=typeof value.base==='string'?[value.base]:[];
-  return {identities:identity===undefined?{}:{[process.platform]:identity},bases,legacy:value,verified:identity!==undefined};
+  return {identities:identity===undefined?{}:{[process.platform]:identity},bases,legacy:value,verified:identity!==undefined,...(identity===undefined?{unlisted:writerOf(value)}:{})};
  }
  const computers=value.computers;
  if(!Array.isArray(computers)||!computers.length||computers.some(item=>!isObject(item)||typeof item.platform!=='string'||typeof item.key!=='string'||Buffer.from(item.key,'base64').length<32||item.id!==keyId(Buffer.from(item.key,'base64'))))throw damagedRecord(file);
@@ -278,7 +291,10 @@ async function readStoreRecord(folder:string,file:string,stat:BigIntStats):Promi
  const legacy=record.legacy as Record<string,unknown>|undefined,own={...identities} as Record<string,string>;
  // A store this computer made with an earlier version, joined since by another system: its old record still names this system's identity.
  if(own[process.platform]===undefined&&legacy){const identity=ownLegacyIdentity(legacy);if(identity!==undefined)own[process.platform]=identity;}
- return {computers:computers as Computer[],identities:own,bases:bases as string[],...(legacy?{legacy}:{}),verified:true};
+ // An earlier record no listed key (nor this computer's) sealed: its computer has not joined, so its records do not verify yet.
+ let unlisted:Writer|undefined;
+ if(legacy){try{openWith('store',legacy,[requireHostKey(),...keys]);}catch(error){if(!(error instanceof SealError))throw error;unlisted=writerOf(legacy);}}
+ return {computers:computers as Computer[],identities:own,bases:bases as string[],...(legacy?{legacy}:{}),verified:true,...(unlisted?{unlisted}:{})};
 }
 /** The store's own record, sealed; read and checked against the folder it is in. Undefined when absent. */
 async function openStore(folder:string,base:string,baseStat:BigIntStats):Promise<{store:Store;record:StoreRecord}|undefined>{
@@ -291,7 +307,7 @@ async function openStore(folder:string,base:string,baseStat:BigIntStats):Promise
  if(!record.verified)console.warn(`Records in ${folder} were written by another computer with an earlier version; they are kept as history and not acted on here until that computer uses this drive again.`);
  // Joined also means the store knows the path the base has here now (a drive letter can change).
  const joined=recorded!==undefined&&record.bases.includes(base)&&!!record.computers?.some(item=>item.id===keyId(requireHostKey()));
- const store={path:folder,base,dev:baseStat.dev,baseIno:baseStat.ino,ino:own.ino,verified:record.verified,joined,bases:record.bases};
+ const store:Store={path:folder,base,dev:baseStat.dev,baseIno:baseStat.ino,ino:own.ino,verified:record.verified,joined,bases:record.bases,...(record.unlisted?{unlisted:record.unlisted}:{})};
  storeCache.set(folder,{key,store,record});
  return {store,record};
 }
