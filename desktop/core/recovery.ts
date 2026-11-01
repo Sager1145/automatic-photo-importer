@@ -30,6 +30,7 @@ interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing i
  * are removed, OS bookkeeping included. Absent (earlier versions' journals): only folders already empty go, up to the source. */cleanupScope?:string[];}
 import {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER,isRecordFolderName} from './legacy-names';
 import {ownRecordWrite} from './own-entries';
+import { noteJournal } from './run-trace';
 export {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from './legacy-names';
 /** This app's record folders, current and earlier: never organized, listed or cleaned as user files. */
 export const isRecoveryName=isRecordFolderName;
@@ -1064,6 +1065,8 @@ async function createJournal(spec:JournalSpec,entries:OrganizationEntry[],signal
  await writeNewFile(temporary,head);
  if(await renameChecked(temporary,journal)!=='done')throw new Error(`Unable to create ${journal}`);
  locations.set(m,{folder,journal,scope:store.path,store,eventsFrom:Buffer.byteLength(head)});
+ // The job running now owns this journal's scratch files, which its Clean up may remove.
+ noteJournal(m.root,m.id);
  await roots(m);
  return m;
 }

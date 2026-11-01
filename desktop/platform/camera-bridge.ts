@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { noteTemporary } from '../core/run-trace';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Source } from '../shared';
@@ -135,6 +136,8 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
 async function stageCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
   signal?.throwIfAborted();
   const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-camera-'));
+  // The job staging it owns the folder: its Clean up removes it if this run could not.
+  noteTemporary(scratch);
   const cleanup=()=>rm(scratch,{recursive:true,force:true});
   const abort=()=>{void closeCameraBridge();};signal?.addEventListener('abort',abort,{once:true});staging++;
   try {

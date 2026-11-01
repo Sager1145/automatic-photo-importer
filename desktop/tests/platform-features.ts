@@ -11,7 +11,7 @@ import { classifyVolume, validateDestination, type MountedVolume } from '../plat
 import { cameraCapacity, cameraSourcesFrom, stageRequest } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, linkRefused, pathKey, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
-import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
+import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeFolder, storeFor, storeIdentity, storesFor } from '../core/app-store';
 import { otherComputer } from './fixtures/other-computer';
 import { getOrganizationRecovery } from '../core/recovery';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +23,10 @@ import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type A
 import { probeDestination } from '../core/destination-probe';
 import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
 import { inventory } from '../core/inventory';
+import { recordPartial, IMPORTS, STAGING } from '../core/import-recovery';
+import { cleanResidue, findRunResidue } from '../core/residue';
+import { noteTemporary, runTrace } from '../core/run-trace';
+import { withJob } from '../logger';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -284,6 +288,36 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: profile.noHardLinkError }), profile.platform), true, profile.noHardLinkError);
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'ENOENT' }), profile.platform), false, 'a missing file is a real error');
     assert.equal(linkRefused(Object.assign(new Error('link'), { code: 'EEXIST' }), profile.platform), false, 'an existing name is a real error');
+  },
+  'Clean up for a stopped job: its camera folder in the system temporary folder and its staged copies go, nothing else': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'feature-job-cleanup-')));
+    // The camera helper's folder, made where it makes it: the system temporary folder as Node names it (macOS: a /var link to /private/var).
+    const camera = await mkdtemp(join(tmpdir(), 'photo-importer-camera-')), other = await mkdtemp(join(tmpdir(), 'photo-importer-camera-'));
+    try {
+      const card = join(base, 'card'), root = join(base, 'backup');
+      await mkdir(card); await mkdir(root);
+      await writeFile(join(card, 'DSC_0001.NEF'), Buffer.alloc(4000, 1)); await writeFile(join(camera, 'DSC_0001.NEF'), Buffer.alloc(800, 2)); await writeFile(join(other, 'DSC_0002.NEF'), 'x');
+      const [transfer] = (await plan(card, [root], { backup: false, template: '{year}/{camera}', layout: 'flat', unknownRules: {} }, async () => ({ camera: 'Nikon Z f', date: '2024-02-03T12:00:00Z', fields: {} }))).plans;
+      const staging = await storeFolder(await storeFor(root), IMPORTS, STAGING);
+      await withJob('feature-job', async () => {
+        noteTemporary(camera);
+        const staged = join(staging, `${randomUUID()}.partial`); await writeFile(staged, Buffer.alloc(1000, 1));
+        await recordPartial('stage', staged, await lstat(staged, { bigint: true }), transfer!.entries[0]!, transfer!, new Map());
+      });
+      const found = await findRunResidue({ job: 'feature-job', ...runTrace('feature-job')! });
+      // Paths come back as this system writes them, under the canonical temporary folder.
+      const temporary = found.items.find(item => item.kind === 'temporary')!;
+      assert.equal(temporary.path, await realpath(camera));
+      assert.equal(temporary.root, await realpath(tmpdir()));
+      assert.deepEqual(found.items.map(item => item.kind).sort(), ['resumable', 'temporary']);
+      await cleanResidue(found);
+      assert.deepEqual(await readdir(staging), []);
+      await assert.rejects(lstat(camera));
+      assert.deepEqual(await readdir(other), ['DSC_0002.NEF'], 'another camera folder stays');
+      assert.equal((await stat(join(card, 'DSC_0001.NEF'))).size, 4000, 'the original stays');
+    } finally { for (const folder of [base, camera, other]) await rm(folder, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {
     assert.deepEqual(cameraCapacity([{ name: 'Slot 1', total: 128, free: 64 }, { name: 'Slot 2', total: 128, free: 32 }]),

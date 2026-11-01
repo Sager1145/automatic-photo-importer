@@ -57,6 +57,7 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | Drive formats ([drive-formats.md](drive-formats.md)) | APFS, HFS+, exFAT, FAT RW; NTFS read only | NTFS, exFAT, FAT32 RW; no APFS, HFS+, ext4, Btrfs | ext4, Btrfs, exFAT, FAT, NTFS RW; HFS+ journaled read only; no APFS |
 | Accepting a destination | Every destination is probed (write, flush, read back by SHA-256, rename, delete) before it is used, whatever driver mounts it | same | same |
 | Record seal key | Per computer, listed in each drive's `store.json` ([shared-records.md](shared-records.md)) | Same | Same |
+| Clean up for a stopped or paused job (`findRunResidue`) | Only what the job made: receipts carrying its job id, its journals' scratch, its camera folder in `os.tmpdir()` (a `/var` link to `/private/var`, compared by real path) | Same; the camera folder is in `%TEMP%` | Same; `/tmp` |
 | Records folder identity | Inode (device numbers change per mount) | Volume serial `:` file id (a volume root's file id is 0) | Inode |
 
 ## Checklist for every change
