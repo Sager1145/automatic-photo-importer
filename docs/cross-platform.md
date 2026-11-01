@@ -30,7 +30,7 @@ This document is the contract. [Shared desktop implementation](multiplatform-mig
 
 Each platform has its own test file, and all of them check the same app features:
 
-- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, how a USB camera's location reads, and a camera's card slots and capacity.
+- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, a records folder made on another system, how a USB camera's location reads, and a camera's card slots and capacity.
 - `desktop/tests/platforms/darwin.ts`, `win32.ts` and `linux.ts` are the profiles. Each supplies that system's real data and setup: `diskutil` output, `/Volumes` and symbolic links on macOS; `Get-Volume` JSON, `D:\` and junctions on Windows; `lsblk` output, `/media` and symbolic links on Linux.
 - `platform-darwin.test.ts`, `platform-win32.test.ts` and `platform-linux.test.ts` each run the whole list with their profile. Features that use recorded tool output run on any machine; features that need the real filesystem run on their own system and skip elsewhere, saying why.
 - `platform-parity.test.ts` checks that all three files run the shared list, and that the builds match `release-targets.json`.
@@ -50,7 +50,8 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | Paths | `/`, case-insensitive by default (APFS) | `\`, case-insensitive, reserved names (`CON`, `NUL` …), no `<>:"/\|?*` | `/`, case-sensitive |
 | Symbolic links | Allowed | Need Developer Mode or admin | Allowed |
 | Release build | arm64 DMG | x64 MSI with branded dialogs, plus an x64 portable exe | Not released yet |
-| Record seal key | Per computer | Per computer | Per computer |
+| Record seal key | Per computer, listed in each drive's `store.json` ([shared-records.md](shared-records.md)) | Same | Same |
+| Records folder identity | Inode (device numbers change per mount) | Volume serial `:` file id (a volume root's file id is 0) | Inode |
 
 ## Checklist for every change
 
@@ -85,7 +86,8 @@ Keep this list current. Remove a line when the gap closes; add one, with the rea
 
 | Gap | Platforms | Notes |
 | --- | --- | --- |
-| A drive's records folder written on one computer is refused on another | All | Records are sealed with a per-computer key, so a backup drive moved between a Mac and a PC cannot record imports on the second one ("belongs to another computer or is damaged"). Needs a design for sharing or adopting a store. |
+| Organizations and imports recorded on another system are listed, not acted on | All | Seals, store identity, names and paths travel with the drive ([shared-records.md](shared-records.md)): a journal recorded at `/Volumes/A006/photobackup` is found for `I:\photobackup` and listed as recorded there. But journals and receipts identify files by that system's inode or file id, which differ between macOS and Windows on exFAT, so it cannot be resumed, undone or finalized on the other system (or after a Windows drive letter change). Needs a file identity both systems can check (for example size, times and SHA-256) before any move relies on it. |
+| Records folder identity on Linux exFAT | Linux | The kernel exFAT driver numbers inodes afresh on each mount, so a store's inode check (`storeIdentity`) would read a remounted exFAT drive as a copied folder. Needs a Linux identity that survives remounts before Linux is released. |
 | USB cameras in MTP/PTP mode | Linux | No adapter yet (gphoto2 or `/run/user/*/gvfs` are candidates). Mass-storage cameras and card readers work. |
 | macOS "Created" date on copies | Windows, Linux | The Mac sets Created through its helper; other systems keep the modified time only. |
 | Tests of symbolic links to files | Windows | Need Developer Mode; without it they skip with the reason (`needsFileSymlinks`). Folder links are tested everywhere: Windows uses a junction. |

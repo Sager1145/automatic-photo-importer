@@ -4,13 +4,17 @@
 // profile must supply what it needs; TypeScript and platform-parity.test.ts refuse a platform that skips one.
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { link, mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyVolume, validateDestination, type MountedVolume } from '../platform/volumes';
 import { cameraCapacity } from '../platform/camera-bridge';
 import { DIRECTORY_SYNC_SUPPORTED, posixRelative, syncDirectory, syncFile } from '../core/paths';
 import { EtaTracker, localDrives } from '../eta';
+import { configureHostKey, ensureStore, hostKeyConfigured, openV5, storeIdentity, storesFor } from '../core/app-store';
+import { otherComputer } from './fixtures/other-computer';
+import { getOrganizationRecovery } from '../core/recovery';
+import { randomUUID } from 'node:crypto';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -30,6 +34,8 @@ export interface PlatformProfile {
   systemDisk: string;
   /** exFAT destinations are written directly, each file checked in place (macOS, core/paths directCapable); elsewhere staged, then published by copying. */
   exfatDirect: boolean;
+  /** A drive's root as this system reports it (the base of its records), and the identity a store keeps for it. */
+  recordsDrive: { dev: bigint; ino: bigint; identity: string };
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -76,6 +82,34 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
   'records: relative paths are stored with "/" on every system': () => {
     const root = join(tmpdir(), 'library');
     assert.equal(posixRelative(root, join(root, '2026', '202610', 'NIKON Z f', 'DSC_0001.NEF')), '2026/202610/NIKON Z f/DSC_0001.NEF');
+  },
+  'records: a store made on another system opens here, and each system keeps its own identity of the drive': async profile => {
+    // docs/shared-records.md: the same drive is /Volumes/A006 on a Mac and I:\ on a PC, with different file identities.
+    if (!hostKeyConfigured()) configureHostKey('fixture-only-host-recovery-secret-32bytes');
+    assert.equal(storeIdentity(profile.recordsDrive, profile.platform), profile.recordsDrive.identity);
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-records-')));
+    try {
+      const here = await lstat(root, { bigint: true }), other = otherComputer(profile.platform);
+      // As that system wrote it: the drive under its own path, and its own identity of the folder (this folder's, when it is this system).
+      const identity = profile.platform === process.platform ? storeIdentity(here) : profile.recordsDrive.identity;
+      await mkdir(join(root, 'Photo Importer Data'));
+      await writeFile(join(root, 'Photo Importer Data', 'store.json'), JSON.stringify(other.storeRecord(profile.volumes()[1]!.path, identity)));
+      assert.deepEqual((await storesFor(root)).map(store => store.verified), [true]);
+      assert.equal(openV5('receipt', other.seal('receipt', { op: 'close', rid: 'written-there' })).op, 'close', 'its records verify here');
+      assert.equal((await ensureStore(root)).joined, true);
+      const record = JSON.parse(await readFile(join(root, 'Photo Importer Data', 'store.json'), 'utf8'));
+      assert.equal(record.identities[profile.platform], identity, 'that system keeps its identity');
+      assert.equal(record.identities[process.platform], storeIdentity(here));
+      assert.equal(record.base, root);
+      assert.deepEqual((await storesFor(root)).map(store => [store.verified, store.joined]), [[true, true]]);
+      // Its journal names the library under its own path for the drive: listed here as recorded there, never acted on.
+      const library = join(root, 'photobackup'), id = randomUUID();
+      const recordedRoot = profile.volumes()[1]!.path.replace(/[\\/]+$/, '') + (profile.platform === 'win32' ? '\\' : '/') + 'photobackup';
+      await mkdir(library); await mkdir(join(root, 'Photo Importer Data', 'Organizations', id), { recursive: true });
+      await writeFile(join(root, 'Photo Importer Data', 'Organizations', id, 'journal.jsonl'), other.line('organization', { id, root: recordedRoot }) + '\n');
+      const jobs = await getOrganizationRecovery(library);
+      assert.deepEqual(jobs.map(job => [job.id, job.recordedElsewhere, job.undoable, job.finalizable]), [[id, recordedRoot, false, false]]);
+    } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera without a drive letter reads as a short path': async profile => {
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');

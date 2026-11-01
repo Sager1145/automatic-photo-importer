@@ -47,7 +47,7 @@ import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {orphanedJournals} from './core/recovery';
-import {registerDestinations} from './core/app-store';
+import {joinStore,registerDestinations,registeredDestinations} from './core/app-store';
 import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-records';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
@@ -340,6 +340,8 @@ async function refresh(){
   state.destinationStatus=destinations;await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
+  // A drive's records are shared by every computer using it: list this one in each connected store it is not in yet.
+  for(const base of registeredDestinations())void joinStore(base).then(joined=>{if(joined)log('normal','records','store-joined',{base});},error=>log('normal','records','store-join-failed',{base,error:toMessage(error)}));
   // getSources leaves out the destinations, so every detected drive is a source.
   const detected=found;
   // A chosen folder the system now detects as a volume at the same path becomes that volume, still chosen.

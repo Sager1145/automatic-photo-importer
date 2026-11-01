@@ -151,6 +151,8 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
 Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
+Recorded with the drive at {place}. Finish or undo it on the computer that recorded it.|此记录是在驱动器位于 {place} 时写入的。请在写入它的电脑上完成或撤销。|此記錄是在磁碟機位於 {place} 時寫入的。請在寫入它的電腦上完成或復原。|この記録はドライブが {place} にあったときに作成されました。記録したコンピューターで完了するか元に戻してください。
+Recorded with the drive at another place or on another system; finish or undo it there.|此记录是在驱动器位于其他位置或其他系统上时写入的；请在那里完成或撤销。|此記錄是在磁碟機位於其他位置或其他系統上時寫入的；請在那裡完成或復原。|この記録はドライブが別の場所または別のシステムにあったときに作成されました。そちらで完了するか元に戻してください。
 {completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
 {step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
 {count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。

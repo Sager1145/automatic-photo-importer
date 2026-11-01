@@ -17,4 +17,6 @@ export const win32: PlatformProfile = {
   systemDisk: 'NTFS',
   exfatDirect: false,
   folderFlush: false,
+  // The A006 SSD's root (I:\) as Windows reports it: the volume serial 0xA04AA04E, and file id 0 for a volume root.
+  recordsDrive: { dev: 2689245262n, ino: 0n, identity: '2689245262:0' },
 };

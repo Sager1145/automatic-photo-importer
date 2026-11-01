@@ -54,13 +54,19 @@ test('readers find every store from the folder up to the top of its drive; a lin
  assert.deepEqual((await store.storesFor(library)).map(item=>item.path),[inner.path,outer.path]);
 });
 
-test('a store whose record another Mac sealed, or that was copied from another folder, is refused',async t=>{
+test('a store copied from another folder, or whose record matches none of its keys, is refused',async t=>{
  const root=await drive(t),one=path.join(root,'one'),two=path.join(root,'two');await fs.mkdir(one);await fs.mkdir(two);
  await store.ensureStore(one);
  await fs.cp(path.join(one,'Photo Importer Data'),path.join(two,'Photo Importer Data'),{recursive:true});
  await assert.rejects(store.storesFor(two),/copied from another folder/);
- await fs.writeFile(path.join(one,'Photo Importer Data','store.json'),JSON.stringify({v:5,kind:'store',base:one,seal:'0'.repeat(64)}));
- await assert.rejects(store.storesFor(one),/another computer or is damaged/);
+ const file=path.join(one,'Photo Importer Data','store.json'),record=JSON.parse(await fs.readFile(file,'utf8'));
+ await fs.writeFile(file,JSON.stringify({...record,seal:'0'.repeat(64)}));
+ await assert.rejects(store.storesFor(one),/damaged or was not made by this app/);
+ await fs.writeFile(file,'{"not":"a store"}');
+ await assert.rejects(store.storesFor(one),/Damaged Photo Importer Data record/);
+ // An earlier version's record another computer sealed is not refused: see shared-records.test.ts.
+ await fs.writeFile(file,JSON.stringify({v:5,kind:'store',base:one,baseIdentity:'1:2',minVersion:'0.3.0',seal:'0'.repeat(64)}));
+ assert.deepEqual((await store.storesFor(one)).map(item=>item.verified),[false]);
 });
 
 test('store unchanged: replacing the folder with another one is noticed',async t=>{
