@@ -386,7 +386,7 @@ function SidebarCapacity({ total, free, unavailable, status, activity, compact =
 // and applied to the DOM directly so measuring never re-renders. While the same drives are listed it
 // only grows: progress ticks change free space every second, and shrinking back would shift the page.
 function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
-  const held = useRef<{ drives: string; width: number } | undefined>(undefined);
+  const held = useRef<{ drives: string; width: number; grown: boolean } | undefined>(undefined);
   const fit = useCallback((event?: Event) => {
     const aside = sidebar.current; if (!aside) return;
     const root = document.documentElement, texts = [...aside.querySelectorAll<HTMLElement>('.sidebar-capacity-text')].filter(text => text.querySelector('.capacity-full'));
@@ -404,9 +404,9 @@ function useSidebarFit(sidebar: RefObject<HTMLElement | null>) {
     const lines = [...capacity, ...named];
     const drives = [...names.map(name => name.textContent), texts.length].join('\n');
     // A resize, or a drive that comes or goes, fits from scratch.
-    const floor = !event && held.current?.drives === drives ? held.current.width : undefined;
-    const result = sidebarFit({ lines, chrome: current - Math.min(...lines.map(line => line.available)), minimum: 190, maximum: Math.min(360, window.innerWidth * .28), current, floor });
-    held.current = { drives, width: result.width };
+    const hold = !event && held.current?.drives === drives ? held.current : undefined;
+    const result = sidebarFit({ lines, chrome: current - Math.min(...lines.map(line => line.available)), minimum: 190, maximum: Math.min(360, window.innerWidth * .28), current, hold });
+    held.current = { drives, width: result.width, grown: result.grown };
     root.style.setProperty('--sidebar-width', `${result.width}px`);
     texts.forEach((text, index) => text.classList.toggle('is-compact', result.compact[index]!));
   }, [sidebar]);
