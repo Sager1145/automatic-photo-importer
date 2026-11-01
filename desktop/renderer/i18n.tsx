@@ -2,6 +2,7 @@ import { browserTranslationRows } from './browser/translations';
 import { workspaceTranslationRows } from './workspace-translations';
 import { safetyTranslationRows } from './safety-translations';
 import { settingsTranslationRows } from './settings-translations';
+import { driveFormatTranslationRows } from './drive-format-translations';
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Language } from '../shared';
 import { formatMessage, type Message } from '../messages';
@@ -151,6 +152,8 @@ Finishing up: {completed} of {total}|正在收尾：{completed}/{total}|正在�
 {completed} of {total} files deleted|已删除 {completed}/{total} 个文件|已刪除 {completed}/{total} 個檔案|{total} 件中 {completed} 件を削除済み
 Leftover files progress|残留文件进度|殘留檔案進度|残りファイルの進行状況
 Library folder not found|未找到资料库文件夹|找不到資料庫資料夾|ライブラリフォルダーが見つかりません
+Recorded with the drive at {place}. Finish or undo it on the computer that recorded it.|此记录是在驱动器位于 {place} 时写入的。请在写入它的电脑上完成或撤销。|此記錄是在磁碟機位於 {place} 時寫入的。請在寫入它的電腦上完成或復原。|この記録はドライブが {place} にあったときに作成されました。記録したコンピューターで完了するか元に戻してください。
+Recorded with the drive at another place or on another system; finish or undo it there.|此记录是在驱动器位于其他位置或其他系统上时写入的；请在那里完成或撤销。|此記錄是在磁碟機位於其他位置或其他系統上時寫入的；請在那裡完成或復原。|この記録はドライブが別の場所または別のシステムにあったときに作成されました。そちらで完了するか元に戻してください。
 {completed} of {total}|{completed}/{total}|{completed}/{total}|{total} 件中 {completed} 件
 {step} · {completed} of {total}|{step} · {completed}/{total}|{step} · {completed}/{total}|{step} · {total} 件中 {completed} 件
 {count} complete copies whose card file changed are kept ({size}): each may be the only copy.|{count} 个完整副本的卡上文件已更改，已保留（{size}）：每个都可能是唯一的副本。|{count} 個完整副本的卡上檔案已變更，已保留（{size}）：每個都可能是唯一的副本。|カード上のファイルが変更された完全なコピー {count} 件を保持しています（{size}）。それぞれが唯一のコピーかもしれません。
@@ -387,21 +390,11 @@ Videos|视频|影片|動画
 {count} companions|{count} 个伴随文件|{count} 個伴隨檔案|関連ファイル {count} 件
 {count} other files|{count} 个其他文件|{count} 個其他檔案|その他 {count} 件
 {count} of 10|{count} / 10|{count} / 10|{count} / 10
-Drive backups|驱动器备份|磁碟備份|ドライブのバックアップ
-Drive backup mode|驱动器备份模式|磁碟備份模式|ドライブのバックアップモード
 Same name, different content|同名但内容不同|同名但內容不同|同じ名前で内容が違うファイル
 Conflicts folder|Conflicts 文件夹|Conflicts 資料夾|Conflicts フォルダ
 Add a number|添加编号|加上編號|番号を付ける
 Saved with its own name in a Conflicts folder inside the camera folder, one subfolder per file.|保留原文件名，存入相机文件夹内的 Conflicts 文件夹，每个文件一个子文件夹。|保留原檔名，存入相機資料夾內的 Conflicts 資料夾，每個檔案一個子資料夾。|元の名前のまま、カメラフォルダ内の Conflicts フォルダに保存します。ファイルごとにサブフォルダを作ります。
 Saved beside the other file with a number: IMG_0001 (1).JPG, then (2). Its sidecars get the same number.|在另一个文件旁加编号保存：IMG_0001 (1).JPG，之后是 (2)。其附属文件使用相同编号。|在另一個檔案旁加編號儲存：IMG_0001 (1).JPG，之後是 (2)。其附屬檔案使用相同編號。|もう一方のファイルの隣に番号を付けて保存します：IMG_0001 (1).JPG、次は (2)。サイドカーファイルにも同じ番号が付きます。
-Additive|只增不删|只增不刪|追加のみ
-Mirror|镜像|鏡像|ミラー
-Drive backups are saved here on each destination|驱动器备份保存在每个目标的此位置|磁碟備份儲存在每個目的地的此位置|ドライブのバックアップは各保存先のここに保存されます
-{count} files will be moved to Removed by mirror|{count} 个文件将移到 Removed by mirror|{count} 個檔案將移到 Removed by mirror|{count} 件のファイルが Removed by mirror へ移動されます
-Drive folder: {folder}|驱动器文件夹：{folder}|磁碟資料夾：{folder}|ドライブフォルダー：{folder}
-Reason|原因|原因|理由
-No longer on the drive|驱动器上已不存在|磁碟上已不存在|ドライブにもう存在しません
-Replaced by a newer version|已被较新版本取代|已被較新版本取代|新しいバージョンに置き換えられました
 Unknown files|未知文件|未知檔案|不明なファイル
 Skip automatically|自动跳过|自動略過|自動的にスキップ
 Copy to Other files folder|复制到“其他文件”文件夹|複製到「其他檔案」資料夾|「その他のファイル」フォルダーにコピー
@@ -469,6 +462,7 @@ Verification after copy is off|复制后校验已关闭|複製後驗證已關閉
 {completed} of {total} files copied|已复制 {completed}/{total} 个文件|已複製 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピー済み
 {completed} of {total} files copied or confirmed|已复制或确认 {completed}/{total} 个文件|已複製或確認 {completed}/{total} 個檔案|{total} 件中 {completed} 件をコピーまたは確認済み
 {count} failed|{count} 个失败|{count} 個失敗|{count} 件失敗
+{copied} copied · {skipped} already in the backup|已复制 {copied} 个 · {skipped} 个已在备份中|已複製 {copied} 個 · {skipped} 個已在備份中|{copied} 件コピー · {skipped} 件はバックアップ済み
 Import steps|导入步骤|匯入步驟|読み込みの手順
 Scanning|扫描|掃描|スキャン
 Copying|复制|複製|コピー
@@ -485,7 +479,6 @@ All files are in the backup and verified|所有文件已在备份中并通过校
 A destination is offline. Reconnect it to import.|有目标离线，请重新连接后再导入。|有目的地離線，請重新連接後再匯入。|保存先がオフラインです。再接続してから読み込んでください。
 A verified copy on both drives.|在两个驱动器上各保存一份校验副本。|在兩個磁碟上各保存一份驗證副本。|両方のドライブに検証済みコピーを保存します。
 Apply or discard the review.|请应用或放弃此审核。|請套用或放棄此審核。|確認内容を適用するか破棄してください。
-Backup matches the drive. Removed files are moved aside, not deleted.|备份与驱动器保持一致。已删除的文件会被移开，不会被删除。|備份與磁碟保持一致。已刪除的檔案會被移開，不會被刪除。|バックアップをドライブと一致させます。削除されたファイルは移動され、消去されません。
 Camera folders (DCIM) found.|找到相机文件夹（DCIM）。|找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）があります。
 Connected as a camera over USB.|已作为相机通过 USB 连接。|已作為相機透過 USB 連接。|USBでカメラとして接続されています。
 Change this any time in Settings › Devices.|可随时在“设置 › 设备”中更改。|可隨時在「設定 › 裝置」中變更。|「設定 › デバイス」でいつでも変更できます。
@@ -494,13 +487,10 @@ Connect a memory card or camera to start.|连接存储卡或相机即可开始�
 Copied to an Other files folder.|复制到“其他文件”文件夹。|複製到「其他檔案」資料夾。|「その他のファイル」フォルダーにコピーします。
 Copy every file, keeping its folders.|复制所有文件并保留其文件夹结构。|複製所有檔案並保留其資料夾結構。|フォルダー構成を保ったまま全ファイルをコピーします。
 Copying starts when you apply.|应用后才开始复制。|套用後才開始複製。|適用するとコピーを開始します。
-Deleted files stay in the backup.|已删除的文件会保留在备份中。|已刪除的檔案會保留在備份中。|削除したファイルもバックアップに残ります。
 Edited exports go here, inside each month folder.|编辑导出的照片放在这里，位于每个月份文件夹中。|編輯匯出的照片放在這裡，位於每個月份資料夾中。|編集済みの書き出しは各月フォルダー内のここに入ります。
 Fill the first drive, then use the second.|先存满第一个驱动器，再使用第二个。|先存滿第一個磁碟，再使用第二個。|1台目がいっぱいになったら2台目を使います。
 Finished imports appear here.|完成的导入会显示在这里。|完成的匯入會顯示在這裡。|完了した読み込みがここに表示されます。
 Index files the camera writes. Not needed.|相机写入的索引文件，不需要导入。|相機寫入的索引檔案，不需要匯入。|カメラが書き込むインデックスファイルです。不要です。
-Mirror doesn't work with “Fill first, then second”.|镜像不能与“先存满第一块再用第二块”同时使用。|鏡像不能與「先存滿第一顆再用第二顆」同時使用。|ミラーは「1台目から順に保存」と併用できません。
-Mirror is on: removed files are moved aside after review.|镜像已开启：已删除的文件会在审核后被移开。|鏡像已開啟：已刪除的檔案會在審核後被移開。|ミラーがオン：削除されたファイルは確認後に移動されます。
 Move existing files into your folder structure.|将现有文件移入你的文件夹结构。|將現有檔案移入你的資料夾結構。|既存のファイルをフォルダー構成に合わせて移動します。
 No camera folders (DCIM) found.|未找到相机文件夹（DCIM）。|未找到相機資料夾（DCIM）。|カメラフォルダー（DCIM）がありません。
 {count} organized files are no longer where this organization put them.|{count} 个已整理的文件已不在此次整理放置的位置。|{count} 個已整理的檔案已不在此次整理放置的位置。|整理したファイルのうち {count} 件は、この整理で置いた場所にありません。
@@ -514,9 +504,7 @@ Camera details for {name}|{name} 的相机详情|{name} 的相機詳細資訊|{n
 {count} files without a camera model|{count} 个文件没有相机型号|{count} 個檔案沒有相機型號|カメラ機種のないファイル {count} 件
 No camera data from a scan yet. Scan this drive to see its cameras.|还没有扫描得到的相机数据。扫描此驱动器即可查看其相机。|尚無掃描得到的相機資料。掃描此磁碟即可查看其相機。|スキャンによるカメラ情報はまだありません。このドライブをスキャンするとカメラを確認できます。
 No saved rules.|没有已保存的规则。|沒有已儲存的規則。|保存されたルールはありません。
-Not available with Mirror.|镜像模式下不可用。|鏡像模式下不可用。|ミラーでは使用できません。
 Not photos or videos. Change this in Settings.|不是照片或视频。可在设置中更改。|不是照片或影片。可在設定中變更。|写真でも動画でもありません。設定で変更できます。
-Nothing is deleted; files go to Removed by mirror.|不会删除任何文件；文件会移到 Removed by mirror。|不會刪除任何檔案；檔案會移到 Removed by mirror。|何も削除されません。ファイルは Removed by mirror に移動します。
 Nothing moves until you apply.|应用之前不会移动任何文件。|套用之前不會移動任何檔案。|適用するまで何も移動しません。
 One verified copy.|一份校验过的副本。|一份驗證過的副本。|検証済みコピーを1つ保存します。
 Reads each copy back to confirm it. Off is faster.|重新读取每个副本以确认无误。关闭会更快。|重新讀取每個副本以確認無誤。關閉會更快。|各コピーを読み直して確認します。オフにすると速くなります。
@@ -533,7 +521,6 @@ Retry|重试|重試|再試行
 Run this job again, including files that had errors|重新运行此任务，包括出错的文件|重新執行此工作，包括出錯的檔案|エラーのファイルも含めてこのジョブをもう一度実行
 This job ended with errors.|此任务完成时有错误。|此工作完成時有錯誤。|このジョブはエラーがある状態で終了しました。
 Show in Finder|在访达中显示|在 Finder 中顯示|Finder で表示
-Review what Mirror will move to continue.|请先审核镜像将移动的文件再继续。|請先審核鏡像將移動的檔案再繼續。|続行するには、ミラーで移動するファイルを確認してください。
 Locked while an import, organization or review is active, including paused or queued ones. Finish or stop them to change this.|导入、整理或审核进行期间（包括已暂停或排队中的）已锁定。请先完成或停止它们再更改。|匯入、整理或審核進行期間（包括已暫停或排隊中的）已鎖定。請先完成或停止它們再變更。|読み込み・整理・レビューの実行中（一時停止中や待機中を含む）はロックされています。完了または停止してから変更してください。
 Some settings are locked while work is active.|有任务进行时，部分设置已锁定。|有工作進行時，部分設定已鎖定。|作業中は一部の設定がロックされています。
 Showing 500 matches. Search to narrow.|显示 500 个匹配项，可搜索以缩小范围。|顯示 500 個符合項目，可搜尋以縮小範圍。|500件を表示中。検索で絞り込めます。
@@ -595,8 +582,6 @@ Files on the drive changed during the import.|导入过程中驱动器上的文�
 Scan the drive again, then import.|请重新扫描驱动器后再导入。|請重新掃描磁碟後再匯入。|ドライブを再スキャンしてから読み込んでください。
 A copy didn't match the original.|有副本与原始文件不一致。|有副本與原始檔案不一致。|コピーが元のファイルと一致しませんでした。
 Import again. The mismatched copy isn't kept.|请重新导入。不一致的副本不会保留。|請重新匯入。不一致的副本不會保留。|もう一度読み込んでください。一致しないコピーは残りません。
-Mirror needs your review before moving files.|镜像在移动文件前需要你审核。|鏡像在移動檔案前需要你審核。|ミラーがファイルを移動する前に確認が必要です。
-Open Review on this drive.|请在此驱动器上打开“审核”。|請在此磁碟上開啟「審核」。|このドライブで「確認」を開いてください。
 The drive was disconnected or a file is missing.|驱动器已断开或文件缺失。|磁碟已中斷連接或檔案遺失。|ドライブが取り外されたか、ファイルが見つかりません。
 Reconnect the drive and try again.|请重新连接驱动器后重试。|請重新連接磁碟後重試。|ドライブを再接続してもう一度お試しください。
 The drive reported a read or write error.|驱动器报告了读写错误。|磁碟回報了讀寫錯誤。|ドライブで読み書きエラーが発生しました。
@@ -814,6 +799,10 @@ See All errors for details.|请在“所有错误”中查看详情。|請在「
 Organize now|立即整理|立即整理|今すぐ整理
 Review changes…|预览更改…|預覽變更…|変更を確認…
 Library organization|媒体库整理|媒體庫整理|ライブラリの整理
+Every file: photos and videos by date and camera, other files in Unknown files.|所有文件：照片和视频按日期和相机归档，其他文件放入 Unknown files。|所有檔案：照片和影片依日期和相機歸檔，其他檔案放入 Unknown files。|すべてのファイル：写真と動画は日付とカメラ別に、その他のファイルは Unknown files に。
+Every file is copied into the library. Photos and videos are filed by date and camera; other files go to Unknown files of their date.|每个文件都会复制到媒体库。照片和视频按日期和相机归档；其他文件放入对应日期的 Unknown files。|每個檔案都會複製到媒體庫。照片和影片依日期和相機歸檔；其他檔案放入對應日期的 Unknown files。|すべてのファイルをライブラリにコピーします。写真と動画は日付とカメラ別に整理し、その他のファイルはその日付の Unknown files に入れます。
+Files deleted from the drive stay in the library. Nothing is removed or moved aside.|从驱动器删除的文件仍保留在媒体库中。不会删除或移走任何文件。|從磁碟刪除的檔案仍保留在媒體庫中。不會刪除或移走任何檔案。|ドライブから削除したファイルもライブラリに残ります。何も削除・移動しません。
+Other files are saved here|其他文件保存在此处|其他檔案儲存在此處|その他のファイルの保存先
 Import: copy, source untouched|导入：复制，来源保持不变|匯入：複製，來源保持不變|インポート：コピー、ソースはそのまま
 Organize: move, source removed|整理：移动，来源文件已移除|整理：移動，來源檔案已移除|整理：移動、ソースから削除
 Emptied source folders are removed|已清空的来源文件夹会被删除|已清空的來源資料夾會被刪除|空になった元フォルダーは削除されます
@@ -1033,7 +1022,7 @@ Log size: {size}|日志大小：{size}|記錄檔大小：{size}|ログのサイ�
 Logs stay on this Mac. They never include file contents or recovery keys.|日志只保存在这台 Mac 上，不含文件内容或恢复密钥。|記錄檔只保存在這台 Mac 上，不含檔案內容或復原金鑰。|ログはこの Mac にのみ保存され、ファイルの内容や復元キーは含まれません。
 `;
 export const translationCatalogs: Record<Exclude<Language, 'en'>, Record<string, string>> = { 'zh-Hans': {}, 'zh-Hant': {}, ja: {} };
-for (const row of [rows, settingsTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
+for (const row of [rows, settingsTranslationRows, driveFormatTranslationRows, safetyTranslationRows, workspaceTranslationRows, browserTranslationRows].join('\n').trim().split('\n').filter(Boolean)) {
   const [english, simplified, traditional, japanese] = row.split('|');
   translationCatalogs['zh-Hans'][english] = simplified;
   translationCatalogs['zh-Hant'][english] = traditional;

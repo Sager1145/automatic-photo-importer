@@ -184,7 +184,8 @@ for(const [name,exfat,changeTimes] of [['the volume is not known to keep change 
 });
 test('deleting originals reads a source whose change time moved',async t=>{
  const {deleteOriginals}=await import('../core/originals'),f=await originals(t,'verify-once-originals-ctime-');
- await new Promise(resolve=>setTimeout(resolve,20));await fs.chmod(f.source,0o600);
+ // Read-only and back moves the change time everywhere; Windows keeps only that bit, so a bare chmod 0o600 changes nothing there.
+ await new Promise(resolve=>setTimeout(resolve,20));await fs.chmod(f.source,0o400);await fs.chmod(f.source,0o600);
  const reads=countReads(t,f.role);
  const result=await deleteOriginals(f.root,[f.file],{changeTimes:true});
  reads.stop();

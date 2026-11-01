@@ -67,3 +67,34 @@ test('the space a job needs shows only while it is queued or running', async () 
   assert.match(await desk([verifiedError({ phase: 'copying', progress: { phase: 'copying', completed: 1, total: 2, bytes: 1, totalBytes: 2, speed: 0, file: '' } })]), needs);
   for (const phase of ['complete', 'error', 'stopped'] as const) assert.doesNotMatch(await desk([verifiedError({ phase })]), needs, phase);
 });
+
+// Seen 2026-11-01 on Windows: imports whose every file failed left their cards reading "40 of 43 files verified · 93%" and
+// "46 of 46 files verified · 100%" (the last progress event), while History read "0 copied · 0 verified · 43 errors".
+const failedImport = (completed: number, total: number, errors: number) => verifiedError({ id: `f${total}`, progress: { phase: 'verifying', completed, total, bytes: 0, totalBytes: 1e9, speed: 0, file: '' }, importResult: { copied: 0, skipped: 0, planned: total, errors } });
+test('an import whose files all failed shows its result on the card, as History does, not the last step count', async () => {
+  const { cardFraction, allVerified, jobFinished } = await import('../renderer/progress');
+  for (const job of [failedImport(40, 43, 43), failedImport(46, 46, 46)]) {
+    assert.ok(!allVerified(job) && !jobFinished(job), 'no file was verified');
+    assert.equal(cardFraction(job), 0);
+    const page = await desk([job]);
+    assert.doesNotMatch(page, /files verified/);
+    assert.doesNotMatch(page, /93%|100%|>Verified</);
+    assert.match(page, /0 copied · 0 already in the backup/);
+    assert.match(page, new RegExp(`${job.importResult!.errors} errors`));
+    assert.match(page, />0%</);
+  }
+});
+
+test('an import that ended with errors after some copies shows how many were verified', async () => {
+  const { cardFraction } = await import('../renderer/progress');
+  const job = verifiedError({ progress: { phase: 'verifying', completed: 43, total: 43, bytes: 0, totalBytes: 1e9, speed: 0, file: '' }, importResult: { copied: 30, skipped: 3, planned: 43, errors: 10 } });
+  assert.equal(cardFraction(job), 33 / 43);
+  const page = await desk([job]);
+  assert.match(page, /30 copied · 3 already in the backup/);
+  assert.match(page, /10 errors/);
+  assert.match(page, />76%</);
+  // Every file verified and only cleanup leftovers failed: still finished.
+  const leftovers = verifiedError({ importResult: { copied: 43539, skipped: 0, planned: 43539, errors: 1 } });
+  assert.equal(cardFraction(leftovers), 1);
+  assert.match(await desk([leftovers]), /100%/);
+});

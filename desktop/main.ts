@@ -25,12 +25,13 @@ import {unknownDecision} from './unknown-confirm';
 import {noMetadataFolderName} from './no-metadata';
 import {plan,findMisplaced,placedByEarlierJournals,type PlanProgress,type PlanRequest,type OrganizationProgress,getOrganizationRecovery,resumeOrganization,finalizeOrganization,undoOrganization,deleteOrganizationRecovery,measureOrganizationRecovery,configureOrganizationRecovery,RECOVERY_FOLDER,setMoveObserver} from './core';
 import {settingsLocked,acceptedPreferences} from './settings-lock';
-import {within,isAbort,unlinkEntry,isOwnRealpath} from './core/paths';
+import {within,isAbort,unlinkEntry,isOwnRealpath,posixRelative} from './core/paths';
 import {rules} from './core/inventory';
 import {executeDestinations,type DestinationOutcome} from './core/destinations';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
 import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
-import {backupDriveIdentity,folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,onCameraCard,type MountedVolume} from './platform/volumes';
+import {checkFileSizes,driverLinks} from './core/drive-formats';
+import {folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,onCameraCard,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
 import {chosenFolders,destinationRoots,libraryAnchor,libraryRoots,type ChosenFolder} from './platform/destination-roots';
 import {resolveFolderSources} from './folder-sources';
@@ -47,7 +48,7 @@ import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,type ResidueItem} from './core/residue';
 import {orphanedJournals} from './core/recovery';
-import {registerDestinations} from './core/app-store';
+import {joinStore,registerDestinations,registeredDestinations} from './core/app-store';
 import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-records';
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
@@ -333,13 +334,21 @@ function savedOutcome(value:unknown,title:Message,detail:Message):HistoryEntry['
 async function load(){try{const data=JSON.parse(await fs.readFile(store(),'utf8'));state.preferences=normalizePreferences(data.preferences);applyLimits();state.organizationFolders=data.organizationFolders&&typeof data.organizationFolders==='object'?data.organizationFolders:{};browseFolders=Array.isArray(data.browseFolders)?data.browseFolders.filter((folder:unknown):folder is string=>typeof folder==='string'&&path.isAbsolute(folder)).slice(0,50):[];state.history=Array.isArray(data.history)?data.history.slice(0,50).flatMap((entry:Record<string,unknown>)=>{const title=savedMessage(entry?.title),detail=savedMessage(entry?.detail);return title&&detail&&typeof entry.id==='string'&&typeof entry.date==='string'?[{id:entry.id,date:entry.date,title,detail,outcome:savedOutcome(entry.outcome,title,detail)}]:[];}):[];organizationLocations=Array.isArray(data.organizationLocations)?data.organizationLocations.filter((item:OrganizationLocation)=>typeof item?.root==='string'&&typeof item.destination==='string'&&typeof item.volumeId==='string'&&within(item.root,item.destination)):[];}catch{/* First launch uses explicit setup. */}if(qa)state.preferences=normalizePreferences(undefined);}
 function addHistory(title:Message,detail:Message,outcome:HistoryEntry['outcome']){state.history.unshift({id:randomUUID(),date:new Date().toISOString(),title,detail,outcome});state.history=state.history.slice(0,50);void save().catch(()=>{});}
 async function allowed(file:string){const real=await fs.realpath(file);for(const root of [...approved,...state.sources.map(s=>s.path),...chosenFolders(state.preferences,true).map(folder=>folder.path),...(catalogCoordinator?.libraries.filter(library=>library.online).map(library=>catalogCoordinator!.binding(library.libraryId)!.root)??[])])if(within(real,await fs.realpath(root).catch(()=>root)))return real;throw new Error('Choose this file or its source folder first.');}
+/** Connected drives for Settings › Devices › Drive formats: disk images and nameless mounts are left out. */
+function driveFormatsOf(volumes:MountedVolume[]):NonNullable<AppState['driveFormats']>{
+ // The startup disk: "/" on macOS and Linux, the system drive's letter on Windows.
+ const system=process.platform==='win32'?`${process.env.SystemDrive??'C:'}\\`.toLowerCase():'/';
+ return volumes.filter(volume=>!volume.diskImage&&(volume.fsType||volume.name)).map(volume=>({path:volume.path,name:volume.name||volume.path,...(volume.fsType?{fsType:volume.fsType}:{}),...(volume.readOnly?{readOnly:true}:{}),...(volume.path.toLowerCase()===system?{system:true}:{})}));
+}
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
   const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
-  state.destinationStatus=destinations;await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
+  state.destinationStatus=destinations;state.driveFormats=driveFormatsOf(volumes);await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
+  // A drive's records are shared by every computer using it: list this one in each connected store it is not in yet.
+  for(const base of registeredDestinations())void joinStore(base).then(joined=>{if(joined)log('normal','records','store-joined',{base});},error=>log('normal','records','store-join-failed',{base,error:toMessage(error)}));
   // getSources leaves out the destinations, so every detected drive is a source.
   const detected=found;
   // A chosen folder the system now detects as a volume at the same path becomes that volume, still chosen.
@@ -637,7 +646,7 @@ function rememberPlaced(plans:TransferPlan[],prefs:Preferences,outcomes:Outcomes
   try{
    for(const [index,plan] of plans.entries()){
     // Placement memory is kept per library; folders on two drives are not one library, so nothing is remembered for them.
-    if(plan.drive||!prefs.destinations[index]||!libraryAnchor(prefs,index))continue;
+    if(!prefs.destinations[index]||!libraryAnchor(prefs,index))continue;
     const {library,id,scope}=placementOf(prefs,index,useFileDate);
     if(!complete&&await placementScope(app.getPath('userData'),id)!==scope){if(!outcomes)await forgetPlacement(app.getPath('userData'),id);continue;}
     if(!outcomes){await replacePlacement(app.getPath('userData'),id,scope,[]);continue;}
@@ -795,7 +804,7 @@ function backupLibrary(prefs:Preferences):{source:string;root:string;videoRoot?:
  const [root,videoRoot]=libraryRoots(prefs,0),source=libraryAnchor(prefs,0);
  if(!root)throw new MessageError('error.chooseDestination');
  if(!source)throw new MessageError('error.organizeVideoOtherDrive');
- return videoRoot?{source,root,videoRoot,sourceFolders:[root,videoRoot].map(folder=>path.relative(source,folder))}:{source:root,root};
+ return videoRoot?{source,root,videoRoot,sourceFolders:[root,videoRoot].map(folder=>posixRelative(source,folder))}:{source:root,root};
 }
 /** One destination of `prefs` as the only one, with its photo and video folders. */
 function slotPreferences(prefs:Preferences,index:number):Preferences{
@@ -835,10 +844,6 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
  const apart=infos.map((info,index)=>!!videoInfos?.[index]&&reservationVolume(volumes,videoInfos[index]!.path)!==reservationVolume(volumes,info.path));
  const eta={source:etaDrive(volumes,source.path,source.transport),destinations:infos.map(info=>etaDrive(volumes,info.path,'storage'))};
  etaTracker.plan(owner,{kind:reorganize?'organization':'import',...eta,...(reorganize?{}:{publish:etaTracker.predictPublish(eta.destinations),direct:etaTracker.predictDirect(eta.destinations)})});
- const mirror=backup&&prefs.backupMode==='mirror';
- if(mirror&&prefs.copyMode==='sequential')throw new MessageError('error.mirrorSequential');
- const drive=backup?{name:source.name,mirror,...await backupDriveIdentity(source.path,volumes)}:undefined;
- if(drive?.mirror&&!drive.stable)throw new MessageError('error.mirrorNoUuid');
  let stage:Prepared['stage'],sourcePath=source.path;
  try{
   if(source.transport==='camera'){
@@ -848,7 +853,7 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
    for(const [index,root] of (videoRoots??[]).entries())if(apart[index]){const info=await volumeInfo(root,volumes);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');videoInfos![index]={...videoInfos![index]!,free:info.free};}
   }
   // The folder for unknown files must not be one the app files into.
-  if(!backup&&!request.useFileDate&&prefs.noMetadataHandling==='folder')noMetadataFolderName(prefs.noMetadataFolder,[prefs.editedFolder??'']);
+  if(!request.useFileDate&&prefs.noMetadataHandling==='folder')noMetadataFolderName(prefs.noMetadataFolder,[prefs.editedFolder??'']);
   onPlanning?.();
   // Card files copied before and still unchanged are recognised without reading them.
   const volume=reorganize||stage?undefined:memoryVolume(source),sourceDigest=volume&&!qa?await loadImported(app.getPath('userData'),volume,source.path):undefined;
@@ -857,7 +862,8 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
   // Selected folders are sized from the files an earlier scan found inside them; the whole drive's used space would overestimate them.
   const previous=reorganize?undefined:reusableScan(source);
   const listing=await listingOptions(source.transport==='camera'?source.id:sourcePath,sourceFolders,backup,scopeHint(previous?.files,sourceFolders),reorganize||sourceFolders?.length?0:usedBytes(source));
-  // One request per intent: an organization files by the rules and keeps unknown files where they are; a drive backup keeps the drive's layout.
+  // One request per intent: an organization files by the rules and keeps unknown files where they are; an import files media by the
+  // rules, and a Files & folders import (`backup`) takes every file: what is not media goes to Unknown files. Nothing keeps a drive's layout.
   const listed={...listing,reuse:reusableScan(source),sourceFolders,keepMacFiles:prefs.removeAppleDouble===false,conflictNaming:prefs.conflictNaming,...(request.exclude?.length?{exclude:request.exclude}:{})};
   const {unknownRules,unknownDefault,...folderRules}=ruleOptions(prefs,request.useFileDate),filed={...folderRules,...(videoRoots?{videoRoots}:{})};
   const copy={...listed,unknownRules,unknownDefault,sourceDigest,skipErrors,...(prefs.copyMode==='sequential'?{fillFirst:(first:TransferPlan)=>{
@@ -865,10 +871,11 @@ async function prepare(owner:string,source:Source,backup:boolean,request:RunRequ
    const {kept,bytes,videoBytes}=fillFirst(first,availableFor(owner,infos,volumes)[0]!,apart[0]?availableFor(owner,videoInfos!,volumes)[0]!:undefined);reservations.set(owner,[{volume:reservationVolume(volumes,infos[0]!.path),bytes},...(apart[0]?[{volume:reservationVolume(volumes,videoInfos![0]!.path),bytes:videoBytes}]:[])]);return kept;
   }}:{})};
   const planning:PlanRequest=reorganize?{...filed,...listed,backup:false,reorganize:true,collectProblems:prefs.collectProblemFiles!==false}
-   :drive?{...copy,backup:true,drive:{name:drive.name,identity:drive.identity,mirror:drive.mirror}}
-   :{...filed,...copy,backup:false,duplicates:true,lookElsewhere:async paths=>qa||(await Promise.all(paths.map(async root=>{const index=Math.max(roots.indexOf(root),videoRoots?.indexOf(root)??-1);if(index<0)return true;const {id,scope}=placementOf(prefs,index,request.useFileDate);return await placementScope(app.getPath('userData'),id)!==scope;}))).some(changed=>changed)};
+   :{...filed,...copy,backup:false,duplicates:true,...(backup?{everyFile:true}:{}),lookElsewhere:async paths=>qa||(await Promise.all(paths.map(async root=>{const index=Math.max(roots.indexOf(root),videoRoots?.indexOf(root)??-1);if(index<0)return true;const {id,scope}=placementOf(prefs,index,request.useFileDate);return await placementScope(app.getPath('userData'),id)!==scope;}))).some(changed=>changed)};
   const {inventory,listing:record,plans,failures,problems,duplicates,elsewhere,noMetadata}=await plan(sourcePath,roots,planning,p=>metadata(p,{details:false}),signal,onProgress);
   signal.throwIfAborted();
+  // A FAT32 destination cannot hold a file over 4 GiB: the import is refused now, before anything is copied, not midway.
+  if(!reorganize)checkFileSizes(plans,root=>volumeOf(volumes,root)?.fsType);
   const available=availableFor(owner,infos,volumes),videoAvailable=videoInfos?availableFor(owner,videoInfos,volumes):[];
   // A same-drive organization moves files; it never needs room for a second library.
   // A video folder on its own volume is checked against that volume: the photo folder's plan then counts its photos only.
@@ -926,13 +933,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(parts.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
   else{
-   job.phase='discovering';job.progress=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
+   job.phase='discovering';job.progress=undefined;job.importResult=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
    await stopResidueCheck();
    if(qaHooks)await qaHooks.gate(job.id,signal);
    prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
-   // Mirror moves only run from a review the user applied.
-   const moving=prepared.review.plans.reduce((sum,plan)=>sum+(plan.removals?.length??0),0);
-   if(moving)throw new MessageError('error.mirrorReview',{count:moving});
   }
   // A job someone started (not an automatic one) that found unknown files stops at the review's confirmation first; nothing has been written.
   if(request&&prepared.noMetadata){
@@ -992,6 +996,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.alreadyImported=!reorganize&&entries>0&&copied===0&&!removed&&errors.length===0&&errorTotal(job)===0;
   await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
+  if(!reorganize)job.importResult={copied,skipped,planned:entries,errors:errorTotal(job)};
   // A finished folder import (and a card or drive import when Settings allow it) can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&offersOriginals(job.source,state.preferences)&&!prepared.stage&&!await onCameraCard(job.source.path)){
@@ -1001,10 +1006,10 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(files.length||withheld.length)await saveReport('verified-originals.json',{root:job.source.path,files,withheld});
   }
   if(!reorganize&&job.phase==='complete'&&(prefs.verifyCopies!==false||job.alreadyImported))noteDevice(job.source,'import');
-  job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:{bytes:releasedBytes??0}}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,dsStoreLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message('job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),removed&&message('job.mirrorRemoved',{count:removed}),appleDoubleLine,dsStoreLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail,job.phase==='error'?'attention':'done');
+  job.detail=reorganize?joined(...organizedText(moved,retained,retainedBytes,errorTotal(job)),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.some(item=>item.collected)&&message('job.problemsCollected',{count:prepared.problems.filter(item=>item.collected).length}),prepared.problems.some(item=>!item.collected)&&message('job.problemsSkipped',{count:prepared.problems.filter(item=>!item.collected).length}),!!released&&message('job.releasedDuplicates',{count:released,size:{bytes:releasedBytes??0}}),foldersRemoved&&message('job.foldersRemoved',{count:foldersRemoved}),appleDoubleLine,dsStoreLine,notes.length>0&&text(notes[0]!)):job.alreadyImported?joined(message('job.alreadyImported',{count:entries}),olderRules>0&&message('job.olderRules',{count:olderRules})):joined(message(policy.verifyCopies!==false?'job.copiedVerified':'job.copied',{copied,skipped}),olderRules>0&&message('job.olderRules',{count:olderRules}),failed.length>0&&message('job.skippedErrors',{count:failed.length}),prepared.problems.length>0&&message('job.problemsSkipped',{count:prepared.problems.length}),appleDoubleLine,message('job.errors',{count:errorTotal(job)}),prefs.copyMode==='mirror'&&message(errorTotal(job)?'job.mirrorIncomplete':'job.mirrorVerified'));addHistory(message(job.backup?'history.driveBackup':'history.import',{name:job.source.name}),job.detail,job.phase==='error'?'attention':'done');
  }catch(error){await saveReport('failure.json',{producer:'desktop-app',passed:false,error:errorText(error),aborted:signal.aborted,finished:new Date().toISOString()}).catch(()=>{});if(signal.aborted&&pausing.delete(job.id)){job.phase='stopped';job.paused=true;job.detail=message(job.organization?'job.organizationPaused':'job.paused');}else{job.phase=signal.aborted?'stopped':'error';job.detail=signal.aborted?message('job.stopped'):toMessage(error);if(!signal.aborted)addErrors(job,job.detail);
-  // A planning error about one file can be skipped by hand: never for a mirror (the copy would read as removed) or a USB camera (staged anew each time).
-  const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&!(job.backup&&prefs?.backupMode==='mirror')&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail,signal.aborted?'stopped':'attention');}}
+  // A planning error about one file can be skipped by hand: never for a USB camera (staged anew each time).
+  const file=signal.aborted?undefined:filePath(job.detail),prefs=prepared?.prefs??request?.prefs;if(file&&job.source.transport!=='camera'&&(!job.organization||organizationRuns.has(job.id)))job.skippablePath=file;addHistory(text(job.source.name),job.detail,signal.aborted?'stopped':'attention');}}
  if(prepared?.stage)await prepared.stage.cleanup().catch(()=>{});
  await writeExcerpt(job,reporting?path.join(app.getPath('userData'),'operation-reports',job.id):undefined,[prepared?.review.id,prepared?.origin?.jobId]);
  if(prepared?.review.kind==='reorganize'||('reorganize' in input&&input.reorganize))recoveryRefresh.request();else recoveryRefresh.resume();emit();
@@ -1317,6 +1322,8 @@ async function action(input:Action):Promise<void>{
   case 'refresh':await refresh();break;
   case 'logOpenFolder':{const logger=activeLogger();if(!logger)break;const target=await logger.latest();if(target)shell.showItemInFolder(target);else await shell.openPath(logger.directory);break;}
   case 'acknowledgeOldRecords':{await acknowledgeDrive(input.drive);break;}
+  // Only the listed drivers' pages, and only in the user's browser: the app never downloads or installs a driver.
+  case 'openDriverLink':{if(!driverLinks().has(input.url))throw new Error('Unknown link');await shell.openExternal(input.url);break;}
   case 'logCopyPath':{const latest=await activeLogger()?.latest();if(latest)clipboard.writeText(latest);break;}
   case 'logExport':{
    const logger=activeLogger();if(!logger)break;await logger.flush();

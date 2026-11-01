@@ -23,13 +23,22 @@ test('every backend message key has text in all four languages with the same pla
 
 test('parameters interpolate with locale numbers, nested messages and joined parts', () => {
   const detail = joined(message('job.copied', { copied: 1234, skipped: 5 }), 0, message('job.errors', { count: 0 }));
-  assert.equal(formatMessage(detail, 'en'), '1,234 copied · 5 verified · 0 errors');
-  assert.equal(formatMessage(detail, 'zh-Hans'), '已复制 1,234 个 · 已验证 5 个 · 0 个错误');
+  assert.equal(formatMessage(detail, 'en'), '1,234 copied · 5 already in the backup · 0 errors');
+  assert.equal(formatMessage(detail, 'zh-Hans'), '已复制 1,234 个 · 5 个已在备份中 · 0 个错误');
   const nested = message('error.backupFolderCheck', { error: text('EBUSY: resource busy') });
   assert.equal(formatMessage(nested, 'ja'), 'バックアップフォルダーの確認：EBUSY: resource busy');
   const parts = joined(detail, message('job.mirrorVerified'));
-  assert.equal(formatMessage(parts, 'en'), '1,234 copied · 5 verified · 0 errors · Both destinations verified');
+  assert.equal(formatMessage(parts, 'en'), '1,234 copied · 5 already in the backup · 0 errors · Both destinations verified');
   for (const language of languages) assert.ok(!formatMessage(parts, language).includes('{'), `${language}: no placeholder left`);
+});
+
+// Seen 2026-11-01: History read "607 copied · 0 verified" after an import that verified all 607 copies; the 0 counted files already in the backup.
+test('an import with verification says its copies were verified, and counts files already in the backup apart', () => {
+  assert.equal(formatMessage(message('job.copiedVerified', { copied: 607, skipped: 0 }), 'en'), '607 copied and verified · 0 already in the backup');
+  for (const key of ['job.copied', 'job.copiedVerified'] as const) for (const language of languages) {
+    const shown = formatMessage(message(key, { copied: 7850, skipped: 3 }), language);
+    assert.ok(shown.includes('7,850') && shown.includes('3') && !shown.includes('{'), `${key} ${language}: ${shown}`);
+  }
 });
 
 test('a keyed error keeps its English text for logs and reports, and raw errors pass through unchanged', () => {
@@ -62,10 +71,8 @@ test('the translator accepts backend messages and job details render in the chos
   assert.notEqual(formatMessage(job.detail!, 'ja'), formatMessage(job.detail!, 'en'));
 });
 
-test('errors panel explains keyed mirror confirmations in every language', async () => {
+test('errors panel explains keyed errors in every language', async () => {
   const { explainError } = await import('../renderer/RootApp');
-  const mirror = message('error.mirrorReview', { count: 3 });
-  for (const language of languages) assert.deepEqual(explainError(mirror, 'source', language), { title: 'Mirror needs your review before moving files.', hint: 'Open Review on this drive.' });
   assert.equal(explainError(message('error.sourceDisconnected'), 'app', 'ja').title, 'The drive was disconnected or a file is missing.');
   assert.equal(explainError(message('error.selectDrive'), 'app', 'zh-Hans').title, formatMessage(message('error.selectDrive'), 'zh-Hans'));
   assert.equal(explainError(text('Unexpected failure. More text.'), 'app', 'en').title, 'Unexpected failure.');

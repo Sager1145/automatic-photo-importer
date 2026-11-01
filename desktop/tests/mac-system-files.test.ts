@@ -52,7 +52,7 @@ test('on: a listing skips .DS_Store and "._" files; off: they are listed as Mac 
   assert.equal(off.media,1,'"._DSC_0001.JPG" is not a photo');
   assert.ok((off.skipped??[]).filter(item=>item.reason==='system').length===2,'nothing is dropped silently');
   const backup=await inventory(source,{keepMacFiles:true,backup:true});
-  assert.ok(backup.files.filter(file=>macSystemName(path.basename(file.path))).every(file=>file.included),'a Files & folders backup copies them');
+  assert.ok(backup.files.filter(file=>macSystemName(path.basename(file.path))).every(file=>file.included),'a backup listing takes them');
 });
 
 test('a remembered listing made with the other setting is never reused',async t=>{
@@ -66,14 +66,17 @@ test('a remembered listing made with the other setting is never reused',async t=
   assert.equal(on.files.length,1,'listed again without them');
 });
 
-test('planning and a drive backup follow the setting',async t=>{
+test('planning and a Files & folders import follow the setting',async t=>{
   const source=await card(t),destination=await temp(t,'mac-files-dest-');
   const skipped=(await plan(source,[destination],{...importOptions},metadata)).inventory;
   assert.equal(skipped.files.length,1);
   const listed=(await plan(source,[destination],{...importOptions,keepMacFiles:true},metadata)).inventory;
   assert.equal(listed.files.length,3);
-  const backup=(await plan(source,[destination],{backup:true,unknownRules:{},keepMacFiles:true,drive:{name:'Card',identity:'card-1',mirror:false}},metadata)).plans[0]!;
-  assert.deepEqual(backup.entries.map(entry=>path.basename(entry.source)).sort(),['.DS_Store','._DSC_0001.JPG','DSC_0001.JPG']);
+  // A Files & folders import takes every file: kept Mac files go with the rest, never as photos.
+  const everything=(await plan(source,[destination],{...importOptions,everyFile:true,keepMacFiles:true},metadata)).plans[0]!;
+  assert.deepEqual(everything.entries.map(entry=>path.basename(entry.source)).sort(),['.DS_Store','._DSC_0001.JPG','DSC_0001.JPG']);
+  const skipping=(await plan(source,[destination],{...importOptions,everyFile:true},metadata)).plans[0]!;
+  assert.deepEqual(skipping.entries.map(entry=>path.basename(entry.source)),['DSC_0001.JPG']);
 });
 
 test('an import removes .DS_Store from each folder it wrote to, once, and never from the source',async t=>{
@@ -126,7 +129,7 @@ test('organization removes .DS_Store from the folders it moves files into and ou
 
 test('protected folders, a file that is not a .DS_Store, and links named .DS_Store are left alone',async t=>{
   const root=await temp(t,'mac-files-safety-'),cleaner=appleDoubleCleaner(),placed=()=>true;
-  for(const name of ['Photo Importer Data','Photo Importer Recovery','Problem files','Drive backups']){
+  for(const name of ['Photo Importer Data','Photo Importer Recovery','Problem files']){
     const folder=path.join(root,name,'2024');await fs.mkdir(folder,{recursive:true});
     await fs.writeFile(path.join(folder,'A.JPG'),'a');await fs.writeFile(path.join(folder,'.DS_Store'),finder());
     await cleaner.besideFile(path.join(folder,'A.JPG'),root,placed);

@@ -9,6 +9,7 @@ import { addPlacement, loadPlacement, forgetPlacement, placedMatches, placementI
 import { ruleOptions, rulesScope } from '../routing-options';
 import { defaultPreferences } from '../preferences';
 import type { Metadata } from '../shared';
+import { slash, unixPermissions } from './fixtures/os';
 
 const options = {backup:false as const, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
 const scopeOf = (template:string) => rulesScope(ruleOptions({...defaultPreferences, template, mediaLayout:'format', unknownRules:{}}));
@@ -81,7 +82,7 @@ test('a file moved by hand is still flagged',async t=>{
   await fs.mkdir(path.join(root,'misc'));
   await fs.rename(path.join(root,'2024/202402/Sony A7/JPEG/A.JPG'),path.join(root,'misc/A.JPG'));
   const again=await check(scope);
-  assert.deepEqual(again.found.files,['misc/A.JPG']);
+  assert.deepEqual(again.found.files.map(slash),['misc/A.JPG']);
   assert.equal(again.found.placed.length,1);
 });
 
@@ -122,7 +123,8 @@ test('the memory file is private, compact and replaced atomically',async t=>{
   const files=Array.from({length:84_000},(_,n)=>({relative:`2024/202402/Sony A7/JPEG/${Math.floor(n/300)}/IMG_${String(n).padStart(6,'0')}.JPG`,size:5_000_000+n,mtimeNs:1_700_000_000_123_456_789n+BigInt(n)*1_000_000_000n,ino:100_000n+BigInt(n)}));
   await replacePlacement(store,id,'scope',files);
   const file=path.join(store,'placement-memory',`${id}.json.gz`),stat=await fs.stat(file);
-  assert.equal(stat.mode&0o777,0o600);
+  // Windows has no mode bits: a file in the user's profile is private through its ACL.
+  if(unixPermissions)assert.equal(stat.mode&0o777,0o600);
   assert.ok(stat.size<10*1024*1024/2,`size ${stat.size}`);
   assert.deepEqual(await fs.readdir(path.dirname(file)),[path.basename(file)]);
   const loaded=await loadPlacement(store,id,'scope');

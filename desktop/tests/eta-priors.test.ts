@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {PriorTable,PriorStore,layeredBook,driveClass,type PriorContext} from '../eta-priors';
 import {defaultBook} from '../eta-model';
+import {unixPermissions} from './fixtures/os';
 
 const SALT='c2FsdHNhbHRzYWx0c2FsdA';
 const card={id:'UUID-CARD-1234-ABCD',transport:'usb',fsType:'exfat',external:true},backup={id:'UUID-BACKUP-9999',transport:'usb',fsType:'exfat',external:true};
@@ -85,7 +86,8 @@ test('the saved file has no paths, names or raw ids, and round trips',async t=>{
  await store.save();
  const text=await fs.readFile(file,'utf8');
  for(const forbidden of ['/','\\','UUID-CARD','UUID-BACKUP','CARD','BACKUP'])assert.ok(!text.includes(forbidden),`file contains ${forbidden}: ${text}`);
- assert.equal((await fs.stat(file)).mode&0o777,0o600);
+ // Windows has no mode bits: a file in the user's profile is private through its ACL.
+ if(unixPermissions)assert.equal((await fs.stat(file)).mode&0o777,0o600);
  assert.deepEqual((await fs.readdir(dir)).sort(),['eta-priors.json'],'no temporary file is left');
  const again=new PriorStore(file,()=>'other');await again.load();
  assert.ok(again.table.lookup('verifying:copy',context,'exact'),'the same salt maps the same ids');

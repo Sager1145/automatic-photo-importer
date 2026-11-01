@@ -8,6 +8,9 @@ import {spawn} from 'node:child_process';
 import {exclusiveRename} from '../platform/exclusive-rename';
 import {nativeCameraHelperPath} from '../platform/camera-bridge';
 
+/** The exclusive rename is the macOS native helper's renameatx_np(RENAME_EXCL); other systems refuse it. */
+const macOnly=process.platform!=='darwin'&&'exclusive rename uses the macOS native helper';
+
 async function fixture(t:test.TestContext){
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'exclusive-rename-')));
  t.after(()=>fs.rm(root,{recursive:true,force:true}));
@@ -15,7 +18,7 @@ async function fixture(t:test.TestContext){
  await fs.writeFile(source,'source bytes');return {root,source,target};
 }
 
-test('native exclusive rename preserves the inode and refuses an occupied name',{skip:process.platform!=='darwin'},async t=>{
+test('native exclusive rename preserves the inode and refuses an occupied name',{skip:macOnly},async t=>{
  const f=await fixture(t),before=await fs.stat(f.source);
  await fs.writeFile(f.target,'other writer');
  await assert.rejects(exclusiveRename(f.source,f.target),{code:'EEXIST'});
@@ -27,7 +30,7 @@ test('native exclusive rename preserves the inode and refuses an occupied name',
  await assert.rejects(fs.stat(f.source),{code:'ENOENT'});
 });
 
-test('an older helper that exits without confirming a rename safely refuses',{skip:process.platform!=='darwin'},async t=>{
+test('an older helper that exits without confirming a rename safely refuses',{skip:macOnly},async t=>{
  const f=await fixture(t),helper=path.join(f.root,'old-helper');
  await fs.writeFile(helper,'#!/bin/sh\nexit 0\n',{mode:0o700});
  const previous=process.env.IMPORTER_NATIVE_BRIDGE;
@@ -38,7 +41,7 @@ test('an older helper that exits without confirming a rename safely refuses',{sk
  await assert.rejects(fs.stat(f.target),{code:'ENOENT'});
 });
 
-test('an unavailable helper cannot move or overwrite files',{skip:process.platform!=='darwin'},async t=>{
+test('an unavailable helper cannot move or overwrite files',{skip:macOnly},async t=>{
  const f=await fixture(t),previous=process.env.IMPORTER_NATIVE_BRIDGE;
  process.env.IMPORTER_NATIVE_BRIDGE=path.join(f.root,'missing-helper');
  t.after(()=>{if(previous===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=previous;});
@@ -47,7 +50,7 @@ test('an unavailable helper cannot move or overwrite files',{skip:process.platfo
  await assert.rejects(fs.stat(f.target),{code:'ENOENT'});
 });
 
-test('a symbolic destination parent cannot redirect an exclusive rename',{skip:process.platform!=='darwin'},async t=>{
+test('a symbolic destination parent cannot redirect an exclusive rename',{skip:macOnly},async t=>{
  const f=await fixture(t),other=path.join(f.root,'other'),alias=path.join(f.root,'alias');
  await fs.mkdir(other);await fs.symlink(other,alias);
  await assert.rejects(exclusiveRename(f.source,path.join(alias,'target.JPG')),error=>['ELOOP','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''));
@@ -55,7 +58,7 @@ test('a symbolic destination parent cannot redirect an exclusive rename',{skip:p
  assert.deepEqual(await fs.readdir(other),[]);
 });
 
-for(const invalid of ['traversal','source replaced','source symlink','non-directory'] as const)test(`native rename refuses ${invalid} without moving any bytes`,{skip:process.platform!=='darwin'},async t=>{
+for(const invalid of ['traversal','source replaced','source symlink','non-directory'] as const)test(`native rename refuses ${invalid} without moving any bytes`,{skip:macOnly},async t=>{
  const f=await fixture(t),helper=await nativeCameraHelperPath();assert.ok(helper,'build the native helper before this test');
  const folder=await fs.open(f.root,constants.O_RDONLY|constants.O_DIRECTORY),input=await fs.open(f.source,'r');
  try{

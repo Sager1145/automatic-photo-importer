@@ -9,7 +9,7 @@ import {stableDevices} from './device-selection';
 export const noMetadataModes:readonly NoMetadataHandling[]=['keep','folder','fileDate'];
 export const mediaLayouts:readonly MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
 
-export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],videoDestinations:[],videoDestinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoTemplate:'',backupMode:'additive',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
+export const defaultPreferences:Preferences={sourceLayout:'list',showDashboard:true,language:'en',appearance:'system',textScale:DEFAULT_TEXT_SCALE,accent:'coral',automatic:false,parallel:5,destinations:[],destinationIds:[],videoDestinations:[],videoDestinationIds:[],copyMode:'single',editedFolder:DEFAULT_EDITED_FOLDER,template:'{year}/{yyyymm}/{camera}',mediaLayout:'video-root',videoTemplate:'',verifyCopies:true,skipFileErrors:true,collectProblemFiles:true,removeAppleDouble:true,unknownDefault:'skip',noMetadataHandling:'folder',noMetadataFolder:UNKNOWN_FILES_FOLDER,conflictNaming:'folder',autoEject:false,deleteOriginalsFolders:true,deleteOriginalsCards:false,logLevel:'normal',rememberedDevices:{},ignoredDevices:{},deviceHistory:{},unknownRules:{},...defaultLimits()};
 
 const oneOf=<T>(value:unknown,allowed:readonly T[],fallback:T):T=>allowed.includes(value as T)?value as T:fallback;
 const bounded=(value:unknown,min:number,max:number,fallback:number):number=>{const number=Number(value);return value===null||value===''||!Number.isFinite(number)||number===0?fallback:Math.min(max,Math.max(min,number));};
@@ -67,7 +67,6 @@ export function normalizePreferences(input:unknown,base:Preferences=defaultPrefe
   // The old media switch was a choice only when on; off was just its default, so it gets today's.
   mediaLayout:oneOf(value.mediaLayout,mediaLayouts,value.separateMedia===true&&value.mediaLayout===undefined?'format':base.mediaLayout??'video-root'),
   videoTemplate:text(value.videoTemplate,base.videoTemplate??''),
-  backupMode:oneOf(value.backupMode,['additive','mirror'] as const,base.backupMode??'additive'),
   verifyCopies:value.verifyCopies===undefined?base.verifyCopies!==false:value.verifyCopies!==false,
   // Saved as skipFileErrors: an older skipErrors:false only recorded that option's earlier default (off).
   skipFileErrors:flag(value.skipFileErrors,base.skipFileErrors!==false),

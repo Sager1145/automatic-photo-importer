@@ -8,6 +8,8 @@ import type { DeviceKind } from '../core/devices';
 import { within } from '../core/paths';
 import { MessageError } from '../messages';
 import { cameraSources } from './camera-bridge';
+import { probeDestination } from '../core/destination-probe';
+import { driveFormat, formatLabel, nativeAccess } from '../core/drive-formats';
 
 const exec = promisify(execFile);
 const commandOptions = { timeout: 8000, maxBuffer: 4 * 1024 * 1024, windowsHide: true };
@@ -313,7 +315,7 @@ export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promis
   } catch(error){return {path:target,available:false,detail:(error as Error).message};}
 }
 /** Pass `identity` to require the saved volume: a destination is a particular disk, not a reusable path. */
-export async function validateDestination(target:string, knownSources:Source[], options:{identity?:string; volumes?:MountedVolume[]}={}):Promise<DestinationStatus> {
+export async function validateDestination(target:string, knownSources:Source[], options:{identity?:string; volumes?:MountedVolume[]; probe?:(folder:string)=>Promise<void>}={}):Promise<DestinationStatus> {
   if(!target || !path.isAbsolute(target))throw new MessageError('error.destinationRelative');
   await requireMountedRoot(target);
   const resolved=await canonical(target);
@@ -328,11 +330,17 @@ export async function validateDestination(target:string, knownSources:Source[], 
     if(classification.layoutUnavailable)throw new MessageError('error.destinationUninspectable');
     // macOS sealed '/' contains writable Data-volume firmlinks such as /Users and /private.
     // access(W_OK) below checks the actual destination filesystem rather than the sealed ancestor.
-    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/'))throw new MessageError('error.destinationReadOnly');
+    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/')) {
+      // A format this computer can only read (NTFS on a Mac, HFS+ on Linux) says where the drivers that write it are listed.
+      const format=driveFormat(volume.fsType);
+      throw nativeAccess(format,process.platform)==='read'?new MessageError('error.destinationReadOnlyFormat',{format:formatLabel(format,volume.fsType)}):new MessageError('error.destinationReadOnly');
+    }
   }
   const ancestor=await existingAncestor(resolved);
   if(!(await stat(ancestor)).isDirectory())throw new MessageError('error.destinationNotFolder');
   await access(ancestor,constants.W_OK);
+  // Every destination, whatever mounts it, proves it can write, flush, read back, rename and delete before it is used.
+  await (options.probe??probeDestination)(ancestor);
   const info=await volumeInfo(target,snapshot);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');
   if(options.identity!==undefined&&(!options.identity||options.identity!==info.volumeId))throw new MessageError('error.destinationChanged');
   return info;

@@ -8,11 +8,11 @@ import { noMetadataFolderName } from '../no-metadata';
 import { listingEstimate, type ListingHint } from '../listing-estimate';
 import { inventory, extension, stem, rules, type RuleDefaults } from './inventory';
 import { destinationIndex, flushIndex, provable, type DestinationIndex, type Digests } from './destination-index';
-import { DRIVE_BACKUPS, claimDriveFolder, driveFolder, mirrorChanges, moveMirrorRemovals, type Drive, type ReviewedRemoval } from './drive-backup';
+import { DRIVE_BACKUPS } from './drive-backup';
 import {applyFileTimestamps} from '../platform/file-timestamps';
 import { destinationParts } from './allocation';
 import { CONFLICTS_FOLDER, DEFAULT_EDITED_FOLDER } from '../folder-template';
-import { beneath, linkRefused, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, sameBirth, sameFileIgnoringCtime, sameStat, statKey, syncDirectory, syncParents, syncFile , unlinkEntry } from './paths';
+import { beneath, linkRefused, directCapable, dirtyFolder, flushFolders, checkAbort, code, contained, digest, directory, identity, isAbort, makeParent, pathKey, readdirIfPresent, regularHandle, rootUnchanged, sameBirth, sameFileIgnoringCtime, sameStat, statKey, syncDirectory, syncParents, syncFile , unlinkEntry } from './paths';
 export { inventory } from './inventory';
 import { mapPool, streams, CHECK_CONCURRENCY } from './devices';
 import { hasher } from './hasher';
@@ -49,7 +49,7 @@ interface ListingOptions {
   /** Source files the user chose to skip: left out with their families, whatever skipErrors is. */exclude?:string[];
   /** "Clean up Mac system files" is off: list .DS_Store and "._" files as system files (a drive backup copies them; an organization never lists them). */keepMacFiles?:boolean;
 }
-/** What a copy (an import or a drive backup) adds: which source files it takes and what it already knows of them. */
+/** What a copy (an import) adds: which source files it takes and what it already knows of them. */
 interface Copy extends ListingOptions {
   unknownRules:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;
   /** SHA-256 remembered for a source whose identity (dev:ino:size:mtimeNs:ctimeNs) is unchanged since it was copied. */sourceDigest?:(file:string,identity:string)=>string|undefined;
@@ -62,14 +62,18 @@ export interface ImportRequest extends FolderRules,Copy {
   /** Duplicate detection stage 1: hash the files that share a name or EXIF identity right away and report them in `duplicates`. Nothing is ever removed because of it. */duplicates?:boolean;
   /** Whether the library may hold these files under other folders (the folder rules changed since it was filled). Absent: look. */lookElsewhere?:(roots:string[])=>boolean|Promise<boolean>;
   /** Largest same-size group (files) and bytes the lookup reads; beyond either the group is skipped. Defaults: 2000 files, 20 GB. */elsewhereLimits?:{candidates?:number;bytes?:number};
+  /** Files & folders: every file of the source is imported, not only media. Media is filed by the folder rules; every
+   * other file (unknown types, camera bookkeeping, Finder aliases) goes to the Unknown files folder of its date, never dropped. */everyFile?:boolean;
 }
-/** Backing up a drive as it is laid out, into its drive folder (`drive`) of each destination. */
-export interface DriveRequest extends Copy {backup:true;drive?:Drive;}
-/** Organizing a library in place (or a folder beneath it on the same filesystem) by its folder rules. Unknown files stay put. */
+/** A copy of the source as it is laid out, straight under each destination root: no folder rules, no drive folder.
+ * Tests and tools use it to lay out fixtures; the app never imports this way (Files & folders is `everyFile`). */
+export interface LayoutRequest extends Copy {backup:true;}
+/** Organizing a library in place (or a folder beneath it on the same filesystem) by its folder rules. Unknown files stay put,
+ * except in a Drive backups folder an earlier version wrote: every file there is filed (inventory `everyFileIn`), so it empties. */
 export interface OrganizeRequest extends FolderRules,ListingOptions {
   backup:false;reorganize:true;/** Move 0-byte files (and their families) into Problem files. */collectProblems?:boolean;
 }
-export type PlanRequest=ImportRequest|DriveRequest|OrganizeRequest;
+export type PlanRequest=ImportRequest|LayoutRequest|OrganizeRequest;
 /** The read-only check of an organized library (findMisplaced). */
 export interface MisplacedRequest extends FolderRules,Pick<ListingOptions,'sourceFolders'|'listingHint'|'onListed'> {
   /** True for a file already known to be in place (same size, mtime and inode as when it was checked). Its metadata is not read and it is not counted, unless a changed file sits beside it. */
@@ -77,15 +81,13 @@ export interface MisplacedRequest extends FolderRules,Pick<ListingOptions,'sourc
 }
 type Request=PlanRequest|(MisplacedRequest&{backup:false;reorganize:true;misplacedOnly:true});
 /** Every request as planOnce reads it, field by field. */
-type Options={backup:boolean;reorganize?:boolean;misplacedOnly?:boolean}&Partial<Omit<ImportRequest,'backup'|'reorganize'>&Omit<DriveRequest,'backup'>&Omit<OrganizeRequest,'backup'|'reorganize'>&MisplacedRequest>;
+type Options={backup:boolean;reorganize?:boolean;misplacedOnly?:boolean}&Partial<Omit<ImportRequest,'backup'|'reorganize'>&Omit<LayoutRequest,'backup'>&Omit<OrganizeRequest,'backup'|'reorganize'>&MisplacedRequest>;
 interface ReviewedSource {captureTimeMs?:number;stat:import('node:fs').BigIntStats;source:string;destination:string;digest?:string;}
 /** Resolves an entry's SHA-256: planned, streamed, or hashed on demand. */
 type Resolve=(entry:PlanEntry,signal?:AbortSignal)=>Promise<string>;
 // Only a plan produced for an explicit library review can authorize relocation.
 // A renderer-provided or reconstructed TransferPlan cannot opt into moving files.
 const reorganizationReviews=new WeakMap<TransferPlan,Map<string,ReviewedSource>>();
-// Mirror moves are likewise limited to removals found by plan() for that plan.
-const mirrorReviews=new WeakMap<TransferPlan,ReviewedRemoval[]>();
 const reorganizationScopes=new WeakMap<TransferPlan,{source:string;sourceIdentity:string;root:string;rootIdentity:string;libraries:string[];/** The chosen source folders, absolute. */folders?:string[]}>();
 function groups(entries:PlanEntry[]):PlanEntry[][] {
   return [...Map.groupBy(entries,entry=>entry.family).values()];
@@ -142,7 +144,27 @@ async function existingMatches(file:string,size:number,expected:()=>Promise<stri
   if(!stat.isFile() || stat.size!==BigInt(size)) return false;
   return await index.digestOf(file,signal)===await expected();
 }
-async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal,known?:Map<string,boolean>):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
+/** Per library root: whether its file system tells names apart by case alone (Linux ext4, ntfs3, case-sensitive APFS). */
+const caseSensitiveRoots=new Map<string,boolean>();
+/** Asked with an existing folder below the root (on the library's own volume), whose name is looked up with its case
+ * swapped: nothing is listed. A folder without letters cannot answer, so the root is asked again later. */
+async function caseSensitive(root:string,folder:string):Promise<boolean> {
+  const known=caseSensitiveRoots.get(root);if(known!==undefined)return known;
+  const name=path.basename(folder),swapped=[...name].map(letter=>letter===letter.toLowerCase()?letter.toUpperCase():letter.toLowerCase()).join('');
+  if(!beneath(folder,root)||swapped===name)return false;
+  const answer=await fs.lstat(path.join(path.dirname(folder),swapped)).then(()=>false,error=>{if(code(error)==='ENOENT')return true;throw error;});
+  caseSensitiveRoots.set(root,answer);return answer;
+}
+/** On a case-sensitive file system, the file already in `file`'s folder whose name differs from it by case alone: macOS
+ * and Windows read the two as one name, so a library that is to move between systems holds only one of them. */
+async function caseVariant(file:string,root:string):Promise<string|undefined> {
+  // A folder that is not there holds nothing to collide with.
+  const folder=path.dirname(file);
+  if(!await fs.lstat(folder).then(stat=>stat.isDirectory(),()=>false)||!await caseSensitive(root,folder))return undefined;
+  const key=pathKey(path.basename(file)),name=(await readdirIfPresent(folder)).find(other=>other!==path.basename(file)&&pathKey(other)===key);
+  return name===undefined?undefined:path.join(path.dirname(file),name);
+}
+async function allocate(family:PlanEntry[],root:string,reservations:Map<string,PlanEntry>,recovery:RecoveryIndex,resolve:Resolve,index:Digests,signal?:AbortSignal):Promise<{entry:PlanEntry;destination:string;skip:boolean}[]> {
   for(let attempt=0;;attempt++) {
     checkAbort(signal);
     // Conflict folders are named by content, so only then is the whole family hashed.
@@ -155,12 +177,15 @@ async function allocate(family:PlanEntry[],root:string,reservations:Map<string,P
       const destination=target(entry,attempt,family,ids), key=pathKey(destination), reserved=proposed.get(key)??reservations.get(key);
       const same=reserved===undefined?undefined:reserved.size===entry.size && await resolve(reserved)===await resolve(entry);
       if(same===false) {log('detailed','plan','destination-check',{source:entry.source,destination,decision:'conflict',reason:`another file in this plan is filed at ${destination} with different content`,attempt});conflict=true;break;}
-      const reviewed=known?.get(key),exists=reviewed===undefined?await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal):reviewed||null;
+      let exists=await existingMatches(destination,entry.size,()=>resolve(entry),root,index,signal);
+      // A name taken by case alone is that file's name: the same content is already there, other content is a conflict.
+      const variant=exists===null?await caseVariant(destination,root):undefined;
+      if(variant!==undefined)exists=await existingMatches(variant,entry.size,()=>resolve(entry),root,index,signal)===true?true:false;
       const resumable=exists===false&&await findPartial('publication',{...entry,destination,digest:await resolve(entry)},root,recovery,signal);
       log('detailed','plan','destination-check',()=>({source:entry.source,destination,attempt,decision:exists===true||same===true?'skip':exists===false&&!resumable?'conflict':'copy',reason:same===true?`same SHA-256 as another file of this plan filed at ${destination}`:exists===true?`skip: same SHA at path ${destination}`:exists===false?(resumable?'copy: an interrupted copy of this file there is resumed':`conflict: ${destination} holds a different file of the same size or an unrelated one`):'copy: no match at the destination',size:entry.size,sha256:entry.digest}));
       if(exists===false&&!resumable) {conflict=true;break;}
       if(!reserved) proposed.set(key,entry);
-      allocation.push({entry,destination,skip:exists===true || same===true});
+      allocation.push({entry,destination:exists===true&&variant!==undefined?variant:destination,skip:exists===true || same===true});
     }
     if(!conflict) { for(const [key,value] of proposed) reservations.set(key,value); return allocation; }
   }
@@ -190,7 +215,7 @@ export async function findMisplaced(source:string,root:string,options:MisplacedR
 export type PlanProgress=(count:number,file:string,detail?:{step:'listing'|'checking'|'reading'|'comparing'|'candidates'|'preparing'|'mirroring'|'index'|'locating';total:number;bytes:number;totalBytes:number;share?:number;matched?:number;matchedBytes?:number})=>void;
 async function planOnce(source:string,roots:string[],request:Request,metadata:(file:string)=>Promise<Metadata>,signal?:AbortSignal,onProgress?:PlanProgress):Promise<{inventory:Inventory;listing?:Listing;plans:TransferPlan[];failures:PlanFailure[];problems:ProblemFile[];duplicates?:PlanDuplicates;placed?:PlacedFile[];elsewhere?:Elsewhere;noMetadata?:NoMetadataSummary}> {
   checkAbort(signal);
-  // A drive backup keeps the drive's own layout; every other plan files by the folder rules.
+  // A layout copy keeps the source's own layout; every other plan files by the folder rules.
   const options:Options=request,folderRules=request.backup?undefined:request;
   if(!roots.length)throw new Error('Choose at least one destination.');
   if(options.reorganize&&roots.length!==1)throw new Error('Review one organization destination at a time.');
@@ -220,17 +245,16 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
   const allRoots=destinations.flatMap(item=>[item,...(item.videos?[item.videos]:[])]);
   const unknownMode:NoMetadataHandling=options.backup?'fileDate':options.noMetadata??'fileDate',unknownFolder=unknownMode==='folder'?noMetadataFolderName(options.noMetadataFolder,[options.editedFolder??DEFAULT_EDITED_FOLDER]):options.noMetadataFolder??UNKNOWN_FILES_FOLDER;
   if(folderRules) {folder({fields:{}},new Date(0),undefined,folderRules);folder({fields:{}},new Date(0),{video:true,format:'MOV'},folderRules);}
-  // Organization leaves drive backups (a copy of each drive's own layout) and conflict copies where they are.
-  // The Problem files folder is the app's own, like Drive backups: never organized again, never misplaced.
-  if(options.reorganize) excludedRoots.push(...allRoots.flatMap(({root})=>[path.join(root,DRIVE_BACKUPS),path.join(root,PROBLEM_FILES_FOLDER)]));
+  // The Problem files folder is the app's own: never organized again, never misplaced. A Drive backups folder (an earlier
+  // version's unsorted copy of a drive) is organized into the library: every file in it is filed, unknown ones too.
+  if(options.reorganize) excludedRoots.push(...allRoots.map(({root})=>path.join(root,PROBLEM_FILES_FOLDER)));
+  const everyFileIn=options.reorganize?allRoots.map(({root})=>path.join(root,DRIVE_BACKUPS)):options.everyFile?[sourceRoot]:undefined;
   const organizationOwned=(file:string)=>options.reorganize===true&&placementExemption(file,allRoots)!==undefined;
-  // With skipErrors a failing file is left out and reported; otherwise it fails the plan. A mirror
-  // never skips: a file left out of it would read as removed from the drive and its copy moved away.
+  // With skipErrors a failing file is left out and reported; otherwise it fails the plan.
   // An organization always skips: leaving a file where it is is safe, and one bad file must not stop the rest.
-  const skipping=options.reorganize===true||options.skipErrors===true&&!options.drive?.mirror;
+  const skipping=options.reorganize===true||options.skipErrors===true;
   // Otherwise the error names its file, so the user can skip that file by hand.
   const failures=new Map<string,Error>(),unreadable=new Set<string>(),skip=(file:string,error:unknown)=>{if(isAbort(error))throw error;if(['EACCES','EPERM','EIO'].includes(code(error)??''))unreadable.add(file);if(!skipping)throw error instanceof MessageError&&typeof error.params?.path==='string'?error:new MessageError('error.fileFailed',{path:file,error:toMessage(error)});failures.set(file,toError(error));};
-  if(options.exclude?.length&&options.drive?.mirror)throw new Error('A mirror backup cannot skip files.');
   for(const file of options.exclude??[])failures.set(file,new MessageError('error.userSkipped'));
   // A file is copied or moved with its whole family (RAW, JPG, sidecars), so a failure leaves the family out.
   const skipFamilies=<T>(items:T[],file:(item:T)=>string,family:(item:T)=>string|undefined)=>{
@@ -238,7 +262,7 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     for(const item of items){const key=family(item);if(key!==undefined&&failed.has(key)&&!failures.has(file(item)))failures.set(file(item),failed.get(key)!);}
   };
   const listingStart=performance.now();
-  const {listing,...scan}=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,folders:options.sourceFolders,reuse:options.reuse,keepMacFiles:!!options.keepMacFiles&&options.reorganize!==true,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
+  const {listing,...scan}=await inventory(sourceRoot,{...(skipping?{onError:skip}:{}),backup:options.backup,unknownRules:custom,unknownDefault:defaults.fallback,builtinRules:defaults.builtins,...(everyFileIn?{everyFileIn}:{}),folders:options.sourceFolders,reuse:options.reuse,keepMacFiles:!!options.keepMacFiles&&options.reorganize!==true,exclude:excludedRoots,onProgress:(found,bytes,top,latest)=>onProgress?.(found,latest??'',{step:'listing',bytes,...listingEstimate(options.listingHint,{files:found,bytes},top)})},signal);
   options.onListed?.(scan.files.length,scan.files.reduce((sum,file)=>sum+file.size,0));
   log('detailed','plan','inventory',()=>{const skipped:Record<string,number>={};for(const item of scan.skipped??[])skipped[item.reason]=(skipped[item.reason]??0)+1;return {source:sourceRoot,folders:listing?.folders.length,files:scan.files.length,media:scan.media,companions:scan.companions,unknown:scan.unknown,systemJunkSkipped:scan.system??0,emptyFiles:scan.empty??0,skipped,bytes:scan.bytes,reusedListing:!!options.reuse,elapsedMs:Math.round(performance.now()-listingStart),scanElapsedMs:scan.elapsedMs,sourceFolders:options.sourceFolders,reorganize:!!options.reorganize,backup:!!options.backup};});
   let files=scan.files.filter(f=>f.included&&!organizationOwned(f.path));
@@ -426,18 +450,15 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     const pending:PlanEntry[]=[],recovery:RecoveryIndex=new Map(),index=await destinationIndex(destinationRoot,rootIdentity,(read,total)=>onProgress?.(read,path.basename(destinationRoot),{step:'index',total,bytes:read,totalBytes:total}));
     const mine=prepared.reduce((count,item)=>count+(item.root===kind&&!elsewhere?.has(item.entry.source)?1:0),0);let made=0;
     onProgress?.(0,path.basename(destinationRoot),{step:'preparing',total:mine,bytes:0,totalBytes:0});
-    // Drive backups land in the folder this drive owns on each destination.
-    const drive=options.drive?{folder:await driveFolder(destinationRoot,options.drive),identity:options.drive.identity,name:options.drive.name}:undefined;
     for(const {entry,relative,root,camera} of prepared){
       if(root!==kind) continue;
       if(elsewhere?.has(entry.source)) {comparingTotal--;continue;}
       checkAbort(signal);
-      const destination=drive?path.join(destinationRoot,DRIVE_BACKUPS,drive.folder,relative):path.join(destinationRoot,relative);
+      const destination=path.join(destinationRoot,relative);
       await contained(destination,destinationRoot);
       pending.push({...entry,destination,allocation:{destination,folder:camera===undefined?path.dirname(destination):path.join(destinationRoot,camera),...(options.conflictNaming==='number'?{conflictNaming:'number' as const}:{})}});
       onProgress?.(++made,path.relative(sourceRoot,entry.source),{step:'preparing',total:mine,bytes:0,totalBytes:0});
     }
-    const mirror=drive&&options.drive!.mirror?await mirrorChanges(destinationRoot,drive.folder,pending,resolve,index,signal,(compared,found,file)=>onProgress?.(compared,file,{step:'mirroring',total:Math.max(found,compared),bytes:0,totalBytes:0}),!!options.keepMacFiles):undefined;
     // A same-size file at a destination is compared by content. Both sides are hashed here, several
     // files at once and outside the publication lock (so other jobs keep publishing meanwhile);
     // allocation below then reuses those digests unless a file changed in between.
@@ -446,7 +467,6 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     const looked=new Map<PlanEntry,import('node:fs').BigIntStats|undefined>();
     await mapPool(pending,STREAM_CONCURRENCY,async entry=>{
       checkAbort(signal);
-      if(mirror?.known.has(pathKey(entry.destination))) return;
       const existing=await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
       looked.set(entry,existing);
       if(existing?.isFile()&&existing.size===BigInt(entry.size)&&!sizedSources.has(entry.source)){sizedSources.add(entry.source);compareBytes+=entry.size;}
@@ -455,7 +475,6 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
     await mapPool(pending,STREAM_CONCURRENCY,async entry=>{
       checkAbort(signal);
       try {
-        if(mirror?.known.has(pathKey(entry.destination))) return;
         // The first pass has looked at every pending destination already.
         const existing=looked.has(entry)?looked.get(entry):await fs.lstat(entry.destination,{bigint:true}).catch(()=>undefined);
         if(!existing?.isFile() || existing.size!==BigInt(entry.size)) return;
@@ -477,15 +496,14 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
       if(family.some(entry=>failures.has(entry.source))) continue;
       let allocation;
       // A family is planned whole or not at all; nothing has been written for it yet.
-      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal,mirror?.known),familyFolders(family),signal); }
+      try { allocation=await exclusive(()=>allocate(family,destinationRoot,reservations,recovery,resolve,index.hinted,signal),familyFolders(family),signal); }
       catch(error) { for(const entry of family) skip(entry.source,error); continue; }
       for(const allocated of allocation){const digest=allocated.entry.digest??resolved.get(allocated.entry.source);entries.push({...allocated.entry,destination:allocated.destination,skip:allocated.skip,...(digest?{digest}:{})});}
       comparing(path.relative(sourceRoot,family[0]!.source));
     }
     await flushIndex(index);
     await rootUnchanged(destinationRoot,rootIdentity);
-    const transfer:TransferPlan={source:sourceRoot,root:destinationRoot,rootIdentity,entries,...(drive?{drive}:{}),...(mirror?{removals:mirror.removals.map(({path,size,reason})=>({path,size,reason}))}:{})};
-    if(mirror)mirrorReviews.set(transfer,mirror.removals);
+    const transfer:TransferPlan={source:sourceRoot,root:destinationRoot,rootIdentity,entries};
     if(options.reorganize){
       await rootUnchanged(sourceRoot,sourceIdentity);
       reorganizationReviews.set(transfer,new Map(entries.map(entry=>[entry.id,{captureTimeMs:entry.captureTimeMs,stat:sourceStats.get(entry.source)!,source:entry.source,destination:entry.destination,digest:entry.digest}])));
@@ -644,8 +662,8 @@ async function planOnce(source:string,roots:string[],request:Request,metadata:(f
 // linking/unlinking a staging file changes the destination inode's ctime.
 // Staging remains independent so jobs can read/copy concurrently.
 // A hold names the paths it decides about (files, or folders for everything beneath them) and
-// waits only for earlier holds that overlap them; a hold without paths (drive folders, mirror
-// moves, organization) overlaps everything. Waiting only on earlier holds cannot deadlock.
+// waits only for earlier holds that overlap them; a hold without paths (an organization)
+// overlaps everything. Waiting only on earlier holds cannot deadlock.
 // No overwrite ever depends on it: publication creates names with link or O_EXCL.
 const holds=new Set<{keys?:string[];done:Promise<void>}>();
 const overlaps=(a?:string[],b?:string[])=>!a||!b||a.some(left=>b.some(right=>left===right||left.startsWith(right+path.sep)||right.startsWith(left+path.sep)));
@@ -857,8 +875,8 @@ export interface ExecutionOptions {
   removeAppleDouble?:boolean;
 }
 /** The file just published: unlinking a hard-linked stage moves its ctime, so identity here is device, inode (birth time where no inode is reliable), size and modification time. */
-/** Folders no "._" cleanup touches: recovery storage, Problem files and Drive backups. */
-export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,DRIVE_BACKUPS,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
+/** Folders no "._" cleanup touches: recovery storage and Problem files. */
+export const appleDoubleCleaner=()=>new AppleDoubleCleaner([PROBLEM_FILES_FOLDER,APP_DATA_FOLDER,RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER]);
 /** Returns the destination stat that verification was bound to, or undefined when
  * none can be named; only that stat may vouch for the published bytes later. */
 async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer:TransferPlan,options:ExecutionOptions,recovery:RecoveryIndex,signal?:AbortSignal,onBytes?:(bytes:number)=>void):Promise<import('node:fs').BigIntStats|undefined> {
@@ -1227,8 +1245,7 @@ async function vouched(index:DestinationIndex,file:string,sha256:string):Promise
 const skippedOf=(transfer:TransferPlan)=>{const skipped=transfer.entries.filter(e=>e.skip).length;return skipped?{skipped}:{};};
 export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,onProgress?:(index:number,progress:Progress)=>void,options:ExecutionOptions={},onSettled?:(index:number)=>void):Promise<(ExecutionResult|Error)[]> {
   const runs:Run[]=transfers.map((transfer,position)=>({transfer,emit:outcome=>options.onFileOutcome?.(outcome,position),result:{copied:0,skipped:0,errors:[]},recovery:new Map(),batches:groups(transfer.entries).map(family=>({family,staged:new Map<string,Staged>(),failed:false,errors:[] as string[],mode:'staged' as 'direct'|'staged'})),pending:new Set<string>(),bytes:0,completed:0,failed:0,counted:new Set<string>(),phase:'copying',started:performance.now(),totalBytes:transfer.entries.filter(e=>!e.skip).reduce((sum,e)=>sum+e.size,0),stagedBytes:0,verifiedBytes:0,publishCopy:false,hashedBytes:0,
-    // A drive backup mirrors a drive as it is: nothing in it is removed.
-    ...(options.removeAppleDouble&&!transfer.drive?{appleDouble:appleDoubleCleaner()}:{})}));
+    ...(options.removeAppleDouble?{appleDouble:appleDoubleCleaner()}:{})}));
   for(const run of runs)if(run.appleDouble)run.result.appleDouble=run.appleDouble.report;
   const progress=(position:number,file:string)=>{const run=runs[position]!;onProgress?.(position,{phase:run.phase,completed:run.completed,failed:run.failed,total:run.transfer.entries.length,bytes:run.bytes,totalBytes:Math.max(run.totalBytes,run.bytes),...(run.direct?{}:skippedOf(run.transfer)),speed:run.phase==='copying'?run.bytes/Math.max((performance.now()-run.started)/1000,0.001):0,file,
    // What the time-left estimate counts: copying moves bytes; verifying publishes the staged files (bytes of files already in the backup add files only).
@@ -1239,7 +1256,7 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
   const report=(run:Run)=>{for(const batch of run.batches){run.result.errors.push(...batch.errors);batch.errors=[];}};
   const settled=new Set<number>();
   try {
-    // Setup per destination: mirror moves, then the duplicate preflight. A
+    // Setup per destination: the duplicate preflight. A
     // reviewed skip is only a hint: a removed/replaced duplicate is staged again.
     for(const [position,run] of runs.entries()) try {
       const {transfer}=run;
@@ -1248,13 +1265,9 @@ export async function executeMany(transfers:TransferPlan[],signal?:AbortSignal,o
       const existing=(file:string)=>onProgress?.(position,{phase:'planning',step:'existing',completed:checked,total:transfer.entries.length,bytes:0,totalBytes:0,speed:0,file});
       existing('');
       checkAbort(signal); await rootUnchanged(transfer.root,transfer.rootIdentity);
-      const removals=mirrorReviews.get(transfer);
-      if(transfer.removals&&(!removals||!transfer.drive))throw new Error('Mirror changes require the reviewed backup plan.');
       run.index=await destinationIndex(transfer.root,transfer.rootIdentity);
       // Receipts must be authenticable for a file written at its final name to be resumed or finished later.
       if(options.direct!==false&&importRecoveryAvailable()&&await directCapable(transfer.root,transfer.rootIdentity,options.exclusiveCopy)){run.direct=true;for(const batch of run.batches)batch.mode='direct';}
-      if(transfer.drive){const drive=transfer.drive;await exclusive(()=>claimDriveFolder(transfer.root,drive,transfer.rootIdentity));}
-      if(removals){run.result.removed=removals.length?await exclusive(()=>moveMirrorRemovals(transfer.root,transfer.drive!,removals,signal,transfer.rootIdentity,(completed,bytes,file)=>onProgress?.(position,{phase:'copying',step:'removing',completed,total:removals.length,bytes,totalBytes:removals.reduce((sum,item)=>sum+item.size,0),speed:0,file,renames:true}))):0;for(const removal of removals)run.index.forget(removal.path);}
       for(const batch of run.batches) try {
         for(const entry of batch.family){
           checkAbort(signal);await contained(entry.source,transfer.source);await contained(entry.destination,transfer.root);

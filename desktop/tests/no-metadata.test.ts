@@ -9,6 +9,7 @@ import {ruleOptions} from '../routing-options';
 import {defaultPreferences} from '../preferences';
 import {safeComponent} from '../folder-template';
 import type {Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -38,7 +39,7 @@ test('import keep: unknown files are not copied, known origins are, and nothing 
   await f.put(f.source,'DCIM/IMG_1.JPG','dated');await f.put(f.source,'DCIM/NOCAM_2.JPG','no camera');await f.put(f.source,'DCIM/SNAP_3.PNG','screenshot');await f.put(f.source,'DCIM/SHOT_4.PNG','shot');await f.put(f.source,'DCIM/BROKEN_5.JPG','zzz');
   const found=await plan(f.source,[f.library],{...base,noMetadata:'keep'},metadata);
   assert.deepEqual(sources(found),['IMG_1.JPG','SHOT_4.PNG']);
-  assert.deepEqual(found.noMetadata?.files.map(item=>[item.relative,item.reason]).sort(),[['DCIM/BROKEN_5.JPG','unreadable'],['DCIM/NOCAM_2.JPG','noCamera'],['DCIM/SNAP_3.PNG','noDate']]);
+  assert.deepEqual(found.noMetadata?.files.map(item=>[slash(item.relative),item.reason]).sort(),[['DCIM/BROKEN_5.JPG','unreadable'],['DCIM/NOCAM_2.JPG','noCamera'],['DCIM/SNAP_3.PNG','noDate']]);
   assert.deepEqual(found.noMetadata?.counts,{noDate:1,noCamera:1,unreadable:1});
   assert.equal(found.noMetadata?.count,3);
   assert.equal(found.noMetadata?.handling,'keep');

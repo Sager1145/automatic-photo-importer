@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { beneath, code, contained, identity, sameStat, syncDirectory , unlinkEntry, rmdirEntry } from './paths';
 import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
+import { retiredDriveMarker } from './drive-backup';
 import { log, logDeletion } from '../logger';
 
 /** Files the operating system creates that are not user content. The app's own recovery
@@ -14,6 +15,7 @@ export const isServiceName=(name:string)=>serviceNames.has(name.toLowerCase());
 /** Why a folder entry is OS bookkeeping, or undefined when it is anything else (so the folder stays). */
 async function bookkeeping(file:string,name:string,root:string):Promise<string|undefined> {
   if(isServiceName(name)) return 'operating-system service file';
+  const marker=await retiredDriveMarker(file);if(marker) return marker;
   if(!name.startsWith('._')||name.length<3) return undefined;
   const before=await fs.lstat(file,{bigint:true});
   if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)) return undefined;

@@ -10,13 +10,13 @@ import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,ty
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
 import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES, type AppleDoubleReport } from './appledouble';
-import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
+import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, recordedPath, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath } from './paths';
+import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath, DIRECTORY_SYNC_SUPPORTED } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -281,6 +281,8 @@ function manifestFrom(header:Record<string,unknown>,entries:Record<string,unknow
   ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{}),...(header.cleanupScope!==undefined?{cleanupScope:header.cleanupScope}:{})};
  return validateManifest(m,root,id);
 }
+/** The listing's error for a journal recorded with the drive elsewhere (see journalsIn). */
+export const RECORDED_ELSEWHERE='Recorded with the drive at another place or on another system; finish or undo it there.';
 interface Found {store:Store;folder:string;journal:string;}
 /** Where journal `id` of library `root` is: its folder in exactly one of the stores readers consult. Refused when
  * two stores hold it. */
@@ -304,7 +306,7 @@ async function readManifest(root:string,id:string):Promise<Manifest> {
  return openJournal(await locateJob(root,id),root,id);
 }
 /** The journals whose header names `folder` (by path key) as their library, in every store readers consult for it. */
-async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):Promise<{id:string;root:string;found:Found}[]>{
+async function journalsIn(folder:string,unreadable?:{id:string;error:string;recordedAt?:string}[]):Promise<{id:string;root:string;found:Found}[]>{
  const journals:{id:string;root:string;found:Found}[]=[];
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
@@ -324,6 +326,9 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):
     throw new Error(`The organization record ${found.journal} cannot be read, so it is not known which library it belongs to: ${text}`);
    }
    if(typeof root==='string'&&pathKey(root)===pathKey(folder))journals.push({id,root,found});
+   // This folder's journal, recorded with the drive at another place or on another system (/Volumes/A006 against I:):
+   // its paths and file identities are that system's, so it is listed there and never acted on here.
+   else if(unreadable&&typeof root==='string'){const here=recordedPath(store,root);if(here&&pathKey(here)===pathKey(folder))unreadable.push({id,error:RECORDED_ELSEWHERE,recordedAt:root});}
   }
  }
  return journals;
@@ -794,7 +799,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
  await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
- const handle=await fs.open(entry.destination,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ const handle=await openForDates(entry.destination);
  let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
@@ -815,6 +820,13 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
  } finally { await handle.close();if(final)observedMove(entry.source,entry.stat,entry.destination,final,m.kind==='duplicates'?'duplicateRemoval':'organize'); }
+}
+/** A moved file opened to read its identity and set its dates. Windows sets dates and flushes only through a handle that
+ * may write (EPERM otherwise); a read-only file still opens there to be checked, and then keeps its date. */
+async function openForDates(file:string):Promise<Awaited<ReturnType<typeof fs.open>>> {
+ const readOnly=constants.O_RDONLY|(constants.O_NOFOLLOW??0);
+ if(DIRECTORY_SYNC_SUPPORTED)return fs.open(file,readOnly);
+ return fs.open(file,constants.O_RDWR).catch(error=>{if(code(error)==='EPERM'||code(error)==='EACCES')return fs.open(file,readOnly);throw error;});
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */
@@ -1125,9 +1137,9 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(!await isOwnRealpath(root))throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
- const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string}[]=[];
+ const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string;recordedAt?:string}[]=[];
  const ids=[...new Set((await journalsIn(root,unreadable)).map(journal=>journal.id))].sort();let looked=0;
- for(const {id,error} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error});
+ for(const {id,error,recordedAt} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error,...(recordedAt?{recordedElsewhere:recordedAt}:{})});
  const report=(position:number,within:number,file:string,counts?:{read:number;total:number},later?:{done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(later?{later}:{})});
  const {signal}=options;
  report(0,0,'');
@@ -1390,7 +1402,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     else if(where==='moved')await restore(entry.destination,entry.source,index,entry);
     if(where!=='none'){
      // Restore the reviewed Modified date; the bytes were never changed.
-     const handle=await fs.open(entry.source,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+     const handle=await openForDates(entry.source);
      try{const now=await handle.stat({bigint:true});if(String(now.mtimeNs)!==entry.stat.mtime){
       // Seconds pass through a double and FAT/exFAT truncate to 10 ms; aim mid-step there.
       const fat=now.ctimeNs===now.mtimeNs,milliseconds=Number(BigInt(entry.stat.mtime)/1000000n)+(fat?5:0);

@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { plan, execute, configureOrganizationRecovery } from '../core/index';
@@ -75,9 +76,11 @@ async function reimport(card:string,root:string,crashed=false) {
   await assertOnlyEmptyOrphans(root,crashed);
 }
 async function crash(card:string,root:string,mode:'copy'|'publish'|'create') {
-  const child=new URL('./fixtures/exfat-crash-child.mts',import.meta.url).pathname;
-  const signal=await new Promise<string|null>(resolve=>execFile('node',['--import','tsx',child,card,root,mode,'20'],{timeout:90000},error=>resolve((error as {signal?:string}|null)?.signal??null)));
-  assert.equal(signal,'SIGKILL','the child process was killed mid-run');
+  const child=fileURLToPath(new URL('./fixtures/exfat-crash-child.mts',import.meta.url));
+  const ended=await new Promise<{signal:string|null;code:unknown;stderr:string}>(resolve=>execFile('node',['--import','tsx',child,card,root,mode,'20'],{timeout:90000},(error,_stdout,stderr)=>resolve({signal:(error as {signal?:string}|null)?.signal??null,code:(error as {code?:unknown}|null)?.code,stderr})));
+  // Windows has no signals: process.kill(pid,'SIGKILL') terminates with exit code 1, and nothing is printed (a crash would print its error).
+  if(process.platform==='win32')assert.deepEqual([ended.code,ended.stderr.trim()],[1,''],'the child process was killed mid-run');
+  else assert.equal(ended.signal,'SIGKILL','the child process was killed mid-run');
 }
 /** Detach and attach again, with another image taking the old disk number in between. */
 async function reattachOnce(d:Disk,root:string) {

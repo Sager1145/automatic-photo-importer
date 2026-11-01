@@ -16,6 +16,7 @@ import type { DuplicateExif, DuplicateFile, DuplicateGroup, Metadata } from '../
 /** The duplicate store of `root` as written (sealed), from the app's data folder. */
 const storedRecord = async (root: string) => JSON.parse(await fs.readFile(await indexTarget(root, 'duplicates.json'), 'utf8'));
 import {configureOrganizationRecovery} from '../core/index';
+import { slash } from './fixtures/os';
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 
 const exif = (patch: Partial<DuplicateExif> = {}): DuplicateExif => ({ date: '2024-05-06T07:08:09.12', camera: 'Nikon Z f', serial: '3000123', shutterCount: '1001', width: 6048, height: 4032, lens: '24-70mm', ...patch });
@@ -306,7 +307,7 @@ test('two copies of one Live Photo: the stills are hashed at import time, their 
   const apple = async (target: string): Promise<Metadata> => ({ camera: 'Apple iPhone 15', make: 'Apple', date: live.date, contentId: 'LIVE-1', fields: {}, fingerprint: live });
   const planned = await plan(source, [root], { backup: false as const, template: '{year}/{yyyymm}/{camera}', layout: 'flat', unknownRules: {}, duplicates: true }, apple);
   const files = planned.duplicates!.files;
-  assert.deepEqual(files.map(item => path.relative(source, item.path)).sort(), ['DCIM/100APPLE/IMG_0001.HEIC', 'DCIM/101APPLE/IMG_0001.HEIC']);
+  assert.deepEqual(files.map(item => slash(path.relative(source, item.path))).sort(), ['DCIM/100APPLE/IMG_0001.HEIC', 'DCIM/101APPLE/IMG_0001.HEIC']);
   assert.ok(files.every(item => item.sha256 === files[0]!.sha256 && item.sha256), 'both stills were hashed as candidates');
 });
 

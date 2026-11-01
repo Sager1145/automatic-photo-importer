@@ -7,7 +7,6 @@ Import mode|导入模式|匯入模式|読み込みモード
 Media|媒体|媒體|メディア
 Files & folders|文件和文件夹|檔案與資料夾|ファイルとフォルダー
 File by date and camera rules.|按日期和相机规则归档。|依日期與相機規則歸檔。|日付とカメラのルールで整理します。
-Keep the original folder structure.|保留原始文件夹结构。|保留原始資料夾結構。|元のフォルダー構造を保ちます。
 A review is waiting in its workspace.|有一项预览正在其工作区中等待确认。|有一項預覽正在其工作區中等待確認。|ワークスペースに確認待ちのプレビューがあります。
 Open pending review|打开待确认预览|開啟待確認預覽|確認待ちのプレビューを開く
 Issues|问题|問題|問題

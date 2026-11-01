@@ -75,8 +75,10 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li><b class="ui">List view</b> / <b class="ui">Grid view</b>: change how sources are shown. Click a file to see its preview and EXIF.</li>
 <li>With <b class="ui">Automatic import</b> on (Settings → Importing), imports start as soon as a chosen card connects.</li>
 </ul>
-<h3>Files &amp; folders tab (whole-drive backups)</h3>
-<ul><li><b class="ui">Back up drives or folders…</b>: copy everything, keeping its own folders, into <code>Drive backups/</code>, without sorting by camera or date.</li></ul>
+<h3>Files &amp; folders tab (every file of a drive or folder)</h3>
+<ul><li><b class="ui">Back up drives or folders…</b>: copy every file into the library, not only photos and videos. Photos and videos are filed by your date and camera rules like any import; every other file (documents, archives, camera index files, Finder aliases) goes to <code>Unknown files</code> in the folder of its date, for example <code>2026/202610/Unknown files/</code>. macOS <code>._</code> files and <code>.DS_Store</code> are not copied.</li>
+<li>There is no Additive or Mirror mode. A file you later delete from the drive stays in the library; nothing is ever removed or moved aside because it left the drive. Files already in the library are recognized by their contents and not copied twice.</li>
+<li>Every name the app writes is valid on macOS, Windows and Linux (characters Windows refuses, trailing dots or spaces and names such as <code>CON</code> are adjusted, and two names differing only by case never share a folder), so a library drive can move between computers.</li></ul>
 <h3>Import overview and Destinations</h3>
 <ul>
 <li>The overview shows sources, active jobs, speed, files done and destination space. <b class="ui">Hide the import overview</b> collapses it.</li>
@@ -112,6 +114,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li><b class="ui">Review changes…</b>: preview the new structure; <b class="ui">Organize now</b> applies it. Originals wait in a recovery area until you release them, so you can undo.</li>
 <li><b class="ui">Organize a folder</b> → <b class="ui">Choose folder…</b>: organize another folder in place.</li>
 <li><b class="ui">Edit folder rules</b>: opens Settings → Storage &amp; folders.</li>
+<li>A <code>Drive backups</code> folder made by an earlier version is organized into the library too: <b class="ui">Check folder layout</b> lists its files as misplaced, and <b class="ui">Review changes…</b> → <b class="ui">Organize now</b> files its photos and videos by date and camera and everything else (Finder aliases included) in <code>Unknown files</code>. A file the library already has is kept in the recovery area as a duplicate, not deleted. Removable <code>._</code> files follow <b class="ui">Remove macOS ._ files</b>; the drive marker and <code>.DS_Store</code> go with the emptied folder, and the <code>Drive backups</code> folder is removed once empty. The whole move is listed under <b class="ui">Organization recovery</b> and can be undone.</li>
 </ul>
 <h3>Duplicates</h3>
 <ul>
@@ -132,8 +135,8 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <ul>
 <li><b class="ui">General</b>: app language (English, 简体中文, 繁體中文, 日本語), text size, appearance (System / Light / Dark) and accent colour.</li>
 <li><b class="ui">Storage &amp; folders</b>: backup folders, copy policy, folder structure and edited exports folder (see section 2).</li>
-<li><b class="ui">Importing</b>: <b class="ui">Automatic import</b>; <b class="ui">Verify each copy after copying</b> (reads each copy back; off is faster); <b class="ui">Drive backups</b>: <b class="ui">Additive</b> or <b class="ui">Mirror</b> (files removed from the source move to <code>Drive backups/.mirror-removed/</code>, never deleted); <b class="ui">After an import</b>: offer to delete originals that are verified in the backup (two-step confirmation, off by default), and eject drives automatically after a clean import.</li>
-<li><b class="ui">File handling</b>: what to do with files without date or camera (<b class="ui">Move to a folder</b>, <b class="ui">Leave where they are</b>, <b class="ui">Use file date</b>); unrecognized file types (<b class="ui">Skip automatically</b>, <b class="ui">Copy to Other files folder</b>, <b class="ui">Ask me</b>, or a saved rule per extension); same name but different content (<b class="ui">Conflicts folder</b> or <b class="ui">Add a number</b>); collect 0-byte problem files; <b class="ui">Clean up Mac system files</b> (on by default, on every computer): imports skip Finder's <code>.DS_Store</code> and <code>._</code> files on the card, and imports and organizations remove them from the folders they write to. <code>._</code> files that hold tags or other data are kept, and the card is never changed. Turn it off to have a Files &amp; folders backup copy them.</li>
+<li><b class="ui">Importing</b>: <b class="ui">Automatic import</b>; <b class="ui">Verify each copy after copying</b> (reads each copy back; off is faster); <b class="ui">Files &amp; folders</b>: shows where files other than photos and videos go (no mode to choose: files deleted from the drive stay in the library); <b class="ui">After an import</b>: offer to delete originals that are verified in the backup (two-step confirmation, off by default), and eject drives automatically after a clean import.</li>
+<li><b class="ui">File handling</b>: what to do with files without date or camera (<b class="ui">Move to a folder</b>, <b class="ui">Leave where they are</b>, <b class="ui">Use file date</b>); unrecognized file types (<b class="ui">Skip automatically</b>, <b class="ui">Copy to Other files folder</b>, <b class="ui">Ask me</b>, or a saved rule per extension); same name but different content (<b class="ui">Conflicts folder</b> or <b class="ui">Add a number</b>); collect 0-byte problem files; <b class="ui">Clean up Mac system files</b> (on by default, on every computer): imports skip Finder's <code>.DS_Store</code> and <code>._</code> files on the card, and imports and organizations remove them from the folders they write to. <code>._</code> files that hold tags or other data are kept, and the card is never changed. Turn it off to have a Files &amp; folders import take them.</li>
 <li><b class="ui">Devices</b>: remembered drives (with the cameras found on them) and ignored drives.</li>
 <li><b class="ui">Performance</b>: drives imported at once, CPU threads and memory limit; <b class="ui">Reset to defaults</b>.</li>
 <li><b class="ui">Diagnostics</b>: log detail, <b class="ui">Open log folder</b>, <b class="ui">Export logs…</b> to share with support.</li>
@@ -182,7 +185,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li>「扫描」/「扫描全部」：只读取不复制，显示数量、格式和相机。</li>
 <li>「开始」：规划、审核后复制，每份副本都用 SHA-256 校验。「停止」：取消进行中的任务，已完成的文件保留，再次导入会继续。</li>
 <li>列表/网格视图切换；点击文件查看预览和 EXIF。在「设置 → 导入」中开启「自动导入」后，插卡即开始导入。</li>
-<li><b>文件和文件夹</b>：「备份磁盘或文件夹…」按原有文件夹结构完整复制到 <code>Drive backups/</code>，不按相机或日期整理。</li>
+<li><b>文件和文件夹</b>：「备份磁盘或文件夹…」把每个文件都复制到媒体库，不只是照片和视频。照片和视频与普通导入一样按日期和相机规则归档；其他文件（文档、压缩包、相机索引文件、Finder 替身）放入对应日期文件夹中的 <code>Unknown files</code>，例如 <code>2026/202610/Unknown files/</code>。macOS 的 <code>._</code> 文件和 <code>.DS_Store</code> 不会复制。不再有「累加」或「镜像」模式：之后从磁盘删除的文件仍保留在媒体库中，任何文件都不会因为离开磁盘而被删除或移走；媒体库中已有的文件按内容识别，不会重复复制。应用写入的每个名称在 macOS、Windows 和 Linux 上都有效（Windows 不允许的字符、结尾的点或空格以及 <code>CON</code> 等名称会被调整，只有大小写不同的两个名称不会放在同一文件夹），媒体库磁盘可以在不同电脑之间使用。</li>
 <li>「目标」显示每个备份文件夹所在硬盘（如“A006 › photobackup”）、视频文件夹、存储条和硬盘活动；「检查文件夹结构」检查现有文件是否符合文件夹规则。</li>
 </ul>
 
@@ -200,7 +203,7 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 
 <h3 id="zh-tools">5. 资料库工具</h3>
 <ul>
-<li><b>整理</b>：「检查文件夹结构」找出位置不符合规则的文件；「预览更改…」预览新结构，「立即整理」执行。原文件会保留在恢复区直到你释放，可以撤销。「整理文件夹 → 选择文件夹…」原地整理其他文件夹；「编辑文件夹规则」打开设置。</li>
+<li><b>整理</b>：「检查文件夹结构」找出位置不符合规则的文件；「预览更改…」预览新结构，「立即整理」执行。原文件会保留在恢复区直到你释放，可以撤销。「整理文件夹 → 选择文件夹…」原地整理其他文件夹；「编辑文件夹规则」打开设置。旧版本建立的 <code>Drive backups</code> 文件夹也会整理进媒体库：「检查文件夹结构」会把其中的文件列为位置不符，「预览更改…」→「立即整理」把照片和视频按日期和相机归档，其他文件（包括 Finder 替身）放入 <code>Unknown files</code>。媒体库中已有的文件作为重复项保留在恢复区，不会删除。可移除的 <code>._</code> 文件按「移除 macOS ._ 文件」设置处理；磁盘标记和 <code>.DS_Store</code> 随清空的文件夹一起移除，<code>Drive backups</code> 清空后也会被移除。整个过程列在「整理恢复」中，可以撤销。</li>
 <li><b>重复文件</b>：在「查找位置」中「选择文件夹…」，然后「扫描重复文件」；可以逐组自行选择保留的文件，或让应用为完全相同的文件建议保留项。移除的副本进入恢复区，可以撤销。</li>
 <li><b>恢复与清理</b>：「整理恢复」列出可撤销的整理；「刷新列表」重新读取；「维护 → 清理」在说明后果后释放不再需要的恢复数据。</li>
 </ul>
@@ -212,8 +215,8 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <ul>
 <li><b>通用</b>：界面语言、文字大小、外观（跟随系统/浅色/深色）和强调色。</li>
 <li><b>存储与文件夹</b>：备份文件夹、复制策略、文件夹结构、编辑导出文件夹（见第 2 节）。</li>
-<li><b>导入</b>：自动导入；复制后逐一校验（关闭更快）；磁盘备份「累加」或「镜像」（来源中已删除的文件移到 <code>Drive backups/.mirror-removed/</code>，从不删除）；导入完成后：提供删除已在备份中校验过的原文件（两步确认，默认关闭）、导入无误后自动推出驱动器。</li>
-<li><b>文件处理</b>：没有日期或相机的文件（移到文件夹 / 保持原位 / 使用文件日期）；无法识别的文件类型（自动跳过 / 复制到“其他文件”文件夹 / 询问我，或按扩展名保存规则）；同名但内容不同（冲突文件夹 / 添加编号）；收集 0 字节问题文件；<b>清理 Mac 系统文件</b>（默认开启，所有电脑上都是）：导入时跳过存储卡上 Finder 的 <code>.DS_Store</code> 和 <code>._</code> 文件，导入和整理时从写入的文件夹中删除它们。含有标签或其他数据的 <code>._</code> 文件会保留，存储卡不会被改动。关闭后，“文件和文件夹”备份会复制它们。</li>
+<li><b>导入</b>：自动导入；复制后逐一校验（关闭更快）；「文件和文件夹」显示照片和视频以外的文件存放位置（无需选择模式：从磁盘删除的文件仍保留在媒体库中）；导入完成后：提供删除已在备份中校验过的原文件（两步确认，默认关闭）、导入无误后自动推出驱动器。</li>
+<li><b>文件处理</b>：没有日期或相机的文件（移到文件夹 / 保持原位 / 使用文件日期）；无法识别的文件类型（自动跳过 / 复制到“其他文件”文件夹 / 询问我，或按扩展名保存规则）；同名但内容不同（冲突文件夹 / 添加编号）；收集 0 字节问题文件；<b>清理 Mac 系统文件</b>（默认开启，所有电脑上都是）：导入时跳过存储卡上 Finder 的 <code>.DS_Store</code> 和 <code>._</code> 文件，导入和整理时从写入的文件夹中删除它们。含有标签或其他数据的 <code>._</code> 文件会保留，存储卡不会被改动。关闭后，“文件和文件夹”导入会包含它们。</li>
 <li><b>设备</b>：记住的驱动器（含其中发现的相机）和已忽略的驱动器。</li>
 <li><b>性能</b>：同时导入的驱动器数、CPU 线程、内存上限，「恢复默认」。</li>
 <li><b>诊断</b>：日志详细程度、「打开日志文件夹」、「导出日志…」。</li>

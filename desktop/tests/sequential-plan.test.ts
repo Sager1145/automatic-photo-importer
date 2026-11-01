@@ -6,6 +6,7 @@ import os from 'node:os';
 import {plan} from '../core/index';
 import {allocateDestinations,destinationEntries,fillFirst} from '../core/allocation';
 import type {Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
 const metadata=async():Promise<Metadata>=>({camera:'Sony A7',date:'2024-02-03T12:00:00Z',fields:{}});
@@ -20,6 +21,6 @@ test('fill-first names each file only against the files that land on its own dis
   await fs.writeFile(path.join(source,'DCIM/101/A.JPG'),'two');
   const {plans}=await plan(source,roots,{...options,fillFirst:first=>fillFirst(first,20).kept},metadata);
   assert.deepEqual(allocateDestinations(plans,[20,100],'sequential'),[20,6]);
-  const placed=plans.map(item=>destinationEntries(item).map(entry=>[path.relative(source,entry.source),path.relative(item.root,entry.destination)]));
+  const placed=plans.map(item=>destinationEntries(item).map(entry=>[slash(path.relative(source,entry.source)),slash(path.relative(item.root,entry.destination))]));
   assert.deepEqual(placed,[[['DCIM/100/A.JPG','2024/202402/Sony A7/JPEG/A.JPG']],[['DCIM/101/A.JPG','2024/202402/Sony A7/JPEG/A.JPG']]]);
 });

@@ -9,6 +9,7 @@ import {ruleOptions,rulesScope} from '../routing-options';
 import {unknownDecision} from '../unknown-confirm';
 import {validNoMetadataFolder} from '../no-metadata';
 import type {Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const base={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -42,11 +43,11 @@ test('the folder check built from the shared rules leaves unknown files alone un
   const flat={...defaultPreferences,mediaLayout:'flat' as const};
   const check=(prefs:typeof defaultPreferences)=>findMisplaced(f.library,f.library,ruleOptions({...prefs,mediaLayout:'flat'}),meta);
   const keep={...flat,noMetadataHandling:'keep' as const};
-  assert.deepEqual((await check(keep)).files,['old/IMG_3.JPG']);
+  assert.deepEqual((await check(keep)).files.map(slash),['old/IMG_3.JPG']);
   const folder={...flat,noMetadataHandling:'folder' as const};
-  assert.deepEqual((await check(folder)).files.sort(),['2021/202103/Unknown Camera/NOCAM_1.JPG','old/IMG_3.JPG','old/SNAP_2.PNG']);
+  assert.deepEqual((await check(folder)).files.map(slash).sort(),['2021/202103/Unknown Camera/NOCAM_1.JPG','old/IMG_3.JPG','old/SNAP_2.PNG']);
   await f.put(f.library,'Unknown files/old/SNAP_2.PNG');await fs.rm(path.join(f.library,'old/SNAP_2.PNG'));
-  assert.ok(!(await check(folder)).files.includes('Unknown files/old/SNAP_2.PNG'));
+  assert.ok(!(await check(folder)).files.map(slash).includes('Unknown files/old/SNAP_2.PNG'));
 });
 
 test('an exiftool Error alone does not make a file unknown; with no date and no camera it does',async t=>{
@@ -69,7 +70,7 @@ test('a camera-rule file takes its folder context: filed normally beside a dated
     const index=entries(found).filter(entry=>entry.source.endsWith('INDEX01.DSC'));
     assert.equal(index.length,1,mode);assert.equal(index[0]!.destination,path.join(f.library,'2022/202205/Cam/INDEX01.DSC'));
     const lone=await plan(alone,[f.library],{...base,unknownRules:rules,noMetadata:mode},meta);
-    assert.deepEqual(lone.noMetadata?.files.map(item=>item.relative),['LOOSE/INDEX02.DSC'],mode);
+    assert.deepEqual(lone.noMetadata?.files.map(item=>slash(item.relative)),['LOOSE/INDEX02.DSC'],mode);
     const loose=entries(lone);
     if(mode==='keep')assert.equal(loose.length,0);else{assert.equal(loose.length,1);assert.equal(loose[0]!.destination,path.join(f.library,'Unknown files/LOOSE/INDEX02.DSC'));}
   }

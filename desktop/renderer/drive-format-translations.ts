@@ -1,0 +1,36 @@
+// Settings › Devices › Drive formats (DriveFormats.tsx), and the driver notes of core/drive-formats.ts DRIVER_OPTIONS.
+export const driveFormatTranslationRows = `
+Drive formats|驱动器格式|磁碟格式|ドライブのフォーマット
+Connected drives|已连接的驱动器|已連接的磁碟|接続中のドライブ
+No drives found.|未找到驱动器。|找不到磁碟。|ドライブが見つかりません。
+All common formats on this computer|此电脑上的所有常见格式|這台電腦上的所有常見格式|このコンピューターでの主なフォーマット
+Reads and writes here|此电脑可读写|這台電腦可讀寫|このコンピューターで読み書きできます
+Read only here|此电脑只能读取|這台電腦只能讀取|このコンピューターでは読み取りのみ
+Not readable here without a driver|未安装驱动程序时此电脑无法读取|未安裝驅動程式時這台電腦無法讀取|ドライバーなしでは読み取れません
+Mounted read-only|以只读方式挂载|以唯讀方式掛載|読み取り専用でマウント中
+This computer's disk|此电脑的磁盘|這台電腦的磁碟|このコンピューターのディスク
+Files up to 4 GB|单个文件最大 4 GB|單一檔案最大 4 GB|1 ファイル 4 GB まで
+Read and write|读写|讀寫|読み書き
+Read only|只读|唯讀|読み取りのみ
+Low risk|风险低|風險低|リスク低
+Some risk: back up first|有一定风险：请先备份|有一定風險：請先備份|リスクあり：先にバックアップを
+High risk: not for backups|风险高：不要用于备份|風險高：不要用於備份|リスク高：バックアップには使わないでください
+exFAT is read and written by macOS, Windows and Linux without extra software: the best format for a drive that moves between them.|macOS、Windows 和 Linux 无需额外软件即可读写 exFAT：在这些系统之间移动的驱动器最适合使用此格式。|macOS、Windows 和 Linux 無需額外軟體即可讀寫 exFAT：在這些系統之間移動的磁碟最適合使用此格式。|exFAT は macOS、Windows、Linux のどれでも追加ソフトなしで読み書きできます。これらの間で移動するドライブに最適なフォーマットです。
+FAT32 cannot hold a file larger than 4 GB. An import with such a file is refused before anything is copied.|FAT32 无法存放大于 4 GB 的文件。包含此类文件的导入会在复制任何内容之前被拒绝。|FAT32 無法存放大於 4 GB 的檔案。包含此類檔案的匯入會在複製任何內容之前被拒絕。|FAT32 には 4 GB を超えるファイルを保存できません。そのようなファイルを含むインポートは、何かをコピーする前に中止されます。
+Mounted by a FUSE driver. Before it is used as a destination, the app writes, reads back, renames and deletes a test file on it.|由 FUSE 驱动程序挂载。用作目标之前，应用会在其上写入、读回、重命名并删除一个测试文件。|由 FUSE 驅動程式掛載。用作目的地之前，應用程式會在其上寫入、讀回、重新命名並刪除一個測試檔案。|FUSE ドライバーでマウントされています。保存先として使う前に、テストファイルの書き込み、読み戻し、名前の変更、削除を行います。
+No open-source driver can write this format on this computer. Use the drive on a computer that can, or copy the photos to an exFAT drive.|此电脑上没有可写入此格式的开源驱动程序。请在可写入的电脑上使用此驱动器，或将照片复制到 exFAT 驱动器。|這台電腦上沒有可寫入此格式的開放原始碼驅動程式。請在可寫入的電腦上使用此磁碟，或將照片複製到 exFAT 磁碟。|このコンピューターでこのフォーマットに書き込めるオープンソースのドライバーはありません。書き込めるコンピューターで使うか、写真を exFAT のドライブにコピーしてください。
+The app never downloads or installs drivers and never changes security settings. Install a driver yourself from its project page, which opens in your browser. Third-party drivers can lose data: keep another copy, and the app tests every destination before using it.|应用不会下载或安装驱动程序，也不会更改安全设置。请从项目页面自行安装驱动程序，该页面会在浏览器中打开。第三方驱动程序可能导致数据丢失：请保留另一份副本；应用在使用每个目标之前都会先进行测试。|應用程式不會下載或安裝驅動程式，也不會變更安全性設定。請從專案頁面自行安裝驅動程式，該頁面會在瀏覽器中開啟。第三方驅動程式可能導致資料遺失：請保留另一份副本；應用程式在使用每個目的地之前都會先進行測試。|アプリがドライバーをダウンロードやインストールしたり、セキュリティ設定を変更したりすることはありません。ドライバーはブラウザーで開くプロジェクトのページからご自身でインストールしてください。サードパーティーのドライバーではデータが失われることがあります。別のコピーを残してください。アプリはすべての保存先を使う前にテストします。
+Runs a small Linux system for the drive and shares it with the Mac over the network: no kernel extension, Apple silicon only. Writes through Linux's own drivers.|为该驱动器运行一个小型 Linux 系统，并通过网络共享给 Mac：无需内核扩展，仅支持 Apple 芯片。通过 Linux 自带的驱动程序写入。|為該磁碟執行一個小型 Linux 系統，並透過網路分享給 Mac：不需核心延伸功能，僅支援 Apple 晶片。透過 Linux 內建的驅動程式寫入。|ドライブ用に小さな Linux を動かし、ネットワーク経由で Mac に共有します。カーネル拡張は不要で、Apple シリコン専用です。書き込みは Linux 自身のドライバーで行います。
+The long-standing NTFS driver. It needs macFUSE, whose kernel extension is closed source and must be allowed in System Settings by you. A drive Windows left hibernated (Fast Startup) mounts read-only.|历史悠久的 NTFS 驱动程序。它需要 macFUSE，而 macFUSE 的内核扩展并非开源，需要你在“系统设置”中自行允许。Windows 处于休眠（快速启动）状态的驱动器会以只读方式挂载。|歷史悠久的 NTFS 驅動程式。它需要 macFUSE，而 macFUSE 的核心延伸功能並非開放原始碼，需要你在「系統設定」中自行允許。Windows 處於休眠（快速啟動）狀態的磁碟會以唯讀方式掛載。|長く使われている NTFS ドライバーです。macFUSE が必要で、そのカーネル拡張はソース非公開のため、システム設定でご自身で許可する必要があります。Windows が休止状態（高速スタートアップ）のまま残したドライブは読み取り専用でマウントされます。
+An early FSKit driver. It deletes hiberfil.sys to mount a drive Windows left hibernated. Not for a backup drive yet.|早期阶段的 FSKit 驱动程序。为挂载 Windows 休眠后的驱动器，它会删除 hiberfil.sys。暂不适合用于备份驱动器。|早期階段的 FSKit 驅動程式。為掛載 Windows 休眠後的磁碟，它會刪除 hiberfil.sys。暫不適合用於備份磁碟。|初期段階の FSKit ドライバーです。Windows が休止状態のまま残したドライブをマウントするために hiberfil.sys を削除します。まだバックアップ用ドライブには向きません。
+An FSKit extension for macOS 15.6 and later. Enable it in System Settings after installing.|适用于 macOS 15.6 及更高版本的 FSKit 扩展。安装后请在“系统设置”中启用。|適用於 macOS 15.6 及更新版本的 FSKit 延伸功能。安裝後請在「系統設定」中啟用。|macOS 15.6 以降用の FSKit 拡張です。インストール後、システム設定で有効にしてください。
+Read only, and no longer updated (last change 2021). Needs macFUSE.|只读，且已不再更新（最后更新于 2021 年）。需要 macFUSE。|唯讀，且已不再更新（最後更新於 2021 年）。需要 macFUSE。|読み取りのみで、更新は止まっています（最終更新 2021 年）。macFUSE が必要です。
+A maintained fork of Ext2Fsd for Windows 10 and 11. Some ext4 features make it mount read-only or not at all. Do not use the original Ext2Fsd: it is abandoned and can damage ext4 drives.|适用于 Windows 10 和 11、仍在维护的 Ext2Fsd 分支。部分 ext4 功能会使其只读挂载或无法挂载。不要使用原版 Ext2Fsd：它已停止维护，可能损坏 ext4 驱动器。|適用於 Windows 10 和 11、仍在維護的 Ext2Fsd 分支。部分 ext4 功能會使其唯讀掛載或無法掛載。不要使用原版 Ext2Fsd：它已停止維護，可能損壞 ext4 磁碟。|Windows 10 と 11 向けの、保守が続いている Ext2Fsd のフォークです。ext4 の機能によっては読み取り専用でしかマウントできないか、マウントできません。元の Ext2Fsd は開発が止まっており ext4 ドライブを壊すことがあるため使わないでください。
+Built into Windows 11 with WSL; needs an administrator. It does not support USB drives or card readers, and the drive shows as a network location, not a drive letter.|Windows 11 的 WSL 内置功能；需要管理员权限。不支持 USB 驱动器或读卡器，驱动器会显示为网络位置而不是驱动器号。|Windows 11 的 WSL 內建功能；需要系統管理員權限。不支援 USB 磁碟或讀卡機，磁碟會顯示為網路位置而不是磁碟機代號。|Windows 11 の WSL に組み込まれています。管理者権限が必要です。USB ドライブやカードリーダーには対応しておらず、ドライブ文字ではなくネットワーク上の場所として表示されます。
+A Windows driver for Btrfs. Its author says to use it at your own risk and keep backups. Secure Boot can stop it from loading.|适用于 Windows 的 Btrfs 驱动程序。作者声明使用风险自负并应保留备份。安全启动可能阻止其加载。|適用於 Windows 的 Btrfs 驅動程式。作者聲明使用風險自負並應保留備份。安全開機可能阻止其載入。|Windows 用の Btrfs ドライバーです。作者は自己責任で使い、バックアップを取るよう求めています。セキュアブートで読み込みが止められることがあります。
+Copies files off a Mac OS Extended drive; it cannot write or show the drive as a drive letter. Needs Java.|可从 Mac OS 扩展格式驱动器中复制文件；无法写入，也无法将其显示为驱动器号。需要 Java。|可從 Mac OS 擴充格式磁碟中拷貝檔案；無法寫入，也無法將其顯示為磁碟機代號。需要 Java。|Mac OS 拡張のドライブからファイルをコピーできます。書き込みやドライブ文字での表示はできません。Java が必要です。
+Extracts files from an APFS or Mac OS Extended disk image; it does not mount the drive. No open-source driver writes APFS on Windows.|可从 APFS 或 Mac OS 扩展格式的磁盘映像中提取文件；不会挂载驱动器。Windows 上没有可写入 APFS 的开源驱动程序。|可從 APFS 或 Mac OS 擴充格式的磁碟映像中擷取檔案；不會掛載磁碟。Windows 上沒有可寫入 APFS 的開放原始碼驅動程式。|APFS や Mac OS 拡張のディスクイメージからファイルを取り出せます。ドライブはマウントしません。Windows で APFS に書き込めるオープンソースのドライバーはありません。
+Read only. Encrypted volumes of Macs with a T2 chip are not supported.|只读。不支持配备 T2 芯片的 Mac 的加密宗卷。|唯讀。不支援配備 T2 晶片的 Mac 的加密宗卷。|読み取りのみです。T2 チップ搭載 Mac の暗号化ボリュームには対応していません。
+A kernel module that reads APFS. Writing (the readwrite option) is experimental: its authors warn of a real risk of corrupting the drive.|读取 APFS 的内核模块。写入（readwrite 选项）仍属实验性：作者警告确有损坏驱动器的风险。|讀取 APFS 的核心模組。寫入（readwrite 選項）仍屬實驗性：作者警告確有損壞磁碟的風險。|APFS を読み取るカーネルモジュールです。書き込み（readwrite オプション）は実験段階で、作者はドライブが壊れる現実的なリスクがあると警告しています。
+Linux writes Mac OS Extended only when its journal is off, which a Mac can do. Never use the force option on a journaled drive.|只有在关闭日志后，Linux 才能写入 Mac OS 扩展格式，这可以在 Mac 上完成。切勿对启用日志的驱动器使用 force 选项。|只有在關閉日誌後，Linux 才能寫入 Mac OS 擴充格式，這可以在 Mac 上完成。切勿對啟用日誌的磁碟使用 force 選項。|Linux が Mac OS 拡張に書き込めるのはジャーナリングがオフのときだけで、Mac でオフにできます。ジャーナリングが有効なドライブに force オプションは絶対に使わないでください。
+`;

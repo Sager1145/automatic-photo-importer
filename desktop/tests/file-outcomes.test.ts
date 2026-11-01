@@ -9,7 +9,7 @@ import { executeDestinations, type DestinationOutcome } from '../core/destinatio
 import { destinationIndex, dropDestinationIndexes } from '../core/destination-index';
 import { verifiedOriginals } from '../core/originals';
 import { duplicateStore, dropDuplicateStores, recordPlanDuplicates, type PlanDuplicates } from '../core/duplicates';
-import { identity, statKey } from '../core/paths';
+import { identity, posixRelative, statKey } from '../core/paths';
 import type { Metadata, TransferPlan } from '../shared';
 
 configureOrganizationRecovery('file-outcomes-fixture-host-authentication-secret-32b');
@@ -71,8 +71,8 @@ test('a same-size file that takes the planned path after planning: the outcome i
  await recordPlanDuplicates(root,found,source=>{const item=bySource.get(source)?.[0];return item?.finalIdentity?{destination:item.destination,identity:item.finalIdentity}:undefined;});
  dropDuplicateStores();
  const store=await duplicateStore(root,await identity(root));
- assert.equal(store.files.has(path.relative(root,foreign)),false);
- assert.deepEqual(store.files.get(path.relative(root,outcome.destination))?.exif,exif);
+ assert.equal(store.files.has(posixRelative(root,foreign)),false);
+ assert.deepEqual(store.files.get(posixRelative(root,outcome.destination))?.exif,exif);
 });
 
 test('mirror: one disk failing leaves the original undeletable, with the reason',async t=>{

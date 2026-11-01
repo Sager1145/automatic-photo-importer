@@ -12,6 +12,7 @@ import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES } from '.
 import { defaultPreferences, normalizePreferences } from '../preferences';
 import { lockedPreferenceKeys } from '../settings-lock';
 import type { Metadata } from '../shared';
+import { fileSymlinks, linkFolder } from './fixtures/os';
 
 const run=promisify(execFile);
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
@@ -70,13 +71,14 @@ test('a symbolic link, an oversized file and a tagged file are kept; a plain one
   for(const name of media)await fs.writeFile(path.join(dir,name),'x');
   await fs.writeFile(path.join(dir,'._A.JPG'),appleDouble([provenance]));
   await fs.writeFile(path.join(dir,'target'),appleDouble([provenance]));
-  await fs.symlink('target',path.join(dir,'._B.JPG'));
+  // A file symlink needs Developer Mode on Windows; without it ._B.JPG is simply absent and the rest is still checked.
+  if(fileSymlinks)await fs.symlink('target',path.join(dir,'._B.JPG'));
   await fs.writeFile(path.join(dir,'._C.JPG'),Buffer.alloc(APPLEDOUBLE_MAX_BYTES+1));
   await fs.writeFile(path.join(dir,'._D.JPG'),appleDouble([provenance,tags]));
   const cleaner=new AppleDoubleCleaner();
   for(const name of media)await cleaner.besideFile(path.join(dir,name),dir,()=>true);
-  assert.deepEqual({removed:cleaner.report.removed,kept:cleaner.report.kept,warnings:cleaner.report.warnings},{removed:1,kept:3,warnings:[]});
-  assert.deepEqual((await fs.readdir(dir)).sort(),['A.JPG','B.JPG','C.JPG','D.JPG','target','._B.JPG','._C.JPG','._D.JPG'].sort());
+  assert.deepEqual({removed:cleaner.report.removed,kept:cleaner.report.kept,warnings:cleaner.report.warnings},{removed:1,kept:fileSymlinks?3:2,warnings:[]});
+  assert.deepEqual((await fs.readdir(dir)).sort(),['A.JPG','B.JPG','C.JPG','D.JPG','target',...fileSymlinks?['._B.JPG']:[],'._C.JPG','._D.JPG'].sort());
 });
 
 test('a sidecar that was there before an import is kept, and one beside a changed file is not touched',async t=>{
@@ -220,7 +222,7 @@ test('a sweep skips protected folders at depth, symlinked folders and other volu
     await fs.writeFile(path.join(root,folder,'._ORPHAN.JPG'),appleDouble([provenance]));
   }
   await fs.mkdir(path.join(base,'outside'));await fs.writeFile(path.join(base,'outside','._Y.JPG'),appleDouble([provenance]));
-  await fs.symlink(path.join(base,'outside'),path.join(root,'linked'));
+  await linkFolder(path.join(base,'outside'),path.join(root,'linked'));
   const cleaner=new AppleDoubleCleaner(['Photo Importer Recovery','Problem files','Drive backups']);
   await cleaner.sweep(root,folders.map(folder=>path.join(root,folder)));
   const left=async(folder:string)=>(await fs.readdir(path.join(root,folder))).filter(name=>name.startsWith('._'));

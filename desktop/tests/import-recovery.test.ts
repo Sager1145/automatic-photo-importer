@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {plan,execute,configureOrganizationRecovery} from '../core';
 import {segmentsFor} from './fixtures/receipts';
+import {needsFileSymlinks} from './fixtures/os';
 
 configureOrganizationRecovery('import-fixture-host-authentication-secret-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{}};
@@ -48,7 +49,7 @@ for(const change of ['prefix','replacement','source replacement','journal authen
  assert.deepEqual(await execute(retry),{copied:1,skipped:0,errors:[]});assert.deepEqual(await fs.readFile(destination),before);assert.deepEqual(await fs.readFile(retry.entries[0]!.destination),f.data);
 });
 
-test('a replaced partial symlink never redirects resumed writes',async t=>{
+test('a replaced partial symlink never redirects resumed writes',{skip:needsFileSymlinks},async t=>{
  const f=await fixture(t),{destination}=await interrupt(t,f),outside=path.join(f.base,'foreign');await fs.writeFile(outside,'precious');await fs.rename(destination,destination+'.saved');await fs.symlink(outside,destination);
  await assert.rejects(f.prepare(),/symbolic|unsafe/i);assert.equal(await fs.readFile(outside,'utf8'),'precious');
 });

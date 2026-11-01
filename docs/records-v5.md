@@ -6,7 +6,7 @@ library itself when it is not beneath a destination. Nothing of the app's is wri
 
 ```
 <destination>/Photo Importer Data/
-  store.json                         sealed: base folder identity, minVersion 0.3.0
+  store.json                         sealed: the computers that write here (their keys), each system's identity of the base folder
   Organizations/<id>/journal.jsonl   header line, entries line, then one sealed event per line
   Organizations/<id>/originals/<i>/<slot>/<name>   originals kept for undo
   Organizations/deleting-<id>-<uuid>/ a deletion set aside (removed by the cleanup)
@@ -16,8 +16,9 @@ library itself when it is not beneath a destination. Nothing of the app's is wri
   Libraries/<library> <hash8>/index.json, duplicates.json   sealed caches
 ```
 
-Every record is sealed with this Mac's host key over `photo-importer:v5:<kind>\n<JSON>`, so a record of one kind,
-or one an earlier version sealed, never verifies as another. Logs are read in 1 MiB chunks, line by line, and
+Every record is sealed with the key of the computer that wrote it over `photo-importer:v5:<kind>\n<JSON>`, so a
+record of one kind, or one an earlier version sealed, never verifies as another. `store.json` lists the key of every
+computer that writes to the drive, so each one verifies the others' records: see [shared-records.md](shared-records.md). Logs are read in 1 MiB chunks, line by line, and
 appended in groups: one write and one sync of the file per group.
 
 ## Durability on exFAT

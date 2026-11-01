@@ -1,12 +1,13 @@
 import test from 'node:test';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import {defaultPreferences,normalizePreferences} from '../preferences';
 import {acceptedPreferences,jobPreferences,lockedPreferenceKeys} from '../settings-lock';
 
 test('saved settings and live changes pass through the same rules',()=>{
- const loaded=normalizePreferences({textScale:9,parallel:'17',language:'fr',copyMode:'raid',backupMode:'x',verifyCopies:0,autoOrganizeBackup:'auto',unknownDefault:'never',sourceLayout:'table'});
+ const loaded=normalizePreferences({textScale:9,parallel:'17',language:'fr',copyMode:'raid',backupMode:'mirror',verifyCopies:0,autoOrganizeBackup:'auto',unknownDefault:'never',sourceLayout:'table'});
  assert.equal(loaded.textScale,2);assert.equal(loaded.parallel,10);
- assert.equal(loaded.language,'en');assert.equal(loaded.copyMode,'single');assert.equal(loaded.backupMode,'additive');
+ assert.equal(loaded.language,'en');assert.equal(loaded.copyMode,'single');assert.ok(!('backupMode' in loaded),'retired: Files & folders imports have no Additive/Mirror mode');
  assert.equal(loaded.verifyCopies,true,'only an explicit false turns verification off');
  assert.ok(!('autoOrganizeBackup' in loaded),'retired: the folder check is a button, not a setting');assert.ok(!('autoOrganizeBackup' in defaultPreferences));assert.ok(!jobPreferences.has('autoOrganizeBackup'));assert.equal(loaded.unknownDefault,'skip');assert.equal(loaded.sourceLayout,'list');
 });
@@ -35,15 +36,17 @@ test('one unreadable destination entry keeps the others and their positions',()=
  assert.deepEqual(result.videoDestinationIds,['UUID-C']);
 });
 
+// A saved drive resolves against this system's root (C:\ on Windows); a no-op for these paths on macOS and Linux.
+const resolved=(...files:string[])=>files.map(file=>path.resolve(file));
 test('settings saved with a drive and two folder names become the photo and video folders they named',()=>{
  const saved=normalizePreferences({destinations:['/Volumes/A','/Volumes/B'],destinationIds:['UUID-A','UUID-B'],basePath:'backup/photos',videoBasePath:'clips'});
- assert.deepEqual(saved.destinations,['/Volumes/A/backup/photos','/Volumes/B/backup/photos']);
+ assert.deepEqual(saved.destinations,resolved('/Volumes/A/backup/photos','/Volumes/B/backup/photos'));
  assert.deepEqual(saved.destinationIds,['UUID-A','UUID-B']);
- assert.deepEqual(saved.videoDestinations,['/Volumes/A/clips','/Volumes/B/clips'],'each video folder stays on its drive');
+ assert.deepEqual(saved.videoDestinations,resolved('/Volumes/A/clips','/Volumes/B/clips'),'each video folder stays on its drive');
  assert.deepEqual(saved.videoDestinationIds,['UUID-A','UUID-B']);
  const defaults=normalizePreferences({destinations:['/Volumes/A'],destinationIds:['UUID-A']});
- assert.deepEqual([defaults.destinations,defaults.videoDestinations],[['/Volumes/A/photobackup'],['/Volumes/A/videobackup']],'the names older versions used by default');
- assert.deepEqual(normalizePreferences({destinations:['/Volumes/A'],basePath:''}).destinations,['/Volumes/A'],'an empty backup folder was the drive itself');
+ assert.deepEqual([defaults.destinations,defaults.videoDestinations],[resolved('/Volumes/A/photobackup'),resolved('/Volumes/A/videobackup')],'the names older versions used by default');
+ assert.deepEqual(normalizePreferences({destinations:['/Volumes/A'],basePath:''}).destinations,resolved('/Volumes/A'),'an empty backup folder was the drive itself');
  assert.equal('basePath' in saved,false);
  // Saved again, the folders are kept as they are.
  assert.deepEqual(normalizePreferences(JSON.parse(JSON.stringify(saved))).destinations,saved.destinations);
