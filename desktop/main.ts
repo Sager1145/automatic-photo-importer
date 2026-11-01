@@ -926,7 +926,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
    if(parts.some((item,index)=>required(item)>available[index]!))throw new MessageError('error.reviewSpace');
   }
   else{
-   job.phase='discovering';job.progress=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
+   job.phase='discovering';job.progress=undefined;job.importResult=undefined;job.detail=message(job.source.transport==='camera'?'job.stagingCamera':'job.finding');emit();
    await stopResidueCheck();
    if(qaHooks)await qaHooks.gate(job.id,signal);
    prepared=await prepare(job.id,job.source,job.backup,input,signal,(done,total)=>{job.detail=message('job.cameraDownload',{done,total});job.progress=downloadProgress(done,total);progressEmit();},(count,file,detail)=>{job.phase='verifying';job.detail=detail?.step==='listing'?message('job.listing',{count}):detail?.step==='locating'?(detail.total?message('job.lookingElsewhere',{count,total:detail.total,file:path.basename(file)}):message('job.listing',{count})):detail?.step==='candidates'?message('job.confirmingCandidates',{count,total:detail.total,file:path.basename(file)}):detail?.step==='reading'?message('job.readingToMove',{count,total:detail.total,file:path.basename(file)}):detail?.step==='comparing'?message('job.comparingDestination',{count,total:detail.total,file:path.basename(file)}):detail?message('job.checkingSourceOf',{count,total:detail.total,file:path.basename(file)}):message('job.checkingSource',{count,file:path.basename(file)});if(detail)job.progress={phase:'planning',step:detail.step,completed:count,total:detail.total,bytes:detail.bytes,totalBytes:detail.totalBytes,...(detail.share!==undefined?{share:detail.share}:{}),...(detail.matched!==undefined?{matched:detail.matched,matchedBytes:detail.matchedBytes??0}:{}),speed:0,file};progressEmit();},()=>{job.phase='verifying';job.detail=message('job.readingMetadata');emit();});
@@ -992,6 +992,7 @@ async function run(job:Job,control:AbortController,input:Prepared|RunRequest){
   job.alreadyImported=!reorganize&&entries>0&&copied===0&&!removed&&errors.length===0&&errorTotal(job)===0;
   await saveReport('summary.json',{producer:'desktop-app',...reportSummary(errors,reported,failed.length),retainedOriginals:true,jobId:job.id,kind,sourceFolders,finished:new Date().toISOString()});
   job.phase=errorTotal(job)?'error':'complete';
+  if(!reorganize)job.importResult={copied,skipped,planned:entries,errors:errorTotal(job)};
   // A finished folder import (and a card or drive import when Settings allow it) can later offer to delete the originals that are verified in the backup; nothing is removed now.
   // Files that failed or were skipped are simply not in `verified`, so they always stay on the source.
   if(!reorganize&&(job.phase==='complete'||job.phase==='error')&&offersOriginals(job.source,state.preferences)&&!prepared.stage&&!await onCameraCard(job.source.path)){

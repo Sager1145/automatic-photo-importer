@@ -29,7 +29,7 @@ import { validNoMetadataFolder } from '../no-metadata';
 import { DuplicatesPage, RemovedDuplicates } from './DuplicatesPage';
 import { CleanupConfirmation } from './CleanupConfirmation';
 import { Button, CardHeader, ConfirmSheet, Icon, ReleaseConfirm, animateInterfaceChange, interfaceSettled, interfaceTransition, motionMs, nextConfirmStep, reducedMotion, sheetOrder, showSheet, useAnimatedClose, useDismissableDetails, type DeleteRecoveryStep, type Dispatch, type InterfaceChange } from './ui';
-import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, formatEstimate, formatRemaining, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
+import { EtaHolds, OperationProgress, OrganizationProgress, ProgressDisplay, Speed, allVerified, cardFraction, copyBasis, ended, endedResult, formatEstimate, formatRemaining, jobCount, jobFinished, jobPaused, jobStageLayers, jobTiming, layersOfPlan, organizationKinds, progressCount, progressFraction, scaledRange, shownPercent, sourceStepKinds, stagePlan, stepKind, useHeld, type SpeedInput, type StageLayer, type StagePlan, type StepKind } from './progress';
 import { BrandLogo } from './BrandLogo';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
@@ -838,7 +838,7 @@ function ImportDashboardPanel({state, act}: {state: AppState; act: Dispatch}) {
       <ProgressDisplay className="dashboard-total" testId="total-progress" etaTestId="total-eta" label={t("Combined copy progress")}
         heading={<strong className="dashboard-total-title">{t("Total progress")}</strong>}
         empty={nothingPlanned} fraction={overall ?? (active.length ? undefined : 0)} finished={!active.length && latestJobs.length > 0 && latestJobs.every(job => ended(job) && cardFraction(job) === 1)}
-        count={leadOnly ? `${leadStatus(lead!, t)} · ${lead!.source.name} · ${progressCount(lead!.progress!, t, formatNumber, !!lead!.organization, bytes)}` : total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : active.length ? undefined : t("No transfer planned")}
+        count={leadOnly ? `${leadStatus(lead!, t)} · ${lead!.source.name} · ${jobCount(lead!, lead!.progress!, t, formatNumber, !!lead!.organization, bytes)}` : total > 0 && transferred > 0 ? `${bytes(transferred)} ${t("of {size} planned", { size: bytes(total) })}` : active.length ? undefined : t("No transfer planned")}
         speed={combinedSpeed(active)}
         startedAt={startedAt} left={remaining !== undefined ? t(queued.length ? "{time} left, not counting queued sources" : "{time} left", { time: formatEstimate(remaining, t, scaledRange(state.etaTotal && state.etaTotal.low !== undefined && state.etaTotal.high !== undefined ? { low: state.etaTotal.low, high: state.etaTotal.high } : undefined, raw!, remaining)) }) : undefined}
         step={stepKind(lead?.progress)} stages={leadOnly ? jobStageLayers(lead!, verify) : totalStageLayers(latestJobs, verify)} paused={totalPaused(latestJobs)} />
@@ -1531,7 +1531,7 @@ export function SourceRow({ reviewing = false, reviewProgress, drive, source, jo
     {drive?.onDestination && <SameDriveNotice sourceId={source.id} act={act} disabled={active || queued || !!reviewBusy} organizeBlocked={organizeBlocked} />}
     {holdsBackup && <p className="source-quiet-note" data-testid="backup-excluded"><Icon icon={Info} size={13} />{backupFolder ? t("The backup folder {folder} isn't scanned as a source", { folder: backupFolder }) : t("The backup folder isn't scanned as a source")}</p>}
     {progress && !already && <ProgressDisplay className="progress-in-card" label={t("{name} copy progress", { name: source.name })} fraction={job ? cardFraction(job) : progressFraction(progress)} finished={!!job && jobFinished(job)}
-      count={<>{progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
+      count={<>{job ? jobCount(job, progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined) : progressCount(progress, t, formatNumber, false, progress.step === 'comparing' ? bytes : undefined)}{endedResult(job) ? <em className="progress-failed"> · {t("{count} errors", { count: formatNumber(endedResult(job)!.errors) })}</em> : progress.failed ? <em className="progress-failed"> · {t("{count} failed", { count: formatNumber(progress.failed) })}</em> : null}</>}
       speed={active ? progress : undefined} {...(job ? jobTiming(job, t, held) : {})} file={active ? progress.file : undefined} step={stepKind(progress)} stages={job ? jobStageLayers(job, !verifyOff) : undefined} paused={!!job && jobPaused(job)}
       extra={job?.phase === 'complete' ? <strong>{t("Verified")}</strong> : undefined} />}
     {progress && !already && progressSkippedNote(progress, t, formatNumber) && <p className="source-quiet-note" data-testid="already-in-backup"><Icon icon={CheckCheck} size={13} />{progressSkippedNote(progress, t, formatNumber)}</p>}
@@ -1862,7 +1862,7 @@ function QueueRow({ job, act, queuePosition, verifyOff, onShow }: { job: Job; ac
       </div>
     </div>
     {((progress && !queued) || active) && <ProgressDisplay className="queue-progress" label={t("{name} copy progress", { name })} fraction={queued ? 0 : cardFraction(job)} finished={jobFinished(job)}
-      count={job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : progress ? progressCount(progress, t, formatNumber, organization, organization || progress.step === 'comparing' ? formatBytes : undefined) : undefined}
+      count={job.stopping ? (job.stopping === 'pause' ? t("Pausing…") : t("Stopping…")) : progress ? jobCount(job, progress, t, formatNumber, organization, organization || progress.step === 'comparing' ? formatBytes : undefined) : undefined}
       speed={active && progress ? progress : undefined} {...jobTiming(job, t, held)} step={!progress ? 'scan' : stepKind(progress)} stages={jobStageLayers(job, !verifyOff)} paused={jobPaused(job)} />}
     {job.detail && !(job.phase === 'error') && <p className="source-detail" title={t(job.detail)}>{t(job.detail)}</p>}
     <SkipFileNotice job={job} act={act} />

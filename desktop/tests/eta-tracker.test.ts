@@ -210,3 +210,24 @@ test('checking and comparing do not count files as copied before comparing has m
   assert.ok(job!==undefined&&job<240,`at ${second} s the job's time left is ${job} s (it took about 2 min more)`);
  }
 });
+
+// Recorded 2026-11-01 on Windows: a Nikon Z f over MTP, 7,850 files (76.3 GB) staged on the internal NTFS disk, then imported to a
+// folder on that disk. Downloading took 18½ min and comparing 3¼ min; the copy then took 229 s at 333 MB/s. As comparing reached
+// 7,849 of 7,850 the time left read "about 1–2 h": the copy was priced at a card's 60 MB/s and the verify step as publishing by
+// copying (40 s/GB), as if NTFS had no hard links.
+test('an import between internal NTFS disks is not priced as a card publishing by copying',()=>{
+ const files=7850,bytes=76310296854,id='z';
+ const local={source:{id:'STAGE',transport:'camera',fsType:'ntfs',external:false},destinations:[{id:'STAGE',transport:'storage',fsType:'ntfs',external:false}]};
+ const tracker=new EtaTracker();
+ assert.equal(tracker.predictPublish(local.destinations),'link','NTFS publishes with hard links');
+ assert.equal(tracker.predictPublish(drives.destinations),'copy','exFAT still publishes by copying');
+ tracker.plan(id,{kind:'import',verify:true,...local});
+ let now=0;
+ for(let t=0;t<=1115;t+=5){tracker.observe(id,{phase:'copying',step:'downloading',completed:Math.round(files*t/1115),total:files,bytes:0,totalBytes:0},context,now);now+=5000;}
+ for(let t=0;t<194;t++){tracker.observe(id,{phase:'planning',step:'comparing',completed:Math.round(files*t/194),total:files,bytes:0,totalBytes:0,matched:0,matchedBytes:0},context,now);now+=1000;}
+ // The plan is known as comparing ends: every file to copy and verify.
+ tracker.plan(id,{kind:'import',verify:true,...local,publish:tracker.predictPublish(local.destinations),direct:tracker.predictDirect(local.destinations,'win32'),totals:{copying:{files,bytes},verifying:{files,bytes}}});
+ const eta=tracker.observe(id,{phase:'planning',step:'comparing',completed:files-1,total:files,bytes:0,totalBytes:0,matched:0,matchedBytes:0},context,now);
+ assert.ok(eta.job!==undefined&&eta.job>229&&eta.job<30*60,`time left ${eta.job} s: more than the 229 s copy, well under the hour priced before`);
+ assert.ok(eta.high!==undefined&&eta.high<3600,`the range's high end ${eta.high} s stays under an hour`);
+});

@@ -18,9 +18,12 @@ const defaults:Record<string,StepDefault>={
  // Loading the destination index counts bytes read, in its file counts too: bytes only.
  index:{a:0,b:10},
 };
-/** backups: how many backup copies a Delete originals run re-reads besides the source. */
-export function stepDefault(step:string,backups=1):StepDefault{
- const found=defaults[step]??{a:0.02,b:0};
+/** Copying and verifying between internal disks (a staged camera, a folder on the computer's own drive): a fixed SSD or hard disk moves
+ * data far faster than a card, so a first run there starts from these instead of a card's rates. */
+const localDefaults:Record<string,StepDefault>={copying:{a:0.02,b:4},'verifying:link':{a:0.05,b:4},'verifying:copy':{a:0.1,b:10},'publish:copy':{a:0.1,b:8}};
+/** backups: how many backup copies a Delete originals run re-reads besides the source. local: every drive of the job is an internal disk. */
+export function stepDefault(step:string,backups=1,local=false):StepDefault{
+ const found=(local?localDefaults[step]:undefined)??defaults[step]??{a:0.02,b:0};
  return step==='originals:deleting'?{...found,b:found.b*(1+Math.max(0,backups))}:found;
 }
 
@@ -28,7 +31,7 @@ export type PriorLevel='default'|'class'|'exact';
 /** Where a step's starting coefficients came from, and how much to trust them. T0: the prior's weight in seconds. */
 export interface PriorChoice {coef:Coef;T0:number;level:PriorLevel;runs:number;}
 export interface PriorBook {lookup(step:string):PriorChoice;}
-export const defaultBook=(backups=1):PriorBook=>({lookup:step=>{const found=stepDefault(step,backups);return {coef:{a:found.a,b:found.b},T0:20,level:'default',runs:0};}});
+export const defaultBook=(backups=1,local=false):PriorBook=>({lookup:step=>{const found=stepDefault(step,backups,local);return {coef:{a:found.a,b:found.b},T0:20,level:'default',runs:0};}});
 /** History with at least two runs counts for more than the built-in defaults. */
 export const priorWeight=(level:PriorLevel,runs:number)=>level!=='default'&&runs>=2?60:20;
 
