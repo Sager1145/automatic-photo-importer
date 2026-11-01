@@ -109,9 +109,11 @@ test('the unknown-file default decides files without an explicit rule',async t=>
  assert.ok(ask.skipped?.some(item=>item.path===zip&&item.reason==='unknown-ask'));
  assert.deepEqual(ask.unknownExtensions,skip.unknownExtensions);
  const {plans}=await plan(source,[root],{...options,unknownDefault:'other',unknownRules:{dat:null}},metadata);
- const destination=(file:string)=>plans[0]!.entries.find(entry=>entry.source===file)?.destination;
- assert.equal(destination(zip),path.join(root,'Other files','zip','backup.zip'));
- assert.equal(destination(bare),path.join(root,'Other files','README'));
+ // Without a rule of the user's own, a file that is not media goes to Other files beside the library, dated by its modified time.
+ const destination=(file:string)=>[...plans[0]!.entries,...plans[0]!.other?.entries??[]].find(entry=>entry.source===file)?.destination;
+ const other=path.join(`${root}-otherfiles`,'Other files');
+ for(const file of [zip,bare])assert.equal(path.dirname(path.dirname(path.dirname(destination(file)!))),other,file);
+ assert.equal(path.basename(destination(zip)!),'backup.zip');
  assert.equal(destination(dat),undefined);
  const explicit=await plan(source,[root],{...options,unknownDefault:'skip',unknownRules:{zip:'Archives'}},metadata);
  assert.equal(explicit.plans[0]!.entries.find(entry=>entry.source===zip)?.destination,path.join(root,'Archives','backup.zip'));
