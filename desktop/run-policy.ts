@@ -1,4 +1,4 @@
-import type {DuplicateOperation,OrganizeOptions,Preferences,Source} from './shared';
+import type {DuplicateOperation,DuplicateRemovalPlan,OrganizeOptions,Preferences,Review,Source} from './shared';
 
 /** Remove confirmed duplicates, per kind of run (Settings › After a run): on for library organization and for drive
  * transfers, off for camera imports. Nothing on a camera or camera card is deleted whatever the camera setting says. */
@@ -30,8 +30,8 @@ export interface SourcePolicy {
   removeEmptySourceFolders:boolean;
   /** Remove confirmed duplicates instead of keeping them for undo. */
   releaseDuplicates:boolean;
-  /** An import: after it finished clean, delete the source files it found already in the library (each checked again
-   * at the source and in the library first). Only a drive transfer ever does; a camera import never does. */
+  /** An import: the default of its review's "delete from the source" checkbox (importDuplicateRemoval). Only a drive
+   * transfer is ever asked; a camera import never is. Deleting itself needs the review applied (reviewConfirmsDeletion). */
   removeSourceDuplicates:boolean;
   verifyCopies:boolean;
 }
@@ -40,4 +40,17 @@ export function sourcePolicy(kind:'import'|'reorganize',options:OrganizeOptions=
   const verifyCopies=prefs?.verifyCopies!==false;
   if(kind==='import') return {sourceAction:'copy',removeEmptySourceFolders:false,releaseDuplicates:false,removeSourceDuplicates:operation==='drive'&&duplicateSetting(prefs,'drive'),verifyCopies};
   return {sourceAction:'move',removeEmptySourceFolders:options.removeEmptyFolders,releaseDuplicates:options.releaseDuplicates,removeSourceDuplicates:false,verifyCopies};
+}
+
+/** What an import's review says about its source duplicates (`planned`: the photos and videos already in the library, by the
+ * plan). A drive transfer is asked with a checkbox ticked from its setting; a camera import is never asked. */
+export function importDuplicateRemoval(operation:'drive'|'camera',policy:Pick<SourcePolicy,'removeSourceDuplicates'>,prefs:Partial<Pick<Preferences,'removeDuplicatesCamera'>>,planned:{files:number;bytes:number}):DuplicateRemovalPlan {
+  if(operation==='camera') return {operation,enabled:prefs.removeDuplicatesCamera===true,files:0,bytes:0};
+  return {operation,enabled:policy.removeSourceDuplicates,files:planned.files,bytes:planned.bytes,remove:policy.removeSourceDuplicates&&planned.files>0};
+}
+/** Whether applying this review lets the import delete from its source: only an import review of a drive transfer, shown with
+ * files to delete and applied with its box ticked. Nothing else ever does: no automatic, queued or unreviewed import. */
+export function reviewConfirmsDeletion(review:Pick<Review,'kind'|'duplicateRemoval'>):boolean {
+  const plan=review.kind==='import'?review.duplicateRemoval:undefined;
+  return plan?.operation==='drive'&&plan.remove===true&&(plan.files??0)>0;
 }
