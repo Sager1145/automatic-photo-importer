@@ -14,5 +14,7 @@ export const win32: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'junction'),
   navigatorPlatform: 'Win32',
   cameraPlace: 'USB\\Z f',
+  systemDisk: 'NTFS',
+  exfatDirect: false,
   folderFlush: false,
 };

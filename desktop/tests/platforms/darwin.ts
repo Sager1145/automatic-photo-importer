@@ -13,5 +13,7 @@ export const darwin: PlatformProfile = {
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'MacIntel',
   cameraPlace: 'USB/Z f',
+  systemDisk: 'apfs',
+  exfatDirect: true,
   folderFlush: true,
 };
