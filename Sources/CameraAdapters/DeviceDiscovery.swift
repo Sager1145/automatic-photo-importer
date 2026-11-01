@@ -6,13 +6,23 @@ import ImageCaptureCore
 public struct CameraSource: Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
+    /// The camera's storages (card slots) when it has several; empty when it has one or they are not known yet.
+    public let storages: [CameraStorage]
+}
+
+/// One storage of a camera: a top-level folder of its catalog. `id` is that folder's name, which names the same
+/// slot on every connection; `name` is how people read it ("NIKON Z F [Slot 1]" -> "Slot 1").
+public struct CameraStorage: Hashable, Sendable {
+    public let id: String
+    public let name: String
 }
 
 public enum CameraAdapterError: LocalizedError, Sendable {
-    case unavailable, busy, disconnected, missingDownload(String), unsafeDownloadPath(String), sizeMismatch(String, expected: Int64, actual: Int64)
+    case unavailable, storageUnavailable, busy, disconnected, missingDownload(String), unsafeDownloadPath(String), sizeMismatch(String, expected: Int64, actual: Int64)
     public var errorDescription: String? {
         switch self {
         case .unavailable: "The camera is no longer available."
+        case .storageUnavailable: "The camera card slot is no longer available."
         case .busy: "An import is already running for this camera."
         case .disconnected: "The camera disconnected before the transfer completed."
         case .missingDownload(let name): "The camera did not save the requested file: \(name)."
@@ -27,6 +37,9 @@ public final class DeviceDiscovery: NSObject {
     private let browser = ICDeviceBrowser()
     private var cameras: [String: ICCameraDevice] = [:]
     private var active: [String: CameraTransfer] = [:]
+    private var storages: [String: [CameraStorage]] = [:]
+    /// A short session per camera that reads its catalog once to learn its storages, so each slot can be listed apart.
+    private var probes: [String: Task<Void, Never>] = [:]
 
     public override init() {
         super.init()
@@ -37,8 +50,10 @@ public final class DeviceDiscovery: NSObject {
 
     public func stop() {
         for transfer in active.values { transfer.cancel() }
+        for probe in probes.values { probe.cancel() }
         browser.stop()
         cameras.removeAll()
+        storages.removeAll()
     }
 
     /// Classified on every read: a device can mount as mass storage after it was added.
@@ -47,25 +62,47 @@ public final class DeviceDiscovery: NSObject {
     }
 
     public var sources: [CameraSource] {
-        cameras.filter { isPTP($0.value) }.map { CameraSource(id: $0.key, name: $0.value.name ?? "USB camera") }
+        cameras.filter { isPTP($0.value) }.map { CameraSource(id: $0.key, name: $0.value.name ?? "USB camera", storages: storages[$0.key] ?? []) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    /// Opens a PTP session, waits for its complete catalog, and downloads every exposed file.
+    /// Opens a session, reads the camera's catalog and closes it again: its storages, kept for `sources`.
+    private func probe(id: String, camera: ICCameraDevice) {
+        guard probes[id] == nil, active[id] == nil else { return }
+        let transfer = CameraTransfer(camera: camera)
+        probes[id] = Task { [weak self] in
+            let found = await withTaskCancellationHandler {
+                (try? await transfer.storages()) ?? []
+            } onCancel: {
+                Task { @MainActor in transfer.cancel() }
+            }
+            guard let self else { return }
+            self.probes[id] = nil
+            if self.cameras[id] === camera { self.storages[id] = found }
+        }
+    }
+
+    /// Opens a PTP session, waits for its complete catalog, and downloads every exposed file, or with `storageID`
+    /// only the files of that storage (card slot), still under its folder.
     /// The returned directory is unique, allowing callers to remove it after a successful import.
     /// A failed transfer leaves its partial directory in place for inspection/recovery.
-    public func stageCamera(id: String, to directory: URL, progress: @escaping @Sendable (Int, Int) -> Void) async throws -> URL {
+    public func stageCamera(id: String, storageID: String? = nil, to directory: URL, progress: @escaping @Sendable (Int, Int) -> Void) async throws -> URL {
+        // The catalog probe holds the camera's session; the transfer opens its own once that has closed.
+        if let probe = probes[id] { await probe.value }
         guard let camera = cameras[id], isPTP(camera) else { throw CameraAdapterError.unavailable }
         guard active[id] == nil else { throw CameraAdapterError.busy }
         let transfer = CameraTransfer(camera: camera)
         active[id] = transfer
         defer { active[id] = nil }
-        return try await withTaskCancellationHandler {
+        let staged = try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await transfer.run(to: directory) { completed, total in progress(completed, total) }
+            return try await transfer.run(to: directory, storageID: storageID) { completed, total in progress(completed, total) }
         } onCancel: {
             Task { @MainActor in transfer.cancel() }
         }
+        // The whole catalog was just read: a card put in since the camera connected is listed from now on.
+        if let found = transfer.foundStorages, cameras[id] === camera { storages[id] = found }
+        return staged
     }
 }
 
@@ -73,12 +110,17 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
     public func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
         // The browser's local mask excludes network devices. Mass-storage devices are listed as volumes.
         guard let camera = device as? ICCameraDevice, isPTP(camera) else { return }
-        cameras[camera.uuidString ?? String(describing: ObjectIdentifier(camera))] = camera
+        let id = camera.uuidString ?? String(describing: ObjectIdentifier(camera))
+        cameras[id] = camera
+        probe(id: id, camera: camera)
     }
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
         for id in cameras.filter({ $0.value === device }).map(\.key) {
             active[id]?.didRemove(device)
+            probes[id]?.cancel()
+            probes[id] = nil
             cameras[id] = nil
+            storages[id] = nil
         }
     }
 }
@@ -95,21 +137,52 @@ private final class CameraTransfer: NSObject, @preconcurrency ICCameraDeviceDele
     private var opening = false
     private var disconnected = false
     private var closeTimeout: Task<Void, Never>?
+    /// The storages in the catalog the last run read.
+    private(set) var foundStorages: [CameraStorage]?
 
     init(camera: ICCameraDevice) { self.camera = camera }
 
-    func run(to directory: URL, progress: @escaping @MainActor (Int, Int) -> Void) async throws -> URL {
+    private func openCatalog() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            ready = continuation
+            opening = true
+            camera.requestOpenSession()
+        }
+        try checkFailure()
+    }
+
+    /// Reads the catalog in a session of its own and closes it again; nothing is downloaded.
+    func storages() async throws -> [CameraStorage] {
+        camera.delegate = self
+        do {
+            try await openCatalog()
+            let found = CameraStorages.storages(in: camera.contents ?? [])
+            await close()
+            camera.delegate = nil
+            return found
+        } catch {
+            await close()
+            camera.delegate = nil
+            throw error
+        }
+    }
+
+    func run(to directory: URL, storageID: String?, progress: @escaping @MainActor (Int, Int) -> Void) async throws -> URL {
         let staging = directory.appendingPathComponent("camera-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         camera.delegate = self
         do {
-            try await withCheckedThrowingContinuation { continuation in
-                ready = continuation
-                opening = true
-                camera.requestOpenSession()
+            try await openCatalog()
+            let contents = camera.contents ?? []
+            foundStorages = CameraStorages.storages(in: contents)
+            var root: ICCameraFolder?
+            if let storageID {
+                guard let folder = contents.compactMap({ $0 as? ICCameraFolder }).first(where: { $0.name == storageID }) else {
+                    throw CameraAdapterError.storageUnavailable
+                }
+                root = folder
             }
-            try checkFailure()
-            let files = allFiles(camera.contents ?? [])
+            let files = allFiles(root.map { [$0] } ?? contents, within: root)
             progress(0, files.count)
             var usedPaths = Set<String>()
             for (index, file) in files.enumerated() {
@@ -156,7 +229,8 @@ private final class CameraTransfer: NSObject, @preconcurrency ICCameraDeviceDele
         }
     }
 
-    private func allFiles(_ items: [ICCameraItem]) -> [ICCameraFile] {
+    /// Every file under `items`; with `within`, the camera's flat media list adds only the files in that storage.
+    private func allFiles(_ items: [ICCameraItem], within root: ICCameraFolder? = nil) -> [ICCameraFile] {
         var result: [ICCameraFile] = []
         var seen = Set<ObjectIdentifier>()
         func visit(_ items: [ICCameraItem]) {
@@ -171,7 +245,7 @@ private final class CameraTransfer: NSObject, @preconcurrency ICCameraDeviceDele
         visit(items)
         // Covers flat catalogs returned by camera drivers while retaining all non-media sidecars
         // exposed through the hierarchy above.
-        visit(camera.mediaFiles ?? [])
+        visit((camera.mediaFiles ?? []).filter { root == nil || CameraStorages.topFolder(of: $0) === root })
         return result
     }
 
@@ -277,6 +351,33 @@ private final class CameraTransfer: NSObject, @preconcurrency ICCameraDeviceDele
     func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
     func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}
     func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) { fail(CameraAdapterError.unavailable) }
+}
+
+/// A camera's storages are the top-level folders of its catalog, one per card slot. A top level that holds DCIM,
+/// or files, is one storage's own contents instead: the camera is then one source.
+enum CameraStorages {
+    static func storages(in items: [ICCameraItem]) -> [CameraStorage] {
+        let names = items.compactMap { ($0 as? ICCameraFolder)?.name }
+        guard names.count == items.count, !names.contains(where: { $0.caseInsensitiveCompare("DCIM") == .orderedSame }) else { return [] }
+        return names.map { CameraStorage(id: $0, name: displayName($0)) }
+    }
+
+    /// "NIKON Z F   [Slot 1]" -> "Slot 1"; otherwise the name with its spacing tidied.
+    static func displayName(_ name: String) -> String {
+        if let open = name.lastIndex(of: "["), let close = name[open...].firstIndex(of: "]") {
+            let inner = name[name.index(after: open)..<close].trimmingCharacters(in: .whitespaces)
+            if !inner.isEmpty { return inner }
+        }
+        let tidy = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return tidy.isEmpty ? name : tidy
+    }
+
+    /// The top-level folder (storage) an item is in.
+    static func topFolder(of item: ICCameraItem) -> ICCameraFolder? {
+        var folder = item.parentFolder
+        while let parent = folder?.parentFolder { folder = parent }
+        return folder
+    }
 }
 
 /// Classifies the backend rather than comparing names or UUIDs: ImageCaptureCore may expose a

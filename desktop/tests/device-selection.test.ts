@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DeviceSelection,deviceId,recordDeviceHistory} from '../device-selection';
+import {DeviceSelection,deviceId,deviceRecord,recordDeviceHistory,wholeCameraId} from '../device-selection';
 import {normalizePreferences} from '../preferences';
 import type {Preferences,Source} from '../shared';
 
@@ -130,4 +130,37 @@ test('a source dropped from the app leaves the selection and both announcement l
  selection.drop(folder.id);
  assert.deepEqual([selection.newDevices,selection.reconnectedDevices],[[],[]]);
  assert.equal(selection.apply([folder],{})[0]!.selected,true,'chosen again later, it starts from its defaults');
+});
+
+test('card slots of a camera chosen before slots were sources follow that choice until decided one by one',()=>{
+ const slot=(id:string,name:string):Source=>({id:`camera:0x1234|${id}`,name:`Z f · ${name}`,path:`camera://0x1234/${id}`,transport:'camera',storage:{id,name,camera:'Z f'}});
+ const [one,two]=[slot('10001','Slot 1'),slot('20001','Slot 2')];
+ assert.equal(deviceId(one),'camera:0x1234|10001');assert.equal(wholeCameraId(one),'camera:0x1234');assert.equal(wholeCameraId(camera),undefined);
+ const now='2026-11-01T10:00:00.000Z';
+ // The whole camera was remembered: both slots start selected, unannounced as new, and read as reconnected.
+ const remembered:Remembered={'camera:0x1234':{name:'Z f',lastSelected:now}};
+ let selection=new DeviceSelection();
+ assert.deepEqual(selection.apply([one,two],remembered).map(source=>source.selected),[true,true]);
+ assert.deepEqual(selection.newDevices,[]);assert.deepEqual(selection.reconnectedDevices,[one.id,two.id]);
+ // Turning one slot off is saved for that slot alone; the other keeps following the camera.
+ const ignored:NonNullable<Preferences['ignoredDevices']>={};
+ selection.select(two,false,remembered,now,ignored);
+ assert.ok(two.id in ignored);assert.ok('camera:0x1234' in remembered);
+ selection=new DeviceSelection();
+ assert.deepEqual(selection.apply([one,two],remembered,ignored).map(source=>source.selected),[true,false]);
+ assert.deepEqual(selection.newDevices,[]);
+ // The whole camera was ignored: its slots start off without asking.
+ selection=new DeviceSelection();
+ assert.deepEqual(selection.apply([one,two],{},{'camera:0x1234':{name:'Z f',ignoredAt:now}}).map(source=>source.selected),[false,false]);
+ assert.deepEqual(selection.newDevices,[]);
+ // Never decided: each slot is a new device of its own.
+ selection=new DeviceSelection();selection.apply([one,two],{});
+ assert.deepEqual(selection.newDevices,[one.id,two.id]);
+ // History recorded for the whole camera is shown for a slot, and carried into the slot's own first record.
+ const history:NonNullable<Preferences['deviceHistory']>={'camera:0x1234':{name:'Z f',lastImportVerified:now}};
+ assert.equal(deviceRecord(history,one)?.lastImportVerified,now);
+ const later='2026-11-02T10:00:00.000Z';
+ recordDeviceHistory(history,one,'scan',later);
+ assert.deepEqual(history[one.id],{name:'Z f · Slot 1',lastImportVerified:now,lastScanCompleted:later});
+ assert.deepEqual(history['camera:0x1234'],{name:'Z f',lastImportVerified:now});
 });

@@ -102,7 +102,9 @@ function Cameras{@($shell.NameSpace(17).Items()|Where-Object{-not $_.IsFileSyste
 function Safe([string]$name){$clean=($name -replace '[\x00-\x1f<>:"/\\|?*]','_').Trim().TrimEnd('.');if(-not $clean -or $clean -eq '.' -or $clean -eq '..'){'unnamed'}else{$clean}}
 # A storage's own description names it ("SID-{10001,NIKON Z F   [Slot 1],...}" -> "Slot 1"); the Shell's name is localized.
 function StorageName($item){if($item.Path -match 'SID-\{[^,]*,([^,\[]*(\[([^\]]+)\])?[^,]*),'){if($matches[3]){return Safe $matches[3]};$d=($matches[1] -replace '\s+',' ').Trim();if($d){return Safe $d}};Safe $item.Name}
-function Storages($camera){@($camera.GetFolder.Items()|Where-Object{$_.IsFolder}|ForEach-Object{$t=$_.ExtendedProperty('System.Capacity');$f=$_.ExtendedProperty('System.FreeSpace');$o=@{name=(StorageName $_)};if($null -ne $t){$o.total=[int64]$t};if($null -ne $f){$o.free=[int64]$f};$o})}
+# Its MTP storage id ("SID-{10001,...}" -> "10001", "20001" for Slot 2) names the slot on every connection, whatever its position.
+function StorageId($item){if($item.Path -match 'SID-\{([^,}]+)'){return $matches[1]};Split-Path -Leaf $item.Path}
+function Storages($camera){@($camera.GetFolder.Items()|Where-Object{$_.IsFolder}|ForEach-Object{$t=$_.ExtendedProperty('System.Capacity');$f=$_.ExtendedProperty('System.FreeSpace');$o=@{id=(StorageId $_);name=(StorageName $_)};if($null -ne $t){$o.total=[int64]$t};if($null -ne $f){$o.free=[int64]$f};$o})}
 function Files($folder,[string[]]$parts,$list){foreach($item in $folder.Items()){if($item.IsFolder){Files $item.GetFolder ($parts+(Safe $item.Name)) $list}else{$list.Add([pscustomobject]@{Item=$item;Parts=$parts})|Out-Null}}}
 while($null -ne ($line=$in.ReadLine())){
  try{$command=ConvertFrom-Json $line}catch{continue}
@@ -113,7 +115,9 @@ while($null -ne ($line=$in.ReadLine())){
    if(-not $camera){throw 'The camera is no longer connected.'}
    if(-not ([IO.Path]::IsPathRooted($command.directory)) -or -not (Test-Path -LiteralPath $command.directory -PathType Container)){throw 'Camera staging requires an existing absolute temporary folder.'}
    $staging=Join-Path $command.directory ('camera-'+[guid]::NewGuid());New-Item -ItemType Directory -Path $staging|Out-Null
-   $list=New-Object Collections.ArrayList;foreach($storage in $camera.GetFolder.Items()){if($storage.IsFolder){Files $storage.GetFolder @(StorageName $storage) $list}else{$list.Add([pscustomobject]@{Item=$storage;Parts=@()})|Out-Null}}
+   # With a storage id, only that storage (card slot); without one, the whole camera. Either way a storage's files stay under its name.
+   $items=@($camera.GetFolder.Items());if($command.storageID){$items=@($items|Where-Object{$_.IsFolder -and (StorageId $_) -eq [string]$command.storageID});if(-not $items.Count){throw 'The camera card slot is no longer available.'}}
+   $list=New-Object Collections.ArrayList;foreach($storage in $items){if($storage.IsFolder){Files $storage.GetFolder @(StorageName $storage) $list}else{$list.Add([pscustomobject]@{Item=$storage;Parts=@()})|Out-Null}}
    Send @{id=$command.id;progress=@{completed=0;total=$list.Count}}
    $used=@{};$index=0
    # The device's PnP path follows This PC's prefix in the camera's Shell path; each file's WPD object id is a Shell property.

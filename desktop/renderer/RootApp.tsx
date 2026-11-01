@@ -34,6 +34,7 @@ import { BrandLogo } from './BrandLogo';
 import { DriveFormats } from './DriveFormats';
 import { markAppReady } from './Boot';
 import { driveContext, type DriveContext } from '../drive-groups';
+import { deviceRecord } from '../device-selection';
 
 import { BrowserPage } from './browser/BrowserPage';
 import { sampleShot } from './sample-cameras';
@@ -1216,7 +1217,7 @@ export function NewDrivePrompt({ state, act, skip = [], onDismiss, onDone }: { s
       const hints = state.sourceCameraInfo?.[drive.id]?.hints ?? [];
       const unplugged = !connected(drive.id);
       const returning = back.includes(drive.id);
-      const history = state.preferences.deviceHistory?.[drive.id];
+      const history = deviceRecord(state.preferences.deviceHistory, drive);
       return <li key={drive.id} data-source-id={drive.id} className={unplugged ? 'is-unplugged' : ''}>
         <div className="new-drive-identity"><span className={`source-device ${drive.camera || drive.transport === 'camera' ? '' : 'not-camera'}`}><Icon icon={drive.camera || drive.transport === 'camera' ? Camera : HardDrive} size={21} /></span><div><h3>{returning ? drive.name : t("Import from {name}?", { name: drive.name })}</h3><small>{[drive.total ? bytes(drive.total) : '', sourcePlace(drive)].filter(Boolean).join(' · ')}</small></div>{unplugged && <span className="unplugged-badge" data-testid="drive-unplugged"><Icon icon={Usb} size={13} />{t("Unplugged")}</span>}</div>
         {unplugged ? <p className="new-drive-evidence">{t("Reconnect it to choose.")}</p> : <p className={`new-drive-evidence ${drive.camera || drive.transport === 'camera' ? 'camera' : ''}`}><Icon icon={drive.camera || drive.transport === 'camera' ? CheckCircle2 : Info} size={14} />{drive.transport === 'camera' ? t("Connected as a camera over USB.") : drive.camera ? t("Camera folders (DCIM) found.") : t("No camera folders (DCIM) found.")}</p>}
@@ -1342,8 +1343,9 @@ export function OrganizationCard({ job, act }: { job: Job; act: Dispatch }) {
 }
 /** macOS calls its file manager Finder. */
 /** Where a source lives, as people read paths. A USB camera without a drive letter (MTP/PTP) has only an internal
- * device id, so it reads as the camera's name under "USB" instead. */
-export const sourcePlace = (source: { path: string; name: string; transport?: string }) => source.transport === 'camera' ? (/Win/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? `USB\\${source.name}` : `USB/${source.name}`) : source.path;
+ * device id, so it reads as the camera's name under "USB" instead, then its card slot when each slot is a source
+ * (USB\Z f\Slot 1 on Windows, USB/Z f/Slot 1 elsewhere). */
+export const sourcePlace = (source: { path: string; name: string; transport?: string; storage?: { name: string; camera: string } }) => source.transport === 'camera' ? ['USB', ...(source.storage ? [source.storage.camera, source.storage.name] : [source.name])].join(/Win/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? '\\' : '/') : source.path;
 export const revealLabel = () => /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? "Show in Finder" : "Show in file manager";
 /** Opens the Finder (file manager) at a source, destination, folder or file the app already works with. */
 export function RevealButton({ path, act, name }: { path: string; act: Dispatch; name?: string }) {

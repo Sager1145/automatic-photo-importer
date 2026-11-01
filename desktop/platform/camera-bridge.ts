@@ -79,13 +79,29 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   });
 }
 const size=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
+type Storage={id?:string;name:string;total?:number;free?:number};
+function cameraStorages(value:unknown):Storage[] {
+  if(!Array.isArray(value))return [];
+  return value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({...(typeof item.id==='string'&&item.id?{id:String(item.id)}:{}),name:String(item.name),total:size(item.total),free:size(item.free)}));
+}
 /** A camera's storages as the helper reported them, and its capacity: their sums, when every storage reported one. */
 export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'free'> {
-  if(!Array.isArray(value))return {};
-  const storages=value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({name:String(item.name),total:size(item.total),free:size(item.free)}));
+  const storages=cameraStorages(value).map(({name,total,free})=>({name,total,free}));
   if(!storages.length)return {};
   const sum=(key:'total'|'free')=>storages.every(item=>item[key]!==undefined)?storages.reduce((all,item)=>all+item[key]!,0):undefined;
   return {storages,total:sum('total'),free:sum('free')};
+}
+/** The sources for the helper's "list" reply. A camera with several storages (card slots), each with its own id, is
+ * one source per storage ("Z f · Slot 1"), with that storage's capacity; its id joins the camera's id and the
+ * storage's id (the camera's own id for that slot, never its position), so it is the same source on every
+ * connection. A camera with one storage stays one source under its own name and id, as it always was. */
+export function cameraSourcesFrom(result:unknown[]):Source[] {
+  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string').flatMap(camera=>{
+    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const};
+    const storages=cameraStorages(camera.storages),ids=storages.map(storage=>storage.id);
+    if(storages.length<2||ids.some(id=>id===undefined)||new Set(ids).size!==ids.length)return [{...base,...cameraCapacity(camera.storages)}];
+    return storages.map(storage=>({id:`${base.id}|${storage.id}`,name:`${camera.name} · ${storage.name}`,path:`${base.path}/${encodeURIComponent(storage.id!)}`,transport:'camera' as const,total:storage.total,free:storage.free,storage:{id:storage.id!,name:storage.name,camera:camera.name}}));
+  });
 }
 export async function cameraSources():Promise<Source[]> {
   if(staging)return cached;
@@ -93,13 +109,31 @@ export async function cameraSources():Promise<Source[]> {
   // The first Windows request also compiles the bridge's copy helper, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=result.filter((camera):camera is Camera=>typeof camera?.cameraID==='string'&&typeof camera?.name==='string').map(camera=>({id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...cameraCapacity(camera.storages)}));
+  cached=cameraSourcesFrom(result);
   return cached;
 }
+/** The bridge's "stage" request for a camera source: the whole camera, or only the storage the source stands for. */
+export function stageRequest(source:Pick<Source,'path'>,directory:string):{command:'stage';cameraID:string;storageID?:string;directory:string} {
+  const [camera,storage]=source.path.slice('camera://'.length).split('/');
+  return {command:'stage',cameraID:decodeURIComponent(camera!),...(storage?{storageID:decodeURIComponent(storage)}:{}),directory};
+}
+/** One stage at a time per camera: a camera serves one transfer session, so its storages are staged one after another. */
+const cameraTurns=new Map<string,Promise<unknown>>();
 export async function prepareCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
   if(source.transport!=='camera'||!source.path.startsWith('camera://'))throw new Error('Choose a native camera source.');
   signal?.throwIfAborted();
-  const cameraID=decodeURIComponent(source.path.slice('camera://'.length));
+  const {cameraID}=stageRequest(source,'');
+  const previous=cameraTurns.get(cameraID)??Promise.resolve();
+  // A stop while waiting ends the wait at once; the next stage still waits for the one running.
+  const turn=new Promise<void>((resolve,reject)=>{
+    const abort=()=>reject(signal!.reason);signal?.addEventListener('abort',abort,{once:true});
+    void previous.then(()=>{signal?.removeEventListener('abort',abort);resolve();});
+  }).then(()=>stageCamera(source,signal,onProgress));
+  const settled=Promise.allSettled([previous,turn]);cameraTurns.set(cameraID,settled);
+  try{return await turn;}finally{if(cameraTurns.get(cameraID)===settled)cameraTurns.delete(cameraID);}
+}
+async function stageCamera(source:Source, signal?:AbortSignal, onProgress?:(completed:number,total:number)=>void):Promise<{path:string;cleanup():Promise<void>}> {
+  signal?.throwIfAborted();
   const scratch=await mkdtemp(path.join(tmpdir(),'photo-importer-camera-'));
   const cleanup=()=>rm(scratch,{recursive:true,force:true});
   const abort=()=>{void closeCameraBridge();};signal?.addEventListener('abort',abort,{once:true});staging++;
@@ -107,7 +141,7 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
     signal?.throwIfAborted();
     // Every staged file restarts the 30-minute timeout, so a large card is not cut off while files keep arriving
     // (a 128 GB card at the 68 MB/s once measured over MTP takes 31 minutes).
-    const result=await request({command:'stage',cameraID,directory:scratch},30*60*1000,onProgress,signal) as {path?:unknown};
+    const result=await request(stageRequest(source,scratch),30*60*1000,onProgress,signal) as {path?:unknown};
     signal?.throwIfAborted();
     if(typeof result?.path!=='string')throw new Error('The camera helper did not return its staged folder.');
     const root=await realpath(scratch);const staged=await realpath(result.path);

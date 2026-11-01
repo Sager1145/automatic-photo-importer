@@ -7,6 +7,8 @@ private struct Command: Decodable, Sendable {
     let id: String
     let command: String
     let cameraID: String?
+    /// With "stage": only this storage (card slot) of the camera, by the id "list" reported for it.
+    let storageID: String?
     let directory: String?
 }
 
@@ -31,7 +33,11 @@ struct NativeCameraBridge {
                 do {
                     switch command.command {
                     case "list":
-                        let cameras = discovery.sources.map { ["name": $0.name, "cameraID": $0.id] }
+                        let cameras = discovery.sources.map { source -> [String: Any] in
+                            var camera: [String: Any] = ["name": source.name, "cameraID": source.id]
+                            if !source.storages.isEmpty { camera["storages"] = source.storages.map { ["id": $0.id, "name": $0.name] } }
+                            return camera
+                        }
                         emit(["id": command.id, "result": cameras])
                     case "stage":
                         guard let cameraID = command.cameraID, let directory = command.directory,
@@ -39,7 +45,7 @@ struct NativeCameraBridge {
                             emit(["id": command.id, "error": "Camera staging requires an existing absolute temporary folder."])
                             continue
                         }
-                        let staged = try await discovery.stageCamera(id: cameraID, to: URL(fileURLWithPath: directory, isDirectory: true)) { completed, total in
+                        let staged = try await discovery.stageCamera(id: cameraID, storageID: command.storageID, to: URL(fileURLWithPath: directory, isDirectory: true)) { completed, total in
                             Task { @MainActor in
                                 emit(["id": command.id, "progress": ["completed": completed, "total": total]])
                             }
