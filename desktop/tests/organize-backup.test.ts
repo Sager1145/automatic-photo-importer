@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { plan, findMisplaced, executeReorganization, configureOrganizationRecovery } from '../core/index';
 import type { Metadata } from '../shared';
+import { slash } from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options = {backup:false as const, template:'{year}/{yyyymm}/{camera}', layout:'format' as const, unknownRules:{}};
@@ -22,20 +23,24 @@ test('the misplaced check counts only backup files outside the folder the rules 
   await put('wrong place/A.JPG');
   await put('2024/202402/Sony A7/JPEG/B.JPG');
   const found=await findMisplaced(root,root,options,metadata);
-  assert.deepEqual(found.files,['wrong place/A.JPG']);
+  assert.deepEqual(found.files.map(slash),['wrong place/A.JPG']);
   assert.equal(found.count,1);
   assert.equal(found.bytes,'bytes of wrong place/A.JPG'.length);
 });
 
-test('conflict copies, drive backups and the recovery store are never counted or moved',async t=>{
+test('conflict copies and the recovery store are never counted or moved; a retired Drive backups folder is',async t=>{
   const {root,put}=await fixture(t);
   await put('2024/202402/Sony A7/JPEG/Conflicts/abc123/A.JPG');
-  await put('Drive backups/Card 1/DCIM/C.JPG');
   await put('Photo Importer Recovery/0f/originals/1/D.JPG');
   await put('Photo Importer Data/Organizations/0f/originals/1/D.JPG');
   assert.equal((await findMisplaced(root,root,options,metadata)).count,0);
+  assert.deepEqual((await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!.entries,[]);
+  // An earlier version's unsorted drive copy is organized into the library like any misplaced file.
+  await put('Drive backups/Card 1/DCIM/C.JPG');
+  assert.equal((await findMisplaced(root,root,options,metadata)).count,1);
   const reviewed=(await plan(root,[root],{...options,reorganize:true},metadata)).plans[0]!;
-  assert.deepEqual(reviewed.entries,[]);
+  assert.deepEqual(reviewed.entries.map(entry=>path.relative(root,entry.source)),[path.join('Drive backups','Card 1','DCIM','C.JPG')]);
+  assert.ok(!reviewed.entries[0]!.destination.split(path.sep).includes('Drive backups'));
 });
 
 test('organizing the backup folder moves misplaced files without reading organized ones',async t=>{

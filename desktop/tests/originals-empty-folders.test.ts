@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { deleteOriginals, type VerifiedOriginal } from '../core/originals';
 import { createTranslator } from '../renderer/i18n';
 import { formatMessage, message } from '../messages';
+import { linkFolder } from './fixtures/os';
 
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const exists = (file: string) => fs.lstat(file).then(() => true, () => false);
@@ -87,7 +88,7 @@ test('a sidecar holding Finder tags keeps its folder and itself', async t => {
 test('a symlinked folder is never entered or removed, and a separately chosen source stays', async t => {
   const { base, source, files } = await fixture(t, ['a/one.jpg', 'b/two.jpg']);
   const outside = path.join(base, 'outside'); await fs.mkdir(outside);
-  await fs.symlink(outside, path.join(source, 'a/link'));
+  await linkFolder(outside, path.join(source, 'a/link'));
   const result = await deleteOriginals(source, files, { protect: [path.join(source, 'b')] });
   assert.equal(await exists(path.join(source, 'a/link')), true);
   assert.equal(await exists(outside), true);

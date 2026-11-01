@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, symlink, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import filesystem from 'node:fs/promises';
 import {syncBuiltinESMExports} from 'node:module';
+import { linkFolder } from './fixtures/os';
 import { metadataFromTags } from '../platform/metadata';
 import { classifyVolume, parseLinuxVolumes, parseWindowsVolumes, parseMacPhysicalStores, resolveMacPhysicalIdentity, validateDestination, volumeInfo } from '../platform/volumes';
 
@@ -19,8 +20,9 @@ test('Linux volumes preserve physical disk identity across partitions', () => {
   assert.deepEqual(volumes.map(v => [v.path,v.volumeId,v.physicalId,v.removable]), [['/media/card','card-id','/dev/sdb',true]]);
 });
 test('Windows SD cards are removable even with a fixed volume drive type', () => {
-  const [card,ssd] = parseWindowsVolumes([{Path:'E:\\',DriveType:3,BusType:'SD',UniqueId:'disk1',VolumeId:'vol1'},{Path:'F:\\',DriveType:3,BusType:'USB',UniqueId:'disk2'}]);
-  assert.equal(card.removable,true); assert.equal(ssd.removable,false);
+  // Get-Volume reports DriveType by name ("Fixed", "Removable"), not as its numeric code.
+  const [card,ssd,stick] = parseWindowsVolumes([{Path:'E:\\',DriveType:'Fixed',BusType:'SD',UniqueId:'disk1',VolumeId:'vol1'},{Path:'F:\\',DriveType:'Fixed',BusType:'USB',UniqueId:'disk2'},{Path:'G:\\',DriveType:'Removable',BusType:'USB',UniqueId:'disk3'}]);
+  assert.equal(card.removable,true); assert.equal(ssd.removable,false); assert.equal(stick.removable,true);
 });
 test('mechanical and total counters remain distinct and image counts never substitute', () => {
   const result = metadataFromTags({'Nikon:MechanicalShutterCount':9059,'Nikon:ShutterCount':10057,'Nikon:ImageCount':20000});
@@ -153,7 +155,7 @@ test('exposure summary skips invalid grouped values and prefers standard EXIF se
 test('destination rejects nested camera folders through symlinks and reports capacity', async () => {
   const root=await mkdtemp(join(tmpdir(),'importer-platform-'));
   try {
-    const card=join(root,'card'); await mkdir(card); await mkdir(join(card,'DCIM')); await symlink(card,join(root,'alias'),'dir');
+    const card=join(root,'card'); await mkdir(card); await mkdir(join(card,'DCIM')); await linkFolder(card,join(root,'alias'));
     await assert.rejects(validateDestination(join(root,'alias','nested'),[{id:'card',name:'Card',path:card,transport:'storage',camera:true}]),/source|camera|card/i);
     await validateDestination(join(root,'backup'),[]);
     const info=await volumeInfo(root); assert.equal(info.available,true); assert.ok((info.total??0)>0); assert.ok((info.free??0)>0);
@@ -271,4 +273,26 @@ test('the duplicate fingerprint takes its exposure from the summary values, stan
   const {fingerprint,exposure}=metadataFromTags(tags,{details:false});
   assert.deepEqual(exposure,{iso:400,aperture:2.8,exposureTime:0.004,exposureCompensation:-0.3});
   assert.deepEqual({iso:fingerprint?.iso,aperture:fingerprint?.aperture,exposureTime:fingerprint?.exposureTime,exposureCompensation:fingerprint?.exposureCompensation},{iso:'400',aperture:'2.8',exposureTime:'0.004',exposureCompensation:'-0.3'});
+});
+test('folder sync succeeds on every platform and still refuses a file', async () => {
+  const { syncDirectory, DIRECTORY_SYNC_SUPPORTED } = await import('../core/paths');
+  assert.equal(DIRECTORY_SYNC_SUPPORTED, process.platform !== 'win32', 'Windows has no folder flush');
+  const root = await mkdtemp(join(tmpdir(), 'sync-dir-'));
+  try {
+    await syncDirectory(root);
+    await filesystem.writeFile(join(root, 'file'), 'x');
+    await assert.rejects(syncDirectory(join(root, 'file')), /Directory synchronization failed/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+test('unlabeled Windows drives are named by device and letter', () => {
+  const [sony, plain, labeled] = parseWindowsVolumes([{Path:'D:\\',FriendlyName:'Sony DSC USB Device'},{Path:'G:\\'},{Path:'I:\\',Label:'A006',FriendlyName:'Micron CT2000X9PROSSD9'}]);
+  assert.equal(sony.name, 'Sony DSC (D:)'); assert.equal(plain.name, 'G:\\'); assert.equal(labeled.name, 'A006');
+});
+test('a failed Windows drive list reads in words, without the encoded command or CLIXML', async () => {
+  const { windowsVolumeError } = await import('../platform/volumes');
+  assert.match(windowsVolumeError({ killed: true, signal: 'SIGTERM' }), /within 30 seconds/);
+  const clixml = '#< CLIXML\r\n<Objs><Obj S="progress"><AV>Preparing modules</AV></Obj><S S="Error">Get-Volume : Access denied_x000D__x000A_</S></Objs>';
+  const message = windowsVolumeError({ code: 1, stderr: clixml });
+  assert.equal(message, 'Windows could not list the drives: Get-Volume : Access denied.');
+  assert.doesNotMatch(windowsVolumeError({ code: 1, stderr: '' }), /EncodedCommand/);
 });

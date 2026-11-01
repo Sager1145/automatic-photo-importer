@@ -103,6 +103,8 @@ test('a routing capture hands over only results read here, once each; seeds, hit
 
 test('routing results under a folder come from the cache without copying the rest',async t=>{
  const {primeRouting,routingEntriesUnder}=await import('../platform/metadata');
- primeRouting([[`/Volumes/CARD/DCIM/a.jpg\0s1`,{camera:'A',fields:{}}],[`/Volumes/CARD 1/b.jpg\0s2`,{camera:'B',fields:{}}],[`/Volumes/CARDS/c.jpg\0s3`,{camera:'C',fields:{}}]]);
+ // Keys are absolute native paths, as the scan makes them ('C:\Volumes\CARD\…' on Windows).
+ const key=(file:string,stat:string)=>`${path.resolve(file)}\0${stat}`;
+ primeRouting([[key('/Volumes/CARD/DCIM/a.jpg','s1'),{camera:'A',fields:{}}],[key('/Volumes/CARD 1/b.jpg','s2'),{camera:'B',fields:{}}],[key('/Volumes/CARDS/c.jpg','s3'),{camera:'C',fields:{}}]]);
  assert.deepEqual(routingEntriesUnder('/Volumes/CARD').map(([,value])=>value.camera),['A']);
 });

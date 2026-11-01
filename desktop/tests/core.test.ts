@@ -8,6 +8,7 @@ import { inventory, plan as planDestinations, execute, executeReorganization, co
 import type { Metadata } from '../shared';
 import {organizeByCopy} from './fixtures/records';
 import {openReceiptsFor,stagingFor} from './fixtures/receipts';
+import {fileSymlinks,linkFolder,slash} from './fixtures/os';
 /** Directory listing without the destination checksum index, which every copy may refresh. */
 const visible=async(folder:string)=>(await fs.readdir(folder)).filter(name=>!name.startsWith('photo-importer-index'));
 
@@ -48,7 +49,7 @@ test('media inventory leaves active downloads untouched while every-file backup 
   assert.equal(scan.files.find(file=>file.relative==='ready.NEF')?.included,true);
   assert.equal(scan.files.find(file=>file.relative==='INDEX01.DSC')?.included,false);
   const backup=await inventory(source,{backup:true});
-  assert.deepEqual(backup.files.map(file=>file.relative).sort(),[...active,'shoot.downloading/E.NEF','ready.NEF','INDEX01.DSC'].sort());
+  assert.deepEqual(backup.files.map(file=>slash(file.relative)).sort(),[...active,'shoot.downloading/E.NEF','ready.NEF','INDEX01.DSC'].sort());
   assert.ok(backup.files.every(file=>file.included));
   for(const name of active)assert.equal(await fs.readFile(path.join(source,name),'utf8'),'unfinished');
 });
@@ -57,7 +58,7 @@ test('backup includes hidden user files and unknowns without metadata and preser
   const {source,root,put}=await fixture(t);
   await put('.private/config.data','secret'); await put('DCIM/DSC0002.DAT','unknown'); await put('.DS_Store'); await put('.Spotlight-V100/index'); await put('._junk');
   const p=await plan(source,root,{...options,backup:true},async()=>{throw new Error('Backup must not read metadata');});
-  assert.deepEqual(p.entries.map(e=>path.relative(root,e.destination)).sort(),['.private/config.data','DCIM/DSC0002.DAT']);
+  assert.deepEqual(p.entries.map(e=>slash(path.relative(root,e.destination))).sort(),['.private/config.data','DCIM/DSC0002.DAT']);
   assert.deepEqual(await execute(p),{copied:2,skipped:0,errors:[]});
   assert.equal(await fs.readFile(path.join(root,'.private/config.data'),'utf8'),'secret');
   assert.equal(await fs.readFile(path.join(source,'.private/config.data'),'utf8'),'secret');
@@ -110,8 +111,8 @@ test('missing camera and capture date use explicit fallback and UTC file modific
 test('RAW and JPEG retain conflicting camera/date metadata rather than inherit incorrect values',async t=>{
   const {source,root,put}=await fixture(t); await put('A.ARW'); await put('A.JPG');
   const p=await plan(source,root,options,async f=>({camera:f.endsWith('.ARW')?'Camera One':'Camera Two',date:f.endsWith('.ARW')?'2021-01-01T00:00:00Z':'2022-02-01T00:00:00Z',fields:{}}));
-  assert.ok(p.entries.find(e=>e.kind==='RAW')?.destination.includes('2021/202101/Camera One'));
-  assert.ok(p.entries.find(e=>e.kind==='JPEG')?.destination.includes('2022/202202/Camera Two'));
+  assert.ok(slash(p.entries.find(e=>e.kind==='RAW')!.destination).includes('2021/202101/Camera One'));
+  assert.ok(slash(p.entries.find(e=>e.kind==='JPEG')!.destination).includes('2022/202202/Camera Two'));
 });
 
 for(const scenario of [
@@ -156,7 +157,7 @@ test('rejects source/destination overlap, symlink targets, and substituted desti
   assert.ok((await plan(source,nested,options,metadata)).entries.every(entry=>!entry.source.startsWith(nested+path.sep)));
   await fs.rm(nested,{recursive:true});
   const outside=path.join(base,'outside'); await fs.mkdir(outside);
-  await fs.symlink(outside,path.join(root,'2024'),'dir');
+  await linkFolder(outside,path.join(root,'2024'));
   await assert.rejects(plan(source,root,options,metadata),/symbolic|unsafe/i);
   await fs.unlink(path.join(root,'2024'));
   const p=await plan(source,root,options,metadata);
@@ -166,7 +167,9 @@ test('rejects source/destination overlap, symlink targets, and substituted desti
 
 test('inventory skips symbolic files and directories and abort prevents publication',async t=>{
   const {source,root,put}=await fixture(t); const file=await put('A.JPG');
-  await fs.symlink(file,path.join(source,'B.JPG')); await fs.symlink(root,path.join(source,'linked'),'dir');
+  // A file symlink needs Developer Mode on Windows; the folder link is checked either way.
+  if(fileSymlinks)await fs.symlink(file,path.join(source,'B.JPG'));
+  await linkFolder(root,path.join(source,'linked'));
   assert.equal((await inventory(source,{})).files.length,1);
   const p=await plan(source,root,options,metadata); const controller=new AbortController(); controller.abort();
   await assert.rejects(execute(p,controller.signal),{name:'AbortError'});
@@ -225,7 +228,7 @@ test('mutation during streaming produces an error without publishing mixed conte
 test('destination ancestor substituted after plan cannot redirect writes outside root',async t=>{
   const {base,source,root,put}=await fixture(t); await put('A.JPG');
   const p=await plan(source,root,options,metadata), outside=path.join(base,'outside'); await fs.mkdir(outside);
-  await fs.symlink(outside,path.join(root,'2024'),'dir');
+  await linkFolder(outside,path.join(root,'2024'));
   const result=await execute(p); assert.equal(result.copied,0); assert.equal(result.errors.length,1);
   assert.deepEqual(await visible(outside),[]);
 });

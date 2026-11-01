@@ -4,7 +4,7 @@ The active frontend is React + TypeScript, rendered by Electron's bundled Chromi
 
 The shared Node filesystem backend implements discovery and verified copies on all three platforms. Mounted-volume enumeration has macOS diskutil, Linux lsblk/mountinfo and Windows PowerShell adapters. Detailed metadata and previews use bundled ExifTool through exiftool-vendored. Native camera protocols remain platform capabilities; the existing ImageCaptureCore implementation is retained through a macOS helper. Linux/Windows camera-protocol integrations are not claimed merely because the frontend can run there.
 
-Current validation host is macOS arm64. The repository includes Windows/Linux build targets but those binaries have not been built or hardware-tested in this session; UI parity on those systems is a shared implementation property, not a claim of completed OS test coverage.
+Validated hosts: macOS arm64, and Windows 11 x64 (2026-11-01: MSI install, upgrade and uninstall; portable exe; an import from a mass-storage Sony camera to an internal SSD, verified by SHA-256; the MTP Nikon Z f is detected with both card slots and downloads over USB). Linux has a build target but has not been hardware-tested. Keeping all three versions together is governed by [Cross-platform policy](cross-platform.md).
 
 The previous SwiftUI app and its Swift core were removed after the migration (see [historical implementation](legacy-implementation.md)); only the macOS ImageCaptureCore camera bridge remains native. The older running real-media importer must not be quit or relaunched during development. Shared-app QA uses `--qa` with isolated user data, Automatic off and disposable fixture destinations only. Real drives are read-only for integration checks.
 

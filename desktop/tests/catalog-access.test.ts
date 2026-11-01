@@ -6,6 +6,7 @@ import path from 'node:path';
 import {openCatalog} from '../catalog/store';
 import {CatalogCoordinator,bindLibrary} from '../catalog/coordinator';
 import {resolveCatalogFile} from '../catalog/access';
+import {fileSymlinks} from './fixtures/os';
 test('preview resolution requires online authorized current library, volume identity, and containment',async()=>{
  const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'catalog-access-'))),root=path.join(dir,'photos'),c=openCatalog(':memory:');
  try{
@@ -14,7 +15,8 @@ test('preview resolution requires online authorized current library, volume iden
   const file=(await c.query({libraryId:binding.library.libraryId,filters:[],sort:{field:'name',direction:'asc'},limit:1})).rows[0];
   assert.equal(await resolveCatalogFile(c,binding,file.fileId,async()=>true),path.join(root,'A.jpg'));
   await assert.rejects(resolveCatalogFile(c,undefined,file.fileId,async()=>true));await assert.rejects(resolveCatalogFile(c,{...binding,library:{...binding.library,online:false}},file.fileId,async()=>true));await assert.rejects(resolveCatalogFile(c,binding,file.fileId,async()=>false));await assert.rejects(resolveCatalogFile(c,binding,'unknown',async()=>true));
-  await fs.unlink(path.join(root,'A.jpg'));await fs.symlink(path.join(dir,'outside.jpg'),path.join(root,'A.jpg'));await assert.rejects(resolveCatalogFile(c,binding,file.fileId,async()=>true));
+  // A file symlink needs Developer Mode on Windows; the other refusals are checked either way.
+  if(fileSymlinks){await fs.unlink(path.join(root,'A.jpg'));await fs.symlink(path.join(dir,'outside.jpg'),path.join(root,'A.jpg'));await assert.rejects(resolveCatalogFile(c,binding,file.fileId,async()=>true));}
   await fs.rename(root,path.join(dir,'old'));await fs.mkdir(root);await fs.writeFile(path.join(root,'A.jpg'),'other volume');await assert.rejects(resolveCatalogFile(c,binding,file.fileId,async()=>true));
  }finally{await c.close();await fs.rm(dir,{recursive:true,force:true});}
 });

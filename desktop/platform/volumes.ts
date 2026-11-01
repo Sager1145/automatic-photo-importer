@@ -8,6 +8,8 @@ import type { DeviceKind } from '../core/devices';
 import { within } from '../core/paths';
 import { MessageError } from '../messages';
 import { cameraSources } from './camera-bridge';
+import { probeDestination } from '../core/destination-probe';
+import { driveFormat, formatLabel, nativeAccess } from '../core/drive-formats';
 
 const exec = promisify(execFile);
 const commandOptions = { timeout: 8000, maxBuffer: 4 * 1024 * 1024, windowsHide: true };
@@ -40,8 +42,13 @@ export function parseLinuxVolumes(data:unknown):MountedVolume[] {
   for(const device of objects((data as any)?.blockdevices)) walk(device);
   return result;
 }
+/** An unlabeled drive reads like Explorer's: the device name with its letter, as "Sony DSC (D:)". */
+function windowsDriveName(v:Record<string,any>):string {
+  const letter=String(v.Path).replace(/\\+$/,''),device=String(v.FriendlyName??'').replace(/\s+USB Device$/i,'').trim();
+  return device?`${device} (${letter})`:v.Path;
+}
 export function parseWindowsVolumes(data:unknown):MountedVolume[] {
-  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || v.Path,volumeId:v.VolumeId || undefined,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
+  return objects(data).filter(v=>typeof v.Path==='string' && v.Path).map(v=>({path:v.Path,name:v.Label || windowsDriveName(v),volumeId:v.VolumeId || undefined,physicalId:v.UniqueId || (v.DiskNumber!==undefined?`disk:${v.DiskNumber}`:undefined),removable:v.DriveType===2 || v.DriveType==='Removable' || /^(SD|MMC)$/i.test(String(v.BusType)) || /card reader|SDHC|SDXC/i.test(String(v.FriendlyName??'')),external:/^(USB|SD|MMC)$/i.test(String(v.BusType)),readOnly:bool(v.IsReadOnly),total:finite(v.Size),free:finite(v.SizeRemaining),fsType:fsType(v.FileSystem)}));
 }
 function fsType(value:unknown):string|undefined {return typeof value==='string'&&value.trim()?value.trim().toLowerCase():undefined;}
 function finite(value:unknown):number|undefined {const n=Number(value); return value!==null && value!==undefined && value!=='' && Number.isFinite(n) && n>=0 ? n : undefined;}
@@ -83,12 +90,27 @@ async function linuxVolumes():Promise<MountedVolume[]> {
     return mounts.split('\n').filter(Boolean).map(line=>{const fields=line.split(' ');return {path:fields[4].replace(/\\([0-7]{3})/g,(_,octal)=>String.fromCharCode(parseInt(octal,8))),readOnly:fields[5]?.split(',').includes('ro')};});
   }
 }
+/** The first PowerShell run after sign-in loads its storage modules and can take far longer than the 2-3 s a warm
+ * run does, so Windows gets its own, longer limit. */
+const WINDOWS_VOLUME_TIMEOUT=30000;
 async function windowsVolumes():Promise<MountedVolume[]> {
-  // This script is constant: no filesystem paths or other user input enter PowerShell code.
-  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[int]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
+  // This script is constant: no filesystem paths or other user input enter PowerShell code. Progress records are
+  // silenced (they arrive on stderr as CLIXML), and partitions and disks are each listed once rather than per drive.
+  const script=`$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $parts=@{}; Get-Partition -ErrorAction SilentlyContinue | Where-Object {$_.DriveLetter} | ForEach-Object { $parts[[string]$_.DriveLetter]=$_ }; $disks=@{}; Get-Disk -ErrorAction SilentlyContinue | ForEach-Object { $disks[[int]$_.Number]=$_ }; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=$parts[[string]$v.DriveLetter]; $d=$null; if($p){$d=$disks[[int]$p.DiskNumber]}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[string]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
   const encoded=Buffer.from(script,'utf16le').toString('base64');
-  const {stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],commandOptions);
-  return parseWindowsVolumes(JSON.parse(stdout.replace(/^\uFEFF/,'')));
+  let stdout:string;
+  try { ({stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],{...commandOptions,timeout:WINDOWS_VOLUME_TIMEOUT})); }
+  catch(error) { throw new Error(windowsVolumeError(error),{cause:error}); }
+  return parseWindowsVolumes(JSON.parse(stdout.replace(/^﻿/,'')));
+}
+/** What went wrong listing drives, in words: never the encoded command, nor PowerShell's CLIXML. */
+export function windowsVolumeError(error:unknown):string {
+  const failure=error as {killed?:boolean;signal?:string;code?:unknown;stderr?:unknown};
+  if(failure?.killed||failure?.signal==='SIGTERM')return `Windows did not list the drives within ${WINDOWS_VOLUME_TIMEOUT/1000} seconds.`;
+  const text=String(failure?.stderr??'').replace(/^#< CLIXML\s*/,'');
+  const errors=[...text.matchAll(/<S S="Error">([^<]*)<\/S>/g)].map(match=>match[1]!.replace(/_x000D__x000A_/g,' ').trim()).filter(Boolean);
+  const plain=errors.length?errors.join(' '):text.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  return `Windows could not list the drives${plain?`: ${plain.slice(0,300)}`:failure?.code!==undefined?` (exit code ${String(failure.code)})`:''}.`;
 }
 /** Successful diskutil answers per mount for this session. Under heavy load diskutil
  * can time out; without this the same disk would fall back to a different identity
@@ -308,7 +330,7 @@ export async function volumeInfo(target:string, volumes?:MountedVolume[]):Promis
   } catch(error){return {path:target,available:false,detail:(error as Error).message};}
 }
 /** Pass `identity` to require the saved volume: a destination is a particular disk, not a reusable path. */
-export async function validateDestination(target:string, knownSources:Source[], options:{identity?:string; volumes?:MountedVolume[]}={}):Promise<DestinationStatus> {
+export async function validateDestination(target:string, knownSources:Source[], options:{identity?:string; volumes?:MountedVolume[]; probe?:(folder:string)=>Promise<void>}={}):Promise<DestinationStatus> {
   if(!target || !path.isAbsolute(target))throw new MessageError('error.destinationRelative');
   await requireMountedRoot(target);
   const resolved=await canonical(target);
@@ -323,11 +345,17 @@ export async function validateDestination(target:string, knownSources:Source[], 
     if(classification.layoutUnavailable)throw new MessageError('error.destinationUninspectable');
     // macOS sealed '/' contains writable Data-volume firmlinks such as /Users and /private.
     // access(W_OK) below checks the actual destination filesystem rather than the sealed ancestor.
-    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/'))throw new MessageError('error.destinationReadOnly');
+    if(volume.readOnly && !(process.platform==='darwin' && volume.path==='/')) {
+      // A format this computer can only read (NTFS on a Mac, HFS+ on Linux) says where the drivers that write it are listed.
+      const format=driveFormat(volume.fsType);
+      throw nativeAccess(format,process.platform)==='read'?new MessageError('error.destinationReadOnlyFormat',{format:formatLabel(format,volume.fsType)}):new MessageError('error.destinationReadOnly');
+    }
   }
   const ancestor=await existingAncestor(resolved);
   if(!(await stat(ancestor)).isDirectory())throw new MessageError('error.destinationNotFolder');
   await access(ancestor,constants.W_OK);
+  // Every destination, whatever mounts it, proves it can write, flush, read back, rename and delete before it is used.
+  await (options.probe??probeDestination)(ancestor);
   const info=await volumeInfo(target,snapshot);if(!info.available)throw info.detail?new Error(info.detail):new MessageError('error.destinationUnavailable');
   if(options.identity!==undefined&&(!options.identity||options.identity!==info.volumeId))throw new MessageError('error.destinationChanged');
   return info;

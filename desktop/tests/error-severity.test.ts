@@ -14,7 +14,7 @@ const state=(extra:Partial<AppState>={}):AppState=>({preferences,sources:[card],
 
 // Message keys that can reach All errors, with their severity. Any other key defaults to an error.
 const warnings:MessageKey[]=['error.userSkipped','inventory.emptyFile','inventory.emptySkipped','inventory.emptyPrimaryFile','inventory.emptyPrimarySkipped'];
-const errorKeys:MessageKey[]=['error.sourceDisconnected','error.sourceChanged','error.alreadyInBackup','error.cameraScan','error.busy','error.mirrorReview','error.organizeSpace','error.destinationUnavailable','error.destinationReadOnly','error.fileFailed','error.residueCleanup'];
+const errorKeys:MessageKey[]=['error.sourceDisconnected','error.sourceChanged','error.alreadyInBackup','error.cameraScan','error.busy','error.organizeSpace','error.destinationUnavailable','error.destinationReadOnly','error.fileFailed','error.residueCleanup'];
 
 test('each known message key has the severity the table says',()=>{
  for(const key of warnings)assert.equal(severityOf(message(key)),'warning',key);

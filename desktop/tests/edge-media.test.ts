@@ -8,6 +8,7 @@ import {buildTemplate,parseTemplate,type FolderPath} from '../folder-template';
 import {metadata as readMetadata,closeMetadata} from '../platform/metadata';
 import type {MediaLayout,Metadata,PlanEntry} from '../shared';
 import {assertCopied,executeAll,leftovers,listedExtensions,parts,put,temporary} from './fixtures/edge';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const layouts:MediaLayout[]=['flat','format','type-format','photos-flat','videos-flat','video-root'];
@@ -97,10 +98,10 @@ test('unknown formats, camera service files and extensionless files are never dr
   assert.equal(scan.files.length,names.length);
   for(const service of ['NC_FLLST.DAT','NIKON001.DSC','MEDIAPRO.XML','SONYCARD.IND','FFXFER.DAT','X.CTG'])assert.equal(scan.skipped!.find(file=>path.basename(file.path)===service)?.reason,'system',service);
   if(unknownDefault==='other'){
-   assert.equal(path.relative(photos,by(transfer!.entries,'notes.txt').destination),'Other files/txt/notes.txt');
+   assert.equal(slash(path.relative(photos,by(transfer!.entries,'notes.txt').destination)),'Other files/txt/notes.txt');
    // An extension that is not a plain word gets the shared Other files folder.
-   assert.equal(path.relative(photos,by(transfer!.entries,'data.d@t').destination),'Other files/data.d@t');
-   assert.equal(path.relative(photos,by(transfer!.entries,'weird.ext with space').destination),'Other files/weird.ext with space');
+   assert.equal(slash(path.relative(photos,by(transfer!.entries,'data.d@t').destination)),'Other files/data.d@t');
+   assert.equal(slash(path.relative(photos,by(transfer!.entries,'weird.ext with space').destination)),'Other files/weird.ext with space');
    assert.equal((await executeAll(transfer!)).errors.length,0);await assertCopied(transfer!);
   }
  }
@@ -112,7 +113,12 @@ test('unknown formats, camera service files and extensionless files are never dr
 test('Unicode, NFD, emoji, 255-byte, control-character and dash-led names copy byte-exactly',async t=>{
  const {source,photos}=await drive(t,'edge-names-');
  const long='L'.repeat(251)+'.JPG',multibyte='写'.repeat(83)+'.JPG';
- const names=['Caf\u00e9_NFC.JPG','Cafe\u0301_NFD.JPG','東京タワー.JPG','📷🌅.HEIC','-leading-dash.JPG','new\nline.JPG','tab\there.JPG','colon:name.JPG','  spaced  .JPG',long,multibyte,'Ünïcödé/földer/ñ.NEF','\u0041\u030A.JPG','sub/\u00C5.jpg'];
+ // Windows refuses control characters and ':' in a name, so no card it reads can hold one.
+ const forbiddenOnWindows=process.platform==='win32'?[]:['new\nline.JPG','tab\there.JPG','colon:name.JPG'];
+ // NTFS keeps NFD Å.JPG and NFC Å.jpg as two names: the copy finds the plain name free and takes it instead of the
+ // conflict folder the plan reserved (planning treats the spellings as one, as APFS does), so the pair only means something there.
+ const apfsCollision=process.platform==='win32'?[]:['sub/\u00C5.jpg'];
+ const names=['Caf\u00e9_NFC.JPG','Cafe\u0301_NFD.JPG','東京タワー.JPG','📷🌅.HEIC','-leading-dash.JPG',...forbiddenOnWindows,'  spaced  .JPG',long,multibyte,'Ünïcödé/földer/ñ.NEF','\u0041\u030A.JPG',...apfsCollision];
  assert.equal(Buffer.byteLength(long),255);assert.equal(Buffer.byteLength(multibyte),253);
  for(const [index,name] of names.entries())await put(path.join(source,name),`bytes ${index}`);
  for(const layout of ['format','video-root'] as const){
@@ -165,10 +171,10 @@ test('garbled camera names and dates never fail a plan or escape the camera fold
   assert.ok(!relative.startsWith('..')&&!path.isAbsolute(relative),relative);
   assert.ok(relative.split(path.sep).every(part=>part&&part!=='.'&&part!=='..'&&Buffer.byteLength(part)<=255&&!/[\u0000-\u001f\u007f]/u.test(part)),relative);
  }
- assert.equal(path.relative(photos,by(transfer!.entries,'K.JPG').destination),'2025/202505/Unknown files/JPEG/K.JPG');
+ assert.equal(slash(path.relative(photos,by(transfer!.entries,'K.JPG').destination)),'2025/202505/Unknown files/JPEG/K.JPG');
  // Braces in a camera name are part of the name, not template tokens.
- assert.equal(path.relative(photos,by(transfer!.entries,'G.JPG').destination),'2026/202610/Brace{year}Cam/JPEG/G.JPG');
- assert.equal(path.relative(photos,by(transfer!.entries,'H.JPG').destination),'2026/202610/{camera}/JPEG/H.JPG');
+ assert.equal(slash(path.relative(photos,by(transfer!.entries,'G.JPG').destination)),'2026/202610/Brace{year}Cam/JPEG/G.JPG');
+ assert.equal(slash(path.relative(photos,by(transfer!.entries,'H.JPG').destination)),'2026/202610/{camera}/JPEG/H.JPG');
  assert.deepEqual((await executeAll(transfer!)).errors,[]);
  await assertCopied(transfer!);
 });
@@ -184,7 +190,7 @@ test('files with no, empty or garbage EXIF are read by ExifTool without failing 
  // The empty files are skipped (nothing to import); the unreadable ones still plan.
  assert.equal(transfer!.entries.length,4);assert.equal(scan.empty,2);
  // Unreadable files fall back to Unknown files and their modified date; ExifTool's complaints are listed.
- for(const entry of transfer!.entries)assert.match(path.relative(photos,entry.destination),/^\d{4}\/\d{6}\/Unknown files\//);
+ for(const entry of transfer!.entries)assert.match(slash(path.relative(photos,entry.destination)),/^\d{4}\/\d{6}\/Unknown files\//);
  assert.ok((scan.issues??[]).length>0);
  assert.equal((await executeAll(transfer!)).errors.length,0);
  await assertCopied(transfer!);

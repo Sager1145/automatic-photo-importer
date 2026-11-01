@@ -13,7 +13,7 @@ export const bootChecks=(ctx:Context):Check[]=>[
   assert.ok(h.scale>=1);
  }},
  {id:'boot-thread-pool',stage:'boot',title:'The main process runs with a libuv thread pool sized by the CPU thread limit (twice it, 4 to 16; 16 without a saved limit)',covers:['file reads and lstat do not queue behind fsync'],run:async()=>{
-  const size=Number(process.env.UV_THREADPOOL_SIZE);assert.ok(size>=4&&size<=16,'UV_THREADPOOL_SIZE is '+process.env.UV_THREADPOOL_SIZE);if(process.platform!=='win32')assert.equal(await threadpoolExceeds(size-1),true);
+  const size=Number(process.env.UV_THREADPOOL_SIZE);assert.ok(size>=4&&size<=16,'UV_THREADPOOL_SIZE is '+process.env.UV_THREADPOOL_SIZE);assert.equal(await threadpoolExceeds(size-1),true);
  }},
  {id:'boot-fresh-launch',stage:'boot',title:'Fresh launch follows System, Automatic is off, and only fixture sources are present',covers:['QA isolation from real drives','default preferences'],run:async h=>{
   const s=await h.state();assert.equal(s.preferences.appearance,'system');assert.equal(s.preferences.automatic,false);assert.equal(s.sources.length,6);assert.ok(s.sources.every(source=>source.id.startsWith('fixture:')&&source.path.startsWith(ctx.root+path.sep)));

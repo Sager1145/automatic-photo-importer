@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {commitFolder, dirtyFolder, flushFolders} from '../core/paths';
+import {commitFolder, dirtyFolder, DIRECTORY_SYNC_SUPPORTED, flushFolders} from '../core/paths';
+
+// These count folder flushes (handle.sync on a folder); Windows has none, so there is nothing to group or fail.
+const skip=DIRECTORY_SYNC_SUPPORTED?false:'Windows does not flush folders (DIRECTORY_SYNC_SUPPORTED)';
 
 type Proto={sync:()=>Promise<void>};
 /** Replaces every handle.sync until `restore`; `hook` runs in place of each flush (it may wait or fail). */
@@ -19,7 +22,7 @@ async function folder(t:test.TestContext) {
   return base;
 }
 
-test('many commits of one folder made together share fewer flushes than requests',async t=>{
+test('many commits of one folder made together share fewer flushes than requests',{skip},async t=>{
   const base=await folder(t),probe=await instrument(()=>new Promise(resolve=>setTimeout(resolve,20)));
   t.after(probe.restore);
   await Promise.all(Array.from({length:12},()=>commitFolder(base)));
@@ -27,7 +30,7 @@ test('many commits of one folder made together share fewer flushes than requests
   assert.ok(probe.count()>=1);
 });
 
-test('a commit never joins a flush that has already started: the change it covers may have come after it began',async t=>{
+test('a commit never joins a flush that has already started: the change it covers may have come after it began',{skip},async t=>{
   const base=await folder(t);let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
   const probe=await instrument(count=>count===1?gate:undefined);
   t.after(probe.restore);
@@ -44,7 +47,7 @@ test('a commit never joins a flush that has already started: the change it cover
   assert.equal(probe.count(),2,'two later requests share one more flush');
 });
 
-test('a failed flush fails every commit that waited for it, and a later commit can succeed',async t=>{
+test('a failed flush fails every commit that waited for it, and a later commit can succeed',{skip},async t=>{
   const base=await folder(t);
   const probe=await instrument(count=>{if(count===1)throw Object.assign(new Error('EIO'),{code:'EIO'});});
   t.after(probe.restore);
@@ -55,7 +58,7 @@ test('a failed flush fails every commit that waited for it, and a later commit c
   await commitFolder(base);
 });
 
-test('a lazily marked folder is flushed by the timer and by flushFolders',async t=>{
+test('a lazily marked folder is flushed by the timer and by flushFolders',{skip},async t=>{
   const base=await folder(t),probe=await instrument(()=>{});
   t.after(probe.restore);
   dirtyFolder(base);
@@ -68,7 +71,7 @@ test('a lazily marked folder is flushed by the timer and by flushFolders',async 
   assert.equal(probe.count(),2,'nothing is dirty any more');
 });
 
-test('a commit covers a lazily marked folder, so it is not flushed again',async t=>{
+test('a commit covers a lazily marked folder, so it is not flushed again',{skip},async t=>{
   const base=await folder(t),probe=await instrument(()=>{});
   t.after(probe.restore);
   dirtyFolder(base);

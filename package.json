@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "description": "Verified photo imports and non-deleting drive backups",
+  "author": "Sager",
   "main": "dist/desktop/main.cjs",
   "scripts": {
     "build": "tsc --noEmit && vite build && node Scripts/build-desktop.mjs",
@@ -11,8 +12,9 @@
     "test:stress": "node --import tsx --test --test-concurrency=1 --test-timeout=3600000 desktop/stress/*.stress.ts",
     "typecheck": "tsc --noEmit",
     "package:mac": "npm run native:mac && npm run build && electron-builder --mac dir --arm64",
-    "package:mac:release": "npm run native:mac && npm run build && electron-builder --mac dmg --universal -c.mac.identity=-",
+    "package:mac:release": "npm run native:mac && npm run build && electron-builder --mac dmg --arm64 -c.mac.identity=-",
     "package:win": "npm run build && electron-builder --win dir",
+    "package:win:release": "npm run build && node Scripts/package-win.mjs",
     "package:linux": "npm run build && electron-builder --linux dir",
     "native:mac": "bash Scripts/build_camera_bridge.sh",
     "codex:test": "node Scripts/codex-test.mjs",
@@ -52,8 +54,7 @@
           ]
         }
       ],
-      "minimumSystemVersion": "14.0",
-      "x64ArchFiles": "Contents/Resources/native/NativeCameraBridge"
+      "minimumSystemVersion": "14.0"
     },
     "win": {
       "target": [
@@ -68,7 +69,7 @@
     },
     "dmg": {
       "title": "Automatic Photo Importer ${version}",
-      "artifactName": "Automatic-Photo-Importer-${version}-universal.${ext}",
+      "artifactName": "Automatic-Photo-Importer-${version}-arm64.${ext}",
       "window": {
         "width": 560,
         "height": 420

@@ -6,6 +6,7 @@ import os from 'node:os';
 import {plan,execute,executeReorganization,getOrganizationRecovery,undoOrganization,findMisplaced,configureOrganizationRecovery} from '../core/index';
 import type {Metadata} from '../shared';
 import {diskImage,temporary} from './fixtures/edge';
+import {slash} from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
@@ -37,7 +38,7 @@ test('an organization collects 0-byte files and their families under Problem fil
   const f=await fixture(t);await populate(f);
   const {found,result}=await organize(f.library,true);
   const home=path.join(f.library,'Problem files','Empty files');
-  assert.deepEqual(found.problems.map(item=>[item.relative,item.reason,item.group,item.collected]).sort(),[
+  assert.deepEqual(found.problems.map(item=>[slash(item.relative),item.reason,item.group,item.collected]).sort(),[
     ['old/clip/CLIP.MP4','empty','empty',true],['old/trip/EMPTY.CR3','empty','empty',true],['old/trip/EMPTY.xmp','emptyPrimary','empty',true]]);
   assert.equal((await fs.stat(path.join(home,'old/trip/EMPTY.CR3'))).size,0);
   assert.equal(await fs.readFile(path.join(home,'old/trip/EMPTY.xmp'),'utf8'),'companion bytes');
@@ -89,7 +90,7 @@ test('an import never copies problem files and lists each with its reason',async
   const destination=path.join(f.base,'destination');await fs.mkdir(destination);
   const found=await plan(f.library,[destination],{...options,collectProblems:true},metadata);
   assert.deepEqual(found.plans[0]!.entries.map(entry=>path.basename(entry.source)),['REAL.JPG']);
-  assert.deepEqual(found.problems.map(item=>[item.relative,item.reason,item.collected]).sort(),[['old/clip/CLIP.MP4','empty',false],['old/trip/EMPTY.CR3','empty',false],['old/trip/EMPTY.xmp','emptyPrimary',false]]);
+  assert.deepEqual(found.problems.map(item=>[slash(item.relative),item.reason,item.collected]).sort(),[['old/clip/CLIP.MP4','empty',false],['old/trip/EMPTY.CR3','empty',false],['old/trip/EMPTY.xmp','emptyPrimary',false]]);
   assert.deepEqual((await execute(found.plans[0]!)).errors,[]);
   assert.equal(await exists(path.join(destination,'Problem files')),false);
   assert.equal((await fs.stat(path.join(f.library,'old/trip/EMPTY.CR3'))).size,0);
@@ -100,7 +101,7 @@ test('a file that cannot be read is listed as unreadable and left in place',{ski
   const locked=await f.put('old/LOCKED.JPG','secret');await f.put('old/OK.JPG','fine');
   await fs.chmod(locked,0);t.after(()=>fs.chmod(locked,0o644).catch(()=>{}));
   const found=await plan(f.library,[f.library],{...options,reorganize:true,collectProblems:true},metadata);
-  assert.deepEqual(found.problems.map(item=>[item.relative,item.reason,item.group,item.collected]),[['old/LOCKED.JPG','unreadable','unreadable',false]]);
+  assert.deepEqual(found.problems.map(item=>[slash(item.relative),item.reason,item.group,item.collected]),[['old/LOCKED.JPG','unreadable','unreadable',false]]);
   assert.deepEqual(found.plans[0]!.entries.map(entry=>path.basename(entry.source)),['OK.JPG']);
 });
 

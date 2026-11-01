@@ -39,7 +39,7 @@ export const settingsChecks=(ctx:Context):Check[]=>[
   // Storage & folders: each destination's photo and video folders (chosen with the folder picker), then the layout inside them.
   assert.equal(await h.js<boolean>("(()=>{const p=document.querySelector('[data-testid=settings-panel-storage]');const pickers=p?.querySelector('[data-testid=backup-folders-note]'),layout=p?.querySelector('[data-testid=folder-settings]');return !!pickers&&!!layout&&!!(pickers.compareDocumentPosition(layout)&Node.DOCUMENT_POSITION_FOLLOWING)&&!p.querySelector('input[placeholder=photobackup]');})()"),true,'Storage & folders holds the folder choices, then the folder layout, without a typed backup folder name');
   await h.settingsTab('defaults');
-  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-defaults] [data-testid=backup-mode]')!==null"),true,'Drive backup mode lives in Settings → Importing');
+  assert.equal(await h.js<boolean>("document.querySelector('[data-testid=settings-panel-defaults] [data-testid=files-folders-settings]')!==null"),true,'Settings → Importing says where Files & folders imports put every file');
   await h.settingsTab('general');
   await h.until('text size in Settings → General',"document.querySelector('input[aria-label=\"Text size\"]')");
   assert.equal((await h.state()).preferences.textScale,1.25);

@@ -58,7 +58,8 @@ test('failures map to busy, not found, unsupported or the system text',async()=>
  assert.equal(await keyOf(ejectVolume('/Volumes/A',run(refusal('Volume A on disk4 failed to eject; at least one volume could not be unmounted\nDissented by PID 55')),'darwin')),'error.ejectBusy');
  assert.equal(await keyOf(ejectVolume('/Volumes/A',run(refusal('Unable to find disk for /Volumes/A')),'darwin')),'error.ejectNotFound');
  assert.equal(await keyOf(ejectVolume('/Volumes/A',run(Object.assign(new Error('spawn ENOENT'),{code:'ENOENT'})),'darwin')),'error.ejectUnsupported');
- assert.equal(await keyOf(ejectVolume('E:\\',run(refusal('',3)),'win32')),'error.ejectNotFound');
+ // A real E: on the test machine would make "not found" read as a failure; the drive is gone here.
+ assert.equal(await keyOf(ejectVolume('E:\\',run(refusal('',3)),'win32',{exists:async()=>false})),'error.ejectNotFound');
  const other=await ejectVolume('/Volumes/A',run(refusal('Something odd happened\nmore')),'darwin').catch(error=>error as MessageError);
  assert.equal((other as MessageError).key,'error.ejectFailed');assert.deepEqual((other as MessageError).params,{error:'Something odd happened'});
  assert.equal(await keyOf(ejectVolume('/x',recorder().run,'freebsd' as NodeJS.Platform)),'error.ejectUnsupported');

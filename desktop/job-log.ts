@@ -6,15 +6,19 @@ const terminal=new Set<Job['phase']>(['complete','stopped','error']);
 
 /** Records every job phase start and end (counts, bytes, duration, rate) as the state is published; repeated calls with an unchanged phase log nothing. */
 export class PhaseLog {
- private seen=new Map<string,{phase:Job['phase'];at:number;progress?:Progress}>();
+ private seen=new Map<string,{phase:Job['phase'];at:number;progress?:Progress;stopping?:Job['stopping']}>();
  observe(jobs:readonly Job[],now:number){
   for(const job of jobs){
    const before=this.seen.get(job.id);
+   // Stop or Pause as it arrives, with how far the job was: a stop that lands as the last files finish still ends the job complete.
+   if(before&&job.stopping&&before.stopping!==job.stopping){before.stopping=job.stopping;const progress=job.progress;log('normal','job','stop-requested',{kind:job.stopping,phase:job.phase,...(progress?{step:progress.step,completed:progress.completed,total:progress.total}:{})},job.id);}
    if(before?.phase===job.phase){before.progress=job.progress??before.progress;continue;}
    if(!before&&job.phase==='queued'){this.seen.set(job.id,{phase:job.phase,at:now});log('normal','job','queued',{source:job.source.name,path:job.source.path,transport:job.source.transport,organization:!!job.organization,backup:job.backup},job.id);continue;}
    if(before&&before.phase!=='queued')this.end(job,before,now);
-   this.seen.set(job.id,{phase:job.phase,at:now});
-   if(terminal.has(job.phase))log('normal','job','job-end',{result:job.phase,errors:job.errors.length,copied:job.progress?.completed,startedAt:job.startedAt,paused:job.paused===true},job.id);
+   this.seen.set(job.id,{phase:job.phase,at:now,...(before?.stopping?{stopping:before.stopping}:{})});
+   if(terminal.has(job.phase))log('normal','job','job-end',{result:job.phase,errors:job.errors.length,
+    // An import's own result (History's numbers); the last progress count only for other jobs: it is not what was copied.
+    ...(job.importResult?{copied:job.importResult.copied,alreadyInBackup:job.importResult.skipped}:{copied:job.progress?.completed}),...(before?.stopping?{stopRequested:before.stopping}:{}),startedAt:job.startedAt,paused:job.paused===true},job.id);
    else log('normal','job','phase-start',{phase:job.phase,source:job.source.name,path:job.source.path,transport:job.source.transport,organization:!!job.organization,backup:job.backup,...(before?{previous:before.phase}:{})},job.id);
   }
   if(this.seen.size>jobs.length*2+20){const live=new Set(jobs.map(job=>job.id));for(const id of this.seen.keys())if(!live.has(id))this.seen.delete(id);}

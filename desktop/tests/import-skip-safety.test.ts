@@ -77,8 +77,6 @@ test('the lookup is off for backups, drive copies and organization',async t=>{
  const events:string[]=[],onProgress:PlanProgress=(_c,_f,detail)=>{if(detail)events.push(detail.step);};
  const backup=await plan(f.source,[f.root],{...options,backup:true},metadata,undefined,onProgress);
  assert.ok(backup.plans[0]!.entries.every(entry=>entry.routed===undefined));
- const drive=await plan(f.source,[f.root],{...options,backup:true,drive:{name:'Card',identity:'card-1',mirror:false}},metadata,undefined,onProgress);
- assert.ok(drive.plans[0]!.entries.every(entry=>entry.routed===undefined));
  // Organization works inside the library itself.
  const library=await fixture(t);
  await library.put(path.join(library.root,'2024/202402/Unknown Camera/B.JPG'),bytes(7));await library.put(path.join(library.root,'2024/202402/Other/B.JPG'),bytes(7));

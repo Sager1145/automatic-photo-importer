@@ -7,6 +7,7 @@ import { volumeAt } from '../platform/volumes';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { ownEntry } from './own-entries';
 
 const exec=promisify(execFile);
 
@@ -18,7 +19,10 @@ export function code(error:unknown):string|undefined { return (error as NodeJS.E
 /** Errors of link(2) that mean this file system has no hard links (or no more of them): exFAT, FAT, some network shares. */
 export const LINK_UNSUPPORTED=new Set(['EPERM','ENOTSUP','ENOSYS','EOPNOTSUPP','EMLINK']);
 /** Publishing a staged copy falls back to copying when the link cannot be made: no hard links, or another volume. A full link count (EMLINK) is not that. */
-export const linkRefused=(error:unknown):boolean=>{const name=code(error)??'';return name==='EXDEV'||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
+/** Windows answers a hard link on a filesystem without them (exFAT, FAT32) with ERROR_INVALID_FUNCTION, which
+ * libuv reports as EISDIR. A link's source here is always a regular file, so there it means "no hard links". */
+const windowsNoLinks=(name:string,platform:NodeJS.Platform)=>platform==='win32'&&name==='EISDIR';
+export const linkRefused=(error:unknown,platform:NodeJS.Platform=process.platform):boolean=>{const name=code(error)??'';return name==='EXDEV'||windowsNoLinks(name,platform)||name!=='EMLINK'&&LINK_UNSUPPORTED.has(name);};
 export function beneath(child:string,root:string):boolean {
   const relative=path.relative(root,child);
   return relative!=='' && relative!=='..' && !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative);
@@ -87,13 +91,17 @@ export async function isOwnRealpath(file:string,real?:string,ops:RealpathOps=rea
 export async function rootUnchanged(root:string,expected:string):Promise<void> {
   if(await identity(root)!==expected || !await isOwnRealpath(root)) throw new Error(`Destination identity changed; scan again: ${root}`);
 }
-/** Strict directory durability: unsupported filesystems must not acknowledge a backup. */
+/** Windows has no directory flush (fsync on a folder handle fails with EPERM). Its folder entries are written by
+ * the filesystem itself; file contents are still synced before they are published. */
+export const DIRECTORY_SYNC_SUPPORTED=process.platform!=='win32';
+/** Strict directory durability: unsupported filesystems must not acknowledge a backup. On Windows the folder is
+ * still opened and checked, but not flushed. */
 export async function syncDirectory(folder:string):Promise<void> {
   let handle:Awaited<ReturnType<typeof fs.open>>|undefined;
   try {
     handle=await fs.open(folder,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
     if(!(await handle.stat()).isDirectory())throw new Error(`Unsafe directory: ${folder}`);
-    await handle.sync();
+    if(DIRECTORY_SYNC_SUPPORTED)await handle.sync();
   } catch(error){throw Object.assign(new Error(`Directory synchronization failed: ${folder}: ${error instanceof Error?error.message:String(error)}`,{cause:error}),{code:code(error)});}
   finally {await handle?.close();}
 }
@@ -153,7 +161,9 @@ export async function syncParents(file:string,root:string):Promise<void> {
     if(folder===root)break;if(!beneath(folder,root))throw new Error('Unsafe synchronization scope');
   }
 }
-export async function syncFile(file:string):Promise<void> {const handle=await regularHandle(file);try{await handle.sync();}finally{await handle.close();}}
+/** Windows flushes a file only through a handle that may write (FlushFileBuffers), so there the file is reopened
+ * for writing; nothing is written through it. */
+export async function syncFile(file:string):Promise<void> {const handle=await regularHandle(file,DIRECTORY_SYNC_SUPPORTED?fileFlags:constants.O_RDWR);try{await handle.sync();}finally{await handle.close();}}
 /** Check every existing path component, including ancestors of a missing leaf. */
 export async function contained(file:string,root:string):Promise<void> {
   if(!beneath(path.resolve(file),root)) throw new Error(`Unsafe path outside selected folder: ${file}`);
@@ -195,7 +205,9 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
     for(const part of parts) {
       current=path.join(current,part);
       if(rootIdentity) await rootUnchanged(root,rootIdentity);
-      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); } catch(error) { if(code(error)!=='EEXIST') throw error; }
+      // A macOS "._" by the new folder's name already there is not this app's (own-entries.ts): it stays.
+      const sidecarExisted=await fs.lstat(path.join(path.dirname(current),'._'+part)).then(()=>true,()=>false);
+      try { await fs.mkdir(current); created.push(current); changedFolders.add(path.dirname(current)); ownEntry(current,root,sidecarExisted); } catch(error) { if(code(error)!=='EEXIST') throw error; }
       // Ancestors were checked a step earlier; the whole chain is checked again below.
       const stat=await fs.lstat(current,{bigint:true});
       if(stat.isSymbolicLink()) throw new Error(`Unsafe symbolic link: ${current}`);
@@ -215,9 +227,9 @@ export async function makeParent(file:string,root:string,rootIdentity?:string):P
   await contained(file,root);
 }
 export const fileFlags=constants.O_RDONLY | (constants.O_NOFOLLOW??0);
-export async function regularHandle(file:string) {
+export async function regularHandle(file:string,flags:number=fileFlags) {
   if(!(await fs.lstat(file)).isFile()) throw new Error(`Unsafe non-regular source: ${file}`);
-  const handle=await fs.open(file,fileFlags);
+  const handle=await fs.open(file,flags);
   try {
     const stat=await handle.stat({bigint:true});
     if(!stat.isFile()) throw new Error(`Unsafe non-regular source: ${file}`);

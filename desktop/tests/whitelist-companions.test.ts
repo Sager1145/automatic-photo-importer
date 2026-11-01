@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {inventory,plan} from '../core/index';
 import type {InventoryFile,Metadata} from '../shared';
+import {slash} from './fixtures/os';
 
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'flat' as const,unknownRules:{}};
 const camera=async():Promise<Metadata>=>({camera:'Cam',date:'2024-03-04T10:00:00Z',fields:{}});
@@ -104,12 +105,12 @@ async function livePair(t:test.TestContext,stillMeta:Partial<Metadata>,movMeta:P
 test('Live Photo MOV with the same ContentIdentifier joins the still',async t=>{
  const {entry,files,mov,root}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'ABC'});
  assert.equal(entry(mov).family,entry(files[0]!).family);
- assert.equal(path.relative(root,entry(mov).destination),'2024/202403/iPhone 15/IMG_0001.MOV');
+ assert.equal(slash(path.relative(root,entry(mov).destination)),'2024/202403/iPhone 15/IMG_0001.MOV');
 });
 test('Live Photo MOV with a different ContentIdentifier stays independent',async t=>{
  const {entry,files,mov,root}=await livePair(t,{contentId:'ABC',make:'Apple'},{contentId:'XYZ'});
  assert.notEqual(entry(mov).family,entry(files[0]!).family);
- assert.equal(path.relative(root,entry(mov).destination),'2024/202403/iPhone MOV/IMG_0001.MOV');
+ assert.equal(slash(path.relative(root,entry(mov).destination)),'2024/202403/iPhone MOV/IMG_0001.MOV');
 });
 test('Live Photo without identifiers pairs when the still is from Apple',async t=>{
  const {entry,files,mov}=await livePair(t,{make:'Apple'},{});

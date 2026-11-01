@@ -13,6 +13,7 @@ import {openV5,sealV5,storeFor} from '../core/app-store';
 import {appendJournalLine,journalFileFor,journalFolderFor,organizeByCopy,pointerFor,resealJournalLine,sealedEvent,sealedRecord} from './fixtures/records';
 import {identity} from '../core/paths';
 import {OLD_HIDDEN_FOLDER,OLD_FOLDER,oldJournal,oldPointer,oldReceipt} from './fixtures/old-records';
+import {linkFolder} from './fixtures/os';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const options={backup:false as const,template:'{year}/{yyyymm}/{camera}',layout:'format' as const,unknownRules:{},reorganize:true as const};
@@ -69,7 +70,7 @@ test('detection reads no event, changes nothing and deletes nothing, and never f
  const job=await oldJournal(root);await oldPointer(root);
  await fs.writeFile(path.join(root,OLD_FOLDER,'journal-not-a-uuid.json'),'\u0000\u0000');
  await fs.mkdir(path.join(root,OLD_FOLDER,'33333333-3333-4333-8333-333333333333'));
- await fs.symlink(root,path.join(root,OLD_FOLDER,'44444444-4444-4444-8444-444444444444'));
+ await linkFolder(root,path.join(root,OLD_FOLDER,'44444444-4444-4444-8444-444444444444'));
  const before=await snapshot(path.join(root,OLD_FOLDER));
  const opened:string[]=[],changed:string[]=[];
  const real={open:patched.open,readFile:patched.readFile,unlink:patched.unlink,rm:patched.rm,rmdir:patched.rmdir,rename:patched.rename,writeFile:patched.writeFile,truncate:patched.truncate,utimes:patched.utimes};
@@ -304,7 +305,7 @@ test('a library folder reached through a link never refuses a delete (it could n
  await organizeByCopy((await core.plan(root,[root],options,metadata)).plans[0]!);
  const [job]=await core.getOrganizationRecovery(root);const id=job!.id;
  await undoOrganization(root,id);
- const link=path.join(root,'link');await fs.symlink(elsewhere,link);
+ const link=path.join(root,'link');await linkFolder(elsewhere,link);
  await oldJournal(elsewhere);
  await resealJournalLine(root,id,0,value=>({...value,libraries:[link]}));
  await deleteOrganizationRecovery(root,id);

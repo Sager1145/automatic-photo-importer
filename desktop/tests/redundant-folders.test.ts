@@ -7,6 +7,7 @@ import * as core from '../core/index';
 import {removeEmptiedFolders} from '../core/redundant-folders';
 import {identity} from '../core/paths';
 import {journalLines,organizeByCopy} from './fixtures/records';
+import {linkFolder} from './fixtures/os';
 
 core.configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 async function library(t:test.TestContext){
@@ -27,7 +28,7 @@ test('only folders holding nothing but OS bookkeeping go; a labelled "._" file, 
  const l=await library(t),at=(relative:string)=>path.join(l.root,relative);
  await l.put('a/.DS_Store');await l.put('a/._A.JPG',blankSidecar());
  await l.put('b/._B.JPG',taggedSidecar());
- await fs.mkdir(at('c'));await fs.symlink(at('a'),at('c/link'));
+ await fs.mkdir(at('c'));await linkFolder(at('a'),at('c/link'));
  await fs.mkdir(at('kept'));await fs.mkdir(at('moved'));
  const expected=new Map([[at('moved'),await identity(at('moved'))]]);
  await fs.rm(at('moved'),{recursive:true});await fs.mkdir(at('moved'));

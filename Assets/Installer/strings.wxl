@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Overrides the stock WixUI wording in the MSI so the installer speaks for this app. -->
+<WixLocalization Culture="en-us" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <String Id="WelcomeDlgTitle">{\WixUI_Font_Bigger}Welcome to [ProductName]</String>
+  <String Id="WelcomeDlgDescription">Copy photos and videos from cameras and cards to your backup drives, with every copy checked byte for byte.
+
+Your originals are never deleted or changed.
+
+Click Next to continue.</String>
+  <String Id="InstallScopeDlgTitle">{\WixUI_Font_Title}Who is this install for?</String>
+  <String Id="InstallScopeDlgDescription">Install it just for you, or for everyone who uses this PC.</String>
+  <String Id="InstallDirDlgTitle">{\WixUI_Font_Title}Install location</String>
+  <String Id="InstallDirDlgDescription">This is where the app's own files go. Your photos stay wherever you keep them.</String>
+  <String Id="VerifyReadyDlgInstallTitle">{\WixUI_Font_Title}Ready to install</String>
+  <String Id="VerifyReadyDlgInstallText">Click Install to set up [ProductName]. Nothing on your drives or cards is touched.</String>
+  <String Id="ProgressDlgTitleInstalling">{\WixUI_Font_Title}Installing [ProductName]</String>
+  <String Id="ExitDialogTitle">{\WixUI_Font_Bigger}[ProductName] is ready</String>
+  <String Id="ExitDialogDescription">Connect a camera or card and pick a backup drive to start your first verified import.
+
+Click Finish to close this window.</String>
+</WixLocalization>

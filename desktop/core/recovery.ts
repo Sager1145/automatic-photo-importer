@@ -10,13 +10,13 @@ import {recordCreation,recordPartial,findPartial,openPartial,releaseCreations,ty
 import { mapPool, streams, STREAMS } from './devices';
 import { hasher } from './hasher';
 import { AppleDoubleCleaner, inspectAppleDouble, APPLEDOUBLE_MAX_BYTES, type AppleDoubleReport } from './appledouble';
-import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
+import { appendLines, configureHostKey, hostKeyConfigured, LINE_CAPS, openRegular, openV5, pointerPartition, readLines, recordedPath, renameChecked, requireHostKey, SealError, sealedLine, sealV5, storeFolder, storeFor, storesFor, storeUnchanged, writeNewFile, type Store } from './app-store';
 import { MessageError } from '../messages';
 import { driveName, refuseOldRecords } from './old-records';
 import { provable, full as fullStat } from './destination-index';
 import { log, logDeletion } from '../logger';
 import { removeEmptiedFolders } from './redundant-folders';
-import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath } from './paths';
+import { sameBirth, beneath, checkAbort, code, contained, within, digest, identity, isAbort, makeParent, pathKey, regularHandle, rootUnchanged, syncDirectory, syncParents, syncFile, sameStat, maybeLstat, posixRelative, readdirIfPresent, statRecord, isStatRecord, rebaseDevice, LINK_UNSUPPORTED, linkRefused, type StatRecord , unlinkEntry, rmdirEntry, isOwnRealpath, DIRECTORY_SYNC_SUPPORTED } from './paths';
 
 /** retained: originals kept in recovery storage for undo (copy path only); renamed files keep none.
  * released: retained duplicates removed right after a clean run (only when that was asked for). */
@@ -28,7 +28,8 @@ interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing i
  * versions): a verified copy plus a retained original. */strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];
  /** The chosen source folders (the source itself when none were chosen): only folders inside them that the run emptied
  * are removed, OS bookkeeping included. Absent (earlier versions' journals): only folders already empty go, up to the source. */cleanupScope?:string[];}
-import {APP_DATA_FOLDER,isRecordFolderName} from './legacy-names';
+import {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER,isRecordFolderName} from './legacy-names';
+import {ownRecordWrite} from './own-entries';
 export {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from './legacy-names';
 /** This app's record folders, current and earlier: never organized, listed or cleaned as user files. */
 export const isRecoveryName=isRecordFolderName;
@@ -49,7 +50,7 @@ function matches(stat:BigIntStats,expected:StatRecord,renamed=false):boolean {
 }
 export const sameFile=matches;
 async function ensureDirectory(folder:string,root:string):Promise<void> {
- await contained(folder,root);try{await fs.mkdir(folder,{mode:0o700});await syncDirectory(path.dirname(folder));}catch(error){if(code(error)!=='EEXIST')throw error;}
+ await contained(folder,root);try{await fs.mkdir(folder,{mode:0o700});ownRecordWrite(folder);await syncDirectory(path.dirname(folder));}catch(error){if(code(error)!=='EEXIST')throw error;}
  await contained(folder,root);const stat=await fs.lstat(folder);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error(`Unsafe recovery directory: ${folder}`);
 }
 /** In a store: Organizations/<id>/journal.jsonl, and Pointers/<folder partition>/journal-<id>.json. */
@@ -281,6 +282,8 @@ function manifestFrom(header:Record<string,unknown>,entries:Record<string,unknow
   ...(header.strategy!==undefined?{strategy:header.strategy}:{}),...(header.keepFolders!==undefined?{keepFolders:header.keepFolders}:{}),...(header.libraries!==undefined?{libraries:header.libraries}:{}),...(header.cleanupScope!==undefined?{cleanupScope:header.cleanupScope}:{})};
  return validateManifest(m,root,id);
 }
+/** The listing's error for a journal recorded with the drive elsewhere (see journalsIn). */
+export const RECORDED_ELSEWHERE='Recorded with the drive at another place or on another system; finish or undo it there.';
 interface Found {store:Store;folder:string;journal:string;}
 /** Where journal `id` of library `root` is: its folder in exactly one of the stores readers consult. Refused when
  * two stores hold it. */
@@ -304,7 +307,7 @@ async function readManifest(root:string,id:string):Promise<Manifest> {
  return openJournal(await locateJob(root,id),root,id);
 }
 /** The journals whose header names `folder` (by path key) as their library, in every store readers consult for it. */
-async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):Promise<{id:string;root:string;found:Found}[]>{
+async function journalsIn(folder:string,unreadable?:{id:string;error:string;recordedAt?:string}[]):Promise<{id:string;root:string;found:Found}[]>{
  const journals:{id:string;root:string;found:Found}[]=[];
  const stores=await storesFor(folder).catch(error=>{if(code(error)==='ENOENT')return [] as Store[];throw error;});
  for(const store of stores){
@@ -324,6 +327,9 @@ async function journalsIn(folder:string,unreadable?:{id:string;error:string}[]):
     throw new Error(`The organization record ${found.journal} cannot be read, so it is not known which library it belongs to: ${text}`);
    }
    if(typeof root==='string'&&pathKey(root)===pathKey(folder))journals.push({id,root,found});
+   // This folder's journal, recorded with the drive at another place or on another system (/Volumes/A006 against I:):
+   // its paths and file identities are that system's, so it is listed there and never acted on here.
+   else if(unreadable&&typeof root==='string'){const here=recordedPath(store,root);if(here&&pathKey(here)===pathKey(folder))unreadable.push({id,error:RECORDED_ELSEWHERE,recordedAt:root});}
   }
  }
  return journals;
@@ -396,12 +402,12 @@ async function preserveIncomplete(entry:Entry,index:number,m:Manifest,input:stri
  await checkpoint(m,'incomplete-intent',index);checkAbort(signal);await roots(m);await contained(entry.destination,m.root);
  if(!matches(await fs.lstat(entry.destination,{bigint:true}),statRecord(current)))throw new Error('Incomplete destination changed before preservation');
  const saved=path.join(jobFolder(m),`incomplete-${randomUUID()}`);await contained(saved,scopeOf(m));if(await maybeLstat(saved))throw new Error('Recovery collision');
- await fs.rename(entry.destination,saved);await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(saved));return true;
+ await fs.rename(entry.destination,saved);ownRecordWrite(saved);await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(saved));return true;
 }
 async function copy(entry:Entry,index:number,m:Manifest,input:string,signal?:AbortSignal,onBytes?:(bytes:number)=>void,proofs?:Proofs):Promise<void> {
  await roots(m);await contained(input,m.source);await makeParent(entry.destination,m.root,m.rootIdentity);await syncDirectory(path.dirname(entry.destination));
  const staged=path.join(jobFolder(m),`stage-${randomUUID()}.partial`);
- const output=await fs.open(staged,'wx',0o600);
+ const output=await fs.open(staged,'wx',0o600);ownRecordWrite(staged);
  // Stages are expendable verified copies: a failed or stopped copy removes its own.
  try{await copyThroughStage(staged,output,entry,index,m,input,signal,onBytes,proofs);}
  catch(error){try{await contained(staged,scopeOf(m));await unlinkEntry(staged);logDeletion('organize',staged,'recovery stage of a copy that failed or was stopped','stage created by this copy with an exclusive open; it is expendable and the original is untouched',{error});}catch{/* Already gone, or left for the residue cleanup. */}throw error;}
@@ -794,7 +800,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
  // The new name is made durable before the old one's removal, so a power cut leaves the file in
  // at least one folder. The original folder may already be gone when a move is resumed.
  await syncParents(entry.destination,m.root);await syncDirectory(path.dirname(entry.source)).catch(error=>{if(code(error)!=='ENOENT')throw error;});
- const handle=await fs.open(entry.destination,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+ const handle=await openForDates(entry.destination);
  let final=undefined as BigIntStats|undefined;
  try {
   const current=await handle.stat({bigint:true});
@@ -815,6 +821,13 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
    note(`${path.basename(entry.destination)}: ${error instanceof Error?error.message:String(error)}`);
   }
  } finally { await handle.close();if(final)observedMove(entry.source,entry.stat,entry.destination,final,m.kind==='duplicates'?'duplicateRemoval':'organize'); }
+}
+/** A moved file opened to read its identity and set its dates. Windows sets dates and flushes only through a handle that
+ * may write (EPERM otherwise); a read-only file still opens there to be checked, and then keeps its date. */
+async function openForDates(file:string):Promise<Awaited<ReturnType<typeof fs.open>>> {
+ const readOnly=constants.O_RDONLY|(constants.O_NOFOLLOW??0);
+ if(DIRECTORY_SYNC_SUPPORTED)return fs.open(file,readOnly);
+ return fs.open(file,constants.O_RDWR).catch(error=>{if(code(error)==='EPERM'||code(error)==='EACCES')return fs.open(file,readOnly);throw error;});
 }
 /** Two names may be one file only through a real hard link on the same device. On exFAT,
  * equal inode numbers with a link count of 1 mean cross-linked entries; never unlink then. */
@@ -962,7 +975,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    const slot=randomUUID();saved=originalPath(m,index,slot);await contained(saved,scopeOf(m));
    // Each attempt owns a newly created private slot. Competing processes never
    // rename into the same pathname, and an existing slot is never reused.
-   await fs.mkdir(path.dirname(saved),{mode:0o700});await syncDirectory(entryDirectory);
+   await fs.mkdir(path.dirname(saved),{mode:0o700});ownRecordWrite(path.dirname(saved));await syncDirectory(entryDirectory);
    await checkpoint(m,'stash-intent',index,{slot});state.slots.set(index,[...(state.slots.get(index)??[]),slot]);checkAbort(signal);await roots(m);await parents(entry,m);await contained(saved,scopeOf(m));
    const destinationStat=await fs.lstat(entry.destination,{bigint:true});
    await parents(entry,m);const reread=!unchangedSince(sourceProof,await fs.lstat(entry.source,{bigint:true}))||!unchangedSince(destinationProof,destinationStat);
@@ -970,7 +983,7 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    if(await maybeLstat(saved))throw new Error(`Recovery original collision: ${saved}`);
    // Same-filesystem rename preserves the original inode; its contents are never
    // deleted, even when the process exits immediately after this operation.
-   await fs.rename(entry.source,saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
+   await fs.rename(entry.source,saved);ownRecordWrite(saved);await syncDirectory(path.dirname(entry.source));await syncDirectory(path.dirname(saved));
    // Renamed by this process just after the check above: its identity (all but the change time) is the proof.
    await validateOriginal(saved,entry,scopeOf(m),true,signal,false);await checkpoint(m,'stashed',index);result.moved++;
    await observePath(entry.source,entry.stat,saved,m.kind==='duplicates'?'duplicateRemoval':'organize');
@@ -982,13 +995,15 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   tidy(0,'');
   await checkpoint(m,'complete');completedRun=true;
   // The organization is complete: what follows can only add warnings. The "._" files already in the folders this
-  // organization touched, beside a media file or companion or left without their main file.
+  // organization touched and the folders above them up to the library, beside a media file, companion or folder, or
+  // left without their main file: on every system, so a library a Mac wrote ends up clean on Windows and Linux too.
   if(sidecars){
    const touched=new Map<string,string>();
+   const up=(folder:string,scope:string)=>{for(let at=folder;within(at,scope)&&!touched.has(at);at=path.dirname(at)){touched.set(at,scope);if(at===scope)break;}};
    for(const [index,entry] of m.entries.entries()){
     if(state.handedOff.has(index))continue;
-    touched.set(path.dirname(entry.destination),m.root);
-    if(entry.move)touched.set(path.dirname(entry.source),m.source);
+    up(path.dirname(entry.destination),m.root);
+    if(entry.move)up(path.dirname(entry.source),m.source);
    }
    const total=touched.size,scoped=new Map<string,string[]>();
    for(const [folder,scope] of touched)scoped.set(scope,[...(scoped.get(scope)??[]),folder]);
@@ -996,12 +1011,22 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
    try{
     for(const [scope,folders] of scoped)await sidecars.sweep(scope,folders,signal,(_done,folder)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total,bytes:0,totalBytes:0,speed:0,file:path.basename(folder),renames:true});});
    }catch(error){if(isAbort(error))throw error;sidecars.warnFolder(m.root,error);}
+   // The library's own "._", beside it in the folder above.
+   for(const folder of new Set([m.root,m.source]))await sidecars.besideFolder(folder);
   }
   // The user can keep emptied source folders; the choice is part of the signed journal.
   await removeSiblingPointers(m);
   // A journal without a cleanup scope keeps its earlier meaning: only folders already empty.
-  const removed=await removeEmptiedFolders(m.source,emptied.keys(),{signal,identities:emptied,bookkeeping:!!m.cleanupScope,area:'organize',after:'organizing',onFolders:(done,_total,folder)=>tidy(done,path.basename(folder))});
+  const removed=await removeEmptiedFolders(m.source,emptied.keys(),{signal,identities:emptied,bookkeeping:!!m.cleanupScope,area:'organize',after:'organizing',onFolders:(done,_total,folder)=>tidy(done,path.basename(folder)),...(sidecars?{appleDouble:sidecars.report}:{})});
   if(removed)result.foldersRemoved=removed;
+  // The "._" files macOS made for the folders and records this organization created; never throws.
+  await sidecars?.own([m.root,m.source],signal);
+  // Library organization also tidies the "._" files earlier runs left in the records: the store this library writes to and
+  // the folders earlier versions kept them in. A folder at a time, so a large store shows its progress.
+  if(sidecars){
+   let looked=0;const records=[where(m).store.path,...[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].map(name=>path.join(m.root,name))];
+   for(const folder of new Set(records))await sidecars.records(folder,signal,(_done,at)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total:looked+1,bytes:0,totalBytes:0,speed:0,file:path.basename(at),renames:true});});
+  }
   if(folders)checkAbort(signal);
   tidy(folders+1,'journal');
  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}
@@ -1125,9 +1150,9 @@ export async function getOrganizationRecovery(root:string,options:{verifyContent
  const verifyContents=options.verifyContents!==false;
  if(path.resolve(root)!==root)throw new Error('Unsafe recovery root');
  try{if(!await isOwnRealpath(root))throw new Error('Unsafe recovery root');}catch(error){if(code(error)==='ENOENT')return[];throw error;}
- const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string}[]=[];
+ const jobs:OrganizationRecovery[]=[],unreadable:{id:string;error:string;recordedAt?:string}[]=[];
  const ids=[...new Set((await journalsIn(root,unreadable)).map(journal=>journal.id))].sort();let looked=0;
- for(const {id,error} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error});
+ for(const {id,error,recordedAt} of unreadable)jobs.push({id,root,status:'pending',files:0,completed:0,retainedFiles:0,retainedBytes:0,finalizable:false,undoable:false,error,...(recordedAt?{recordedElsewhere:recordedAt}:{})});
  const report=(position:number,within:number,file:string,counts?:{read:number;total:number},later?:{done:number;total:number})=>options.onProgress?.({share:Math.min(1,(position+Math.min(1,Math.max(0,within)))/Math.max(1,ids.length)),looked,file,...(counts??{}),...(later?{later}:{})});
  const {signal}=options;
  report(0,0,'');
@@ -1390,7 +1415,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
     else if(where==='moved')await restore(entry.destination,entry.source,index,entry);
     if(where!=='none'){
      // Restore the reviewed Modified date; the bytes were never changed.
-     const handle=await fs.open(entry.source,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+     const handle=await openForDates(entry.source);
      try{const now=await handle.stat({bigint:true});if(String(now.mtimeNs)!==entry.stat.mtime){
       // Seconds pass through a double and FAT/exFAT truncate to 10 ms; aim mid-step there.
       const fat=now.ctimeNs===now.mtimeNs,milliseconds=Number(BigInt(entry.stat.mtime)/1000000n)+(fat?5:0);

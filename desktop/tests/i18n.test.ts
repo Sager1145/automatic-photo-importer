@@ -234,20 +234,6 @@ test('metadata disclosure does not repeat parser error messages outside the erro
  assert.ok(!markup.includes('Invalid media payload'));assert.ok(markup.includes('EXIF:Model'));
 });
 
-test('mirror reviews list files moved to Removed by mirror with reasons, per destination, in every language', async () => {
-  const { MirrorRemovals } = await import('../renderer/RootApp');
-  const plan = (root: string, removals: {path:string;size:number;reason:'missing'|'changed'}[]) => ({ source: '/Volumes/CARD', root, entries: [], rootIdentity: root, drive: { folder: 'CARD', identity: 'id', name: 'CARD' }, removals });
-  const review = { id: 'r', kind: 'import', backup: true, source: { id: 's', name: 'CARD', path: '/Volumes/CARD', transport: 'removable' }, plans: [plan('/A', [{ path: 'DCIM/old.NEF', size: 2_000_000, reason: 'missing' }]), plan('/B', [{ path: 'notes.txt', size: 1_000, reason: 'changed' }])] } as unknown as NonNullable<AppState['review']>;
-  const expected = { en: ['2 files will be moved to Removed by mirror', 'No longer on the drive', 'Replaced by a newer version', 'Destination 2: '], ja: ['2 件のファイルが Removed by mirror へ移動されます', 'ドライブにもう存在しません', '新しいバージョンに置き換えられました'] } as const;
-  for (const [language, labels] of Object.entries(expected)) {
-    const markup = renderToStaticMarkup(createElement(I18nProvider, { language: language as 'en' | 'ja', children: createElement(MirrorRemovals, { review }) }));
-    for (const label of labels) assert.ok(markup.includes(label), `${language}: ${label}`);
-    assert.ok(markup.includes('DCIM/old.NEF') && markup.includes('notes.txt'));
-  }
-  const additive = { ...review, plans: review.plans.map(item => ({ ...item, removals: undefined })) };
-  assert.equal(renderToStaticMarkup(createElement(I18nProvider, { ...defaultPreferences, language:'en', children: createElement(MirrorRemovals, { review: additive }) })), '');
-});
-
 test('unknown files are skipped quietly by default and only become errors when the user chose Ask', async () => {
   const {collectErrors, SkippedFilesNotice, SettingsPage}=await import('../renderer/RootApp');
   const inventory=withFigures({files:[
@@ -687,7 +673,11 @@ test('the drive popup shows when a reconnected drive last finished a scan or a v
     const row = back.match(/<li[^>]*data-source-id="known"[\s\S]*$/)?.[0] ?? '';
     assert.ok(row.includes(t('Last import verified {date}', { date: formatWhen('2026-10-20T21:15:00Z', language) })) && row.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-19T08:30:00Z', language) })), `${language}: both times`);
     assert.ok(back.includes(t('Drive reconnected')), `${language}: reconnected heading`);
-    assert.ok(row.includes(t('Import now')) && row.includes(t('OK')), `${language}: remembered drive offers Import now and OK`);
+    const dontImport = t("Don't import").replaceAll("'", '&#x27;');
+    assert.ok(row.includes(t('Import now')) && row.includes(dontImport) && row.includes('data-testid="reconnected-dont-import"') && !/>OK</.test(row), `${language}: verified drive offers Import now and Don't import, not OK`);
+    const ignored = render({ reconnectedDevices: ['fresh'] });
+    const ignoredRow = ignored.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
+    assert.ok(ignoredRow.includes(t('Import from this drive')) && ignoredRow.includes(dontImport) && !/>OK</.test(ignoredRow), `${language}: reconnected unselected drive offers Don't import, not OK`);
     const both = render({ newDevices: ['fresh'], reconnectedDevices: ['fresh'] });
     const freshRow = both.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
     assert.ok(freshRow.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-18T09:00:00Z', language) })) && !freshRow.includes(t('Last import verified {date}', { date: '@@' }).split('@@')[0]), `${language}: new drive with history shows its scan`);
@@ -796,8 +786,8 @@ test('Settings is organized into categories with live summaries, one open panel,
     assert.ok(tab('devices').includes(t('{count} remembered', { count: '1' })), `${language}: devices summary`);
     assert.ok(tab('general').includes('125%'), `${language}: general summary`);
     assert.ok(!/<section[^>]*data-testid="settings-panel-general"[^>]*hidden/.test(markup) && /<section[^>]*data-testid="settings-panel-storage"[^>]*hidden/.test(markup), `${language}: only the open panel is shown`);
-    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying', 'Drive backups', 'After an import'], files: ['Collect problem files', 'Remove macOS ._ files', 'Same name, different content'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once'], diagnostics: ['Diagnostics', 'Log detail'] };
-    for (const [id, labels] of Object.entries(controls)) for (const label of labels) assert.ok(panel(markup, id).includes(t(label)), `${language}: ${id}: ${label}`);
+    const controls: Record<string, string[]> = { general: ['App language', 'Text size'], storage: ['Backup location', 'Folder structure', 'Edited exports folder'], defaults: ['Automatic import', 'Verify each copy after copying', 'Files & folders', 'After an import'], files: ['Collect problem files', 'Clean up Mac system files', 'Same name, different content'], devices: ['Remembered drives', 'Ignored drives'], performance: ['Drives at once'], diagnostics: ['Diagnostics', 'Log detail'] };
+    for (const [id, labels] of Object.entries(controls)) for (const label of labels) assert.ok(panel(markup, id).includes(t(label).replace(/&/g, '&amp;')), `${language}: ${id}: ${label}`);
     assert.ok(!markup.includes('data-testid="residue-cleanup"'), `${language}: maintenance belongs to Activity`);
     const busy = render(true);
     for (const id of ['storage', 'defaults', 'files', 'performance']) assert.ok(/<fieldset[^>]*disabled/.test(panel(busy, id)), `${language}: ${id} policy lock`);

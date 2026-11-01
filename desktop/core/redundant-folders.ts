@@ -2,7 +2,8 @@ import * as fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { beneath, code, contained, identity, sameStat, syncDirectory , unlinkEntry, rmdirEntry } from './paths';
-import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble } from './appledouble';
+import { APPLEDOUBLE_MAX_BYTES, inspectAppleDouble, type AppleDoubleReport } from './appledouble';
+import { retiredDriveMarker } from './drive-backup';
 import { log, logDeletion } from '../logger';
 
 /** Files the operating system creates that are not user content. The app's own recovery
@@ -14,6 +15,7 @@ export const isServiceName=(name:string)=>serviceNames.has(name.toLowerCase());
 /** Why a folder entry is OS bookkeeping, or undefined when it is anything else (so the folder stays). */
 async function bookkeeping(file:string,name:string,root:string):Promise<string|undefined> {
   if(isServiceName(name)) return 'operating-system service file';
+  const marker=await retiredDriveMarker(file);if(marker) return marker;
   if(!name.startsWith('._')||name.length<3) return undefined;
   const before=await fs.lstat(file,{bigint:true});
   if(!before.isFile()||before.size>BigInt(APPLEDOUBLE_MAX_BYTES)) return undefined;
@@ -26,13 +28,20 @@ async function bookkeeping(file:string,name:string,root:string):Promise<string|u
   } finally { await handle.close(); }
   return 'AppleDouble sidecar holding only bookkeeping (no resource fork, tags, label or comment)';
 }
+/** A Mac file removed with an emptied folder, in the job's report. */
+function count(report:AppleDoubleReport|undefined,name:string):void {
+  if(!report)return;
+  if(name.toLowerCase()==='.ds_store')report.dsStore++;
+  else if(name.startsWith('._'))report.orphans++;
+}
 /** Removes those of `folders` (inside `root`) that now hold nothing but OS bookkeeping, deepest first, on `root`'s
  * device, links never followed. Bookkeeping files go first, then a non-recursive rmdir that fails (and keeps the
  * folder) if anything else appeared. `root`, `protect` and everything outside `root` are never touched; a folder
- * whose identity differs from the one in `identities` is kept. Returns how many folders were removed. */
+ * whose identity differs from the one in `identities` is kept. With `appleDouble` ("Clean up Mac system files" on), the
+ * Mac files removed are counted there, and a removed folder's own bookkeeping "._" in the folder above goes too. Returns how many folders were removed. */
 export async function removeEmptiedFolders(root:string,folders:Iterable<string>,options:{signal?:AbortSignal;protect?:string[];/** Folders looked at so far of all the candidates. */onFolders?:(done:number,total:number,folder:string)=>void;
   /** Folder identities (`dev:ino`) recorded when the run began. */identities?:ReadonlyMap<string,string>;/** false: bookkeeping keeps a folder too, so only folders already empty go. */bookkeeping?:boolean;
-  /** Log area, and what emptied the folders ("Delete originals"). */area:string;after:string}):Promise<number> {
+  /** Log area, and what emptied the folders ("Delete originals"). */area:string;after:string;appleDouble?:AppleDoubleReport}):Promise<number> {
   const protect=(options.protect??[]).map(item=>path.resolve(item));
   const candidates=[...new Set([...folders].map(folder=>path.resolve(folder)))].filter(folder=>beneath(folder,root)&&!protect.includes(folder)).sort((a,b)=>b.length-a.length);
   if(!candidates.length||options.signal?.aborted) return 0;
@@ -60,6 +69,7 @@ export async function removeEmptiedFolders(root:string,folders:Iterable<string>,
       for(const [file,why] of found) {
         await unlinkEntry(file).catch(error=>{if(code(error)!=='ENOENT')throw error;});
         logDeletion(options.area,file,`${why} in a folder emptied by ${options.after}`,'the folder held nothing else; the file is bookkeeping, not user content',{folder});
+        count(options.appleDouble,path.basename(file));
       }
       // Anything that appeared since the listing keeps the folder; rmdir refuses a folder that is not empty.
       if((await fs.readdir(folder)).length) continue;
@@ -67,6 +77,14 @@ export async function removeEmptiedFolders(root:string,folders:Iterable<string>,
       logDeletion(options.area,folder,`folder left with no files after ${options.after}`,'rmdir succeeded, which only removes empty folders; every entry was OS bookkeeping or an already-removed subfolder',{bookkeeping:found.length});
       await syncDirectory(path.dirname(folder));
       removed++;
+      // The folder's own "._" is left without its folder: judged like any other.
+      const beside=path.join(path.dirname(folder),'._'+path.basename(folder));
+      if(options.appleDouble&&beneath(beside,root)&&await bookkeeping(beside,path.basename(beside),root).catch(()=>undefined)) {
+        await unlinkEntry(beside).then(()=>{
+          logDeletion(options.area,beside,`AppleDouble sidecar of a folder removed after ${options.after}`,'inspectAppleDouble: safe (bookkeeping attributes only); its folder is gone; "Clean up Mac system files" on',{folder});
+          count(options.appleDouble,path.basename(beside));
+        },error=>{if(code(error)!=='ENOENT')log('normal',options.area,'sidecar-kept',{path:beside,code:code(error)??'error',error});});
+      }
     } catch(error) { if(options.signal?.aborted) break; log('normal',options.area,'folder-kept',{path:folder,code:code(error)??'error',error}); }
   }
   return removed;

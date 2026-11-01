@@ -3,8 +3,9 @@ import {constants,type BigIntStats} from 'node:fs';
 import path from 'node:path';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {APP_DATA_FOLDER} from './legacy-names';
+import {ownRecordWrite} from './own-entries';
 import {logDeletion} from '../logger';
-import {beneath,checkAbort,code,contained,maybeLstat,pathKey,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey,unlinkEntry,isOwnRealpath} from './paths';
+import {beneath,checkAbort,code,contained,maybeLstat,pathKey,posixRelative,syncDirectory,unreliableIno,sameFileIgnoringCtime,exactStatKey,unlinkEntry,isOwnRealpath} from './paths';
 export {APP_DATA_FOLDER} from './legacy-names';
 
 /** Records v5: every record this app writes on a drive lives in one visible "Photo Importer Data" folder (the
@@ -14,15 +15,22 @@ export const STORE_VERSION=5;
 /** The first app version that reads this store; earlier versions are not supported on a drive that has one. */
 export const STORE_MIN_VERSION='0.3.0';
 
-// ---- Host key and seals ----
+// ---- Computer keys and seals ----
 let hostKey:Buffer|undefined;
-/** Configure once from the host's private application data, never from a drive record. */
+/** Keys of the other computers that write to the stores this app has opened, by id (docs/shared-records.md). */
+const learnedKeys=new Map<string,Buffer>();
+/** A computer key's id, as listed in a store record. */
+export const keyId=(key:Buffer)=>createHash('sha256').update('photo-importer:computer-key\n').update(key).digest('hex').slice(0,16);
+/** Configure once from the host's private application data, never from a drive record. It seals everything this
+ * computer writes; stores this computer writes to list it, so every computer using the drive can verify its records. */
 export function configureHostKey(secret:Buffer|string):void {
  const key=Buffer.isBuffer(secret)?Buffer.from(secret):Buffer.from(secret,'utf8');
  if(key.length<32)throw new Error('Recovery authentication requires a host key of at least 32 bytes');
  if(hostKey&&!hostKey.equals(key))throw new Error('Recovery host key is already configured');
  hostKey=key;
 }
+/** Keys a verified store record lists: each record sealed with one of them is accepted from then on. */
+function learnKeys(keys:Buffer[]):void {for(const key of keys)if(!hostKey?.equals(key))learnedKeys.set(keyId(key),key);}
 export function hostKeyConfigured():boolean {return !!hostKey;}
 export function requireHostKey():Buffer {
  if(!hostKey)throw new Error('Organization recovery host authentication key is not configured');
@@ -30,8 +38,8 @@ export function requireHostKey():Buffer {
 }
 /** Seal kinds: what a sealed record is, part of what its seal covers. */
 export type SealKind='store'|'organization'|'entries'|'event'|'pointer'|'receipt'|'index'|'duplicates'|'drive'|'reviewed'|'cache';
-const v5Seal=(kind:string,text:string)=>createHmac('sha256',requireHostKey()).update(`photo-importer:v5:${kind}\n${text}`).digest('hex');
-/** A v5 record: the value with `v` and `kind`, sealed with this host's key over a domain-separated text, so a
+const v5Seal=(kind:string,text:string,key:Buffer=requireHostKey())=>createHmac('sha256',key).update(`photo-importer:v5:${kind}\n${text}`).digest('hex');
+/** A v5 record: the value with `v` and `kind`, sealed with this computer's key over a domain-separated text, so a
  * record of one kind (or one sealed by an earlier version) never verifies as another. */
 export function sealV5(kind:SealKind,value:Record<string,unknown>):Record<string,unknown> {
  const {v:_v,kind:_kind,seal:_seal,...rest}=value;
@@ -39,13 +47,20 @@ export function sealV5(kind:SealKind,value:Record<string,unknown>):Record<string
  return {...unsigned,seal:v5Seal(kind,JSON.stringify(unsigned))};
 }
 export class SealError extends Error {constructor(message='Record authentication failed'){super(message);this.name='SealError';}}
-/** The verified record (without its seal), or a SealError. */
-export function openV5(kind:SealKind,value:unknown):Record<string,unknown> {
+/** The record verified with one of `keys` (without its seal), or a SealError. */
+function openWith(kind:SealKind,value:unknown,keys:Iterable<Buffer>):Record<string,unknown> {
  if(!value||typeof value!=='object'||Array.isArray(value))throw new SealError('Invalid record');
  const {seal,...unsigned}=value as Record<string,unknown>;
  if(unsigned.v!==STORE_VERSION||unsigned.kind!==kind)throw new SealError(`Not a version ${STORE_VERSION} ${kind} record`);
- if(typeof seal!=='string'||!/^[a-f0-9]{64}$/.test(seal)||!timingSafeEqual(Buffer.from(seal,'hex'),Buffer.from(v5Seal(kind,JSON.stringify(unsigned)),'hex')))throw new SealError();
- return unsigned;
+ if(typeof seal!=='string'||!/^[a-f0-9]{64}$/.test(seal))throw new SealError();
+ const text=JSON.stringify(unsigned),given=Buffer.from(seal,'hex');
+ for(const key of keys)if(timingSafeEqual(given,Buffer.from(v5Seal(kind,text,key),'hex')))return unsigned;
+ throw new SealError();
+}
+/** The verified record (without its seal), or a SealError: sealed by this computer, or by another computer listed
+ * in a store this app has opened. */
+export function openV5(kind:SealKind,value:unknown):Record<string,unknown> {
+ return openWith(kind,value,[requireHostKey(),...learnedKeys.values()]);
 }
 /** One sealed line (no newline). */
 export const sealedLine=(kind:SealKind,value:Record<string,unknown>)=>JSON.stringify(sealV5(kind,value));
@@ -133,7 +148,7 @@ async function flush(file:string,log:Log):Promise<void>{
  if(!ready.length)return;
  try{
   const created=log.create&&!await maybeLstat(file);
-  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);
+  const handle=await fs.open(file,constants.O_RDWR|constants.O_APPEND|(log.create?constants.O_CREAT:0)|(constants.O_NOFOLLOW??0),0o600);if(created)ownRecordWrite(file);
   try{
    const opened=await handle.stat();if(!opened.isFile()||opened.nlink!==1)throw new Error(`Unsafe record log: ${file}`);
    // Start on a fresh line if an interrupted write left a partial one.
@@ -151,13 +166,13 @@ export function holdLog<T>(file:string,work:()=>Promise<T>):Promise<T>{
 }
 /** A new file holding exactly `text`, created exclusively, synchronized with its folder. */
 export async function writeNewFile(file:string,text:string):Promise<void>{
- const handle=await fs.open(file,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);
+ const handle=await fs.open(file,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|(constants.O_NOFOLLOW??0),0o600);ownRecordWrite(file);
  try{await handle.writeFile(text);await handle.sync();}finally{await handle.close();}
  await syncDirectory(path.dirname(file));
 }
 
 /** The verified payload of the sealed record in `file`, or undefined when it is not a regular file or is larger than `maxBytes`.
- * Throws when it cannot be read, is not JSON or is not sealed by this Mac (callers start empty then). `read` supplies the text (progress). */
+ * Throws when it cannot be read, is not JSON or is not sealed by a computer this one knows (callers start empty then). `read` supplies the text (progress). */
 export async function readSealedRecord(kind:SealKind,file:string,maxBytes:number,read:(file:string,size:number)=>Promise<string>=(name)=>fs.readFile(name,'utf8')):Promise<Record<string,unknown>|undefined>{
  const stat=await fs.lstat(file);
  if(!stat.isFile()||stat.size>maxBytes)return undefined;
@@ -168,7 +183,7 @@ export async function readSealedRecord(kind:SealKind,file:string,maxBytes:number
 export async function replaceSealed(kind:SealKind,target:string,prefix:string,payload:Record<string,unknown>):Promise<void>{
  const temporary=path.join(path.dirname(target),`${prefix}-${randomUUID()}.tmp`);
  try{
-  const handle=await fs.open(temporary,'wx',0o600);
+  const handle=await fs.open(temporary,'wx',0o600);ownRecordWrite(temporary);
   try{await handle.writeFile(JSON.stringify(sealV5(kind,payload)));await handle.sync();}finally{await handle.close();}
   await fs.rename(temporary,target);
  }catch(error){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'temporary sealed record of a write that failed','written by this call, never renamed into place'),()=>{});throw error;}
@@ -194,7 +209,7 @@ export const renamedIdentity=(before:BigIntStats)=>(after:BigIntStats)=>sameFile
 export async function renameChecked(source:string,target:string,expected?:(stat:BigIntStats)=>boolean):Promise<'done'|'retry'>{
  if(await maybeLstat(target))throw new FirstAidError(`Something is already at ${target}; nothing was moved`);
  const before=await fs.lstat(source,{bigint:true});
- await fs.rename(source,target);
+ await fs.rename(source,target);ownRecordWrite(source);ownRecordWrite(target);
  const [from,to]=await Promise.all([maybeLstat(source),maybeLstat(target)]);
  if(from&&to){
   if(from.dev===to.dev&&from.ino===to.ino)throw new FirstAidError(`First Aid needed: ${source} and ${target} name the same file`);
@@ -207,7 +222,15 @@ export async function renameChecked(source:string,target:string,expected?:(stat:
 }
 
 // ---- Store location ----
-export interface Store {/** The "Photo Importer Data" folder. */path:string;/** The folder it is in. */base:string;dev:bigint;baseIno:bigint;/** The store folder's own inode. */ino:bigint;}
+export interface Store {/** The "Photo Importer Data" folder. */path:string;/** The folder it is in. */base:string;dev:bigint;baseIno:bigint;/** The store folder's own inode. */ino:bigint;
+ /** false: a store an earlier version made on another computer. Nothing in it verifies here until that computer
+  * uses the drive with this version; this computer still reads and writes it (docs/shared-records.md). */
+ verified:boolean;
+ /** The store record lists this computer's key and this system's identity of the base (a writer joins otherwise). */
+ joined:boolean;
+ /** Every path a computer writing to the store has had the base at (`/Volumes/A006`, `I:\`, `E:\`): records name
+  * paths under these, and `recordedPath` reads them as paths under `base`. */
+ bases:string[];}
 let destinations:string[]=[];
 /** The configured destinations (and folders organized in place on their own drive): a library beneath one keeps
  * its records in that destination's store, on the same volume. */
@@ -215,23 +238,64 @@ export function registerDestinations(paths:string[]):void {destinations=[...new 
 export function registeredDestinations():string[] {return [...destinations];}
 /** A folder entry that is not Finder or temp-store bookkeeping, so counts as content. */
 const storeFolderEntry=(name:string)=>name!=='.DS_Store'&&!name.startsWith('._')&&!/^store-[0-9a-f-]{36}\.tmp$/.test(name);
-const storeCache=new Map<string,{key:string;store:Store}>();
+const storeCache=new Map<string,{key:string;store:Store;record:StoreRecord}>();
+/** The base folder's identity on this system: the volume serial and file id on Windows (a volume root's file id is 0
+ * there, and the serial is the same on every PC); the inode elsewhere, where device numbers change between mounts. */
+export const storeIdentity=(stat:Pick<BigIntStats,'dev'|'ino'>,platform:NodeJS.Platform=process.platform)=>platform==='win32'?`${stat.dev}:${stat.ino}`:String(stat.ino);
+/** A computer that writes to a store, as its record lists it. */
+interface Computer {id:string;platform:string;key:string;}
+/** What a store record says, checked. `computers` is undefined for a record an earlier version wrote. */
+interface StoreRecord {computers?:Computer[];/** Each system's identity of the base, by `process.platform`. */identities:Record<string,string>;/** Every path a computer has had the base at. */bases:string[];/** An earlier version's record, kept as it was. */legacy?:Record<string,unknown>;verified:boolean;}
+const damagedRecord=(file:string)=>new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);
+const isObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
+/** An earlier version's record verified with this computer's key: its base identity, in this system's form (it wrote
+ * `dev:ino`, and only on the system it ran on). Undefined when another computer sealed it. */
+function ownLegacyIdentity(record:Record<string,unknown>):string|undefined{
+ let opened:Record<string,unknown>;try{opened=openWith('store',record,[requireHostKey()]);}catch(error){if(error instanceof SealError)return undefined;throw error;}
+ const recorded=typeof opened.baseIdentity==='string'?opened.baseIdentity:'';
+ return process.platform==='win32'?recorded:recorded.split(':')[1]??'';
+}
+/** store.json, checked: a shared record sealed by one of the keys it lists (which are learned), or an earlier
+ * version's single-computer record, verified only when this computer sealed it (docs/shared-records.md). */
+async function readStoreRecord(folder:string,file:string,stat:BigIntStats):Promise<StoreRecord>{
+ if(!stat.isFile()||stat.size>BigInt(LINE_CAPS.header))throw damagedRecord(file);
+ const handle=await openRegular(file);let value:unknown;
+ try{try{value=JSON.parse(await handle.readFile('utf8'));}catch{throw damagedRecord(file);}}finally{await handle.close();}
+ if(!isObject(value)||value.v!==STORE_VERSION||value.kind!=='store'||typeof value.seal!=='string')throw damagedRecord(file);
+ if(value.computers===undefined){
+  const identity=ownLegacyIdentity(value);
+  const bases=typeof value.base==='string'?[value.base]:[];
+  return {identities:identity===undefined?{}:{[process.platform]:identity},bases,legacy:value,verified:identity!==undefined};
+ }
+ const computers=value.computers;
+ if(!Array.isArray(computers)||!computers.length||computers.some(item=>!isObject(item)||typeof item.platform!=='string'||typeof item.key!=='string'||Buffer.from(item.key,'base64').length<32||item.id!==keyId(Buffer.from(item.key,'base64'))))throw damagedRecord(file);
+ const keys=(computers as Computer[]).map(item=>Buffer.from(item.key,'base64'));
+ let record:Record<string,unknown>;
+ try{record=openWith('store',value,keys);}catch(error){if(error instanceof SealError)throw new Error(`${folder} is damaged or was not made by this app; its records cannot be used. Use First Aid.`);throw error;}
+ const identities=record.identities,bases=record.bases??[];
+ if(!isObject(identities)||Object.values(identities).some(item=>typeof item!=='string')||!Array.isArray(bases)||bases.some(item=>typeof item!=='string')||record.legacy!==undefined&&!isObject(record.legacy))throw damagedRecord(file);
+ learnKeys(keys);
+ const legacy=record.legacy as Record<string,unknown>|undefined,own={...identities} as Record<string,string>;
+ // A store this computer made with an earlier version, joined since by another system: its old record still names this system's identity.
+ if(own[process.platform]===undefined&&legacy){const identity=ownLegacyIdentity(legacy);if(identity!==undefined)own[process.platform]=identity;}
+ return {computers:computers as Computer[],identities:own,bases:bases as string[],...(legacy?{legacy}:{}),verified:true};
+}
 /** The store's own record, sealed; read and checked against the folder it is in. Undefined when absent. */
-async function storeRecord(folder:string,base:string,baseStat:BigIntStats):Promise<Store|undefined>{
+async function openStore(folder:string,base:string,baseStat:BigIntStats):Promise<{store:Store;record:StoreRecord}|undefined>{
  const file=path.join(folder,'store.json'),stat=await maybeLstat(file);if(!stat)return undefined;
  const own=await fs.lstat(folder,{bigint:true}),key=`${exactStatKey(stat)}:${baseStat.ino}:${own.ino}`;
- const cached=storeCache.get(folder);if(cached&&cached.key===key&&cached.store.base===base)return {...cached.store,dev:baseStat.dev};
- if(!stat.isFile()||stat.size>BigInt(LINE_CAPS.header))throw new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);
- const handle=await openRegular(file);let value:unknown;
- try{try{value=JSON.parse(await handle.readFile('utf8'));}catch{throw new Error(`Damaged ${APP_DATA_FOLDER} record: ${file}`);}}finally{await handle.close();}
- let record:Record<string,unknown>;try{record=openV5('store',value);}catch{throw new Error(`${folder} belongs to another Mac or is damaged; its records cannot be used here`);}
- const recorded=typeof record.baseIdentity==='string'?record.baseIdentity.split(':')[1]:undefined;
- // A drive mounted again may get another device number (and another name); the folder is the same inode.
- if(recorded!==String(baseStat.ino))throw new Error(`${folder} was copied from another folder; its records are not used. Use First Aid.`);
- const store={path:folder,base,dev:baseStat.dev,baseIno:baseStat.ino,ino:own.ino};
- storeCache.set(folder,{key,store});
- return store;
+ const cached=storeCache.get(folder);if(cached&&cached.key===key&&cached.store.base===base)return {store:{...cached.store,dev:baseStat.dev},record:cached.record};
+ const record=await readStoreRecord(folder,file,stat),recorded=record.identities[process.platform];
+ // A drive mounted again may get another device number (and another name or drive letter); the folder is the same one.
+ if(recorded!==undefined&&recorded!==storeIdentity(baseStat))throw new Error(`${folder} was copied from another folder; its records are not used. Use First Aid.`);
+ if(!record.verified)console.warn(`Records in ${folder} were written by another computer with an earlier version; they are kept as history and not acted on here until that computer uses this drive again.`);
+ // Joined also means the store knows the path the base has here now (a drive letter can change).
+ const joined=recorded!==undefined&&record.bases.includes(base)&&!!record.computers?.some(item=>item.id===keyId(requireHostKey()));
+ const store={path:folder,base,dev:baseStat.dev,baseIno:baseStat.ino,ino:own.ino,verified:record.verified,joined,bases:record.bases};
+ storeCache.set(folder,{key,store,record});
+ return {store,record};
 }
+async function storeRecord(folder:string,base:string,baseStat:BigIntStats):Promise<Store|undefined>{return (await openStore(folder,base,baseStat))?.store;}
 /** Every store a reader must consult for `folder`: in `folder` itself and each folder above it on the same
  * device, that holds a plain (not linked) "Photo Importer Data" folder with a verified record. A folder by that
  * name without a record (a creation cut short, or the user's own folder) is skipped; writers refuse to adopt one
@@ -272,23 +336,54 @@ export function ensureStore(base:string):Promise<Store>{
  if(!made){made=createStore(base).finally(()=>{if(creating.get(base)===made)creating.delete(base);});creating.set(base,made);}
  return made;
 }
+/** A store record listing this computer (its key, and this system's identity of the base) after those `record` lists. */
+function joinedRecord(base:string,baseStat:BigIntStats,record?:StoreRecord):Record<string,unknown>{
+ const key=requireHostKey(),me:Computer={id:keyId(key),platform:process.platform,key:key.toString('base64')};
+ return {base,minVersion:STORE_MIN_VERSION,computers:[...(record?.computers??[]).filter(item=>item.id!==me.id),me],identities:{...record?.identities,[process.platform]:storeIdentity(baseStat)},bases:[...new Set([...(record?.bases??[]),base])].slice(-32),...(record?.legacy?{legacy:record.legacy}:{})};
+}
 async function createStore(base:string):Promise<Store>{
  if(path.resolve(base)!==base||!await isOwnRealpath(base))throw new Error(`Unsafe records location: ${base}`);
  const baseStat=await fs.lstat(base,{bigint:true});if(!baseStat.isDirectory())throw new Error(`Unsafe records location: ${base}`);
  const folder=path.join(base,APP_DATA_FOLDER);
- try{await fs.mkdir(folder,{mode:0o700});await syncDirectory(base);}catch(error){if(code(error)!=='EEXIST')throw error;}
+ try{await fs.mkdir(folder,{mode:0o700});ownRecordWrite(folder);await syncDirectory(base);}catch(error){if(code(error)!=='EEXIST')throw error;}
  const stat=await fs.lstat(folder,{bigint:true});
  if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==baseStat.dev)throw new Error(`Unsafe ${APP_DATA_FOLDER} folder: ${folder}`);
- const existing=await storeRecord(folder,base,baseStat);if(existing)return existing;
- // Only an empty folder (a creation cut short) is adopted; one holding records without its own record is refused, as readers refuse it.
- if((await fs.readdir(folder)).some(name=>storeFolderEntry(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${folder}`);
- const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
- await writeNewFile(temporary,JSON.stringify(sealV5('store',{base,baseIdentity:`${baseStat.dev}:${baseStat.ino}`,minVersion:STORE_MIN_VERSION})));
- const file=path.join(folder,'store.json');
- if(await maybeLstat(file)){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'store record written by a creation another one beat','written by this call'),()=>{});}
- else if(await renameChecked(temporary,file)!=='done')throw new Error(`Unable to create ${file}`);
+ const file=path.join(folder,'store.json'),existing=await openStore(folder,base,baseStat);
+ if(existing?.store.joined)return existing.store;
+ if(existing){
+  // Joining: this computer's key and identity are added in one replace; everything other computers wrote stays as it is.
+  await replaceSealed('store',file,'store',joinedRecord(base,baseStat,existing.record));
+ }else{
+  // Only an empty folder (a creation cut short) is adopted; one holding records without its own record is refused, as readers refuse it.
+  if((await fs.readdir(folder)).some(name=>storeFolderEntry(name)))throw new Error(`Damaged ${APP_DATA_FOLDER} folder (no store record): ${folder}`);
+  const temporary=path.join(folder,`store-${randomUUID()}.tmp`);
+  await writeNewFile(temporary,JSON.stringify(sealV5('store',joinedRecord(base,baseStat))));
+  if(await maybeLstat(file)){await unlinkEntry(temporary).then(()=>logDeletion('store',temporary,'store record written by a creation another one beat','written by this call'),()=>{});}
+  else if(await renameChecked(temporary,file)!=='done')throw new Error(`Unable to create ${file}`);
+ }
  const store=await storeRecord(folder,base,baseStat);if(!store)throw new Error(`Unable to create ${file}`);
  return store;
+}
+/** `recorded`, a path a record names, as a path here: under the base where some system that wrote to the store had it
+ * (`/Volumes/A006/photobackup` or `I:\photobackup`), read under `store.base` with this system's separator. Undefined
+ * when it is under none of them. */
+export function recordedPath(store:Pick<Store,'base'|'bases'>,recorded:string):string|undefined{
+ const parts=(text:string)=>text.split(/[\\/]+/).filter(Boolean);
+ const named=parts(recorded);
+ for(const base of new Set([store.base,...store.bases])){
+  const prefix=parts(base);
+  if(prefix.length&&prefix.length<=named.length&&prefix.every((part,index)=>pathKey(part)===pathKey(named[index]!)))return path.join(store.base,...named.slice(prefix.length));
+ }
+ return undefined;
+}
+/** Joins the store already at `base`, if there is one this computer is not listed in yet, so the records it wrote
+ * there verify on every computer as soon as it sees the drive (docs/shared-records.md). Never makes a store. */
+export async function joinStore(base:string):Promise<boolean>{
+ const stat=await maybeLstat(base),folder=path.join(base,APP_DATA_FOLDER),own=await maybeLstat(folder);
+ if(!stat?.isDirectory()||!own?.isDirectory()||own.isSymbolicLink()||own.dev!==stat.dev)return false;
+ const found=await openStore(folder,base,stat);
+ if(!found||found.store.joined)return false;
+ return (await ensureStore(base)).joined;
 }
 /** Where `library` writes its records. */
 export async function storeFor(library:string):Promise<Store>{return ensureStore(await baseFor(library));}
@@ -304,14 +399,18 @@ export async function storeFolder(store:Store,...parts:string[]):Promise<string>
  let current=store.path;
  for(const part of parts){
   current=path.join(current,part);await contained(current,store.path);
-  try{await fs.mkdir(current,{mode:0o700});await syncDirectory(path.dirname(current));}catch(error){if(code(error)!=='EEXIST')throw error;}
+  try{await fs.mkdir(current,{mode:0o700});ownRecordWrite(current);await syncDirectory(path.dirname(current));}catch(error){if(code(error)!=='EEXIST')throw error;}
   const stat=await fs.lstat(current,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink()||stat.dev!==store.dev)throw new Error(`Unsafe records folder: ${current}`);
  }
  return current;
 }
 export const hash8=(text:string)=>createHash('sha256').update(text).digest('hex').slice(0,8);
 const label=(folder:string)=>path.basename(folder)||'volume';
-/** The folder name for a library's index and duplicate store: its name and a hash of its place under the base. */
-export const libraryPartition=(store:Pick<Store,'base'>,library:string)=>`${label(library)} ${hash8(pathKey(path.relative(store.base,library)))}`;
+/** What a library partition's hash covers: its place under the base, with "/", and the system. Caches name files by
+ * that system's identities, so each system keeps its own (macOS keeps the name earlier versions gave it) and a drive
+ * moving between a Mac and a PC never makes either rebuild the other's. */
+const partitionKey=(relative:string)=>process.platform==='darwin'?pathKey(relative):`${process.platform}\n${pathKey(relative)}`;
+/** The folder name for a library's index and duplicate store: its name and a hash of its place under the base and system. */
+export const libraryPartition=(store:Pick<Store,'base'>,library:string)=>`${label(library)} ${hash8(partitionKey(posixRelative(store.base,library)))}`;
 /** The folder name for the sibling pointers kept for folder `folder`. */
 export const pointerPartition=(folder:string)=>`${label(folder)} ${hash8(pathKey(folder))}`;

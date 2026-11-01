@@ -1,11 +1,11 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Inventory, InventoryFile, Listing, SkippedFile, UnknownDefault, UnknownFileRule } from '../shared';
+import type { Inventory, InventoryFile, Listing, SkippedFile, SystemFile, UnknownDefault, UnknownFileRule } from '../shared';
 import { finderAliasFile, knownSystemFile } from './known-files';
 import { formatFolder, mediaKindForPath } from '../media-formats';
 import { isOldReceiptName } from './legacy-names';
 import { noteOldReceipt } from './old-records';
-import { checkAbort, contained, directory, pathKey } from './paths';
+import { beneath, checkAbort, contained, directory, pathKey } from './paths';
 import { validateRelative } from '../folder-template';
 
 /** Entries of a folder looked at (lstat) at once. */
@@ -24,12 +24,17 @@ function proxyOriginals(file:string):string[] {
   return names.map(item=>pathKey(path.join(folder,item)));
 }
 const audio=new Set('wav bwf m4a mp3 aac'.split(' '));
-const artifacts=new Set(['.photo-importer-recovery','photo-importer-drive.json','.photo-importer-drive.json','photo-importer-index.json','photo-importer-duplicates.json','photo importer recovery','photo importer data','.ds_store','.fseventsd','.documentrevisions-v100','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
+const artifacts=new Set(['.photo-importer-recovery','photo-importer-drive.json','.photo-importer-drive.json','photo-importer-index.json','photo-importer-duplicates.json','photo importer recovery','photo importer data','.fseventsd','.documentrevisions-v100','.spotlight-v100','.trashes','.temporaryitems','$recycle.bin','system volume information','thumbs.db','desktop.ini']);
 const importArtifact=/^(?:\.import|photo-importer)-(?:(?:stage|intent)-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.json|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.partial)$/i;
 const duplicatesTemporary=/^photo-importer-duplicates-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.tmp$/i;
 const indexTemporary=/^photo-importer-index-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.tmp$/i;
-/** Filesystem service files and this app's own recovery artifacts. */
-export function ignoredName(name:string):boolean {return artifacts.has(name.toLowerCase()) || importArtifact.test(name) || indexTemporary.test(name) || duplicatesTemporary.test(name) || name.startsWith('._') || name.startsWith('.photo-importer-index');}
+/** Filesystem service files and this app's own recovery artifacts: never listed, whatever the settings. */
+export function appArtifactName(name:string):boolean {return artifacts.has(name.toLowerCase()) || importArtifact.test(name) || indexTemporary.test(name) || duplicatesTemporary.test(name) || name.startsWith('.photo-importer-index');}
+/** Finder's ".DS_Store" and AppleDouble "._" files: skipped while "Clean up Mac system files" is on. */
+export function macSystemName(name:string):boolean {return name.startsWith('._') || name.toLowerCase()==='.ds_store';}
+export const macSystemFile:SystemFile={id:'macos-system',vendor:'macOS',label:'Mac system file'};
+/** Names a listing leaves out. `keepMacFiles`: list Mac system files (the setting is off). */
+export function ignoredName(name:string,keepMacFiles=false):boolean {return appArtifactName(name) || (!keepMacFiles && macSystemName(name));}
 export function extension(file:string):string {return path.extname(file).slice(1).toLowerCase();}
 export function stem(file:string):string {return pathKey(path.join(path.dirname(file),path.basename(file,path.extname(file))));}
 /** NX Studio keeps edits in NKSC_PARAM/<original name>.nksc beside the original. */
@@ -57,7 +62,7 @@ export function rules(input:Record<string,UnknownFileRule>={}):Record<string,Unk
   return result;
 }
 /** The record of a whole-source listing, to reuse while its folders are unchanged. */
-export const listingOf=(inventory:Pick<Inventory,'files'>,backup:boolean,folders:Listing['folders']):Listing=>({backup,folders,files:inventory.files.map(file=>({relative:file.relative,size:file.size}))});
+export const listingOf=(inventory:Pick<Inventory,'files'>,backup:boolean,folders:Listing['folders'],keepMacFiles=false):Listing=>({backup,...(keepMacFiles?{keepMacFiles}:{}),folders,files:inventory.files.map(file=>({relative:file.relative,size:file.size}))});
 /** What the screens show about an inventory, counted once here: files and bytes per format folder, unknown files copied or skipped, camera system files per kind. */
 export function figuresOf(files:readonly InventoryFile[],backup:boolean):Pick<Inventory,'formats'|'unknownFiles'|'systemKinds'>{
   const formats:Inventory['formats']={},systemKinds:Record<string,number>={};let copied=0,skipped=0;
@@ -71,10 +76,13 @@ export function figuresOf(files:readonly InventoryFile[],backup:boolean):Pick<In
 /** An inventory whose figures are derived from its files (for callers that build one by hand). */
 export function withFigures<T extends Omit<Inventory,'formats'|'unknownFiles'|'systemKinds'>>(inventory:T,backup=false):T&Pick<Inventory,'formats'|'unknownFiles'|'systemKinds'>{return {...inventory,...figuresOf(inventory.files,backup)};}
 
-export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
+export async function inventory(source:string,options:{backup?:boolean;unknownRules?:Record<string,UnknownFileRule>;unknownDefault?:UnknownDefault;builtinRules?:boolean;folders?:string[];onProgress?:(files:number,bytes:number,topLevel?:{done:number;total:number},/** The file found last, relative to the source root. */file?:string)=>void;/** The last whole-source listing; also serves a listing of some of its folders. */reuse?:Listing;exclude?:string[];/** Folders with these names are never listed, at any depth. */excludeNames?:string[];/** A file that cannot be read while listing is reported here instead of failing the listing. */onError?:(file:string,error:unknown)=>void;
+  /** Folders (absolute) whose every file is taken: unknown types, camera bookkeeping and Finder aliases too, as files (a Files & folders import, a retired Drive backups folder). */everyFileIn?:string[];
+  /** List Finder's ".DS_Store" and "._" files (as system files: a backup or Files & folders import takes them, a media import skips them). */keepMacFiles?:boolean}={},signal?:AbortSignal):Promise<Inventory&{/** The record a later listing reuses; only for a whole source, so a partial listing never replaces it. */listing?:Listing}> {
   const started=performance.now(), root=await directory(source), custom=rules(options.unknownRules);
   const defaults:RuleDefaults={fallback:options.unknownDefault??'skip',builtins:options.builtinRules??true};
   const files:InventoryFile[]=[];
+  const everyFile=(file:string)=>(options.everyFileIn??[]).some(folder=>file===folder||beneath(file,folder));
   // Listing a large card takes a while; report what has been found so far.
   let listedBytes=0,reported=0,reportedAt=0,topDone=0,topTotal=0;
   const report=(final=false)=>{if(!options.onProgress||(!final&&files.length-reported<500&&performance.now()-reportedAt<100))return;reported=files.length;reportedAt=performance.now();options.onProgress(files.length,listedBytes,topTotal>0?{done:topDone,total:topTotal}:undefined,files.at(-1)?.relative);};
@@ -88,7 +96,8 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   // checked by: camera firmware may add files without updating a folder's stored timestamp.
   // Paths are relative to the source root, so selected folders reuse the whole source's record.
   const remembered=new Map<string,{key?:string;names:string[];files:Listing['files'];folders:string[]}>();
-  if(options.reuse && options.reuse.backup===!!options.backup) {
+  // A listing made with the other Mac system files setting holds other files, so it is never reused.
+  if(options.reuse && options.reuse.backup===!!options.backup && !!options.reuse.keepMacFiles===!!options.keepMacFiles) {
     for(const {relative,key,names} of options.reuse.folders) remembered.set(relative,{key,names,files:[],folders:[]});
     const parent=(relative:string)=>{const folder=path.dirname(relative);return folder==='.'?'':folder;};
     for(const {relative} of options.reuse.folders) if(relative) remembered.get(parent(relative))?.folders.push(relative);
@@ -115,12 +124,12 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     if(known && known.names.length===names.length && known.names.every((name,index)=>name===names[index])) return reuse(names);
     listedFolders.push({relative,key,names});
     entries.sort((a,b)=>a.name.localeCompare(b.name));
-    if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name)).length;
+    if(isRoot)topTotal=entries.filter(entry=>entry.isDirectory()&&!ignoredName(entry.name,options.keepMacFiles)).length;
     // The entries that need a look, in name order. Their lstats run LISTING_STATS at a time (one at a time
     // leaves a drive idle between calls); each is judged in order, and an error is raised at its own turn.
     // An earlier version's receipt is never listed; it is only noted, so the library can say old records are there.
     for(const entry of entries)if(entry.isFile()&&isOldReceiptName(entry.name))noteOldReceipt(path.join(folder,entry.name));
-    const wanted=entries.filter(entry=>!(ignoredName(entry.name) || entry.isSymbolicLink() || (!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name))));
+    const wanted=entries.filter(entry=>!(ignoredName(entry.name,options.keepMacFiles) || entry.isSymbolicLink() || (!options.backup && /\.(?:downloading|part|partial|crdownload|tmp)$/i.test(entry.name))));
     for(let start=0;start<wanted.length;start+=LISTING_STATS) {
       checkAbort(signal);
       const chunk=wanted.slice(start,start+LISTING_STATS);
@@ -138,19 +147,22 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   if(options.folders){
     const selected:string[]=[];
-    for(const relative of options.folders){validateRelative(relative);const requested=path.join(root,relative);await contained(path.join(requested,'.inventory-scope-check'),root);const folder=await directory(requested);if(!selected.some(parent=>folder===parent||folder.startsWith(parent+path.sep))){for(let index=selected.length-1;index>=0;index--)if(selected[index].startsWith(folder+path.sep))selected.splice(index,1);selected.push(folder);}}
+    // A folder may be spelled natively ('DCIM\101' on Windows); it is checked as the '/' path every system accepts.
+    for(const relative of options.folders){validateRelative(relative.split(path.sep).join('/'));const requested=path.join(root,relative);await contained(path.join(requested,'.inventory-scope-check'),root);const folder=await directory(requested);if(!selected.some(parent=>folder===parent||folder.startsWith(parent+path.sep))){for(let index=selected.length-1;index>=0;index--)if(selected[index].startsWith(folder+path.sep))selected.splice(index,1);selected.push(folder);}}
     topTotal=selected.length;
     for(const folder of selected){await walk(folder);topDone++;report(true);}
   }else await walk(root,true);
   report(true);
   // Camera bookkeeping that looks like media (a thumbnail JPG) is a system file, never a photo.
   for(const file of files) if(file.kind!=='Other') {const system=knownSystemFile(file.relative);if(system){file.system=system;file.kind='Other';}}
+  // A kept "._IMG_0001.JPG" is Finder's, never a photo.
+  if(options.keepMacFiles) for(const file of files) if(macSystemName(path.basename(file.path))) {file.system=macSystemFile;file.kind='Other';}
   const media=new Map<string,InventoryFile[]>(),byPath=new Map<string,InventoryFile>();
   for(const file of files) if(file.kind!=='Other') { const key=stem(file.path); {const list=media.get(key);if(list)list.push(file);else media.set(key,[file]);} byPath.set(pathKey(file.path),file); }
   for(const file of files) {
     checkAbort(signal);
-    if(file.kind==='Other') try { file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size); } catch(error) { if(!options.onError) throw error; options.onError(file.path,error); }
-    if(file.system) { file.included=!!options.backup; continue; }
+    if(file.kind==='Other' && !file.system) try { file.system=knownSystemFile(file.relative) ?? await finderAliasFile(file.path,file.size); } catch(error) { if(!options.onError) throw error; options.onError(file.path,error); }
+    if(file.system) { file.included=!!options.backup||everyFile(file.path); continue; }
     // Proxies (DJI LRF, GoPro and Insta360 LRV) contain real video and remain importable on their
     // own. An unambiguous original in the same directory supplies routing/family context.
     if(proxies.has(extension(file.path))) {
@@ -186,7 +198,7 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
     }
     if(nkscEdit(file.path)) file.companionOf=byPath.get(pathKey(path.join(path.dirname(path.dirname(file.path)),path.basename(file.path,path.extname(file.path)))))?.path;
     const rule=unknownRule(extension(file.path),custom,defaults);
-    file.included=!!options.backup || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
+    file.included=!!options.backup || everyFile(file.path) || file.kind!=='Other' || !!file.companionOf || typeof rule==='string' || (!!rule && rule.action==='camera');
   }
   // Nothing is dropped silently: every file left out is listed with its reason.
   const skipped:SkippedFile[]=[];
@@ -205,5 +217,5 @@ export async function inventory(source:string,options:{backup?:boolean;unknownRu
   }
   const unknown=files.filter(f=>f.kind==='Other' && !f.companionOf && !f.system && (options.backup || f.size>0)), unknownExtensions:Record<string,number>={};
   for(const file of unknown) {const ext=extension(file.path); unknownExtensions[ext]=(unknownExtensions[ext]??0)+1;}
-  return {files,...figuresOf(files,!!options.backup),media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:listingOf({files},!!options.backup,listedFolders)}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,skipped,elapsedMs:performance.now()-started};
+  return {files,...figuresOf(files,!!options.backup),media:files.filter(f=>f.kind!=='Other').length,companions:files.filter(f=>!!f.companionOf).length,unknown:unknown.length,bytes:files.filter(f=>f.included).reduce((sum,f)=>sum+f.size,0),unknownExtensions,...(options.folders?{}:{listing:listingOf({files},!!options.backup,listedFolders,!!options.keepMacFiles)}),system:files.filter(f=>!!f.system).length,empty:skipped.filter(item=>item.reason==='empty').length,skipped,elapsedMs:performance.now()-started};
 }

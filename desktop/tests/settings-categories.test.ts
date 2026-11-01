@@ -22,8 +22,8 @@ test('each saved policy and live control is grouped under its intended category'
   const contents: Record<SettingsCategory, string[]> = {
     general: ['App language', 'Text size', 'Appearance'],
     storage: ['Backup location', 'Copy policy', 'Folder structure', 'Edited exports folder'],
-    defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Drive backups', 'After an import', 'Offer for folders', 'Eject drives automatically after a clean import'],
-    files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Remove macOS ._ files', 'Collect problem files'],
+    defaults: ['Automatic import', 'Verify each copy after copying', 'Skip files with errors and continue', 'Files &amp; folders', 'After an import', 'Offer for folders', 'Eject drives automatically after a clean import'],
+    files: ['Files without date or camera', 'Unrecognized file types', 'Same name, different content', 'Clean up Mac system files', 'Collect problem files'],
     devices: ['Remembered drives', 'Ignored drives'],
     performance: ['Drives at once', 'CPU threads', 'Memory limit'],
     diagnostics: ['Diagnostics', 'Log detail'],
@@ -64,7 +64,7 @@ test('each category reads in the order the work happens: where, then how files a
   const markup = render();
   const order = (category: SettingsCategory, labels: string[]) => { const text = panel(markup, category), at = labels.map(label => text.indexOf(label)); assert.ok(at.every(index => index >= 0), `${category}: ${labels.join(', ')}`); assert.deepEqual([...at].sort((a, b) => a - b), at, `${category} order`); };
   order('storage', ['Backup location', 'Folder structure', 'Edited exports folder']);
-  order('defaults', ['Starting imports', 'Copying', 'Drive backups', 'After an import']);
+  order('defaults', ['Starting imports', 'Copying', 'Files &amp; folders', 'After an import']);
   order('defaults', ['Offer for folders', 'Offer for SD cards and drives', 'Eject drives automatically after a clean import']);
-  assert.ok(!panel(markup, 'storage').includes('Drive backups') && !panel(markup, 'storage').includes('placeholder="photobackup"'), 'storage holds only where backups go');
+  assert.ok(!panel(markup, 'storage').includes('files-folders-settings') && !panel(markup, 'storage').includes('placeholder="photobackup"'), 'storage holds only where backups go');
 });

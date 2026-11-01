@@ -12,6 +12,23 @@ export function deviceId(source:Source):string|undefined {
   if(source.transport==='camera') return source.id;
   return source.transport==='storage' && source.id && source.id!==source.path ? source.id : undefined;
 }
+/** A card slot of a camera with several slots was, before each slot became a source of its own, part of the one
+ * source for the whole camera, `camera:<id>`: the key its remembered choices were saved under. */
+export function wholeCameraId(source:Source):string|undefined {
+  return source.transport==='camera' && source.storage ? source.id.slice(0,source.id.length-source.storage.id.length-1) : undefined;
+}
+/** A device's record (history): its own, else, for a camera's card slot with none yet, the whole camera's. */
+export function deviceRecord<T>(records:Record<string,T>|undefined,source:Source):T|undefined {
+  const device=deviceId(source),whole=wholeCameraId(source);
+  return device===undefined || !records ? undefined : records[device] ?? (whole===undefined ? undefined : records[whole]);
+}
+/** Where a device's import-or-ignore decision is: its own key once the user decided for it; until then a card slot
+ * follows the decision made for its whole camera (each slot starts selected if the camera was, ignored if it was ignored). */
+function decisionKey(source:Source,remembered:Remembered,ignored:Ignored):string|undefined {
+  const device=deviceId(source),whole=wholeCameraId(source);
+  if(device===undefined || device in remembered || device in ignored || whole===undefined) return device;
+  return whole in remembered || whole in ignored ? whole : device;
+}
 /** Keys saved before device ids were UUIDs only: a mount path, drive letter, /dev node or diskN
  * identifier. They are dropped when settings are read rather than matched against forever. */
 const savedByPath=/^(?:\/|[a-z]:[\\/]?$|disk\d|folder:|filesystem:)/i;
@@ -34,12 +51,12 @@ export class DeviceSelection {
     this.reconnectedDevices=this.reconnectedDevices.filter(id=>connected.has(id));
     return sources.map(source=>{
       if(!this.selected.has(source.id)) {
-        const device=deviceId(source);
+        const device=decisionKey(source,remembered,ignored);
         // A folder exists only because the user picked it.
         const known=source.transport==='folder' || (device!==undefined && device in remembered);
         this.selected.set(source.id,known);
         if(!known && !(device!==undefined && device in ignored)) this.newDevices.push(source.id);
-        if(device!==undefined && (device in remembered || device in history)) this.reconnectedDevices.push(source.id);
+        if(device!==undefined && (device in remembered || deviceRecord(history,source)!==undefined)) this.reconnectedDevices.push(source.id);
       }
       return {...source,selected:this.selected.get(source.id)!};
     });
@@ -79,7 +96,8 @@ export class DeviceSelection {
 export function recordDeviceHistory(history:History,source:Source,event:'scan'|'import',now:string,cameras?:DriveCameraRecord):void {
   const device=deviceId(source);
   if(device===undefined) return;
-  const entry=history[device]={...history[device],name:source.name};
+  // A card slot's first record starts from its whole camera's, which covered the slot too.
+  const entry=history[device]={...deviceRecord(history,source),name:source.name};
   if(event==='import') {entry.lastImportVerified=now;return;}
   // A scan replaces the remembered cameras, so an older scan's cameras are never shown as current.
   entry.lastScanCompleted=now;

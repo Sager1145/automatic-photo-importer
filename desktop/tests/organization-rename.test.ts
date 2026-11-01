@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -55,7 +56,7 @@ for(const kind of ['rename','copy'] as const)for(const when of ['mid-copy','afte
  const script=path.join(f.root,'undo-crash.mjs');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
  import {syncBuiltinESMExports} from 'node:module';
- import {undoOrganization,configureOrganizationRecovery} from ${JSON.stringify(path.resolve('desktop/core/index.ts'))};
+ import {undoOrganization,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(path.resolve('desktop/core/index.ts')).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const to=${JSON.stringify(f.original)},from=${JSON.stringify(from)},when=${JSON.stringify(when)};
  const open=filesystem.open,unlink=filesystem.unlink;
@@ -194,7 +195,8 @@ test('a cross-device move falls back to the verified copy that keeps the origina
 
 test('a source changed after review is not moved',async t=>{
  const f=await fixture(t),p=await prepare(f.root);
- await fs.chmod(f.original,0o600);
+ // Read-only and back moves the change time everywhere; Windows keeps only that bit, so a bare chmod 0o600 changes nothing there.
+ await fs.chmod(f.original,0o400);await fs.chmod(f.original,0o600);
  const result=await core.executeReorganization(p,undefined,undefined);
  assert.match(result.errors.join('\n'),/changed/i);assert.equal(result.moved,0);
  assert.equal(await fs.readFile(f.original,'utf8'),'precious original 0');
@@ -238,7 +240,7 @@ test('a finalized organization cannot be undone',async t=>{
 for(const when of ['after-intent','after-link','after-rename'] as const)test(`a process killed ${when} resumes the move without losing the original`,async t=>{
  const f=await fixture(t),script=path.join(f.root,'crash.mjs'),module=path.resolve('desktop/core/index.ts');
  await fs.writeFile(script,`import filesystem from 'node:fs/promises';
- import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(module)};
+ import {plan,executeReorganization,configureOrganizationRecovery} from ${JSON.stringify(pathToFileURL(module).href)};
  configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
  const original=${JSON.stringify(f.original)},destination=${JSON.stringify(f.destination())},root=${JSON.stringify(f.root)},when=${JSON.stringify(when)};
  const link=filesystem.link,unlink=filesystem.unlink,open=filesystem.open;
