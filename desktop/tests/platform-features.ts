@@ -19,6 +19,9 @@ import { evaluateRoutes } from '../core/folder-rules';
 import { configureOrganizationRecovery, execute, plan } from '../core/index';
 import { portableName, portablePath } from '../folder-template';
 import type { InventoryFile } from '../shared';
+import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type Access, type DriveFormat } from '../core/drive-formats';
+import { probeDestination } from '../core/destination-probe';
+import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -40,6 +43,8 @@ export interface PlatformProfile {
   exfatDirect: boolean;
   /** A drive's root as this system reports it (the base of its records), and the identity a store keeps for it. */
   recordsDrive: { dev: bigint; ino: bigint; identity: string };
+  /** This system's drive tool output for drives in each format people bring, and what this system can do with each one. */
+  formats: { volumes(): MountedVolume[]; expect: { format: DriveFormat; access: Access; readOnly?: boolean }[] };
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -177,6 +182,32 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       const staged = join(root, 'A.JPG.partial'), published = join(root, 'A.JPG'); await writeFile(staged, 'jpeg');
       await link(staged, published);
       assert.equal((await stat(published)).nlink, 2);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'drive formats: each format the system reports is recognized, with what it reads and writes, and FAT32 refuses files over 4 GB before copying': async (profile, t) => {
+    // docs/drive-formats.md: the adapter's own names for each format, and this system's native access to it.
+    const volumes = profile.formats.volumes();
+    assert.deepEqual(volumes.map(volume => ({ format: driveFormat(volume.fsType), access: nativeAccess(driveFormat(volume.fsType), profile.platform), ...(volume.readOnly ? { readOnly: true } : {}) })), profile.formats.expect);
+    // exFAT is read and written everywhere: the format for a drive that moves between systems.
+    assert.equal(nativeAccess(driveFormat(profile.volumes()[1]!.fsType), profile.platform), 'readwrite');
+    // FAT32 holds files up to 4 GiB - 1 byte: a larger one stops the import at planning, naming the file; other formats take it.
+    const fat = volumes.find(volume => driveFormat(volume.fsType) === 'fat')!, others = volumes.filter(volume => driveFormat(volume.fsType) !== 'fat');
+    const entry = (name: string, size: number, skip = false) => ({ id: name, source: join(tmpdir(), 'card', name), destination: join(fat.path, name), size, kind: 'Videos' as const, skip, family: name });
+    const plans = [{ root: join(fat.path, 'photobackup'), entries: [entry('C0001.MP4', FAT32_MAX_FILE_BYTES), entry('C0002.MP4', FAT32_MAX_FILE_BYTES + 1), entry('C0003.MP4', 6e9, true)] }];
+    assert.throws(() => checkFileSizes(plans, () => fat.fsType), (error: any) => error.key === 'error.fileTooLargeForFormat' && error.params.count === 1 && error.params.name === 'C0002.MP4' && error.params.format === 'FAT32');
+    for (const volume of others) checkFileSizes(plans, () => volume.fsType);
+    if (!onNative(profile, t)) return;
+    // Every destination proves it can write, flush, read back, rename and delete; nothing of the probe is left.
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-probe-')));
+    try {
+      await probeDestination(root);
+      assert.deepEqual(await readdir(root), []);
+      // A write-denied folder (an ACL entry on Windows, mode bits elsewhere) is refused as read-only. Root ignores mode bits.
+      if (process.platform !== 'win32' && !unixPermissions) return t.diagnostic('root ignores permission bits');
+      const locked = join(root, 'locked'); await mkdir(locked); await denyWrite(locked);
+      try { await assert.rejects(probeDestination(locked), (error: any) => error.key === 'error.destinationReadOnly'); }
+      finally { await allowWrite(locked); }
+      assert.deepEqual(await readdir(locked), []);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
   'USB camera: each card slot and the total capacity are shown': () => {

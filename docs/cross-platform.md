@@ -30,7 +30,7 @@ This document is the contract. [Shared desktop implementation](multiplatform-mig
 
 Each platform has its own test file, and all of them check the same app features:
 
-- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, a records folder made on another system, library names valid on every system (`portableName`, no two names differing only by case in one folder), how a USB camera's location reads, and a camera's card slots and capacity.
+- `desktop/tests/platform-features.ts` is the one list of features (`FEATURES`), each with its assertions written once: drive detection, refusing a camera card reached through a folder link, durable writes, `/` in stored paths, a records folder made on another system, library names valid on every system (`portableName`, no two names differing only by case in one folder), how a USB camera's location reads, a camera's card slots and capacity, and drive formats (each format the adapter reports, what this system reads and writes, FAT32's 4 GB limit refused before copying, and the destination probe).
 - `desktop/tests/platforms/darwin.ts`, `win32.ts` and `linux.ts` are the profiles. Each supplies that system's real data and setup: `diskutil` output, `/Volumes` and symbolic links on macOS; `Get-Volume` JSON, `D:\` and junctions on Windows; `lsblk` output, `/media` and symbolic links on Linux.
 - `platform-darwin.test.ts`, `platform-win32.test.ts` and `platform-linux.test.ts` each run the whole list with their profile. Features that use recorded tool output run on any machine; features that need the real filesystem run on their own system and skip elsewhere, saying why.
 - `platform-parity.test.ts` checks that all three files run the shared list, and that the builds match `release-targets.json`.
@@ -51,6 +51,8 @@ To add an OS-dependent feature: add it to `FEATURES`, give every profile what it
 | Names a library writes | Same rule everywhere: `portableName`/`portablePath` (`desktop/folder-template.ts`) replace what Windows refuses, drop trailing dots and spaces and prefix reserved names; allocation treats names that differ only by case as one, and on a case-sensitive volume (`caseVariant` in `desktop/core/index.ts`) a file already there under another case is that name | same | same |
 | Symbolic links | Allowed | Need Developer Mode or admin | Allowed |
 | Release build | arm64 DMG | x64 MSI with branded dialogs, plus an x64 portable exe | Not released yet |
+| Drive formats ([drive-formats.md](drive-formats.md)) | APFS, HFS+, exFAT, FAT RW; NTFS read only | NTFS, exFAT, FAT32 RW; no APFS, HFS+, ext4, Btrfs | ext4, Btrfs, exFAT, FAT, NTFS RW; HFS+ journaled read only; no APFS |
+| Accepting a destination | Every destination is probed (write, flush, read back by SHA-256, rename, delete) before it is used, whatever driver mounts it | same | same |
 | Record seal key | Per computer, listed in each drive's `store.json` ([shared-records.md](shared-records.md)) | Same | Same |
 | Records folder identity | Inode (device numbers change per mount) | Volume serial `:` file id (a volume root's file id is 0) | Inode |
 
@@ -95,4 +97,5 @@ Keep this list current. Remove a line when the gap closes; add one, with the rea
 | Tests of folder flushes | Windows | Windows has no folder flush (`DIRECTORY_SYNC_SUPPORTED`), so tests that count or fail `sync` on a folder skip there with that reason. |
 | `heartbeat.test.ts` runs about 3.5 minutes | Windows | It passes. Windows timers stretch the simulated 20 ms drive delay to about 30 ms, and the deeper temp folder means more calls. |
 | A file already in a library under another case, on a case-sensitive volume | Linux (and case-sensitive APFS) | `caseVariant` handles it, but the `library names` platform feature runs natively only where the tests run; until a Linux machine runs it, the Linux profile skips that part. |
+| Drives a system cannot mount | Windows (APFS, HFS+, ext4, Btrfs), macOS (ext4, Btrfs) | Such a drive gets no drive letter or mount, so Settings › Devices › Drive formats cannot list it as connected; its format still appears under "All common formats" with the open-source options. |
 | Source card after a failed import | All | Can show "N of N files verified" for files that all failed; Activity shows the true counts. |
