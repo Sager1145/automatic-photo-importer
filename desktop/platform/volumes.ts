@@ -90,12 +90,27 @@ async function linuxVolumes():Promise<MountedVolume[]> {
     return mounts.split('\n').filter(Boolean).map(line=>{const fields=line.split(' ');return {path:fields[4].replace(/\\([0-7]{3})/g,(_,octal)=>String.fromCharCode(parseInt(octal,8))),readOnly:fields[5]?.split(',').includes('ro')};});
   }
 }
+/** The first PowerShell run after sign-in loads its storage modules and can take far longer than the 2-3 s a warm
+ * run does, so Windows gets its own, longer limit. */
+const WINDOWS_VOLUME_TIMEOUT=30000;
 async function windowsVolumes():Promise<MountedVolume[]> {
-  // This script is constant: no filesystem paths or other user input enter PowerShell code.
-  const script=`$ErrorActionPreference='Stop'; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue | Select-Object -First 1; $d=$null; if($p){$d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[string]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
+  // This script is constant: no filesystem paths or other user input enter PowerShell code. Progress records are
+  // silenced (they arrive on stderr as CLIXML), and partitions and disks are each listed once rather than per drive.
+  const script=`$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $parts=@{}; Get-Partition -ErrorAction SilentlyContinue | Where-Object {$_.DriveLetter} | ForEach-Object { $parts[[string]$_.DriveLetter]=$_ }; $disks=@{}; Get-Disk -ErrorAction SilentlyContinue | ForEach-Object { $disks[[int]$_.Number]=$_ }; $items=@(Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object { $v=$_; $p=$parts[[string]$v.DriveLetter]; $d=$null; if($p){$d=$disks[[int]$p.DiskNumber]}; [pscustomobject]@{Path=([string]$v.DriveLetter+':\');Label=$v.FileSystemLabel;VolumeId=$v.UniqueId;DriveType=[string]$v.DriveType;Size=$v.Size;SizeRemaining=$v.SizeRemaining;DiskNumber=$d.Number;UniqueId=$d.UniqueId;BusType=[string]$d.BusType;FriendlyName=$d.FriendlyName;FileSystem=[string]$v.FileSystem;IsReadOnly=$d.IsReadOnly}}); ConvertTo-Json -InputObject $items -Compress`;
   const encoded=Buffer.from(script,'utf16le').toString('base64');
-  const {stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],commandOptions);
-  return parseWindowsVolumes(JSON.parse(stdout.replace(/^\uFEFF/,'')));
+  let stdout:string;
+  try { ({stdout}=await exec('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],{...commandOptions,timeout:WINDOWS_VOLUME_TIMEOUT})); }
+  catch(error) { throw new Error(windowsVolumeError(error),{cause:error}); }
+  return parseWindowsVolumes(JSON.parse(stdout.replace(/^﻿/,'')));
+}
+/** What went wrong listing drives, in words: never the encoded command, nor PowerShell's CLIXML. */
+export function windowsVolumeError(error:unknown):string {
+  const failure=error as {killed?:boolean;signal?:string;code?:unknown;stderr?:unknown};
+  if(failure?.killed||failure?.signal==='SIGTERM')return `Windows did not list the drives within ${WINDOWS_VOLUME_TIMEOUT/1000} seconds.`;
+  const text=String(failure?.stderr??'').replace(/^#< CLIXML\s*/,'');
+  const errors=[...text.matchAll(/<S S="Error">([^<]*)<\/S>/g)].map(match=>match[1]!.replace(/_x000D__x000A_/g,' ').trim()).filter(Boolean);
+  const plain=errors.length?errors.join(' '):text.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  return `Windows could not list the drives${plain?`: ${plain.slice(0,300)}`:failure?.code!==undefined?` (exit code ${String(failure.code)})`:''}.`;
 }
 /** Successful diskutil answers per mount for this session. Under heavy load diskutil
  * can time out; without this the same disk would fall back to a different identity

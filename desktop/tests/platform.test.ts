@@ -288,3 +288,11 @@ test('unlabeled Windows drives are named by device and letter', () => {
   const [sony, plain, labeled] = parseWindowsVolumes([{Path:'D:\\',FriendlyName:'Sony DSC USB Device'},{Path:'G:\\'},{Path:'I:\\',Label:'A006',FriendlyName:'Micron CT2000X9PROSSD9'}]);
   assert.equal(sony.name, 'Sony DSC (D:)'); assert.equal(plain.name, 'G:\\'); assert.equal(labeled.name, 'A006');
 });
+test('a failed Windows drive list reads in words, without the encoded command or CLIXML', async () => {
+  const { windowsVolumeError } = await import('../platform/volumes');
+  assert.match(windowsVolumeError({ killed: true, signal: 'SIGTERM' }), /within 30 seconds/);
+  const clixml = '#< CLIXML\r\n<Objs><Obj S="progress"><AV>Preparing modules</AV></Obj><S S="Error">Get-Volume : Access denied_x000D__x000A_</S></Objs>';
+  const message = windowsVolumeError({ code: 1, stderr: clixml });
+  assert.equal(message, 'Windows could not list the drives: Get-Volume : Access denied.');
+  assert.doesNotMatch(windowsVolumeError({ code: 1, stderr: '' }), /EncodedCommand/);
+});
