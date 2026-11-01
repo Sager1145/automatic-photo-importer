@@ -181,9 +181,28 @@ export class AppleDoubleCleaner {
       catch(error){if(code(error)!=='ENOENT'&&code(error)!=='ENOTDIR')this.warnFolder(folder,error);}
     }
   }
+  /** Every bookkeeping "._" file anywhere in the records folder `records` (and its own beside it): what earlier runs
+   * left, on a Mac or on another computer. Folders on another volume and links are never entered; a folder that cannot be
+   * read is reported and skipped. Never throws; a stop ends it quietly. */
+  async records(records:string,signal?:AbortSignal,onFolder?:(done:number,folder:string)=>void):Promise<void> {
+    let device:bigint;
+    try{const stat=await fs.lstat(records,{bigint:true});if(!stat.isDirectory()||stat.isSymbolicLink())return;device=stat.dev;}
+    catch(error){if(code(error)!=='ENOENT')this.warnFolder(records,error);return;}
+    await this.besideFolder(records);
+    let done=0;
+    const walk=async(folder:string):Promise<void>=>{
+      if(signal?.aborted)return;
+      onFolder?.(++done,folder);
+      let entries:import('node:fs').Dirent[];
+      try{await contained(path.join(folder,'.x'),records);if((await fs.lstat(folder,{bigint:true})).dev!==device)return;entries=await fs.readdir(folder,{withFileTypes:true});await this.sweepRecords(folder,records,entries);}
+      catch(error){if(code(error)!=='ENOENT')this.warnFolder(folder,error);return;}
+      for(const entry of entries)if(entry.isDirectory())await walk(path.join(folder,entry.name));
+    };
+    await walk(records);
+  }
   /** Every "._" file in one of the app's records folders: everything there is the app's own. */
-  private async sweepRecords(folder:string,scope:string):Promise<void> {
-    const entries=await fs.readdir(folder,{withFileTypes:true});
+  private async sweepRecords(folder:string,scope:string,listed?:import('node:fs').Dirent[]):Promise<void> {
+    const entries=listed??await fs.readdir(folder,{withFileTypes:true});
     const names=new Set(entries.map(entry=>entry.name.normalize('NFC').toLowerCase()));
     for(const entry of entries){
       if(!entry.name.startsWith('._')||entry.name.length<3||!entry.isFile())continue;

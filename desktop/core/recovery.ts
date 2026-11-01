@@ -28,7 +28,7 @@ interface Manifest {version:1;/** duplicates: a Remove duplicates run; nothing i
  * versions): a verified copy plus a retained original. */strategy?:'rename';keepFolders?:true;/** Other backup folders organized from the same source (the video-root layout's); never removed as empty. */libraries?:string[];
  /** The chosen source folders (the source itself when none were chosen): only folders inside them that the run emptied
  * are removed, OS bookkeeping included. Absent (earlier versions' journals): only folders already empty go, up to the source. */cleanupScope?:string[];}
-import {APP_DATA_FOLDER,isRecordFolderName} from './legacy-names';
+import {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER,isRecordFolderName} from './legacy-names';
 import {ownRecordWrite} from './own-entries';
 export {APP_DATA_FOLDER,LEGACY_RECOVERY_FOLDER,RECOVERY_FOLDER} from './legacy-names';
 /** This app's record folders, current and earlier: never organized, listed or cleaned as user files. */
@@ -1021,6 +1021,12 @@ async function run(m:Manifest,signal?:AbortSignal,onProgress?:(progress:Progress
   if(removed)result.foldersRemoved=removed;
   // The "._" files macOS made for the folders and records this organization created; never throws.
   await sidecars?.own([m.root,m.source],signal);
+  // Library organization also tidies the "._" files earlier runs left in the records: the store this library writes to and
+  // the folders earlier versions kept them in. A folder at a time, so a large store shows its progress.
+  if(sidecars){
+   let looked=0;const records=[where(m).store.path,...[RECOVERY_FOLDER,LEGACY_RECOVERY_FOLDER].map(name=>path.join(m.root,name))];
+   for(const folder of new Set(records))await sidecars.records(folder,signal,(_done,at)=>{looked++;onProgress?.({phase:'copying',step:'tidying',completed:looked,total:looked+1,bytes:0,totalBytes:0,speed:0,file:path.basename(at),renames:true});});
+  }
   if(folders)checkAbort(signal);
   tidy(folders+1,'journal');
  }catch(error){if(isAbort(error))throw error;result.errors.push(error instanceof Error?error.message:String(error));}

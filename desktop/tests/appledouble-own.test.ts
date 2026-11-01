@@ -107,3 +107,20 @@ test('emptied-folder removal: only bookkeeping "._" files go, and the folder\'s 
   assert.deepEqual(await fs.readdir(path.join(root,'tagged')),['._x'],'a labelled "._" keeps its folder');
   assert.equal(report.orphans,2);
 });
+
+test('library organization removes the "._" files earlier runs left in the records folder, keeping a labelled one',async t=>{
+  const {top,library}=await drive(t),source=await card(t);
+  assert.deepEqual((await execute((await plan(source,[library],importOptions,metadata)).plans[0]!)).errors,[]);
+  // Left by an earlier run on a Mac, in folders this session never wrote to.
+  const store=path.join(top,'Photo Importer Data'),old=path.join(store,'Organizations','11111111-1111-4111-8111-111111111111','originals','0','slot');
+  await fs.mkdir(old,{recursive:true});await fs.writeFile(path.join(old,'A.JPG'),'kept original');
+  for(const file of [path.join(old,'._A.JPG'),path.join(old,'..','._slot'),path.join(old,'..','..','._0'),path.join(store,'._store.json'),path.join(top,'._Photo Importer Data')])await fs.writeFile(file,bookkeepingSidecar());
+  await fs.writeFile(path.join(store,'._labelled'),labelledSidecar());
+  const incoming=path.join(library,'incoming');await fs.mkdir(incoming);await fs.writeFile(path.join(incoming,'M.JPG'),Buffer.alloc(5000,3));
+  const review=(await plan(library,[library],{...importOptions,reorganize:true},metadata)).plans[0]!;
+  const result=await executeReorganization(review,undefined,undefined,{removeAppleDouble:true});
+  assert.deepEqual(result.errors,[]);
+  assert.deepEqual(await sidecarsUnder(top),['Photo Importer Data/._labelled']);
+  assert.ok(await exists(path.join(old,'A.JPG')),'the kept original itself is never touched');
+  assert.ok(result.appleDouble!.kept>=1);
+});
