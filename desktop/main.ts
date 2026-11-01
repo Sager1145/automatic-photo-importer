@@ -3,11 +3,12 @@ import {startCatalog} from './catalog/process';
 import {createCatalogSession,type CatalogSession} from './catalog/session';
 import {CatalogCoordinator,bindLibrary,catalogStat,type LibraryBinding} from './catalog/coordinator';
 import {resolveCatalogFile} from './catalog/access';
+import {collectDragFiles,validDragRequest} from './core/file-drag';
 import {configuredRefreshIds,createCatalogRefreshScheduler} from './catalog/refresh-scheduler';
 import type {Catalog,CatalogQuery,CategoryField} from './catalog/types';
 import {stopOperations} from './stop-scope';
 import {publishSourceModes} from './source-modes';
-import {app,BrowserWindow,clipboard,dialog,ipcMain,shell,session,nativeTheme,powerMonitor,powerSaveBlocker} from 'electron';
+import {app,BrowserWindow,clipboard,dialog,ipcMain,nativeImage,shell,session,nativeTheme,powerMonitor,powerSaveBlocker} from 'electron';
 import {keepAwake} from './keep-awake';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -99,6 +100,8 @@ useCameraCheck(onCameraCard);
 const state:AppState={preferences:normalizePreferences(undefined),sources:[],jobs:[],history:[],platform:process.platform,destinationStatus:[],organizeOptions:freshOrganizeOptions()};
 let catalog:Catalog|undefined,catalogCoordinator:CatalogCoordinator|undefined,catalogSession:CatalogSession|undefined;
 let catalogPublishTimer:NodeJS.Timeout|undefined,catalogClosing=false;
+/** File lists prepared for a drag out of the Library browser, by token; only the latest few are kept. */
+const preparedDrags=new Map<string,string[]>();
 const catalogFallbacks=new Map<string,string>(),catalogConnected=new Set<string>(),catalogStopped=new Set<string>();
 let rememberedCatalogLibraries:LibraryBinding[]=[];
 /** The libraries of the folders chosen now (destination folders and added organization folders): the only ones offered for browsing. */
@@ -1673,7 +1676,7 @@ async function boot(){
  const renderer=path.join(__dirname,'../renderer/index.html');
  window=new BrowserWindow({frame:process.platform==='darwin',...(process.platform==='darwin'?{titleBarStyle:'hidden' as const,trafficLightPosition:{x:18,y:15}}:{}),title:'Automatic Photo Importer',width:1440,height:940,minWidth:1000,minHeight:720,backgroundColor:'#151c24',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,scrollBounce:true}});
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
- function trusted(event:Electron.IpcMainInvokeEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
+ function trusted(event:Electron.IpcMainInvokeEvent|Electron.IpcMainEvent){if(!window||event.sender!==window.webContents||event.senderFrame?.url!==pathToFileURL(renderer).href)throw new Error('Untrusted request');}
  ipcMain.handle('importer:state',event=>{trusted(event);return stateChannel.snapshot(state);});
  ipcMain.handle('importer:action',async(event,value)=>{trusted(event);try{if(qaHooks?.beforeAction?.(value)===false)return;await action(value);}catch(e){state.error=toMessage(e);emit();}});
  ipcMain.handle('importer:catalogQuery',(event,query:CatalogQuery)=>{trusted(event);return catalogMember(query?.libraryId).catalog.query(query);});
@@ -1681,6 +1684,17 @@ async function boot(){
  ipcMain.handle('importer:catalogFacets',(event,query:CatalogQuery,field:CategoryField)=>{trusted(event);return catalogMember(query?.libraryId).catalog.facets(query,field);});
  ipcMain.handle('importer:catalogStatus',(event,libraryId:string)=>{trusted(event);return catalogMember(libraryId).status(libraryId);});
  ipcMain.handle('importer:catalogResolve',(event,libraryId:string,fileId:string)=>{trusted(event);const coordinator=catalogAvailable();return resolveCatalogFile(coordinator.catalog,coordinator.binding(libraryId),fileId,binding=>catalogVolumeValid(binding,true));});
+ // Dragging photos out (to Lightroom, a file manager): main resolves the files while the pointer is down, then starts the
+ // system drag from the prepared list as soon as the renderer's dragstart arrives, so no path lookup delays the drag itself.
+ ipcMain.handle('importer:prepareDrag',async(event,request:unknown)=>{trusted(event);if(!validDragRequest(request))throw new Error('Invalid drag.');const coordinator=catalogMember(request.libraryId),binding=coordinator.binding(request.libraryId);if(!binding||!await catalogVolumeValid(binding,true))throw new Error('Library is unavailable.');
+  const payload=await collectDragFiles(request,{query:query=>coordinator.catalog.query(query),companions:(libraryId,fileIds)=>coordinator.catalog.companions(libraryId,fileIds),resolve:fileId=>resolveCatalogFile(coordinator.catalog,binding,fileId,checked=>catalogVolumeValid(checked))});
+  const token=randomUUID();if(payload.files.length){preparedDrags.set(token,payload.files);while(preparedDrags.size>8)preparedDrags.delete(preparedDrags.keys().next().value!);}
+  return {token,files:payload.files.length,photos:payload.photos,companions:payload.companions,skipped:payload.skipped,...(payload.tooMany?{tooMany:true}:{})};});
+ ipcMain.on('importer:startDrag',(event,token:unknown,icon:unknown)=>{try{trusted(event);}catch{return;}const files=typeof token==='string'?preparedDrags.get(token):undefined;if(!files?.length)return;
+  let image=typeof icon==='string'&&icon.startsWith('data:image/png;base64,')&&icon.length<2_000_000?nativeImage.createFromDataURL(icon):undefined;
+  // macOS refuses a drag without a picture: a plain tile stands in when the renderer's could not be read.
+  if(!image||image.isEmpty())image=nativeImage.createFromBitmap(Buffer.alloc(32*32*4,0xc0),{width:32,height:32});
+  try{event.sender.startDrag({file:files[0]!,files,icon:image});}catch(error){log('normal','catalog','drag-failed',{error});}});
  ipcMain.handle('importer:summary',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file),{details:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview)}));}finally{inspecting--;void releaseIfIdle();}});

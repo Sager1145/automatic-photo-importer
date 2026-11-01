@@ -36,6 +36,22 @@ void (async()=>{
   ui.scrollTo(0);await until(()=>!!ui.row('Camera 1'),'First rows not rendered after scrolling back');
   ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 201"]',`Toggle lost hidden second-page value: ${JSON.stringify(ui.values())}`);
  }finally{ui.dispose();}});
+ await run('a click selects, a second click deselects, and the selection bar lists each choice with their number',async()=>{const ui=await mount();try{
+  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);
+  ui.row('Camera 2').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1","Camera 2"]',`Second click replaced the first: ${JSON.stringify(ui.values())}`);
+  const bar=()=>ui.host.querySelector('[data-testid=browser-selection]')?.textContent??'';check(bar().includes('Camera 1, Camera 2')&&bar().includes('(2)'),`Selection bar: ${bar()}`);
+  check(ui.column().querySelector('header small')!.textContent!.startsWith('2/')&&ui.column().querySelector('header small')!.getAttribute('title')==='2 selected','Column header count missing');
+  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 2"]',`Second click did not deselect: ${JSON.stringify(ui.values())}`);
+  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);ui.row('Camera 3').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 2","Camera 1","Camera 3"]',`Shift range: ${JSON.stringify(ui.values())}`);
+ }finally{ui.dispose();}});
+ await run('Select all reads every page and selects each value; Deselect all clears the column; each disables when it would do nothing',async()=>{const ui=await mount();try{
+  const all=()=>ui.column().querySelector<HTMLButtonElement>('[data-testid=column-select-all]')!,none=()=>ui.column().querySelector<HTMLButtonElement>('[data-testid=column-deselect-all]')!;
+  check(!all().disabled&&none().disabled,'Initial button states');
+  all().click();await until(()=>ui.values().length===202,`Select all chose ${ui.values().length}`);await delay(50);
+  check(all().disabled&&!none().disabled,'Select all stays enabled after selecting everything');check(ui.row('Camera 1')?.getAttribute('aria-selected')==='true','Rows not shown selected');
+  none().click();await until(()=>ui.values().length===0,'Deselect all left values');await delay(50);check(none().disabled&&!all().disabled,'Buttons after deselect');
+  const files=ui.host.querySelector('[data-testid=browser-files]')!;check(!!files.querySelector('[data-testid=column-select-all]')&&!!files.querySelector('[data-testid=lightroom-drag]'),'Files column lacks Select all or the Lightroom drag handle');
+ }finally{ui.dispose();}});
  await run('continuous ArrowDown survives delayed responses without refocus',async()=>{const ui=await mount();try{
   const list=ui.list();list.focus();list.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));await delay(100);
   check(document.activeElement===list&&ui.list()===list,`Focused list replaced after first response: ${document.activeElement?.tagName}`);

@@ -90,14 +90,17 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <ul>
 <li><b class="ui">Library</b> menu: pick a destination library. <b class="ui">Browse a folder…</b> (folder icon) adds any other folder to browse; <b class="ui">×</b> removes it from the list.</li>
 <li><b class="ui">Categories</b>: virtual columns such as Date › Camera › Format › Files. <b class="ui">Real folders</b>: the actual folders on disk.</li>
-<li>Click a row to narrow the next columns. Command-click adds more choices in the same column. Every column only shows what matches the columns before it.</li>
+<li>Click a row to select it; click it again to deselect it. Select several rows in one column (for example two months) and the next columns show everything they hold together. Shift-click selects a range. Every column only shows what matches the columns before it.</li>
+<li>The bar above the columns shows the selection as a path, with the number of choices in each column, for example “2026 › 202609, 202610 (2) › NIKON Z f”. Click a part to clear it and the columns after it.</li>
+<li><b class="ui">Select all</b> / <b class="ui">Deselect all</b> (the two buttons in every column header, the Files column included) choose every row of that column or none. Each is greyed out when it would change nothing.</li>
+<li><b class="ui">Drag to Lightroom</b> at the bottom of the Files column: drag it onto Lightroom Classic’s Library grid or Import window to import the selected photos, or every photo shown when none are selected. The paired RAW of a RAW + JPEG photo and sidecars such as .xmp go with them. Finder, File Explorer and other apps take the drop too. Up to 10,000 photos at a time; the drive must be connected.</li>
 <li><b class="ui">Back</b> / <b class="ui">Forward</b>: step through your selections. <b class="ui">Clear all</b> resets them.</li>
 <li><b class="ui">Search names</b> and <b class="ui">Sort</b> filter and order the Files column.</li>
 <li><b class="ui">RAW + JPEG</b> (on by default): a RAW and the JPEG/HEIF taken with it (same name, same EXIF time and camera) show as one photo marked “+ NEF”.</li>
 <li>Click a file to preview it with camera, lens, date and exposure. <b class="ui">Full EXIF</b> shows every tag; <b class="ui">Show in file manager</b> reveals it in Finder.</li>
 <li>The status line shows indexing progress with <b class="ui">Refresh index</b> / <b class="ui">Stop indexing</b> and a <b class="ui">Placement</b> filter (for example “Needs organization”).</li>
 <li>Drag a column edge to change its width; drag the handle under the columns to change their height (double-click it to fill the window).</li>
-<li>Keyboard: arrow keys move, Space selects, Esc clears or closes the preview.</li>
+<li>Keyboard: arrow keys move and select one row (Shift adds it, Command/Ctrl only moves), Space selects or deselects, Esc clears or closes the preview.</li>
 </ul>
 <h3>Building a view (Virtual hierarchy panel)</h3>
 <ul>
@@ -196,10 +199,13 @@ If macOS says the app “is damaged”, run this in Terminal, then open it again
 <li>只读浏览已导入的内容，这里不会移动或重命名任何文件。</li>
 <li>「资料库」菜单选择目标资料库；文件夹图标「浏览文件夹…」可加入任意其他文件夹，× 可移除。</li>
 <li>「分类浏览」：日期 › 相机 › 格式 › 文件等虚拟栏位；「实际文件夹」：磁盘上的实际文件夹。</li>
-<li>点击一行会筛选后面的栏位；按住 Command 点击可在同一栏多选。每一栏只显示符合前面栏位选择的内容。「后退」/「前进」切换选择历史，「全部清除」重置。</li>
+<li>点击一行即选择，再点一次取消选择。同一栏可选择多行（例如两个月份），后面的栏位会显示它们的合集；按住 Shift 点击可选择一个范围。每一栏只显示符合前面栏位选择的内容。「后退」/「前进」切换选择历史，「全部清除」重置。</li>
+<li>栏位上方的路径显示当前选择，并标出每栏选了几项，例如“2026 › 202609, 202610 (2) › NIKON Z f”。点击其中一段可清除它及后面的选择。</li>
+<li>每个栏位标题（包括文件栏）都有「全选」和「取消全选」两个按钮；不会改变任何内容时按钮显示为灰色。</li>
+<li>文件栏底部的「拖到 Lightroom」：拖到 Lightroom Classic 的图库网格或导入窗口即可导入所选照片；未选择时导入当前显示的全部照片。RAW + JPEG 配对的 RAW 文件和 .xmp 等附属文件会一并带上。也可以拖到访达、文件资源管理器或其他应用。一次最多 10,000 张，硬盘需已连接。</li>
 <li>「搜索名称」和「排序」作用于文件栏。「RAW + JPEG」（默认开启）：同名、EXIF 时间和相机相同的 RAW 与 JPEG/HEIF 合并显示为一张，并标注“+ NEF”。</li>
 <li>点击文件可预览并查看相机、镜头、日期和曝光；「完整 EXIF」显示全部标签；「在文件管理器中显示」在访达中显示。</li>
-<li>拖动栏位边缘调整宽度；拖动栏位下方的手柄调整高度（双击恢复填满窗口）。键盘：方向键移动，空格选择，Esc 清除或关闭预览。</li>
+<li>拖动栏位边缘调整宽度；拖动栏位下方的手柄调整高度（双击恢复填满窗口）。键盘：方向键移动并选择一行（Shift 追加选择，Command/Ctrl 只移动），空格选择或取消选择，Esc 清除或关闭预览。</li>
 <li><b>虚拟层级面板</b>：点击「字段」把它加到最后一层，或拖到「层级」中的指定位置；点击「预设」直接使用，或拖入层级插入其全部栏位；点击某一层设置选项，拖动可调整顺序，「清除」移除全部层级；输入名称后点「保存当前视图」保存为自己的预设（✎ 重命名、× 删除），「恢复默认视图」回到 日期 › 相机 › 格式。</li>
 </ul>
 

@@ -27,7 +27,7 @@ export function createCatalogSession(open:(onError:(error:Error)=>void)=>Catalog
  }
  const catalog:Catalog={
   async configure(libraries){for(const library of libraries)definitions.set(library.libraryId,structuredClone(library));await invoke('configure',[libraries]);},
-  records:(...args)=>invoke('records',args),file:(...args)=>invoke('file',args),
+  records:(...args)=>invoke('records',args),file:(...args)=>invoke('file',args),companions:(...args)=>invoke('companions',args),
   beginScan:(...args)=>invoke('beginScan',args),ingest:(...args)=>invoke('ingest',args),endScan:(...args)=>invoke('endScan',args),
   apply:(...args)=>invoke('apply',args),query:(...args)=>invoke('query',args),directories:(...args)=>invoke('directories',args),facets:(...args)=>invoke('facets',args),
   async status(id){

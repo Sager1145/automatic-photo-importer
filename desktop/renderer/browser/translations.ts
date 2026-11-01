@@ -126,7 +126,21 @@ This file may need organization.|此文件可能需要整理。|此檔案可能�
 Open organization tool|打开整理工具|開啟整理工具|整理ツールを開く
 Review and apply changes in the separate organization tool.|请在独立整理工具中审核并应用更改。|請在獨立整理工具中檢閱並套用變更。|別の整理ツールで変更を確認して適用します。
 Placement has not been checked.|尚未检查文件位置。|尚未檢查檔案位置。|配置は未確認です。
-Arrow keys navigate columns. Space selects; Command/Ctrl adds a selection. Esc clears. Tab moves to controls.|方向键浏览分栏。空格键选择；Command/Ctrl 添加选择。Esc 清除，Tab 切换控件。|方向鍵瀏覽分欄。空白鍵選取；Command/Ctrl 加入選取。Esc 清除，Tab 切換控制項。|矢印キーで列を移動。スペースで選択、Command/Ctrl で追加選択。Esc で解除、Tab で操作項目へ移動します。
+Click or Space selects and deselects; select several to see them together in the next columns. Shift adds a range. Arrow keys navigate. Esc clears. Tab moves to controls.|单击或按空格键选择，再按一次取消选择；选择多项后，后续分栏显示它们的合集。Shift 选择一个范围。方向键浏览，Esc 清除，Tab 切换控件。|按一下或按空白鍵選取，再按一次取消選取；選取多項後，後續欄位顯示它們的合集。Shift 選取一個範圍。方向鍵瀏覽，Esc 清除，Tab 切換控制項。|クリックまたはスペースで選択し、もう一度で選択解除。複数選ぶと次の列にまとめて表示されます。Shift で範囲を選択。矢印キーで移動、Esc で解除、Tab で操作項目へ移動します。
+Selection|选择|選取|選択
+Select all|全选|全選|すべて選択
+Deselect all|取消全选|取消全選|すべて選択解除
+Too many values to select at once|值太多，无法一次全选|值太多，無法一次全選|値が多すぎて一度に選択できません
+{count} selected|已选 {count} 项|已選 {count} 項|{count} 件選択
+{count} files selected|已选 {count} 个文件|已選 {count} 個檔案|{count} 個のファイルを選択
+Drag to Lightroom|拖到 Lightroom|拖到 Lightroom|Lightroom へドラッグ
+All {count}|全部 {count} 个|全部 {count} 個|全 {count} 件
+Connect the drive to drag photos.|请连接硬盘后再拖动照片。|請連接磁碟後再拖曳照片。|写真をドラッグするにはドライブを接続してください。
+Choose at most {max} photos to drag at once.|一次最多拖动 {max} 张照片，请缩小选择。|一次最多拖曳 {max} 張照片，請縮小選取範圍。|一度にドラッグできる写真は {max} 枚までです。選択を絞り込んでください。
+Could not prepare the drag.|无法准备拖动。|無法準備拖曳。|ドラッグを準備できませんでした。
+{count} files could not be read and are left out.|{count} 个文件无法读取，已略过。|{count} 個檔案無法讀取，已略過。|{count} 個のファイルを読み取れないため除外しました。
+{count} files, with paired RAWs and sidecars|共 {count} 个文件，含配对的 RAW 和附属文件|共 {count} 個檔案，含配對的 RAW 和附屬檔案|ペアの RAW とサイドカーを含む {count} 個のファイル
+Drag onto Lightroom Classic’s Library grid or Import window to import these photos. File Explorer, Finder and other apps take the drop too; paired RAW files and sidecars such as .xmp go with them.|拖到 Lightroom Classic 的图库网格或导入窗口即可导入这些照片。也可以拖到文件资源管理器、访达或其他应用；配对的 RAW 文件和 .xmp 等附属文件会一并带上。|拖到 Lightroom Classic 的圖庫格線或匯入視窗即可匯入這些照片。也可以拖到檔案總管、Finder 或其他 App；配對的 RAW 檔案和 .xmp 等附屬檔案會一併帶上。|Lightroom Classic のライブラリのグリッドまたは読み込みウインドウにドラッグすると、これらの写真を読み込めます。エクスプローラ、Finder などのアプリにもドロップできます。ペアの RAW ファイルや .xmp などのサイドカーも一緒に渡されます。
 Date → Camera → Format|日期 → 相机 → 格式|日期 → 相機 → 格式|日付 → カメラ → 形式
 Camera → Lens → Focal length|相机 → 镜头 → 焦距|相機 → 鏡頭 → 焦距|カメラ → レンズ → 焦点距離
 Aperture → Date → Format → Camera|光圈 → 日期 → 格式 → 相机|光圈 → 日期 → 格式 → 相機|絞り → 日付 → 形式 → カメラ

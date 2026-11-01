@@ -27,4 +27,6 @@ export const linux: PlatformProfile = {
   // An exFAT root under /media as Linux reports it (illustrative: no Linux reading of A006 yet); the device number changes per mount.
   recordsDrive: { dev: 2065n, ino: 1n, identity: '1' },
   namesIgnoreCase: false,
+  // File managers take POSIX paths with forward slashes.
+  dropPath: /^\/(?!.*\\)/,
 };
