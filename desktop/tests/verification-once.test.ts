@@ -275,10 +275,12 @@ test('on exFAT an organization reads the original and the copy again before sett
 
 // Without hard links the copy is streamed out of the stage into a new file, which is read back once. A link that is
 // not exactly the stage plus one name (another name appeared) is read back too, and again before stashing: removing
-// the stage's name moved the shared inode's change time.
+// the stage's name moved the shared inode's change time. Change times come from a coarse clock (a 15.6 ms tick on
+// Windows, a jiffy on Linux), so the other name waits out a tick: removing the stage in the same tick moves nothing,
+// the stat is unchanged and its proof rightly holds.
 for(const [name,expected,link] of [
  ['links are unsupported',1,async()=>{throw Object.assign(new Error('links unsupported'),{code:'ENOTSUP'});}],
- ['another name appears beside the link',2,async(from:string,to:string,original:(a:string,b:string)=>Promise<void>)=>{await original(from,to);await original(to,`${to}.other`);}],
+ ['another name appears beside the link',2,async(from:string,to:string,original:(a:string,b:string)=>Promise<void>)=>{await original(from,to);await original(to,`${to}.other`);await new Promise(resolve=>setTimeout(resolve,50));}],
 ] as const)test(`an organization copy reads its published copy back when ${name}`,async t=>{
  const root=await folder(t,'verify-once-fallback-'),original=path.join(root,'incoming','A.JPG'),data=Buffer.alloc(SIZE,5);
  await photo(original,data);
