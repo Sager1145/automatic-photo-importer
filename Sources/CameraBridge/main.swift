@@ -29,7 +29,12 @@ struct NativeCameraBridge {
 
     static func emit(_ value: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else {
+            // Never silent: the app would wait for this reply until its timeout.
+            FileHandle.standardError.write(Data("Native camera bridge: a reply could not be written as JSON.\n".utf8))
+            if let id = value["id"] as? String { line(Data("{\"id\":\"\(escaped(id))\",\"error\":\"The camera helper could not send its reply.\"}".utf8)) }
+            return
+        }
         line(data)
     }
 
@@ -48,7 +53,10 @@ struct NativeCameraBridge {
     }
 
     static func milliseconds(_ date: Date?) -> Int64? {
-        guard let date, date.timeIntervalSince1970 > 0 else { return nil }
+        // Some cameras report a missing date as a far-future or invalid value (an X100VI does); converting that
+        // trapped the helper. Only dates a camera can have taken count: 1990 to 2100. The app reads the capture date
+        // from the file itself.
+        guard let date, date.timeIntervalSince1970.isFinite, date.timeIntervalSince1970 > 631_152_000, date.timeIntervalSince1970 < 4_102_444_800 else { return nil }
         return Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
@@ -59,18 +67,39 @@ struct NativeCameraBridge {
             for try await text in FileHandle.standardInput.bytes.lines {
                 guard let data = text.data(using: .utf8),
                       let command = try? JSONDecoder().decode(Command.self, from: data) else { continue }
+                // Each command runs on its own: one waiting on a camera never holds up "list", "close" or a read of another.
+                Task { @MainActor in await handle(command, discovery) }
+            }
+        } catch {
+            FileHandle.standardError.write(Data(("Native camera bridge: \(error.localizedDescription)\n").utf8))
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    fileprivate static func handle(_ command: Command, _ discovery: DeviceDiscovery) async {
                 do {
                     switch command.command {
                     case "list":
                         let cameras = discovery.sources.map { source -> [String: Any] in
                             var camera: [String: Any] = ["name": source.name, "cameraID": source.id]
-                            if !source.storages.isEmpty { camera["storages"] = source.storages.map { ["id": $0.id, "name": $0.name] } }
+                            if !source.storages.isEmpty {
+                                camera["storages"] = source.storages.map { storage -> [String: Any] in
+                                    var entry: [String: Any] = ["id": storage.id, "name": storage.name]
+                                    if let total = storage.total { entry["total"] = total }
+                                    if let free = storage.free { entry["free"] = free }
+                                    return entry
+                                }
+                            }
                             return camera
                         }
                         emit(["id": command.id, "result": cameras])
                     case "files":
                         guard let cameraID = command.cameraID else { throw CameraAdapterError.unavailable }
-                        let files = try await discovery.files(id: cameraID, storageID: command.storageID)
+                        // A progress line as the camera's catalog grows restarts the app's timeout, so a large card is not cut off.
+                        var reported = 0
+                        let files = try await discovery.files(id: cameraID, storageID: command.storageID) { count in
+                            if count >= reported + 100 || (reported == 0 && count > 0) { reported = count; emit(["id": command.id, "progress": ["completed": count, "total": 0]]) }
+                        }
                         emit(["id": command.id, "result": files.map { file -> [String: Any] in
                             var entry: [String: Any] = ["storage": file.storage, "folder": file.folder, "name": file.name, "size": file.size, "objectID": file.objectID]
                             if let modified = milliseconds(file.modified) { entry["modified"] = modified }
@@ -101,11 +130,6 @@ struct NativeCameraBridge {
                 } catch {
                     emit(["id": command.id, "error": error.localizedDescription])
                 }
-            }
-        } catch {
-            FileHandle.standardError.write(Data(("Native camera bridge: \(error.localizedDescription)\n").utf8))
-        }
-        NSApplication.shared.terminate(nil)
     }
 
     /// The writable descriptor is inherited as fd 3. No source or destination
