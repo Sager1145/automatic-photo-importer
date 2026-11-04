@@ -63,3 +63,13 @@ rl.on('line',line=>{const c=JSON.parse(line);
     assert.deepEqual((await readdir(tmpdir())).filter(name=>!before.has(name)&&/photo-importer/i.test(name)),[]);
   }finally{await closeCameraBridge();if(prior===undefined)delete process.env.IMPORTER_NATIVE_BRIDGE;else process.env.IMPORTER_NATIVE_BRIDGE=prior;await rm(scratch,{recursive:true,force:true});}
 });
+
+test('a camera read only in part says so, and a camera on USB that the system never offered is no source', async () => {
+  const { cameraSourcesFrom, unansweredCameras } = await import('../platform/camera-bridge');
+  const listed=[{cameraID:'zf',name:'Z f',problem:'cardsUnknown'},{cameraID:'x',name:'X100VI',storages:[{id:'10000001',name:'External Memory',total:128,free:120}]},{cameraID:'usb:2228224',name:'NIKON DSC Z f',unanswered:true}];
+  const sources=cameraSourcesFrom(listed);
+  assert.deepEqual(sources.map(source=>[source.name,source.cameraProblem??'',source.total??'']),[['Z f','cardsUnknown',''],['X100VI','',128]]);
+  assert.deepEqual(unansweredCameras(listed),['NIKON DSC Z f']);
+  // Anything else in "problem" is ignored.
+  assert.equal(cameraSourcesFrom([{cameraID:'a',name:'A',problem:'other'}])[0]!.cameraProblem,undefined);
+});

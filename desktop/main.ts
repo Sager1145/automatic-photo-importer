@@ -61,7 +61,7 @@ import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-rec
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
-import {prepareCamera,closeCameraBridge} from './platform/camera-bridge';
+import {prepareCamera,closeCameraBridge,lastUnansweredCameras} from './platform/camera-bridge';
 import {isListedPath,listedFile} from './core/source-fs';
 import {startScan,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
@@ -387,7 +387,7 @@ function driveFormatsOf(volumes:MountedVolume[]):NonNullable<AppState['driveForm
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
-  const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
+  const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});{const unanswered=qaFixtureRoot?[]:lastUnansweredCameras();if(unanswered.join('\n')!==(state.unansweredCameras??[]).join('\n')){state.unansweredCameras=unanswered.length?unanswered:undefined;if(unanswered.length)log('normal','camera','not-offered',{cameras:unanswered});}}releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
   state.destinationStatus=destinations;state.driveFormats=driveFormatsOf(volumes);await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);

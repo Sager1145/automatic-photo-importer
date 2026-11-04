@@ -30,6 +30,18 @@ export function layoutFolders(layout: MediaLayout, video: boolean, format: strin
 /** Spellings of one format that share a format folder. */
 const formatNames: Record<string, string> = {jpg: 'JPEG', jpe: 'JPEG', heic: 'HEIF', hif: 'HEIF', tif: 'TIFF', mpg: 'MPEG'};
 
+/** Spellings that name one file format, for showing formats (the Library browser): a superset of the folder names
+ * above, which also decide where imports go and so stay as they are. Extensions are compared in lowercase. */
+const sameFormat: Record<string, string> = {...formatNames, jpeg: 'JPEG', jfif: 'JPEG', jif: 'JPEG', heif: 'HEIF', tiff: 'TIFF', mpeg: 'MPEG', mts: 'MTS', m2ts: 'MTS'};
+
+/** How a format is shown: its extension in capitals, with `mergeSpellings` its format's one name (JPG, JPEG and JPE are
+ * JPEG), and with `rawAsOne` every camera RAW format (ARW, NEF, RAF, CR3, DNG…) as RAW. */
+export function formatGroup(extension: string, options: {mergeSpellings?: boolean; rawAsOne?: boolean} = {}): string {
+  const lower = extension.toLowerCase();
+  if (options.rawAsOne && extensions[lower] === 'RAW') return 'RAW';
+  return (options.mergeSpellings !== false && sameFormat[lower]) || lower.toUpperCase();
+}
+
 /** The format folder of a media file: its uppercase extension, spelling variants merged. */
 export function formatFolder(file: string): string {
   const name = file.slice(Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\')) + 1);

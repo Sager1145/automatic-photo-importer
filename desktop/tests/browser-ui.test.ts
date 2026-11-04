@@ -15,13 +15,15 @@ const library:CatalogLibrary={libraryId:'l',volumeId:'v',trustedVolumeId:true,na
 test('editor supplies drag insertion plus labeled keyboard add, move, remove and independent date/format controls',()=>{
  const c=defaultConfiguration();const html=render(createElement(HierarchyEditor,{configuration:c,onChange:()=>{}}));
  for(const k of ['date','name','format','camera','lens','focal','aperture','shutter','iso'])assert.match(html,new RegExp(`data-block-kind="${k}"`));
- assert.match(html,/draggable="true"/);assert.match(html,/Move earlier/);assert.match(html,/Move later/);assert.match(html,/Remove block/);assert.match(html,/Date granularity/);assert.match(html,/Date display/);assert.match(html,/Files always come last/);
+ assert.match(html,/draggable="true"/);assert.match(html,/Move earlier/);assert.match(html,/Move later/);assert.match(html,/Remove block/);assert.match(html,/Date levels/);assert.match(html,/Shown as a tree/);for(const level of ['Year','Month','Day'])assert.match(html,new RegExp(`>${level}</label>`));assert.match(html,/Files always come last/);
+ // Year, Month and Day under the Date level, all on for a new view; the toggles are buttons with a pressed state.
+ assert.match(html,/data-testid="date-level-toggles"><button type="button" aria-pressed="true">Year<\/button><button type="button" aria-pressed="true">Month<\/button><button type="button" aria-pressed="true">Day<\/button>/);
  assert.match(render(createElement(HierarchyEditor,{configuration:{...c,blocks:[createBlock('format')]},onChange:()=>{}})),/Media kind/);
 });
 test('one view panel holds the levels, fields, presets and a single-row save form',()=>{
  const c=defaultConfiguration();const html=render(createElement(HierarchyEditor,{configuration:{...c,presets:[{id:'preset-mine',name:'Mine',blocks:c.blocks}]},onChange:()=>{}}));
  assert.equal(html.match(/<details/g)?.length,1,'presets and the hierarchy share one disclosure');
- for(const part of ['data-testid="hierarchy-clear"','data-testid="browser-presets"','builtin-aperture-date-format-camera','data-preset-id="preset-mine"','Rename: Mine','Save current view','Restore default view','Drag a field or preset onto the levels'])assert.ok(html.includes(part),part);
+ for(const part of ['data-testid="hierarchy-clear"','data-testid="browser-presets"','builtin-aperture-date-format-camera','data-preset-id="preset-mine"','Rename: Mine','Save current view','Restore default view','Drag a field by its grip onto the levels','browser-grip','class="browser-field-add" aria-label="Add block: Date"','data-testid="hierarchy-editor-toggle"','Edit levels'])assert.ok(html.includes(part),part);
  assert.ok(!html.includes('data-preset-id="builtin-aperture"'),'single fields are the field row, not presets');
  assert.match(html,/<form class="browser-preset-save">[^]*Preset name[^]*<input[^]*Save current view[^]*Restore default view[^]*<\/form>/,'name, save and restore on one form row');
 });
@@ -47,7 +49,7 @@ test('date display keeps grouping keys intact and preview paths remain relative 
  const html=render(createElement(PreviewPanel,{row,online:false,api,onOrganization:()=>{},onReveal:()=>{},onClose:()=>{}}));assert.match(html,/Unsorted\/a.nef/);assert.match(html,/2026\/a.nef/);assert.match(html,/Open organization tool/);assert.doesNotMatch(html,/Organize now|Apply/);
 });
 test('all browser labels translate in the four supported languages',()=>{
- for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['Library browser','Add block','Real folders','Categories','Save current view','Date granularity','Open organization tool',...Object.values(blockLabels).filter(label=>label!=='ISO')])assert.notEqual(t(label),label,`${language}: ${label}`);}
+ for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['Library browser','Add block','Real folders','Categories','Save current view','Date levels','Edit levels','Merge spellings of one format','Show every RAW format as RAW','Open organization tool',...Object.values(blockLabels).filter(label=>label!=='ISO')])assert.notEqual(t(label),label,`${language}: ${label}`);}
 });
 
 test('translated browser controls preserve dynamic numbers and user values',()=>{

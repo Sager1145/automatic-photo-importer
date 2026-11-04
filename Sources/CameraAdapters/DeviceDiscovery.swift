@@ -1,5 +1,6 @@
 import Foundation
 import ImageCaptureCore
+import IOKit
 
 /// A PTP/MTP camera exposed by ImageCaptureCore. Mounted mass-storage cards are
 /// discovered by the desktop app's filesystem adapter, never here.
@@ -9,6 +10,19 @@ public struct CameraSource: Identifiable, Hashable, Sendable {
     /// The camera's storages (card slots) with their capacity: several when its files are told apart per card, one
     /// when it has one card (or its cards cannot be told apart: then their capacity is summed); empty until known.
     public let storages: [CameraStorage]
+    /// Set when the camera could not be reached in full; the app says what to do.
+    public var problem: CameraProblem? = nil
+}
+
+/// Why a camera is listed without everything: its cards and capacity could not be read (it can still be imported as one
+/// source), or its session would not open.
+public enum CameraProblem: String, Sendable { case cardsUnknown, notAnswering }
+
+/// A USB camera the system has on its bus that ImageCaptureCore has not offered for a while: it cannot be read until
+/// it is turned off and on, or reconnected.
+public struct UnansweredCamera: Sendable {
+    public let name: String
+    public let location: Int
 }
 
 /// One storage of a camera (a card slot). `id` names the same slot on every connection: its PTP storage id in hex
@@ -69,6 +83,12 @@ public final class DeviceDiscovery: NSObject {
     private var probes: [String: Task<Void, Never>] = [:]
     /// Cameras an import is reading: their session stays open from "files" until "close".
     private var held: Set<String> = []
+    /// What went wrong reaching a camera, for the app to say: its cards could not be read, or its session would not open.
+    private var problems: [String: CameraProblem] = [:]
+    /// How often a camera whose cards were not read in full is probed again, and when the last one began.
+    private var reprobes: [String: Int] = [:]
+    /// USB still-image devices first seen at (by USB location id), to tell a camera ImageCaptureCore never offers.
+    private var usbSeen: [Int: Date] = [:]
 
     public override init() {
         super.init()
@@ -95,7 +115,7 @@ public final class DeviceDiscovery: NSObject {
     }
 
     public var sources: [CameraSource] {
-        cameras.filter { isPTP($0.value) }.map { CameraSource(id: $0.key, name: $0.value.name ?? "USB camera", storages: storages[$0.key] ?? []) }
+        cameras.filter { isPTP($0.value) }.map { CameraSource(id: $0.key, name: $0.value.name ?? "USB camera", storages: storages[$0.key] ?? [], problem: probes[$0.key] == nil ? problems[$0.key] : nil) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -117,7 +137,9 @@ public final class DeviceDiscovery: NSObject {
             try await session.open()
             await session.learnStorages()
             self?.sessions[id] = session
-            self?.storages[id] = session.storages ?? CameraStorages.storages(in: camera.contents ?? [])
+            // Card details learned before (a probe at connect) stay when this session could not read them again.
+            if let learned = session.storages { self?.storages[id] = learned; self?.problems[id] = session.storagesComplete ? nil : .cardsUnknown }
+            else if self?.storages[id]?.isEmpty ?? true { self?.storages[id] = CameraStorages.storages(in: camera.contents ?? []); self?.problems[id] = .cardsUnknown }
         }
         opening[id] = (session, task)
         defer { if opening[id]?.session === session { opening[id] = nil } }
@@ -129,12 +151,36 @@ public final class DeviceDiscovery: NSObject {
     private func probe(id: String) {
         guard probes[id] == nil else { return }
         probes[id] = Task { [weak self] in
-            let opened = try? await self?.session(id)
+            var opened: CameraSession?
+            do { opened = try await self?.session(id) } catch { trace("probe \(id): \(error)"); self?.problems[id] = .notAnswering }
             guard let self else { return }
             self.probes[id] = nil
+            // A camera just connected or woken may need a moment for its cards: ask again a little later (three times at most).
+            if !(opened?.storagesComplete ?? false), self.cameras[id] != nil, (self.reprobes[id] ?? 0) < 3, !self.held.contains(id) {
+                self.reprobes[id, default: 0] += 1
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(8))
+                    guard let self, self.cameras[id] != nil, !self.held.contains(id), self.probes[id] == nil, self.sessions[id] == nil else { return }
+                    self.probe(id: id)
+                }
+            }
             // Its storages are known now; unless an import began meanwhile, the camera is let go again.
             if let opened, !self.held.contains(id), self.sessions[id] === opened { self.end(id) }
         }
+    }
+
+    /// USB still-image devices (interface class 6, PTP/MTP) on the bus for 20 s or more that ImageCaptureCore has not offered.
+    public func unanswered(now: Date = Date()) -> [UnansweredCamera] {
+        let offered = Set(cameras.values.map { Int($0.usbLocationID) })
+        let present = USBStillImage.devices()
+        usbSeen = usbSeen.filter { seen in present.contains { $0.location == seen.key } }
+        var result: [UnansweredCamera] = []
+        for device in present where !offered.contains(device.location) {
+            let since = usbSeen[device.location] ?? now
+            usbSeen[device.location] = since
+            if now.timeIntervalSince(since) >= 20 { result.append(UnansweredCamera(name: device.name, location: device.location)) }
+        }
+        return result
     }
 
     /// The app's imports of the camera ended: its session closes (a later "files" opens a new one).
@@ -181,6 +227,8 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
         guard let camera = device as? ICCameraDevice, isPTP(camera) else { return }
         let id = camera.uuidString ?? String(describing: ObjectIdentifier(camera))
         cameras[id] = camera
+        problems[id] = nil
+        reprobes[id] = 0
         probe(id: id)
     }
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
@@ -192,6 +240,8 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
             sessions[id] = nil
             held.remove(id)
             storages[id] = nil
+            problems[id] = nil
+            reprobes[id] = nil
             cameras[id] = nil
         }
     }
@@ -251,10 +301,31 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
     /// Learns the camera's storages (GetStorageIDs, GetStorageInfo: names, capacity, free space) and, when it has
     /// several, which card each catalog folder is on (see StorageMap). Read-only PTP requests; a camera that does
     /// not answer them is listed as before.
+    /// Whether the camera's cards were read in full: every one with its capacity, and with several, which files are on which.
+    var storagesComplete: Bool {
+        guard let ptpStorages, !ptpStorages.isEmpty, ptpStorages.allSatisfy({ $0.total != nil }) else { return false }
+        return ptpStorages.count == 1 || folderStorage != nil
+    }
+
+    /// Learns the cards, asking again while a camera that has just been connected or woken is still mounting them: it
+    /// can answer with no storage, a storage of no capacity, or refuse (Store Not Available) for a few seconds.
     func learnStorages() async {
-        guard camera.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue),
-              let idData = await ptp(PTP.getStorageIDs, []), let ids = PTP.array(idData)?.filter(PTP.present), !ids.isEmpty else {
-            trace("storages \(camera.name ?? "?"): not available over PTP")
+        guard camera.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue) else {
+            trace("storages \(camera.name ?? "?"): the camera takes no PTP requests")
+            return
+        }
+        for (attempt, wait) in [0, 1, 2, 3, 4].enumerated() {
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard failure == nil, camera.hasOpenSession else { return }
+            await readStorages()
+            if storagesComplete { return }
+            trace("storages \(camera.name ?? "?"): incomplete on attempt \(attempt + 1)")
+        }
+    }
+
+    private func readStorages() async {
+        guard let idData = await ptp(PTP.getStorageIDs, []), let ids = PTP.array(idData)?.filter(PTP.present), !ids.isEmpty else {
+            trace("storages \(camera.name ?? "?"): no storage ids")
             return
         }
         var found: [PTPStorage] = []
@@ -263,6 +334,8 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
             let capacity = info.map { Int64(clamping: $0.maxCapacity) }, free = info.map { Int64(clamping: $0.freeSpace) }
             found.append(PTPStorage(id: id, name: PTPStorage.name(label: info?.label ?? "", description: info?.description ?? "", index: index), total: capacity.flatMap { $0 > 0 ? $0 : nil }, free: capacity.flatMap { $0 > 0 ? free : nil }))
         }
+        // A read that came back with less than an earlier one (a card not mounted yet) does not replace it.
+        if let known = ptpStorages, known.count > found.count || known.filter({ $0.total != nil }).count > found.filter({ $0.total != nil }).count { return }
         ptpStorages = found
         trace("storages \(camera.name ?? "?"): \(found.map { "\($0.key) \($0.name) \($0.total ?? -1)/\($0.free ?? -1)" })")
         guard found.count > 1 else { return }
@@ -590,5 +663,31 @@ enum CameraStorages {
         var folder = item.parentFolder
         while let parent = folder?.parentFolder { folder = parent }
         return folder
+    }
+}
+
+/// USB devices with a still-image interface (class 6: PTP/MTP cameras), read from the I/O Registry.
+enum USBStillImage {
+    struct Device { let location: Int; let name: String }
+    static func devices() -> [Device] {
+        guard let matching = IOServiceMatching("IOUSBHostInterface") as NSMutableDictionary? else { return [] }
+        matching["IOPropertyMatch"] = ["bInterfaceClass": 6]
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return [] }
+        defer { IOObjectRelease(iterator) }
+        var result: [Device] = []
+        while true {
+            let interface = IOIteratorNext(iterator)
+            if interface == 0 { break }
+            defer { IOObjectRelease(interface) }
+            var device: io_registry_entry_t = 0
+            guard IORegistryEntryGetParentEntry(interface, kIOServicePlane, &device) == KERN_SUCCESS else { continue }
+            defer { IOObjectRelease(device) }
+            func property(_ key: String) -> Any? { IORegistryEntryCreateCFProperty(device, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() }
+            guard let location = (property("locationID") as? NSNumber)?.intValue else { continue }
+            let name = (property("USB Product Name") as? String) ?? (property("kUSBProductString") as? String) ?? "USB camera"
+            if !result.contains(where: { $0.location == location }) { result.append(Device(location: location, name: name)) }
+        }
+        return result
     }
 }

@@ -82,6 +82,7 @@ struct NativeCameraBridge {
                     case "list":
                         let cameras = discovery.sources.map { source -> [String: Any] in
                             var camera: [String: Any] = ["name": source.name, "cameraID": source.id]
+                            if let problem = source.problem { camera["problem"] = problem.rawValue }
                             if !source.storages.isEmpty {
                                 camera["storages"] = source.storages.map { storage -> [String: Any] in
                                     var entry: [String: Any] = ["id": storage.id, "name": storage.name]
@@ -92,7 +93,9 @@ struct NativeCameraBridge {
                             }
                             return camera
                         }
-                        emit(["id": command.id, "result": cameras])
+                        // Cameras on USB that the system has not offered: listed apart, never as a source to import.
+                        let unanswered = discovery.unanswered().map { ["name": $0.name, "cameraID": "usb:\($0.location)", "unanswered": true] as [String: Any] }
+                        emit(["id": command.id, "result": cameras + unanswered])
                     case "files":
                         guard let cameraID = command.cameraID else { throw CameraAdapterError.unavailable }
                         // A progress line as the camera's catalog grows restarts the app's timeout, so a large card is not cut off.

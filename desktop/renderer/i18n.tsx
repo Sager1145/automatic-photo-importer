@@ -199,6 +199,10 @@ Recheck|重新检查|重新檢查|再確認
 Import|导入|匯入|インポート
 Verified|已校验|已驗證|検証済み
 Capacity unavailable over USB|USB 连接不提供容量信息|USB 連接不提供容量資訊|USB経由では容量を取得できません
+{name} is connected but not answering.|{name} 已连接，但没有响应。|{name} 已連接，但沒有回應。|{name} は接続されていますが応答しません。
+Turn the camera off and on, or unplug it and plug it in again. Quit Photos, Image Capture or another app that may be using it.|请将相机关机再开机，或拔下后重新连接。如果“照片”“图像捕捉”或其他应用可能正在使用它，请先退出。|請將相機關機再開機，或拔下後重新連接。如果「照片」、「影像擷取」或其他 App 可能正在使用它，請先結束。|カメラの電源を入れ直すか、ケーブルを抜いて差し直してください。「写真」や「イメージキャプチャ」など、カメラを使っている可能性のあるアプリは終了してください。
+This camera's cards and capacity could not be read, so it imports as one source. Turn it off and on to read them again.|无法读取这台相机的存储卡和容量，因此它会作为一个来源导入。将相机关机再开机即可重新读取。|無法讀取這台相機的記憶卡和容量，因此它會作為一個來源匯入。將相機關機再開機即可重新讀取。|このカメラのカードと容量を読み取れなかったため、1 つのソースとして読み込みます。電源を入れ直すと読み取り直します。
+The camera did not open its session. Turn it off and on, or reconnect it.|相机没有打开连接会话。请将相机关机再开机，或重新连接。|相機沒有開啟連線工作階段。請將相機關機再開機，或重新連接。|カメラがセッションを開きませんでした。電源を入れ直すか、接続し直してください。
 Capacity unavailable|容量信息不可用|容量資訊無法取得|容量を取得できません
 Storage used|已用空间|已用空間|使用済み容量
 Drive activity|硬盘使用率|硬碟使用率|ドライブの使用率

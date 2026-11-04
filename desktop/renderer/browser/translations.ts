@@ -25,8 +25,9 @@ Custom view|自定义视图|自訂檢視|カスタム表示
 Preset: {name}|预设：{name}|預設：{name}|プリセット：{name}
 Options for level {index}: {field}|第 {index} 层选项：{field}|第 {index} 層選項：{field}|階層 {index} のオプション：{field}
 Click to set its options; drag to move it.|点击设置选项；拖动可调整位置。|點按以設定選項；拖移可調整位置。|クリックでオプションを設定、ドラッグで移動します。
-Drag a field or preset onto the levels to insert it there. Click a field to add it last; click a preset to use it. Files always come last.|将字段或预设拖到层级中即可插入到该位置。点击字段会添加到最后；点击预设会直接使用。文件始终在最后。|將欄位或預設拖到層級中即可插入到該位置。點按欄位會加到最後；點按預設會直接使用。檔案一律在最後。|項目やプリセットを階層にドラッグすると、その位置に挿入されます。項目をクリックすると最後に追加、プリセットをクリックするとその表示を使います。ファイルは常に最後です。
-Click to add as the last level; drag to insert.|点击添加为最后一层；拖动可插入。|點按以加為最後一層；拖移可插入。|クリックで最後の階層に追加、ドラッグで挿入します。
+Drag a field by its grip onto the levels to insert it there, or click its + to add it last. Click a preset to use it. Files always come last.|按住字段的拖动条拖到层级中即可插入到该位置，或点击它的 + 添加到最后。点击预设会直接使用。文件始终在最后。|按住欄位的拖移把手拖到層級中即可插入到該位置，或點按它的 + 加到最後。點按預設會直接使用。檔案一律在最後。|項目のつまみをドラッグして階層に重ねるとその位置に挿入、＋をクリックすると最後に追加します。プリセットをクリックするとその表示を使います。ファイルは常に最後です。
+Drag onto the levels to insert it there.|拖到层级中即可插入到该位置。|拖到層級中即可插入到該位置。|階層にドラッグするとその位置に挿入します。
+Add as the last level|添加为最后一层|加為最後一層|最後の階層に追加
 Click to use this view; drag to insert its levels.|点击使用此视图；拖动可插入其层级。|點按以使用此檢視；拖移可插入其層級。|クリックでこの表示を使い、ドラッグでその階層を挿入します。
 Name this view to reuse it|为此视图命名以便重复使用|為此檢視命名以便重複使用|この表示に名前を付けて再利用
 Browse a folder…|浏览文件夹…|瀏覽資料夾…|フォルダーを参照…
@@ -55,10 +56,21 @@ Hierarchy path|层级路径|階層路徑|階層パス
 Move earlier|前移|往前移|前に移動
 Move later|后移|往後移|後ろに移動
 Remove block|移除分类块|移除分類區塊|ブロックを削除
-Date granularity|日期粒度|日期粒度|日付の単位
+Date levels|日期层级|日期層級|日付の階層
+At least one date level stays on.|至少要保留一个日期层级。|至少要保留一個日期層級。|日付の階層は少なくとも 1 つオンのままです。
+Shown as a tree: click the arrow beside a year or month to open it.|以树状显示：点击年份或月份旁的箭头即可展开。|以樹狀顯示：點按年份或月份旁的箭頭即可展開。|ツリーで表示します。年や月の横の矢印をクリックすると開きます。
+One level: a flat list.|只有一层：显示为平铺列表。|只有一層：顯示為平鋪列表。|1 階層のみ：一覧で表示します。
+Collapse {name}|收起 {name}|收合 {name}|{name} を閉じる
+Expand {name}|展开 {name}|展開 {name}|{name} を開く
+Edit levels|展开编辑层级|展開編輯層級|階層を編集
+Hide levels|收起|收合|閉じる
+Merge spellings of one format|合并同一格式的不同扩展名|合併同一格式的不同副檔名|同じ形式の異なる拡張子をまとめる
+JPG, JPEG and JPE show as JPEG; TIF and TIFF as TIFF; HEIC, HEIF and HIF as HEIF. Upper and lower case are always the same.|JPG、JPEG 和 JPE 显示为 JPEG；TIF 和 TIFF 显示为 TIFF；HEIC、HEIF 和 HIF 显示为 HEIF。大小写始终视为相同。|JPG、JPEG 和 JPE 顯示為 JPEG；TIF 和 TIFF 顯示為 TIFF；HEIC、HEIF 和 HIF 顯示為 HEIF。大小寫一律視為相同。|JPG、JPEG、JPE は JPEG、TIF と TIFF は TIFF、HEIC、HEIF、HIF は HEIF として表示します。大文字と小文字は常に同じものとして扱います。
+Show every RAW format as RAW|将所有 RAW 格式统一显示为 RAW|將所有 RAW 格式統一顯示為 RAW|すべての RAW 形式を RAW として表示
+ARW, NEF, RAF, CR3, DNG and other camera RAW files show as one RAW row.|ARW、NEF、RAF、CR3、DNG 等各相机的 RAW 文件合并为一行 RAW。|ARW、NEF、RAF、CR3、DNG 等各相機的 RAW 檔案合併為一列 RAW。|ARW、NEF、RAF、CR3、DNG などのカメラ RAW ファイルを 1 行の RAW にまとめます。
+Month|月|月|月
 Date display|日期显示|日期顯示|日付の表示
 Year|年|年|年
-Month (with year)|月（含年份）|月（含年份）|月（年を含む）
 Day|日|日|日
 Date|日期|日期|日付
 Name|名称|名稱|名前

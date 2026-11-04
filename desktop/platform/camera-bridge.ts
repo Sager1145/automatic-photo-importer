@@ -7,11 +7,11 @@ import type { Source } from '../shared';
 import { registerListedSource, type ListedFile } from '../core/source-fs';
 import { windowsCameraBridgeArgs } from './windows-camera';
 
-interface Camera {name:string;cameraID:string;storages?:unknown;}
+interface Camera {name:string;cameraID:string;storages?:unknown;problem?:unknown;unanswered?:unknown;}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;/** Restarts the timeout: a request that reports progress is timed from its last report, not its start. */alive():void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
-let stdout:string[]=[];let stdoutLength=0;let stderr='';let opened=0;let cached:Source[]=[];
+let stdout:string[]=[];let stdoutLength=0;let stderr='';let opened=0;let cached:Source[]=[];let unanswered:string[]=[];
 const pending=new Map<string,Pending>();
 /** The longest line the helper may send: a 16 MB read is 22 MB of base64. */
 const MAX_LINE=96*1024*1024;
@@ -110,13 +110,18 @@ export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'fr
  * storage's id (the camera's own id for that slot, never its position), so it is the same source on every
  * connection. A camera with one storage stays one source under its own name and id, as it always was. */
 export function cameraSourcesFrom(result:unknown[]):Source[] {
-  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string').flatMap(camera=>{
-    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const};
+  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string'&&!(camera as Camera).unanswered).flatMap(camera=>{
+    const problem:Pick<Source,'cameraProblem'>=camera.problem==='cardsUnknown'||camera.problem==='notAnswering'?{cameraProblem:camera.problem}:{};
+    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...problem};
     const storages=cameraStorages(camera.storages),ids=storages.map(storage=>storage.id);
     if(storages.length<2||ids.some(id=>id===undefined)||new Set(ids).size!==ids.length)return [{...base,...cameraCapacity(camera.storages)}];
     return storages.map(storage=>({id:`${base.id}|${storage.id}`,name:`${camera.name} · ${storage.name}`,path:`${base.path}/${encodeURIComponent(storage.id!)}`,transport:'camera' as const,total:storage.total,free:storage.free,storage:{id:storage.id!,name:storage.name,camera:camera.name}}));
   });
 }
+/** The helper's cameras on USB that the system has not offered to apps (macOS: a still-image USB device ImageCaptureCore has not listed for 20 s). */
+export function unansweredCameras(result:unknown[]):string[] {return result.filter((camera):camera is Camera=>!!(camera as Camera)?.unanswered&&typeof (camera as Camera).name==='string').map(camera=>camera.name);}
+/** The cameras the last list found on USB but not offered, by name. */
+export const lastUnansweredCameras=():string[]=>unanswered;
 export async function cameraSources():Promise<Source[]> {
   // While a camera is being imported its helper serves that import; the last list stands.
   if(opened)return cached;
@@ -124,7 +129,7 @@ export async function cameraSources():Promise<Source[]> {
   // The first Windows request also compiles the bridge's reader, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=cameraSourcesFrom(result);
+  cached=cameraSourcesFrom(result);unanswered=unansweredCameras(result);
   return cached;
 }
 /** One file as the helper lists it: its storage (card slot), folders, name, size, dates (ms) and the helper's own id for it. */

@@ -1610,15 +1610,24 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-hidden-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .browser-status{display:flex;align-items:center;justify-content:space-between;gap:.5rem 1rem}.browser-status-text{min-height:1.25rem;color:var(--label-secondary);font-size:var(--text-caption);display:flex;align-items:center;gap:.35rem .9rem;flex-wrap:wrap}.browser-status-text>span{display:inline-flex;align-items:center;gap:.3rem}
 .browser-status .browser-index-actions{flex:none;align-items:center;flex-wrap:nowrap}.browser-status .browser-compact-select{height:var(--control-height-sm);min-height:var(--control-height-sm);font-size:var(--text-footnote);width:auto;max-width:11rem}.browser-page .button-small{min-height:var(--control-height-sm);padding:0 .8rem;font-size:var(--text-footnote)}
-.browser-editor>summary{cursor:pointer;display:flex;align-items:baseline;gap:.8rem;font-weight:600;padding:.3rem 0}
+.browser-editor>summary{cursor:pointer;display:flex;align-items:center;gap:.8rem;font-weight:600;padding:.3rem 0;list-style:none}
+.browser-editor>summary::-webkit-details-marker{display:none}
+/* The hierarchy's own expand control: a pill at the end of its row, its arrow turning when open. */
+.browser-editor-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:.35rem;flex:none;min-height:var(--control-height-sm);padding:0 .8rem;border-radius:var(--radius-capsule);background:var(--fill-3);border:1px solid var(--separator-strong);font-size:var(--text-footnote);font-weight:600;color:var(--label)}
+.browser-editor>summary:hover .browser-editor-toggle{background:var(--fill-2)}
+.browser-editor-toggle svg{transition:rotate var(--quick) var(--ease-out)}.browser-editor-toggle:not(.is-open) svg{rotate:-90deg}
+.browser-editor-toggle.is-open{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent)}
 .browser-editor-path{font-weight:500;color:var(--label-secondary);font-size:var(--text-footnote)}
 .browser-editor>summary small{font-size:var(--text-caption);color:var(--label-secondary);font-weight:400}
-.browser-palette button{min-height:var(--control-height-sm);padding:0 .85rem;background:var(--fill-3);border:1px solid transparent;border-radius:var(--radius-capsule);font-size:var(--text-footnote);font-weight:550}
-.browser-palette button:hover{background:var(--fill-2)}
 .browser-horizontal{overflow-x:auto;overflow-y:hidden;min-width:0;scroll-behavior:auto;overscroll-behavior-x:contain}
 .browser-horizontal-track{min-width:100%;display:flex}.browser-columns .browser-column-placeholder{height:100%;border-right:1px solid var(--separator)}
 .browser-block-path{padding:.2rem 0 .6rem}
-.browser-path-slot{height:48px;padding:2px 8px 2px 12px;border-left:2px dotted var(--separator-strong);display:flex;align-items:center}
+.browser-path-slot{min-height:48px;padding:2px 8px 2px 12px;border-left:2px dotted var(--separator-strong);display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:3px}
+/* Year, Month and Day under a date level: on is filled; the last one on cannot be turned off. */
+.browser-date-toggles{display:flex;gap:3px}
+.browser-path-slot .browser-date-toggles button{flex:1;width:auto;min-height:22px;padding:0 .3rem;border-radius:var(--radius-capsule);background:var(--fill-4);border:1px solid var(--separator-strong);font-size:var(--text-caption);font-weight:600;text-align:center;justify-content:center;cursor:pointer;color:var(--label-secondary)}
+.browser-path-slot .browser-date-toggles button[aria-pressed=true]{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--on-accent)}
+.browser-path-slot .browser-date-toggles button:disabled{cursor:not-allowed;opacity:.85}
 .browser-path-slot:has(:hover){border-left-color:var(--accent)}
 .browser-path-slot button{width:100%;min-height:var(--control-height);text-align:left;padding:.5rem .6rem;border-radius:var(--radius-sm);background:var(--fill-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-footnote)}
 .browser-path-slot button[aria-pressed=true]{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-border)}
@@ -1689,7 +1698,29 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-editor.is-dragging .browser-block-path{border-color:var(--accent-fill);background:var(--accent-soft)}
 .browser-path-slot.is-drop-target{border-left:3px solid var(--accent-fill)}
 .browser-path-slot button{display:inline-flex;align-items:center;gap:.3rem;cursor:grab}.browser-path-slot button svg{flex:none;opacity:.55}
-.browser-palette{display:flex;gap:.3rem;flex-wrap:wrap}.browser-palette button{cursor:grab}
+.browser-palette{display:flex;gap:.3rem;flex-wrap:wrap}
+/* A USB camera that is connected but cannot be read, or read only in part: what to do about it. */
+.camera-notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .7rem;padding:.6rem .8rem;border-radius:var(--radius-md);background:var(--warning-soft);border:1px solid var(--warning-border);font-size:var(--text-footnote)}
+.camera-notice svg{flex:none;margin-top:.1rem;color:var(--warning)}
+.camera-notice.is-inline{margin:.3rem 0 .5rem;padding:.4rem .6rem;font-size:var(--text-caption)}
+/* A field: a grip to drag it onto the levels, its name, and + to add it last. */
+.browser-field-chip{display:inline-flex;align-items:center;gap:.15rem;min-height:var(--control-height-sm);padding:0 .2rem 0 .1rem;border-radius:var(--radius-capsule);background:var(--fill-3);border:1px solid var(--separator);font-size:var(--text-footnote);font-weight:550;cursor:grab;user-select:none}
+.browser-field-chip:hover{border-color:var(--separator-strong)}.browser-field-chip:active{cursor:grabbing}
+.browser-grip{display:inline-flex;align-items:center;padding:0 .1rem;color:var(--label-secondary)}
+.browser-field-chip:hover .browser-grip{color:var(--label)}
+.browser-field-name{padding:0 .25rem}
+.browser-field-add{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border-radius:50%;background:var(--accent-fill);color:var(--on-accent);cursor:pointer}
+.browser-field-add:hover{filter:brightness(1.08)}
+.browser-path-slot button svg{opacity:.85}
+/* Date tree rows: indent and an arrow that opens the rows below. */
+.browser-tree-lead{display:inline-flex;align-items:center;flex:none}
+.browser-row:has(.browser-tree-lead){justify-content:flex-start}.browser-row:has(.browser-tree-lead)>small:last-child{margin-left:auto}
+.browser-disclosure,.browser-disclosure-space{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border-radius:var(--radius-sm);flex:none}
+.browser-disclosure{color:var(--label-secondary);cursor:pointer}.browser-disclosure:hover{background:var(--fill-3);color:var(--label)}
+.browser-disclosure svg{transition:rotate var(--quick) var(--ease-out)}.browser-disclosure.is-open svg{rotate:90deg}
+.browser-date-levels{border:0;padding:0;margin:0;display:grid;gap:.3rem}.browser-date-levels legend{font-size:var(--text-footnote);font-weight:600;padding:0}.browser-date-levels>div{display:flex;gap:.9rem;flex-wrap:wrap}.browser-date-levels small{color:var(--label-secondary);font-size:var(--text-caption)}
+.browser-check{display:inline-flex;align-items:flex-start;gap:.4rem;font-size:var(--text-footnote)}.browser-check input{margin-top:.15rem}
+.browser-format-switches{display:grid;gap:.5rem}.browser-format-switches .browser-check>span{display:grid;gap:.1rem}.browser-format-switches small{color:var(--label-secondary);font-size:var(--text-caption)}
 .browser-preset-list{display:flex;flex-wrap:wrap;gap:.4rem}
 .browser-preset{display:inline-flex;align-items:center;gap:.1rem;border-radius:var(--radius-capsule);background:var(--fill-4)}
 .browser-preset>button{min-height:var(--control-height-sm);padding:0 .85rem;border-radius:var(--radius-capsule);font-size:var(--text-footnote);cursor:grab}.browser-preset>button:hover{background:var(--fill-3)}
