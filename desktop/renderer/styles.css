@@ -1720,6 +1720,10 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .conflicts-panel>.conflicts-title{font-weight:600;color:var(--label)}
 .conflicts-panel>.conflicts-title svg{color:var(--accent)}
 .conflicts-bulk{flex-wrap:wrap}
+.conflicts-bulk .button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.conflicts-panel>.conflicts-bulk-status{color:var(--accent);font-weight:500}
+/* Kept in the layout while empty, so screen readers announce what is put in it; only its gap shows. */
+.conflicts-panel>.conflicts-bulk-status:empty{margin-top:-.45rem}
 .conflicts-toggle{justify-self:start}
 .conflicts-list{display:grid;gap:.3rem;max-height:24rem;overflow:auto;margin:0;padding:0;list-style:none}
 .conflict-row{display:grid;gap:.35rem;padding:.4rem .5rem;border-radius:var(--radius-sm,8px);background:var(--background-elevated,var(--fill-4))}

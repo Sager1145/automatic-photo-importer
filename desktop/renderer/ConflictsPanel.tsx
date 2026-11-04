@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown, CircleAlert, CheckCircle2, CopyPlus, FolderOpen, LoaderCircle, Replace, SkipForward, Square, Undo2 } from 'lucide-react';
-import { isLive, type ConflictChoice, type ImportConflict, type Job, type Thumbnail } from '../shared';
+import { isLive, type ConflictChoice, type ConflictSummary, type ImportConflict, type Job, type Thumbnail } from '../shared';
 import { useTranslation } from './i18n';
 import { Button, Icon, type Dispatch } from './ui';
 
@@ -8,6 +8,16 @@ import { Button, Icon, type Dispatch } from './ui';
 export const CONFLICT_PAGE = 200;
 const baseName = (file: string) => file.split(/[\\/]/).filter(Boolean).at(-1) ?? file;
 const folderOf = (file: string) => { const parts = file.split(/[\\/]/); parts.pop(); return parts.join(file.includes('\\') ? '\\' : '/'); };
+
+/** How long the line confirming a bulk choice stays. */
+export const BULK_STATUS_MS = 5000;
+const allChosen: Record<ConflictChoice, string> = { skip: "Skip is now chosen for every file ({count}).", overwrite: "Overwrite is now chosen for every file ({count}).", keep: "Keep both is now chosen for every file ({count})." };
+const someChosen: Record<ConflictChoice, string> = { skip: "Skip is now chosen for {chosen} of {count} files; files already applied keep their result.", overwrite: "Overwrite is now chosen for {chosen} of {count} files; files already applied keep their result.", keep: "Keep both is now chosen for {chosen} of {count} files; files already applied keep their result." };
+/** The line shown after Skip all, Overwrite all or Keep both for all: what the conflicts hold now, so a click that changed
+ * nothing (Skip is the default) still says it took. Files already applied keep their choice. */
+export function bulkChoiceStatus(summary: Pick<ConflictSummary, 'count' | ConflictChoice>, choice: ConflictChoice): { text: string; params: Record<string, number> } {
+  return summary[choice] >= summary.count ? { text: allChosen[choice], params: { count: summary.count } } : { text: someChosen[choice], params: { chosen: summary[choice], count: summary.count } };
+}
 
 /** Files of an import whose name the library already holds with the same bytes: not copied, listed one per row while
  * the import runs and after it. Skip is the default; Overwrite and Keep both apply once the import has ended. Nothing waits on the user. */
@@ -18,14 +28,23 @@ export function ConflictsPanel({ job, act }: { job: Job; act: Dispatch }) {
   const [items, setItems] = useState<ImportConflict[]>([]);
   const [shown, setShown] = useState(CONFLICT_PAGE);
   const revision = summary?.revision;
+  /** The bulk choice just clicked; `at` restarts the timer when the same button is clicked again. */
+  const [bulk, setBulk] = useState<{ choice: ConflictChoice; at: number }>();
   useEffect(() => {
     if (!open || !window.importer?.conflicts) return;
     let current = true;
     void window.importer.conflicts(job.id).then(list => { if (current) setItems(list); }).catch(() => {});
     return () => { current = false; };
   }, [open, job.id, revision]);
+  useEffect(() => {
+    if (!bulk) return;
+    const timer = setTimeout(() => setBulk(undefined), BULK_STATUS_MS);
+    return () => clearTimeout(timer);
+  }, [bulk]);
   if (!summary?.count) return null;
   const choose = (choice: ConflictChoice, ids?: string[]) => act({ type: 'conflictChoice', jobId: job.id, choice, ...(ids ? { ids } : {}) });
+  const chooseAll = (choice: ConflictChoice) => { choose(choice); setBulk({ choice, at: Date.now() }); };
+  const status = bulk && bulkChoiceStatus(summary, bulk.choice);
   const running = isLive(job), progress = summary.progress;
   return <section className="conflicts-panel" data-testid="conflicts-panel" aria-label={t("Same name, same contents")}>
     <p className="conflicts-title"><Icon icon={CircleAlert} size={14} />{summary.count === 1 ? t("1 file is already in the library with the same name and contents") : t("{count} files are already in the library with the same name and contents", { count: formatNumber(summary.count) })}</p>
@@ -35,11 +54,12 @@ export function ConflictsPanel({ job, act }: { job: Job; act: Dispatch }) {
     {!running && !summary.applying && summary.waiting > 0 && <p data-testid="conflicts-waiting">{t("{count} choices wait to be applied", { count: formatNumber(summary.waiting) })}</p>}
     {summary.stopped && <p data-testid="conflicts-stopped">{t("Stopped: every conflict not applied yet is skipped.")}</p>}
     <div className="rule-actions conflicts-bulk">
-      <Button icon={SkipForward} data-testid="conflicts-skip-all" onClick={() => choose('skip')}>{t("Skip all")}</Button>
-      <Button icon={Replace} data-testid="conflicts-overwrite-all" title={t("The library files go to recovery storage; Undo puts them back")} onClick={() => choose('overwrite')}>{t("Overwrite all")}</Button>
-      <Button icon={CopyPlus} data-testid="conflicts-keep-all" title={t("Copies each file under a new name")} onClick={() => choose('keep')}>{t("Keep both for all")}</Button>
+      <Button icon={SkipForward} data-testid="conflicts-skip-all" aria-pressed={summary.skip >= summary.count} onClick={() => chooseAll('skip')}>{t("Skip all")}</Button>
+      <Button icon={Replace} data-testid="conflicts-overwrite-all" aria-pressed={summary.overwrite >= summary.count} title={t("The library files go to recovery storage; Undo puts them back")} onClick={() => chooseAll('overwrite')}>{t("Overwrite all")}</Button>
+      <Button icon={CopyPlus} data-testid="conflicts-keep-all" aria-pressed={summary.keep >= summary.count} title={t("Copies each file under a new name")} onClick={() => chooseAll('keep')}>{t("Keep both for all")}</Button>
       <Button kind="quiet" icon={Square} data-testid="conflicts-stop-all" disabled={!running && !summary.applying} title={t("Skips every conflict not applied yet and stops the import")} onClick={() => act({ type: 'conflictStopAll', jobId: job.id })}>{t("Stop all")}</Button>
     </div>
+    <p className="conflicts-bulk-status" role="status" aria-live="polite" data-testid="conflicts-bulk-status">{status && <><Icon icon={CheckCircle2} size={14} />{t(status.text, Object.fromEntries(Object.entries(status.params).map(([key, value]) => [key, formatNumber(value)])))}</>}</p>
     <button type="button" className="source-disclosure-toggle conflicts-toggle" data-testid="conflicts-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}><span className="source-disclosure-label">{open ? t("Hide the files") : t("Show the files")}<Icon icon={ChevronDown} size={16} /></span></button>
     {open && <ul className="conflicts-list" data-testid="conflicts-list">
       {items.slice(0, shown).map(item => <ConflictRow key={item.id} item={item} act={act} jobId={job.id} choose={choose} />)}

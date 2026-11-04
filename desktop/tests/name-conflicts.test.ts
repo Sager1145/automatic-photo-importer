@@ -267,4 +267,29 @@ test('the conflicts panel lists the count, every bulk choice and Stop all, in ea
   assert.match(english,/Skip 2 · Overwrite 1 · Keep both 0/);
   assert.match(html('zh-Hans'),/有 3 个文件已在图库中，名称和内容都相同/);
   assert.equal(renderToStaticMarkup(createElement(ConflictsPanel,{job:{...job,conflicts:undefined},act:()=>{}})),'');
+  // The bulk choice every file has shows as pressed; the status line is there, empty, until a bulk button is clicked.
+  assert.match(english,/data-testid="conflicts-skip-all" aria-pressed="false"/);
+  assert.match(english,/data-testid="conflicts-bulk-status"><\/p>/);
+  const allSkip=renderToStaticMarkup(createElement(ConflictsPanel,{job:{...job,conflicts:{...job.conflicts!,skip:3,overwrite:0}},act:()=>{}}));
+  assert.match(allSkip,/data-testid="conflicts-skip-all" aria-pressed="true"/);
+  assert.match(allSkip,/data-testid="conflicts-overwrite-all" aria-pressed="false"/);
+});
+
+test('a bulk choice says what the conflicts hold now, also when it changed nothing, in each language',async()=>{
+  const {bulkChoiceStatus}=await import('../renderer/ConflictsPanel');
+  const {createTranslator}=await import('../renderer/i18n');
+  // Skip all when every file is already skipped (the default): it still confirms.
+  const all=bulkChoiceStatus({count:409,skip:409,overwrite:0,keep:0},'skip');
+  assert.deepEqual(all,{text:'Skip is now chosen for every file ({count}).',params:{count:409}});
+  // Two overwrites already applied keep their result.
+  const some=bulkChoiceStatus({count:5,skip:3,overwrite:2,keep:0},'skip');
+  assert.deepEqual(some.params,{chosen:3,count:5});
+  for(const choice of ['skip','overwrite','keep'] as const)for(const summary of [{count:2,skip:2,overwrite:2,keep:2},{count:2,skip:1,overwrite:1,keep:1}]) {
+    const {text,params}=bulkChoiceStatus(summary,choice);
+    for(const language of ['en','zh-Hans','zh-Hant','ja'] as const) {
+      const line=createTranslator(language)(text,params);
+      assert.doesNotMatch(line,/\{/,`${language}: ${text}`);
+      if(language!=='en')assert.notEqual(line,createTranslator('en')(text,params),`${language} has no translation of: ${text}`);
+    }
+  }
 });

@@ -16,6 +16,12 @@ The library files go to recovery storage; Undo puts them back|图库中的文件
 Keep both for all|全部保留两者|全部保留兩者|すべて両方残す
 Copies each file under a new name|以新名称复制每个文件|以新名稱複製每個檔案|各ファイルを新しい名前でコピーします
 Skips every conflict not applied yet and stops the import|跳过所有尚未执行的冲突并停止导入|略過所有尚未執行的衝突並停止匯入|まだ適用されていない競合をすべてスキップし、インポートを停止します
+Skip is now chosen for every file ({count}).|现在所有文件（{count} 个）都选择了“跳过”。|現在所有檔案（{count} 個）都選擇了「略過」。|すべてのファイル（{count} 件）で「スキップ」を選択しました。
+Overwrite is now chosen for every file ({count}).|现在所有文件（{count} 个）都选择了“覆盖”。|現在所有檔案（{count} 個）都選擇了「覆寫」。|すべてのファイル（{count} 件）で「上書き」を選択しました。
+Keep both is now chosen for every file ({count}).|现在所有文件（{count} 个）都选择了“保留两者”。|現在所有檔案（{count} 個）都選擇了「保留兩者」。|すべてのファイル（{count} 件）で「両方残す」を選択しました。
+Skip is now chosen for {chosen} of {count} files; files already applied keep their result.|现在 {count} 个文件中有 {chosen} 个选择了“跳过”；已执行的文件保持原结果。|現在 {count} 個檔案中有 {chosen} 個選擇了「略過」；已執行的檔案保持原結果。|{count} 件中 {chosen} 件で「スキップ」を選択しました。適用済みのファイルは結果がそのまま残ります。
+Overwrite is now chosen for {chosen} of {count} files; files already applied keep their result.|现在 {count} 个文件中有 {chosen} 个选择了“覆盖”；已执行的文件保持原结果。|現在 {count} 個檔案中有 {chosen} 個選擇了「覆寫」；已執行的檔案保持原結果。|{count} 件中 {chosen} 件で「上書き」を選択しました。適用済みのファイルは結果がそのまま残ります。
+Keep both is now chosen for {chosen} of {count} files; files already applied keep their result.|现在 {count} 个文件中有 {chosen} 个选择了“保留两者”；已执行的文件保持原结果。|現在 {count} 個檔案中有 {chosen} 個選擇了「保留兩者」；已執行的檔案保持原結果。|{count} 件中 {chosen} 件で「両方残す」を選択しました。適用済みのファイルは結果がそのまま残ります。
 Hide the files|隐藏文件|隱藏檔案|ファイルを隠す
 Show the files|显示文件|顯示檔案|ファイルを表示
 Show {count} more|再显示 {count} 个|再顯示 {count} 個|さらに {count} 件表示
