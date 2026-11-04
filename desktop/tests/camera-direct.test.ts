@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import * as nodeFs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -10,6 +10,7 @@ import { posixRelative } from '../core/paths';
 import { listedBytes } from '../platform/metadata';
 import { cameraFiles, closeCameraBridge, listedFiles, prepareCamera } from '../platform/camera-bridge';
 import type { Metadata } from '../shared';
+import { ownTemporaryFolder } from './fixtures/os';
 
 configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
 const fs = sourceAware(nodeFs);
@@ -42,7 +43,9 @@ async function library(t: test.TestContext) {
   await nodeFs.mkdir(root);
   return root;
 }
-/** The system temporary folder's entries, to show a camera import adds none (the test's own library aside). */
+/** The temporary folder's entries, to show a camera import adds none (the test's own library aside). Every test of this file
+ * gets a temporary folder of its own, so folders that test files running alongside make in the system one never count. */
+test.beforeEach(async t => { await ownTemporaryFolder(t as TestContext); });
 const temporary = async () => new Set((await nodeFs.readdir(os.tmpdir())).filter(name => !name.startsWith('camera-direct-')));
 const added = async (before: Set<string>) => [...await temporary()].filter(name => !before.has(name) && /photo-importer|camera/i.test(name));
 

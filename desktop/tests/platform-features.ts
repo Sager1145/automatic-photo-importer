@@ -26,7 +26,7 @@ import { portableName, portablePath } from '../folder-template';
 import type { InventoryFile } from '../shared';
 import { checkFileSizes, driveFormat, FAT32_MAX_FILE_BYTES, nativeAccess, type Access, type DriveFormat } from '../core/drive-formats';
 import { probeDestination } from '../core/destination-probe';
-import { denyWrite, allowWrite, unixPermissions } from './fixtures/os';
+import { denyWrite, allowWrite, ownTemporaryFolder, unixPermissions } from './fixtures/os';
 import { inventory } from '../core/inventory';
 import { registerListedSource, LISTED_PARENT } from '../core/source-fs';
 import { createHash } from 'node:crypto';
@@ -405,6 +405,8 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
     if (!onNative(profile, t)) return;
     configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
     assert.equal(LISTED_PARENT, profile.cameraFolder);
+    // A temporary folder of its own: test files running alongside add theirs to the system one.
+    await ownTemporaryFolder(t);
     const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-camera-')));
     const temporary = new Set(await readdir(tmpdir()));
     try {
@@ -445,6 +447,8 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
   'Clean up for a stopped job: the copies it left in the destination go, nothing else; a USB camera import leaves nothing in the temporary folder': async (profile, t) => {
     if (!onNative(profile, t)) return;
     configureOrganizationRecovery('fixture-only-host-recovery-secret-32bytes');
+    // A temporary folder of its own: test files running alongside add theirs to the system one.
+    await ownTemporaryFolder(t);
     const base = await realpath(await mkdtemp(join(tmpdir(), 'feature-job-cleanup-')));
     const before = new Set(await readdir(tmpdir()));
     // A camera import reads the camera where it is (core/source-fs): its only leftovers are partial copies in the destination.

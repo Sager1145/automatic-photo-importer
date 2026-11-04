@@ -43,3 +43,19 @@ export const denyWrite=(folder:string):Promise<void>=>process.platform==='win32'
 export const allowWrite=(folder:string):Promise<void>=>process.platform==='win32'?icacls(folder,'/remove:d',user()):fs.chmod(folder,0o755);
 /** What a denied read or write fails with on this system. */
 export const DENIED=/EACCES|EPERM|permission/i;
+
+/** The variables the system temporary folder is read from: TMPDIR on macOS and Linux, TEMP and TMP on Windows. */
+const TEMPORARY_VARIABLES=['TMPDIR','TEMP','TMP'] as const;
+/** Gives this test a temporary folder of its own: `os.tmpdir()` returns it until the test ends, on every system. A check that
+ * an operation leaves nothing in the temporary folder then sees only what that operation wrote, never the folders of test
+ * files running at the same time (`node --test` runs files in parallel, all sharing the one system folder). */
+export async function ownTemporaryFolder(t:{after:(fn:()=>Promise<void>|void)=>void}):Promise<string> {
+  const saved=Object.fromEntries(TEMPORARY_VARIABLES.map(name=>[name,process.env[name]]));
+  const folder=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'own-temporary-')));
+  for(const name of TEMPORARY_VARIABLES)process.env[name]=folder;
+  t.after(async()=>{
+    for(const name of TEMPORARY_VARIABLES){const value=saved[name];if(value===undefined)delete process.env[name];else process.env[name]=value;}
+    await fs.rm(folder,{recursive:true,force:true});
+  });
+  return folder;
+}

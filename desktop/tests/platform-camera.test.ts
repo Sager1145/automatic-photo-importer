@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { cameraSources, closeCameraBridge, prepareCamera } from '../platform/camera-bridge';
 import { sourceAware } from '../core/source-fs';
+import { ownTemporaryFolder } from './fixtures/os';
 
 // The helper protocol (list, files, read by range) is tested on every system in camera-direct.test.ts.
 test('a USB camera reports its card slots, and its capacity is their sum', async () => {
@@ -35,7 +36,9 @@ test('a camera with two card slots is two sources, each with a stable id, its ow
   assert.equal(cameraSourcesFrom([{...zf,storages:zf.storages.map(storage=>({...storage,id:'1'}))}]).length,1);
 });
 
-test('two slots of one camera, each a source: each lists and reads only its own slot, at once, with nothing staged', async () => {
+test('two slots of one camera, each a source: each lists and reads only its own slot, at once, with nothing staged', async t => {
+  // A temporary folder of its own: test files running alongside add theirs to the system one.
+  await ownTemporaryFolder(t);
   const scratch=await realpath(await mkdtemp(path.join(tmpdir(),'importer-camera-slots-')));
   const prior=process.env.IMPORTER_NATIVE_BRIDGE;
   const helper=path.join(scratch,'fake-camera.cjs');
