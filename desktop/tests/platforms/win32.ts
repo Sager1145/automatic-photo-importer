@@ -3,6 +3,7 @@
 import { symlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { parseWindowsVolumes } from '../../platform/volumes';
+import { createDriveSampler, parseWindowsDiskCounters } from '../../platform/drive-activity';
 import type { PlatformProfile } from '../platform-features';
 
 export const win32: PlatformProfile = {
@@ -43,7 +44,28 @@ export const win32: PlatformProfile = {
   dropPath: /^[A-Za-z]:\\(?!.*\/)/,
   heldOpen,
   previews: { photos: 'shell', posters: true },
+  // Win32_PerfRawData_PerfDisk_PhysicalDisk as the app's reader prints it: instances by disk number and drive letters.
+  driveActivity: { disks: [['D:'], ['I:']], sampler: now => {
+    let next = 0;
+    return createDriveSampler({ now, counters: async wanted => new Map([...parseWindowsDiskCounters(JSON.stringify(physicalDisks[Math.min(next++, 1)]))].filter(([disk]) => wanted.has(disk))) });
+  } },
 };
+
+// Two readings on this PC; the card (disk 2, D:) was read between them.
+const physicalDisks = [
+  [
+    { Name: '0 C:', DiskReadBytesPersec: 91503005184, DiskWriteBytesPersec: 120117067264, DiskReadsPersec: 3712040, DiskWritesPersec: 5260112, PercentDiskReadTime: 5143911050, PercentDiskWriteTime: 2871601030 },
+    { Name: '1 I:', DiskReadBytesPersec: 1043332608, DiskWriteBytesPersec: 40517177344, DiskReadsPersec: 20113, DiskWritesPersec: 310221, PercentDiskReadTime: 63112050, PercentDiskWriteTime: 1830117020 },
+    { Name: '2 D:', DiskReadBytesPersec: 21331116032, DiskWriteBytesPersec: 1048576, DiskReadsPersec: 162740, DiskWritesPersec: 16, PercentDiskReadTime: 2101180400, PercentDiskWriteTime: 1200 },
+    { Name: '_Total', DiskReadBytesPersec: 113877453824, DiskWriteBytesPersec: 160635293184, DiskReadsPersec: 3894893, DiskWritesPersec: 5570349, PercentDiskReadTime: 7308203500, PercentDiskWriteTime: 4701719250 },
+  ],
+  [
+    { Name: '0 C:', DiskReadBytesPersec: 91503267328, DiskWriteBytesPersec: 120118640128, DiskReadsPersec: 3712052, DiskWritesPersec: 5260190, PercentDiskReadTime: 5143941050, PercentDiskWriteTime: 2871801030 },
+    { Name: '1 I:', DiskReadBytesPersec: 1043332608, DiskWriteBytesPersec: 40613646336, DiskReadsPersec: 20113, DiskWritesPersec: 310590, PercentDiskReadTime: 63112050, PercentDiskWriteTime: 1836117020 },
+    { Name: '2 D:', DiskReadBytesPersec: 21427585024, DiskWriteBytesPersec: 1048576, DiskReadsPersec: 163108, DiskWritesPersec: 16, PercentDiskReadTime: 2108680400, PercentDiskWriteTime: 1200 },
+    { Name: '_Total', DiskReadBytesPersec: 113974185024, DiskWriteBytesPersec: 160733335040, DiskReadsPersec: 3895273, DiskWritesPersec: 5570796, PercentDiskReadTime: 7315733500, PercentDiskWriteTime: 4707919250 },
+  ],
+];
 
 // Every file and folder under the root opened as another program would to have it alone: CreateFileW with no sharing
 // (folders with backup semantics). A sharing violation means something holds it; one that lasts past three tries half

@@ -145,3 +145,36 @@ test('a camera body names its slots’ card types, and a camera’s slots share 
   // The camera's facts show once, in its header, not in each slot.
   assert.equal(html.split('9,690').length-1,1);
 });
+
+test('a camera card\'s contents come from one listing of its files: files and bytes per extension, and the date range', async () => {
+  const { listingContents } = await import('../platform/camera-bridge');
+  const file = (storage: string, name: string, size: number, created: number) => ({ storage, folder: ['DCIM'], name, size, created, objectID: name });
+  const cards = listingContents([file('Slot 1', 'DSC_0001.NEF', 50, 2000), file('Slot 1', 'DSC_0001.JPG', 10, 1000), file('Slot 1', 'DSC_0002.jpg', 12, 3000), file('Slot 2', 'CLIP.MOV', 900, 5000), file('Slot 2', 'README', 1, 4000)]);
+  assert.deepEqual(cards.get('Slot 1'), { extensions: { nef: [1, 50], jpg: [2, 22] }, first: 1000, last: 3000 });
+  assert.deepEqual(cards.get('Slot 2'), { extensions: { mov: [1, 900], '': [1, 1] }, first: 4000, last: 5000 });
+});
+
+// The macOS helper sends each card's contents from ImageCaptureCore's catalog; the Windows bridge has none, so the app lists a camera once in the background.
+test('Windows: a USB camera is listed once in the background for its cards\' contents, and the shutter count reuses that listing', { skip: process.platform !== 'win32' && 'the background listing is for the Windows Portable Devices bridge; the macOS helper sends contents itself', timeout: 60000 }, async t => {
+  const { withNewestCameraPhoto } = await import('../platform/camera-bridge');
+  const scratch = await realpath(await mkdtemp(path.join(tmpdir(), 'camera-contents-')));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const helper = path.join(scratch, 'fake-camera.cjs'), log = path.join(scratch, 'requests.log');
+  await writeFile(helper, `const fs=require('node:fs');const rl=require('node:readline').createInterface({input:process.stdin});const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
+rl.on('line',line=>{const c=JSON.parse(line);fs.appendFileSync(${JSON.stringify(log)},c.command+'\\n');
+ if(c.command==='list')send({id:c.id,result:[{cameraID:'zf',name:'Z f',vendor:0x04b0,battery:80,serial:'3012345',storages:[{id:'10001',name:'Slot 1',total:100,free:40},{id:'20001',name:'Slot 2',total:100,free:90}]}]});
+ else if(c.command==='files')send({id:c.id,result:[{storage:'Slot 1',folder:['DCIM'],name:'DSC_0001.NEF',size:50,created:2000,objectID:'o1'},{storage:'Slot 2',folder:['DCIM'],name:'DSC_0002.JPG',size:10,created:1000,objectID:'o2'}]});
+ else send({id:c.id,result:true});});`);
+  const prior = process.env.IMPORTER_NATIVE_BRIDGE; process.env.IMPORTER_NATIVE_BRIDGE = helper;
+  t.after(async () => { await closeCameraBridge(); if (prior === undefined) delete process.env.IMPORTER_NATIVE_BRIDGE; else process.env.IMPORTER_NATIVE_BRIDGE = prior; });
+  const first = await cameraSources();
+  assert.deepEqual(first.map(source => source.details?.contents), [undefined, undefined], 'not listed yet');
+  assert.deepEqual(first[0]!.details, { battery: 80, serial: '3012345' });
+  let sources = first;
+  for (let i = 0; i < 100 && !sources[0]!.details?.contents; i++) { await new Promise(resolve => setTimeout(resolve, 50)); sources = await cameraSources(); }
+  assert.deepEqual(sources.map(source => source.details?.contents), [{ extensions: { nef: [1, 50] }, first: 2000, last: 2000 }, { extensions: { jpg: [1, 10] }, first: 1000, last: 1000 }]);
+  await cameraSources();
+  assert.equal(await withNewestCameraPhoto('zf', async file => path.basename(file)), 'DSC_0001.NEF');
+  const requests = (await fs.readFile(log, 'utf8')).split('\n').filter(Boolean);
+  assert.equal(requests.filter(command => command === 'files').length, 1, 'one listing: contents and the shutter count');
+});

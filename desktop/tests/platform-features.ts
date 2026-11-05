@@ -41,6 +41,7 @@ import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
 import { resolveCatalogFile } from '../catalog/access';
 import { collectDragFiles } from '../core/file-drag';
 import { systemDecoders } from '../platform/thumbnails';
+import { activityTargets, type DriveSampler } from '../platform/drive-activity';
 import type { StorageMedia } from '../core/storage-media';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
@@ -89,6 +90,10 @@ export interface PlatformProfile {
   /** Who makes preview pictures: macOS's own sips and Quick Look (photos, RAW and video posters), Windows's shell
    * thumbnailer through the app's decoder (photos, installed RAW codecs and posters), or on Linux the app's decoder for JPEG/PNG only. */
   previews: { photos: 'system' | 'shell' | 'image'; posters: boolean };
+  /** The drive activity meter: the disk names this system's counters give the card and the SSD, and a sampler over
+   * two recorded readings of its own counters (ioreg on macOS, PhysicalDisk through CIM on Windows, /proc/diskstats
+   * on Linux), the card read or written between them. */
+  driveActivity: { disks: [card: string[], ssd: string[]]; sampler(now: () => number): DriveSampler };
 }
 
 /** Features that need this system's real filesystem run only there (elsewhere they skip, saying why); the rest
@@ -99,6 +104,21 @@ const onNative = (profile: PlatformProfile, t: TestContext) => {
 };
 
 export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext) => void | Promise<void>> = {
+  'drive activity: a drive in use shows its speed, read from this system\'s own disk counters': async profile => {
+    const [card, ssd] = profile.volumes();
+    const targets = activityTargets(profile.volumes(), [{ id: 'card', path: card!.path, transport: 'storage' }, { id: 'cam', path: '', transport: 'camera' }], [{ path: ssd!.path, available: true }], profile.platform);
+    assert.deepEqual(targets, { card: profile.driveActivity.disks[0], [ssd!.path]: profile.driveActivity.disks[1] }, 'each drive by this system\'s disk name; a camera has none');
+    let clock = 0;
+    const sampler = profile.driveActivity.sampler(() => clock);
+    sampler.setTargets(targets);
+    assert.deepEqual(await sampler.sample(), {}, 'one reading gives no rate yet');
+    clock += 1000;
+    const activity = (await sampler.sample())['card'];
+    assert.ok(activity, 'the card has activity after a second reading');
+    assert.ok(activity.readBps + activity.writeBps > 0, 'bytes moved');
+    assert.ok(activity.utilization >= 0 && activity.utilization <= 100);
+    assert.deepEqual(activity.history, [activity.utilization]);
+  },
   'drive media: a card by its type, a USB stick, an external disk, a disc and a floppy, each told apart': profile => {
     assert.deepEqual(profile.volumes().map(volume => volume.media), profile.driveMedia);
     const other = profile.otherMedia();

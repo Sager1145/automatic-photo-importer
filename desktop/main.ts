@@ -35,7 +35,8 @@ import {JobLedger,PausedCopies,sourcesUnchanged,type PausedImport} from './impor
 import {ConflictBook} from './name-conflicts';
 import {applyConflictChoices,nameOnDisk,type ConflictOutcome} from './core/name-conflicts';
 import {allocateDestinations,allocateVideoFolders,fillFirst,destinationEntries,olderRulesPaths,destinationParts,destinationSpace,freeAfterReservations,reservationVolume,requiredTransferSpace,requiredOrganizationSpace} from './core/allocation';
-import {activityTargets,createDriveSampler,runIoreg,startActivityLoop} from './platform/drive-activity';
+import {closeFileTimestamps} from './platform/file-timestamps';
+import {activityTargets,closeDiskCounters,nativeDriveSampler,startActivityLoop} from './platform/drive-activity';
 import {checkFileSizes,driverLinks} from './core/drive-formats';
 import {folderCapacity,getSources,mountedVolumes,volumeInfo,volumeOf,validateDestination,onCameraCard,type MountedVolume} from './platform/volumes';
 import {driveCameraRecord} from './source-cameras';
@@ -178,7 +179,8 @@ let window:BrowserWindow|undefined;
 let timer:NodeJS.Timeout|undefined;
 // Live drive utilization (macOS IOKit statistics): every second while the window is visible or work runs; stopped while hidden and idle.
 let activityLoop:ReturnType<typeof startActivityLoop>|undefined;
-const driveSampler=createDriveSampler({run:runIoreg});
+// Each system reads its own counters: ioreg on macOS, raw PhysicalDisk counters through CIM on Windows, /proc/diskstats on Linux.
+const driveSampler=nativeDriveSampler();
 let refreshing=false;
 /** The mounted volumes as the last refresh described them; paths resolve to drives against this, not a new sweep. */
 let mounts:MountedVolume[]=[];
@@ -432,7 +434,7 @@ async function refresh(){
   // Folders' free space is re-read like a card's, so a capacity bar follows copies and deletions; so is a library's while a job runs on it.
   const shown=new Map([...state.sources,...state.jobs.map(job=>job.source)].map(source=>[source.id,source]));
   for(const source of shown.values())if(source.transport==='folder')await updateFolderCapacity(source);
-  driveSampler.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
+  driveSampler?.setTargets(activityTargets(volumes,state.sources,destinations));topologyLog.observe(volumes,state.sources,destinations);
   dropStaleMisplaced();emit();pump();scheduleOldRecordsCheck();scheduleResidueCheck();
   const scope=JSON.stringify([chosenFolders(state.preferences,true),organizationLocations,destinations.map(info=>[info.path,info.available,info.volumeId])]);
   if(scope!==recoveryScope&&!recoveryRefresh.running){recoveryScope=scope;recoveryRefresh.request();}
@@ -1747,7 +1749,7 @@ async function boot(){
  ipcMain.handle('importer:conflicts',(event,jobId:unknown)=>{trusted(event);return typeof jobId==='string'?conflictBooks.get(jobId)?.list()??[]:[];});
  await window.loadFile(renderer);await refresh();timer=setInterval(()=>void refresh(),5000);
  // A new sample rides along with the next publish; it forces one only when nothing else published for a second.
- if(process.platform==='darwin'&&!hardwareTest){activityLoop=startActivityLoop({sampler:driveSampler,wanted:()=>!!window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized()||busy()||scanControls.size>0||!!state.review||!!state.busyReview,publish:activity=>{state.driveActivity=activity;activityLog.observe(activity,Date.now());if(Date.now()-lastEmit>=1000)emit();}});window.on('show',()=>activityLoop?.wake());window.on('restore',()=>activityLoop?.wake());window.on('focus',()=>activityLoop?.wake());}
+ if(driveSampler&&!hardwareTest){activityLoop=startActivityLoop({sampler:driveSampler,wanted:()=>!!window&&!window.isDestroyed()&&window.isVisible()&&!window.isMinimized()||busy()||scanControls.size>0||!!state.review||!!state.busyReview,publish:activity=>{state.driveActivity=activity;activityLog.observe(activity,Date.now());if(Date.now()-lastEmit>=1000)emit();}});window.on('show',()=>activityLoop?.wake());window.on('restore',()=>activityLoop?.wake());window.on('focus',()=>activityLoop?.wake());}
  if(hardwareReportRoot){const reports=hardwareReportRoot,owner=window;runA006HardwareTest(()=>state,action,reports,async source=>{const result=await dialog.showOpenDialog(owner,{title:`Authorize read access: ${source.name}`,defaultPath:source.path,properties:['openDirectory']});if(result.canceled||!result.filePaths[0]||await fs.realpath(result.filePaths[0])!==await fs.realpath(source.path))throw new Error(`Select the exact source root: ${source.path}`);}).catch(error=>{state.error=text(`A006 hardware test failed: ${errorText(error)}. Reports: ${reports}`);emit();});}
  if(qa&&qaFixtureRoot&&flags['codex-test']===true){if(!app.isPackaged)qaHooks=createQaHooks(state,emit);const passed=await runCodexSmoke(window,qaFixtureRoot,{uiOnly:flags['codex-ui-only']===true,organizationOnly:flags['codex-organization-only']===true,only:flagText(flags['codex-only']),deadline:Number(flagText(flags['codex-deadline']))||undefined,realDrives:flagText(flags['codex-real-drives'])},qaHooks);
   // exiftool can take minutes to end on a loaded machine; the QA result is already written, so its exit waits at most 15 s.
@@ -1775,12 +1777,12 @@ app.on('before-quit',event=>{
    // Paused imports cannot continue after the app quits: their kept staged copies are removed like a stopped job's.
    await Promise.allSettled([...pausedImports.values()].map(carry=>discardPausedCopies(carry.copies)));pausedImports.clear();
    await catalogCoordinator?.settled();await catalog?.close();
-   await Promise.allSettled([closeMetadata(),closeCameraBridge(),terminateHasher()]);
+   closeDiskCounters();closeFileTimestamps();await Promise.allSettled([closeMetadata(),closeCameraBridge(),terminateHasher()]);
    await activeLogger()?.close();
   };
   closing=Promise.race([finish(),sleep(10000,undefined,{ref:false})]).finally(()=>{quitting=true;app.quit();});
   return;
  }
- void closeMetadata();void closeCameraBridge();activeLogger()?.flushSync();
+ closeDiskCounters();closeFileTimestamps();void closeMetadata();void closeCameraBridge();activeLogger()?.flushSync();
 });
 process.on('exit',()=>activeLogger()?.flushSync());

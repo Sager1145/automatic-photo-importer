@@ -1020,7 +1020,7 @@ async function stageMany(targets:StageTarget[],signal:AbortSignal|undefined):Pro
         try {
           const {output,staged,target}=open;
           staged.streamDigest=streamDigest;staged.sourceStat=after;
-          const stamping=performance.now();const exact=await applyFileTimestamps(output,before,target.entry.captureTimeMs);const stamped=performance.now();
+          const stamping=performance.now();const exact=await applyFileTimestamps(output,before,target.entry.captureTimeMs,staged.file);const stamped=performance.now();
           await rebindStage(open);
           // The one sync after the last write: data and timestamps reach the disk together.
           const syncing=performance.now();await output.sync();const synced=performance.now();
@@ -1162,7 +1162,7 @@ async function publish(staged:Staged,destination:string,entry:PlanEntry,transfer
       try {for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,position);if(!bytesRead)break;let offset=0;
         while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}
         if(!position&&owned)owned=await rebound(owned,output,publicationEntry,transfer,recovery);position+=bytesRead;
-      }const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();
+      }const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs,owned?.file??destination);await output.sync();
       if(owned)owned=await rebound(owned,output,publicationEntry,transfer,recovery);}finally{await input.close();}
       },signal);
       const stat=await output.stat({bigint:true});if(!sameStat(stat,await fs.lstat(destination,{bigint:true})))throw new Error('Destination changed while publishing');
@@ -1207,7 +1207,7 @@ async function finishDirect(entry:PlanEntry,destination:string,sha:string,transf
     if(!sameStat(found.stat,stat)||!sameStat(stat,await fs.lstat(destination,{bigint:true}))||stat.nlink!==1n) throw new Error('Incomplete copy changed before finishing');
     const source=await fs.lstat(entry.source,{bigint:true});
     if(entry.sourceIdentity!==undefined&&statKey(source)!==entry.sourceIdentity) throw sourceChanged(entry);
-    await applyFileTimestamps(output,source,entry.captureTimeMs);
+    await applyFileTimestamps(output,source,entry.captureTimeMs,destination);
     await output.sync();
     if(!sameStat(await output.stat({bigint:true}),await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while finishing');
   } finally { await output.close(); }
@@ -1395,7 +1395,7 @@ async function directFamily(run:Run,family:PlanEntry[],options:ExecutionOptions,
       }
     }
     // Phase 4: dates, one flush of data and dates (M), then the folder entry (P).
-    await applyFileTimestamps(output,sourceStat,entry.captureTimeMs);
+    await applyFileTimestamps(output,sourceStat,entry.captureTimeMs,destination);
     await output.sync();
     const placed=await output.stat({bigint:true});
     if(!sameStat(placed,await fs.lstat(destination,{bigint:true}))) throw new Error('Destination changed while publishing');

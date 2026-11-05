@@ -16,12 +16,14 @@ async function fixture(t:test.TestContext){
  const original=path.join(source,'A.JPG');await fs.writeFile(original,'original fixture bytes');await fs.utimes(original,new Date('2020-01-01T00:00:00Z'),new Date('2020-01-01T00:00:00Z'));
  return {base,source,root,original};
 }
+/** Created is set on macOS (native helper) and Windows (SetFileTime); Linux cannot set a file's birth time. */
+const setsCreated=process.platform==='darwin'||process.platform==='win32';
 function close(actual:number,want:number){assert.ok(Math.abs(actual-want)<2,`Expected timestamp ${want}; got ${actual}`);}
 for(const exclusiveCopy of [false,true])test(`import sets Created and Modified to capture time (${exclusiveCopy?'exclusive copy':'hard link'})`,async t=>{
  const {source,root,original}=await fixture(t),before=await fs.stat(original);
  const {plans:[transfer]}=await plan(source,[root],options,async()=>({date:capture,camera:'Camera',fields:{}}));
  assert.deepEqual(await execute(transfer!,undefined,undefined,{exclusiveCopy}),{copied:1,skipped:0,errors:[]});
- const destination=await fs.stat(transfer!.entries[0]!.destination);close(destination.mtimeMs,captureMs);if(process.platform==='darwin')close(destination.birthtimeMs,captureMs);
+ const destination=await fs.stat(transfer!.entries[0]!.destination);close(destination.mtimeMs,captureMs);if(setsCreated)close(destination.birthtimeMs,captureMs);
  const after=await fs.stat(original);close(after.mtimeMs,before.mtimeMs);close(after.birthtimeMs,before.birthtimeMs);assert.equal(await fs.readFile(original,'utf8'),'original fixture bytes');
 });
 test('backup and absent/invalid capture metadata preserve source filesystem timestamps',async t=>{
@@ -29,11 +31,11 @@ test('backup and absent/invalid capture metadata preserve source filesystem time
  for(const [index,date]of [undefined,'2024-02-30T12:00:00Z','2024-02-03'].entries()){
   const destination=path.join(root,String(index));await fs.mkdir(destination);
   const {plans:[transfer]}=await plan(source,[destination],options,async()=>({date,fields:{}}));
-  assert.deepEqual(await execute(transfer!),{copied:1,skipped:0,errors:[]});const copied=await fs.stat(transfer!.entries[0]!.destination);close(copied.mtimeMs,before.mtimeMs);if(process.platform==='darwin')close(copied.birthtimeMs,before.birthtimeMs);
+  assert.deepEqual(await execute(transfer!),{copied:1,skipped:0,errors:[]});const copied=await fs.stat(transfer!.entries[0]!.destination);close(copied.mtimeMs,before.mtimeMs);if(setsCreated)close(copied.birthtimeMs,before.birthtimeMs);
  }
  const destination=path.join(root,'backup');await fs.mkdir(destination);
  const {plans:[transfer]}=await plan(source,[destination],{...options,backup:true},async()=>{throw new Error('Backup must not read metadata');});
- assert.deepEqual(await execute(transfer!,undefined,undefined,{exclusiveCopy:true}),{copied:1,skipped:0,errors:[]});const copied=await fs.stat(transfer!.entries[0]!.destination);close(copied.mtimeMs,before.mtimeMs);if(process.platform==='darwin')close(copied.birthtimeMs,before.birthtimeMs);
+ assert.deepEqual(await execute(transfer!,undefined,undefined,{exclusiveCopy:true}),{copied:1,skipped:0,errors:[]});const copied=await fs.stat(transfer!.entries[0]!.destination);close(copied.mtimeMs,before.mtimeMs);if(setsCreated)close(copied.birthtimeMs,before.birthtimeMs);
 });
 test('timezone-free capture timestamps use local wall clock once during planning',async t=>{
  const previous=process.env.TZ;t.after(()=>{if(previous===undefined)delete process.env.TZ;else process.env.TZ=previous;});process.env.TZ='America/Toronto';
@@ -44,8 +46,8 @@ test('organization recovery retains capture timestamps without rereading metadat
  const {source,original}=await fixture(t);const {plans:[transfer]}=await plan(source,[source],{...options,reorganize:true},async()=>({date:capture,camera:'Camera',fields:{}}));
  const result=await organizeByCopy(transfer!);assert.equal(result.errors.length,0);assert.equal(result.moved,1);
  const [job]=await getOrganizationRecovery(source);const destination=transfer!.entries[0]!.destination;
- close((await fs.stat(destination)).mtimeMs,captureMs);if(process.platform==='darwin')close((await fs.stat(destination)).birthtimeMs,captureMs);
+ close((await fs.stat(destination)).mtimeMs,captureMs);if(setsCreated)close((await fs.stat(destination)).birthtimeMs,captureMs);
  await fs.unlink(destination);{const resumed=await resumeOrganization(source,job!.id);assert.deepEqual({...resumed,retainedBytes:undefined},{copied:1,skipped:0,errors:[],moved:1,retained:1,retainedBytes:undefined});}
- close((await fs.stat(destination)).mtimeMs,captureMs);if(process.platform==='darwin')close((await fs.stat(destination)).birthtimeMs,captureMs);
+ close((await fs.stat(destination)).mtimeMs,captureMs);if(setsCreated)close((await fs.stat(destination)).birthtimeMs,captureMs);
  await assert.rejects(fs.stat(original));
 });

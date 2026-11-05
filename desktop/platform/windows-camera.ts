@@ -49,7 +49,9 @@ public static class CameraRead {
   void GetStream([MarshalAs(UnmanagedType.LPWStr)] string id, ref PropertyKey key, uint mode, ref uint optimal, out IStream stream);
  }
  [ComImport, Guid("6A96ED84-7C73-4480-9938-BF5AF477D426"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
- interface IPortableDeviceContent { void EnumObjects(); void Properties(); void Transfer(out IPortableDeviceResources r); }
+ interface IPortableDeviceContent { void EnumObjects(); void Properties(out IPortableDeviceProperties p); void Transfer(out IPortableDeviceResources r); }
+ [ComImport, Guid("7F6D695C-03DF-4439-A809-59266BEEE3A6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+ interface IPortableDeviceProperties { void GetSupportedProperties(); void GetPropertyAttributes(); void GetValues([MarshalAs(UnmanagedType.LPWStr)] string id, IntPtr keys, out IPortableDeviceValues values); }
  [ComImport, Guid("625E2DF8-6392-4CF0-9AD1-3CFA5F17775C"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
  interface IPortableDevice {
   void Open([MarshalAs(UnmanagedType.LPWStr)] string id, IPortableDeviceValues info); void SendCommand(uint flags, IPortableDeviceValues p, out IPortableDeviceValues r);
@@ -70,6 +72,20 @@ public static class CameraRead {
   var info = Values(); var access = Key(new Guid("204D9F0C-2292-4080-9F42-40664E70F859"), 9); info.SetUnsignedIntegerValue(ref access, 0xC0000000);
   var opened = (IPortableDevice)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("728A21C5-3D9E-48D7-9810-864848F0F404")));
   opened.Open(pnp, info); device = opened; IPortableDeviceContent content; device.Content(out content); content.Transfer(out resources); session = pnp; partial = true;
+ }
+ // The camera's battery (percent, -1 when it does not say) and serial number from its WPD device object, as
+ // "battery<TAB>serial": through this script's session when one is open on it, otherwise a short read-only one.
+ public static string Info(string pnp) {
+  IPortableDevice target = session == pnp ? device : null; bool own = target == null;
+  try {
+   if (own) { var info = Values(); var access = Key(new Guid("204D9F0C-2292-4080-9F42-40664E70F859"), 9); info.SetUnsignedIntegerValue(ref access, 0x80000000); target = (IPortableDevice)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("728A21C5-3D9E-48D7-9810-864848F0F404"))); target.Open(pnp, info); }
+   IPortableDeviceContent content; target.Content(out content); IPortableDeviceProperties properties; content.Properties(out properties);
+   IPortableDeviceValues values; properties.GetValues("DEVICE", IntPtr.Zero, out values);
+   var dev = new Guid("26D4979A-E643-4626-9E2B-736DC0C92FDC"); long battery = -1; string serial = ""; // WPD_DEVICE_POWER_LEVEL (4), WPD_DEVICE_SERIAL_NUMBER (9)
+   try { uint level; var k = Key(dev, 4); values.GetUnsignedIntegerValue(ref k, out level); if (level <= 100) battery = level; } catch {}
+   try { var k = Key(dev, 9); values.GetStringValue(ref k, out serial); } catch { serial = ""; }
+   return battery + "\t" + (serial ?? "").Replace("\t", " ").Trim();
+  } finally { if (own && target != null) { try { target.Close(); } catch {} } }
  }
  static IPortableDeviceValues Command(uint id) { var v = Values(); var category = Key(Common, 1001); var mtp = Mtp; v.SetGuidValue(ref category, ref mtp); var command = Key(Common, 1002); v.SetUnsignedIntegerValue(ref command, id); return v; }
  static IPortableDeviceValues Send(IPortableDeviceValues p) { IPortableDeviceValues r; device.SendCommand(0, p, out r); int hr; var key = Key(Common, 1003); r.GetErrorValue(ref key, out hr); if (hr != 0) throw new COMException("The camera refused the read.", hr); return r; }
@@ -199,10 +215,47 @@ function Walk($folder,[string[]]$parts,[string]$storage,$list,$id){
   if($list.Count%250 -eq 0){Send @{id=$id;progress=@{completed=$list.Count;total=0}}}
  }
 }
+# What the list says about each camera besides its cards, as the macOS helper does: its USB vendor id from the device's
+# PnP id, and its battery and serial number from WPD (read at most once a minute; a serial in the PnP id when WPD has
+# none: \\?\usb#vid_04b0&pid_0443#3012345#{...}, where a composite device's interface has a generated id with '&').
+# A camera with no storage is loading for 15 s after it appears (it is still mounting its cards), then it has no card.
+$seen=@{};$infos=@{};$usb=@{};$usbRead=[DateTime]::MinValue;$usbList=@()
+function Vendor([string]$id){if($id -match 'vid_([0-9a-f]{4})'){[Convert]::ToInt32($matches[1],16)}}
+function PathSerial([string]$pnp){if($pnp -match 'vid_[0-9a-f]{4}&pid_[0-9a-f]{4}#([^#&]+)#'){$matches[1]}}
+# \\?\usb#vid_04b0&pid_0443&mi_00#7&1a2b&0&0000#{...} -> USB\VID_04B0&PID_0443&MI_00\7&1A2B&0&0000, its device instance id.
+function Instance([string]$pnp){$parts=$pnp.Substring([Math]::Min(4,$pnp.Length)).Split('#');if($parts.Count -lt 3){return ''};($parts[0..2] -join '\').ToUpperInvariant()}
+function Info([string]$pnp){$known=$infos[$pnp];if($known -and ((Get-Date)-$known.at).TotalSeconds -lt 60){return $known};$i=@{at=(Get-Date);battery=-1;serial=''};try{$p=([CameraRead]::Info($pnp)).Split([char]9);$i.battery=[int]$p[0];$i.serial=$p[1]}catch{};$infos[$pnp]=$i;$i}
+# Still-image USB devices (interface class 06, what the macOS helper looks for) that Windows has not offered as a portable
+# device: no driver, a driver problem, or a USB mode WPD does not list. Read at most every 10 s; reported after 20 s.
+function Unanswered($instances){
+ $now=Get-Date
+ if(($now-$script:usbRead).TotalSeconds -ge 10){$script:usbRead=$now;$script:usbList=@(Get-CimInstance Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USB%'" -ErrorAction SilentlyContinue|Where-Object{@($_.CompatibleID) -match '^USB\\Class_06'})}
+ $present=@{}
+ foreach($d in $script:usbList){
+  $id=([string]$d.PNPDeviceID).ToUpperInvariant();$present[$id]=1;if(-not $usb[$id]){$usb[$id]=$now}
+  if($instances -contains $id -or ($now-$usb[$id]).TotalSeconds -lt 20){continue}
+  $o=@{name=[string]$d.Name;cameraID='usb:'+$id;unanswered=$true};$v=Vendor $id;if($v){$o.vendor=$v};$o
+ }
+ foreach($id in @($usb.Keys)){if(-not $present[$id]){$usb.Remove($id)}}
+}
+function List{
+ $now=Get-Date;$cameras=@(Cameras);$instances=@();$pnps=@{}
+ $result=@(foreach($camera in $cameras){
+  $pnp=Pnp $camera.Path;$pnps[$pnp]=1;$instances+=Instance $pnp;if(-not $seen[$pnp]){$seen[$pnp]=$now}
+  $o=@{name=$camera.Name;cameraID=$camera.Path};$storages=@(Storages $camera);$v=Vendor $pnp;if($v){$o.vendor=$v}
+  if($storages.Count){
+   $o.storages=$storages
+   $i=Info $pnp;if($i.battery -ge 0){$o.battery=$i.battery};$s=$i.serial;if(-not $s){$s=PathSerial $pnp};if($s){$o.serial=$s}
+  }elseif(($now-$seen[$pnp]).TotalSeconds -lt 15){$o.loading=$true}else{$o.problem='noCards'}
+  $o
+ })
+ foreach($pnp in @($seen.Keys)){if(-not $pnps[$pnp]){$seen.Remove($pnp);$infos.Remove($pnp)}}
+ @($result)+@(Unanswered $instances)
+}
 while($null -ne ($line=$in.ReadLine())){
  try{$command=ConvertFrom-Json $line}catch{continue}
  try{
-  if($command.command -eq 'list'){Send @{id=$command.id;result=@(Cameras|ForEach-Object{@{name=$_.Name;cameraID=$_.Path;storages=@(Storages $_)}})}}
+  if($command.command -eq 'list'){Send @{id=$command.id;result=@(List)}}
   elseif($command.command -eq 'files'){
    $camera=Camera $command.cameraID;$list=New-Object Collections.ArrayList
    # With a storage id, only that storage (card slot); without one, the whole camera. Either way a storage's files stay under its name.

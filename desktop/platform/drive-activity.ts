@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { DestinationStatus, DriveActivity, Source } from '../shared';
 import { RateMeter } from '../rate-meter';
@@ -96,8 +97,11 @@ export interface DriveSampler {
   sample():Promise<Record<string,DriveActivity>>;
 }
 export interface SamplerOptions {
-  /** Runs ioreg; `withMedia` adds -l so IOMedia children (BSD names) are included. */
-  run(withMedia:boolean):Promise<string>;
+  /** macOS: runs ioreg; `withMedia` adds -l so IOMedia children (BSD names) are included. */
+  run?(withMedia:boolean):Promise<string>;
+  /** Windows and Linux: this system's cumulative counters of the wanted disks, by the names `volumeDisks` gives
+   * them (`windowsDiskCounters`, `linuxDiskCounters`). Used instead of `run`. */
+  counters?(wanted:ReadonlySet<string>):Promise<Map<string,Counters>>;
   now?():number;
   historyLength?:number;
   /** Minimum time between media listings, which are the costly form of the call. */
@@ -117,21 +121,25 @@ export function createDriveSampler(options:SamplerOptions):DriveSampler {
       if(changed){wantedKey=key;misses=0;}
       // The counters are read somewhere inside the call: its midpoint is the best time to give them (not the moment the call began).
       const began=now();
-      let stats=parseStatistics(await options.run(false)),at=(began+now())/2;
+      let byDisk:Map<string,Counters>,at:number;
+      if(options.counters){byDisk=await options.counters(wanted);at=(began+now())/2;}
+      else{
+      let stats=parseStatistics(await options.run!(false));at=(began+now())/2;
       const mapped=new Set([...diskMap.values()].flat());
       const stale=[...stats.keys()].some(id=>!diskMap.has(id))||[...diskMap.keys()].some(id=>!stats.has(id));
       if((stale||[...wanted].some(disk=>!mapped.has(disk)))&&(changed||at-lastMedia>=Math.min(MEDIA_RETRY_CAP,retry*2**misses))){
-        const mediaBegan=now(),xml=await options.run(true);at=(mediaBegan+now())/2;lastMedia=now();
+        const mediaBegan=now(),xml=await options.run!(true);at=(mediaBegan+now())/2;lastMedia=now();
         diskMap=parseDiskMap(xml);stats=parseStatistics(xml);
         // A wanted disk that still does not map (not a block-storage disk) must not cost a full listing every few seconds.
         misses=[...wanted].every(disk=>[...diskMap.values()].some(names=>names.includes(disk)))?0:Math.min(misses+1,20);
       }
       // A disk with several drivers (rare) adds their counters.
-      const byDisk=new Map<string,Counters>();
+      byDisk=new Map<string,Counters>();
       for(const [id,counters] of stats)for(const disk of diskMap.get(id)??[]){
         if(!wanted.has(disk))continue;
         const sum=byDisk.get(disk);
         byDisk.set(disk,sum?Object.fromEntries((Object.keys(sum) as (keyof Counters)[]).map(key=>[key,sum[key]+counters[key]])) as unknown as Counters:{...counters});
+      }
       }
       for(const disk of [...previous.keys()])if(!wanted.has(disk)){previous.delete(disk);history.delete(disk);latest.delete(disk);meters.delete(disk);}
       for(const [disk,counters] of byDisk){
@@ -170,21 +178,90 @@ export async function runIoreg(withMedia:boolean):Promise<string> {
   return stdout;
 }
 
-/** The whole disks behind every connected source (keyed by source id) and destination (keyed by its path):
- * a folder maps to the volume it lives on. Cameras and unknown volumes have no entry. */
-export function activityTargets(volumes:Pick<MountedVolume,'path'|'physicalId'>[],sources:Pick<Source,'id'|'path'|'transport'>[],destinations:Pick<DestinationStatus,'path'|'physicalId'|'available'>[]):Record<string,string[]> {
+/** The disks a volume is on, named the way this system's counters name them: macOS whole disks (disk6, or
+ * disk4+disk5 for an APFS container over two), the Windows drive letter ("D:", matched to its physical disk by the
+ * PhysicalDisk counter's instance name "2 D: E:"), the Linux whole block device ("sdb", "mmcblk0" from /dev/sdb). */
+export function volumeDisks(volume:Pick<MountedVolume,'path'|'physicalId'>|undefined,physicalId:string|undefined,platform:NodeJS.Platform=process.platform):string[] {
+  if(platform==='win32'){const letter=/^([A-Za-z]):/.exec(volume?.path??'')?.[1];return letter?[`${letter.toUpperCase()}:`]:[];}
+  if(platform==='linux'){const disk=/^\/dev\/([\w.-]+)$/.exec(physicalId??volume?.physicalId??'')?.[1];return disk?[disk]:[];}
+  return wholeDisks(physicalId??volume?.physicalId);
+}
+/** The disks behind every connected source (keyed by source id) and destination (keyed by its path), named by
+ * `volumeDisks`: a folder maps to the volume it lives on. Cameras and unknown volumes have no entry. */
+export function activityTargets(volumes:Pick<MountedVolume,'path'|'physicalId'>[],sources:Pick<Source,'id'|'path'|'transport'>[],destinations:Pick<DestinationStatus,'path'|'physicalId'|'available'>[],platform:NodeJS.Platform=process.platform):Record<string,string[]> {
   const result:Record<string,string[]>={};
   for(const source of sources){
     if(source.transport==='camera')continue;
-    const disks=wholeDisks(volumeOf(volumes,source.path)?.physicalId);
+    const disks=volumeDisks(volumeOf(volumes,source.path),undefined,platform);
     if(disks.length)result[source.id]=disks;
   }
   for(const destination of destinations){
     if(!destination.available)continue;
-    const disks=wholeDisks(destination.physicalId??volumeOf(volumes,destination.path)?.physicalId);
+    const disks=volumeDisks(volumeOf(volumes,destination.path),destination.physicalId,platform);
     if(disks.length)result[destination.path]=disks;
   }
   return result;
+}
+
+/** Windows: the raw (cumulative) PhysicalDisk counters, from Win32_PerfRawData_PerfDisk_PhysicalDisk as
+ * ConvertTo-Json prints it. Each instance is named by its disk number and drive letters ("2 D: E:"); every letter
+ * gets that disk's counters, so two volumes of one disk read the same disk. The read and write times are in 100 ns
+ * units summed over concurrent requests, as on macOS. */
+export function parseWindowsDiskCounters(json:string):Map<string,Counters> {
+  const result=new Map<string,Counters>();
+  let rows:unknown;try{rows=JSON.parse(json);}catch{return result;}
+  for(const row of (Array.isArray(rows)?rows:[rows]) as Record<string,unknown>[]){
+    if(typeof row?.Name!=='string'||row.Name==='_Total')continue;
+    const counters:Counters={readBytes:num(Number(row.DiskReadBytesPersec)),writeBytes:num(Number(row.DiskWriteBytesPersec)),readOps:num(Number(row.DiskReadsPersec)),writeOps:num(Number(row.DiskWritesPersec)),readNs:num(Number(row.PercentDiskReadTime))*100,writeNs:num(Number(row.PercentDiskWriteTime))*100};
+    for(const letter of row.Name.match(/\b[A-Za-z]:/g)??[])result.set(letter.toUpperCase(),counters);
+  }
+  return result;
+}
+/** Linux: /proc/diskstats (sectors are always 512 bytes there; times in ms, summed over requests in flight). */
+export function parseLinuxDiskstats(text:string):Map<string,Counters> {
+  const result=new Map<string,Counters>();
+  for(const line of text.split('\n')){
+    const field=line.trim().split(/\s+/);if(field.length<11)continue;
+    const n=(index:number)=>num(Number(field[index]));
+    result.set(field[2]!,{readOps:n(3),readBytes:n(5)*512,readNs:n(6)*1e6,writeOps:n(7),writeBytes:n(9)*512,writeNs:n(10)*1e6});
+  }
+  return result;
+}
+const pick=(all:Map<string,Counters>,wanted:ReadonlySet<string>)=>new Map([...all].filter(([disk])=>wanted.has(disk)));
+/** Linux: one read of /proc/diskstats covers every disk; no process is started. */
+export async function linuxDiskCounters(wanted:ReadonlySet<string>):Promise<Map<string,Counters>> {
+  return pick(parseLinuxDiskstats(await readFile('/proc/diskstats','utf8')),wanted);
+}
+/** Windows: one PowerShell kept running for the meter, asked for a reading by a line on stdin: starting PowerShell
+ * every second would cost more than the reading. CIM class and property names are the same in every Windows
+ * language (the counter paths typeperf takes are translated). It ends when its stdin closes. */
+let windowsReader:{child:ChildProcessWithoutNullStreams;waiting:((line:string)=>void)[];buffer:string}|undefined;
+const windowsScript="$q='SELECT Name,DiskReadBytesPersec,DiskWriteBytesPersec,DiskReadsPersec,DiskWritesPersec,PercentDiskReadTime,PercentDiskWriteTime FROM Win32_PerfRawData_PerfDisk_PhysicalDisk';while($null -ne [Console]::In.ReadLine()){try{[Console]::Out.WriteLine((ConvertTo-Json -Compress -InputObject @(Get-CimInstance -Query $q|Select-Object Name,DiskReadBytesPersec,DiskWriteBytesPersec,DiskReadsPersec,DiskWritesPersec,PercentDiskReadTime,PercentDiskWriteTime)))}catch{[Console]::Out.WriteLine('[]')}}";
+export function windowsDiskCounters(wanted:ReadonlySet<string>):Promise<Map<string,Counters>> {
+  if(!windowsReader||windowsReader.child.exitCode!==null){
+    const child=spawn('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(windowsScript,'utf16le').toString('base64')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+    const reader={child,waiting:[] as ((line:string)=>void)[],buffer:''};windowsReader=reader;
+    child.stdout.setEncoding('utf8');child.stderr.resume();
+    child.stdout.on('data',(text:string)=>{reader.buffer+=text;let at:number;while((at=reader.buffer.indexOf('\n'))>=0){const line=reader.buffer.slice(0,at);reader.buffer=reader.buffer.slice(at+1);reader.waiting.shift()?.(line);}});
+    const gone=()=>{if(windowsReader===reader)windowsReader=undefined;for(const done of reader.waiting.splice(0))done('[]');};
+    child.on('exit',gone);child.on('error',gone);child.stdin.on('error',gone);
+  }
+  const reader=windowsReader!;
+  return new Promise((resolve,reject)=>{
+    // The first reading also starts PowerShell and loads CIM: it gets longer.
+    const timer=setTimeout(()=>{reader.waiting=reader.waiting.filter(item=>item!==done);reject(new Error('Disk counters timed out.'));},10000);
+    const done=(line:string)=>{clearTimeout(timer);resolve(pick(parseWindowsDiskCounters(line),wanted));};
+    reader.waiting.push(done);reader.child.stdin.write('sample\n');
+  });
+}
+/** Ends the Windows counter reader, if one runs. */
+export function closeDiskCounters():void {const reader=windowsReader;windowsReader=undefined;try{reader?.child.kill();}catch{/* Already gone. */}}
+/** This system's native counter reader: ioreg on macOS, PowerShell CIM on Windows, /proc/diskstats on Linux. */
+export function nativeDriveSampler(platform:NodeJS.Platform=process.platform):DriveSampler|undefined {
+  if(platform==='darwin')return createDriveSampler({run:runIoreg});
+  if(platform==='win32')return createDriveSampler({counters:windowsDiskCounters});
+  if(platform==='linux')return createDriveSampler({counters:linuxDiskCounters});
+  return undefined;
 }
 
 export interface ActivityLoopOptions {

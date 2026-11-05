@@ -446,7 +446,7 @@ async function exclusivePublication(staged:string,entry:Entry,index:number,m:Man
   // A stream slot on each device and the memory governor, like every other whole-file copy.
   await streams.run([staged,entry.destination],async chunk=>{
    const input=await regularHandle(staged);
-   try {const buffer=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}if(!settled){settled=true;await output.sync();const settledStat=await output.stat({bigint:true}),now=statRecord(settledStat);if(now.dev!==created.dev||now.ino!==created.ino)await checkpoint(m,'exclusive-created',index,{stat:now,birthtimeNs:String(settledStat.birthtimeNs)});}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs);await output.sync();}finally{await input.close();}
+   try {const buffer=Buffer.allocUnsafe(chunk);for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;let offset=0;while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,null);if(!bytesWritten)throw new Error('Unable to publish exclusive copy');offset+=bytesWritten;}if(!settled){settled=true;await output.sync();const settledStat=await output.stat({bigint:true}),now=statRecord(settledStat);if(now.dev!==created.dev||now.ino!==created.ino)await checkpoint(m,'exclusive-created',index,{stat:now,birthtimeNs:String(settledStat.birthtimeNs)});}}const stat=await input.stat({bigint:true});await applyFileTimestamps(output,stat,entry.captureTimeMs,entry.destination);await output.sync();}finally{await input.close();}
   },signal);
  }finally{await output.close();}
 }
@@ -492,7 +492,7 @@ async function copyThroughStage(staged:string,output:fs.FileHandle,entry:Entry,i
   },signal);
   // Still the file streamed, by its path too: those bytes are this run's proof of it.
   proofs?.seed(input,before,entry.digest,await fs.lstat(input,{bigint:true}));
-  await applyFileTimestamps(output,before,entry.captureTimeMs);await output.sync();
+  await applyFileTimestamps(output,before,entry.captureTimeMs,staged);await output.sync();
  } finally {await source.close();await output.close();}
  const stage=await proven(staged,async()=>{if(await digest(staged,signal)!==entry.digest)throw new Error('Recovery stage verification failed');});
  checkAbort(signal);await roots(m);await contained(entry.destination,m.root);await checkpoint(m,'publish-intent',index);
@@ -876,7 +876,7 @@ async function finishMove(entry:Entry,index:number,m:Manifest,state:JournalState
   // FAT and exFAT report ctime equal to mtime and cannot store dates before 1980.
   if(entry.captureTimeMs<earliestStorableDate&&current.ctimeNs===current.mtimeNs){note(`${path.basename(entry.destination)}: capture date before 1980 cannot be stored`);return;}
   try {
-   const stored=await applyFileTimestamps(handle,current,entry.captureTimeMs);await handle.sync();
+   const stored=await applyFileTimestamps(handle,current,entry.captureTimeMs,entry.destination);await handle.sync();
    await remember('timed',await handle.stat({bigint:true}));
    if(!stored)note(`${path.basename(entry.destination)}: the drive cannot store its capture date`);
   } catch(error) {
@@ -1440,7 +1440,7 @@ export async function undoOrganization(root:string,id:string,signal?:AbortSignal
        for(;;){checkAbort(signal);const {bytesRead}=await input.read(buffer,0,buffer.length,null);if(!bytesRead)break;await hash.update(buffer.subarray(0,bytesRead));let offset=Math.max(0,Math.min(bytesRead,initial-position));
         while(offset<bytesRead){const {bytesWritten}=await output.write(buffer,offset,bytesRead-offset,position+offset);if(!bytesWritten)throw new Error('Unable to restore original');offset+=bytesWritten;}position+=bytesRead;tick();}
        if(position!==entry.size||await hash.digest()!==entry.digest||!sameStat(before,await input.stat({bigint:true}))||!sameStat(before,await fs.lstat(from,{bigint:true})))throw new Error('Undo source changed while copying');
-       await applyFileTimestamps(output,before);await output.sync();
+       await applyFileTimestamps(output,before,undefined,prior&&!prior.absent?prior.file:entry.source);await output.sync();
       }finally{hash.drop();await input.close();}
      },signal);
     }finally{await output.close();}

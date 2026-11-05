@@ -73,7 +73,7 @@ test('targets map sources and destinations to whole disks through their volume',
     { id: 'uuid-1', path: '/Volumes/A006', transport: 'storage' },
     { id: 'f', path: '/Users/me/Pictures', transport: 'folder' },
     { id: 'cam', path: '', transport: 'camera' },
-  ], [{ path: '/Volumes/Pair/Backup', available: true, physicalId: 'disk4+disk5' }, { path: '/Volumes/Gone', available: false }]);
+  ], [{ path: '/Volumes/Pair/Backup', available: true, physicalId: 'disk4+disk5' }, { path: '/Volumes/Gone', available: false }], 'darwin');
   assert.deepEqual(targets, { 'uuid-1': ['disk6'], f: ['disk0'], '/Volumes/Pair/Backup': ['disk4', 'disk5'] });
 });
 

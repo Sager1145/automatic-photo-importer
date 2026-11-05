@@ -2,6 +2,7 @@
 import { readdir, readlink, symlink } from 'node:fs/promises';
 import { sep } from 'node:path';
 import { parseLinuxVolumes } from '../../platform/volumes';
+import { createDriveSampler, parseLinuxDiskstats } from '../../platform/drive-activity';
 import type { PlatformProfile } from '../platform-features';
 
 export const linux: PlatformProfile = {
@@ -42,7 +43,29 @@ export const linux: PlatformProfile = {
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
   previews: { photos: 'image', posters: false },
+  // Two readings of /proc/diskstats (whole disks and partitions); the card (mmcblk0) was read between them.
+  driveActivity: { disks: [['mmcblk0'], ['sdb']], sampler: now => {
+    let next = 0;
+    return createDriveSampler({ now, counters: async wanted => new Map([...parseLinuxDiskstats(diskstats[Math.min(next++, 1)]!)].filter(([disk]) => wanted.has(disk))) });
+  } },
 };
+
+const diskstats = [
+  [
+    '   8       0 sda 412337 10112 30117234 210334 501231 90233 81223114 993221 0 612331 1203555 0 0 0 0 20111 1112',
+    '   8      16 sdb 2011 0 160112 1203 310221 0 79135112 3574133 0 401220 3575336 0 0 0 0 0 0',
+    '   8      17 sdb1 1990 0 159800 1200 310221 0 79135112 3574133 0 401220 3575333 0 0 0 0 0 0',
+    ' 179       0 mmcblk0 162740 0 41662336 210118 16 0 2048 12 0 180113 210130 0 0 0 0 0 0',
+    ' 179       1 mmcblk0p1 162700 0 41660000 210100 16 0 2048 12 0 180100 210112 0 0 0 0 0 0',
+  ].join('\n'),
+  [
+    '   8       0 sda 412349 10112 30117746 210337 501309 90233 81226186 993241 0 612351 1203578 0 0 0 0 20111 1112',
+    '   8      16 sdb 2011 0 160112 1203 310590 0 79323528 3580133 0 401820 3581336 0 0 0 0 0 0',
+    '   8      17 sdb1 1990 0 159800 1200 310590 0 79323528 3580133 0 401820 3581333 0 0 0 0 0 0',
+    ' 179       0 mmcblk0 163108 0 41850752 210868 16 0 2048 12 0 180863 210880 0 0 0 0 0 0',
+    ' 179       1 mmcblk0p1 163068 0 41848416 210850 16 0 2048 12 0 180850 210862 0 0 0 0 0 0',
+  ].join('\n'),
+];
 
 /** What this process has open under the root: its descriptors in /proc (lsof is not on every distribution). */
 async function heldOpen(root: string): Promise<string[]> {

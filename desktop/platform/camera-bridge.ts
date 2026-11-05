@@ -152,8 +152,65 @@ export async function cameraSources():Promise<Source[]> {
   // The first Windows request also compiles the bridge's reader, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=cameraSourcesFrom(result);unanswered=unansweredCameras(result);loading=loadingCameras(result);
+  cached=withListedContents(cameraSourcesFrom(result));unanswered=unansweredCameras(result);loading=loadingCameras(result);
   return cached;
+}
+/** Each card's contents (files and bytes per extension, the date range) from one listing of a camera's files, by card name. */
+export function listingContents(files:readonly CameraFile[]):Map<string,CardContents> {
+  const result=new Map<string,CardContents>();
+  for(const file of files){
+    let card=result.get(file.storage);if(!card){card={extensions:{}};result.set(file.storage,card);}
+    const ext=/\.([a-z0-9]{1,8})$/i.exec(file.name)?.[1]?.toLowerCase()??'';
+    const [count,bytes]=card.extensions[ext]??[0,0];card.extensions[ext]=[count+1,bytes+file.size];
+    const at=file.created??file.modified;
+    if(at){card.first=Math.min(card.first??at,at);card.last=Math.max(card.last??at,at);}
+  }
+  return result;
+}
+/** Several cards' contents as one (a camera imported as one source). */
+function mergedContents(cards:Iterable<CardContents>):CardContents|undefined {
+  let all:CardContents|undefined;
+  for(const card of cards){
+    all??={extensions:{}};
+    for(const [ext,[count,bytes]] of Object.entries(card.extensions)){const [c,b]=all.extensions[ext]??[0,0];all.extensions[ext]=[c+count,b+bytes];}
+    if(card.first)all.first=Math.min(all.first??card.first,card.first);
+    if(card.last)all.last=Math.max(all.last??card.last,card.last);
+  }
+  return all;
+}
+/** Cameras listed in the background for their cards' contents, keyed by camera id: the cards' capacity and free space
+ * when listed (a camera is listed again once they change), when, and the listing, kept briefly for the shutter count. */
+const listings=new Map<string,{key:string;at:number;files:CameraFile[];cards:Map<string,CardContents>}>();
+const listing=new Set<string>();
+/** How long a background listing serves the shutter-count read instead of a listing of its own. */
+const LISTING_REUSE_MS=90000;
+/** Fills in each camera card's contents where the helper sent none. macOS: the ImageCaptureCore helper sends them from
+ * its own catalog. Windows: the Portable Devices bridge has no catalog, so a camera is listed once, in the background,
+ * after it connects (about 10 s for 7,850 files on a Nikon Z f), and again only when its cards' free space changes.
+ * Linux has no camera bridge yet. */
+function withListedContents(sources:Source[]):Source[] {
+  if(process.platform!=='win32')return sources;
+  const cameras=new Map<string,Source[]>();
+  for(const source of sources){const {cameraID}=cameraOf(source);cameras.set(cameraID,[...(cameras.get(cameraID)??[]),source]);}
+  for(const cameraID of [...listings.keys()])if(!cameras.has(cameraID))listings.delete(cameraID);
+  for(const [cameraID,cards] of cameras){
+    if(cards.every(card=>card.details?.contents))continue;
+    const key=cards.map(card=>`${card.storage?.id??''}:${card.total??''}:${card.free??''}`).join('|');
+    const known=listings.get(cameraID);
+    if(known?.key!==key){if(!listing.has(cameraID))void listInBackground(cameraID,key);continue;}
+    for(const card of cards){
+      const contents=card.storage?known.cards.get(card.storage.name):mergedContents(known.cards.values());
+      if(contents&&!card.details?.contents)card.details={...card.details,contents};
+    }
+  }
+  return sources;
+}
+async function listInBackground(cameraID:string,key:string):Promise<void> {
+  listing.add(cameraID);opened++;
+  try{const {files}=cameraFiles(await request({command:'files',cameraID},120000));listings.set(cameraID,{key,at:Date.now(),files,cards:listingContents(files)});}
+  // Not listed again until its cards change: a camera that cannot be listed now is not asked every few seconds.
+  catch{listings.set(cameraID,{key,at:0,files:[],cards:new Map()});}
+  finally{opened--;listing.delete(cameraID);}
 }
 /** One file as the helper lists it: its storage (card slot), folders, name, size, dates (ms) and the helper's own id for it. */
 export interface CameraFile {storage:string;folder:string[];name:string;size:number;modified?:number;created?:number;objectID:string;}
@@ -222,7 +279,10 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
 export async function withNewestCameraPhoto<T>(cameraID:string,use:(file:string)=>Promise<T>):Promise<T|undefined> {
   opened++;sessions.set(cameraID,(sessions.get(cameraID)??0)+1);
   try {
-    const {files}=cameraFiles(await request({command:'files',cameraID},120000));
+    // A listing made moments ago for the cards' contents (Windows) is used once rather than listing the camera again.
+    const recent=listings.get(cameraID);
+    const files=recent&&recent.files.length&&Date.now()-recent.at<LISTING_REUSE_MS?recent.files:cameraFiles(await request({command:'files',cameraID},120000)).files;
+    if(recent)recent.files=[];
     const photos=files.filter(file=>/\.(nef|nrw|arw|srf|sr2|cr2|cr3|crw|raf|orf|rw2|pef|dng|srw|3fr|fff|iiq|x3f|rwl|jpe?g|hif|heic|heif)$/i.test(file.name));
     const newest=photos.sort((a,b)=>(b.modified??b.created??0)-(a.modified??a.created??0)||b.name.localeCompare(a.name))[0];
     if(!newest)return undefined;

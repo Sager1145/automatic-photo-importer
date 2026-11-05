@@ -1,7 +1,9 @@
 // macOS: `diskutil info -plist` output, /Volumes mounts, symbolic links, folders that can be flushed.
 import { symlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { parseMacVolume } from '../../platform/volumes';
+import { createDriveSampler } from '../../platform/drive-activity';
 import type { PlatformProfile } from '../platform-features';
 
 export const darwin: PlatformProfile = {
@@ -43,6 +45,13 @@ export const darwin: PlatformProfile = {
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
   previews: { photos: 'system', posters: true },
+  // Two readings of `ioreg -c IOBlockStorageDriver -r -w0 -l -a` on a Mac; disk4 was written between them.
+  driveActivity: { disks: [['disk4'], ['disk5']], sampler: now => {
+    const readings = ['a', 'b'].map(name => readFileSync(new URL(`../fixtures/ioreg-storage-${name}.plist`, import.meta.url), 'utf8'));
+    let next = 0;
+    // The listing with media (taken once, right after the first plain reading) is that same reading.
+    return createDriveSampler({ now, run: async withMedia => withMedia ? readings[Math.max(0, next - 1)]! : readings[Math.min(next++, 1)]! });
+  } },
 };
 
 /** What any process has open under the root, as lsof lists it (exit 1: nothing). */
