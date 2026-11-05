@@ -41,6 +41,7 @@ import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
 import { resolveCatalogFile } from '../catalog/access';
 import { collectDragFiles } from '../core/file-drag';
 import { systemDecoders } from '../platform/thumbnails';
+import type { StorageMedia } from '../core/storage-media';
 
 export type Platform = 'darwin' | 'win32' | 'linux';
 export interface PlatformProfile {
@@ -49,6 +50,11 @@ export interface PlatformProfile {
   volumes(): MountedVolume[];
   /** Names people should see for those two drives. */
   driveNames: [card: string, ssd: string];
+  /** What those two drives are (their medium), as this system reports them. */
+  driveMedia: [card: StorageMedia, ssd: StorageMedia];
+  /** This system's drive tool output for other media, parsed by its adapter: a CFexpress Type B reader, a microSD
+   * reader, a USB flash drive, a DVD and a floppy disk, in that order. */
+  otherMedia(): MountedVolume[];
   /** This system's kind of folder link: a symbolic link, or a junction on Windows (no Developer Mode needed). */
   link(target: string, at: string): Promise<void>;
   /** navigator.platform in this system's app window, and how a USB camera named "Z f" reads there. */
@@ -93,6 +99,13 @@ const onNative = (profile: PlatformProfile, t: TestContext) => {
 };
 
 export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext) => void | Promise<void>> = {
+  'drive media: a card by its type, a USB stick, an external disk, a disc and a floppy, each told apart': profile => {
+    assert.deepEqual(profile.volumes().map(volume => volume.media), profile.driveMedia);
+    const other = profile.otherMedia();
+    assert.deepEqual(other.map(volume => volume.media), ['cfexpress-b', 'microsd', 'usb-drive', 'optical', 'floppy']);
+    // A disc and a floppy are removable sources like a card.
+    for (const volume of other.slice(3)) assert.equal(classifyVolume(volume, []).source, true, volume.path);
+  },
   'drive detection: a camera card is a source, an external SSD is a destination': profile => {
     const [card, ssd] = profile.volumes();
     assert.equal(classifyVolume(card!, ['DCIM']).source, true, 'card is a source');

@@ -17,7 +17,7 @@ import {randomUUID,randomBytes} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {parseArgs} from 'node:util';
 import {setTimeout as sleep} from 'node:timers/promises';
-import type {HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,DuplicateRemovalPlan,PlanEntry} from './shared';
+import type {ShutterNote,HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,DuplicateRemovalPlan,PlanEntry} from './shared';
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
 import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
@@ -61,7 +61,7 @@ import {OldRecordsNotice,onOldRecordsFound,type DriveRoots} from './core/old-rec
 import {recordPlanDuplicates,scanDuplicates,overlappingLibraries,type PlanDuplicates} from './core/duplicates';
 import {destinationIndex} from './core/destination-index';
 import {identity} from './core/paths';
-import {prepareCamera,closeCameraBridge,lastUnansweredCameras} from './platform/camera-bridge';
+import {prepareCamera,closeCameraBridge,lastLoadingCameras,lastUnansweredCameras,withNewestCameraPhoto,cameraOf} from './platform/camera-bridge';
 import {isListedPath,listedFile} from './core/source-fs';
 import {startScan,scansSettled} from './scan-process';
 import {terminateHasher} from './core/hasher';
@@ -384,10 +384,35 @@ function driveFormatsOf(volumes:MountedVolume[]):NonNullable<AppState['driveForm
  const system=process.platform==='win32'?`${process.env.SystemDrive??'C:'}\\`.toLowerCase():'/';
  return volumes.filter(volume=>!volume.diskImage&&(volume.fsType||volume.name)).map(volume=>({path:volume.path,name:volume.name||volume.path,...(volume.fsType?{fsType:volume.fsType}:{}),...(volume.readOnly?{readOnly:true}:{}),...(volume.path.toLowerCase()===system?{system:true}:{})}));
 }
+/** Each USB camera's shutter count, read from the EXIF header of its newest photo through the camera (nothing is
+ * copied), by camera id. `key` is the dates of its cards' last files: it is read again only when there are newer ones. */
+const cameraShutter=new Map<string,{key:string;count?:number;note?:ShutterNote}>();
+const shutterReading=new Set<string>();
+const cameraKey=(cameraID:string)=>state.sources.filter(source=>source.transport==='camera'&&cameraOf(source).cameraID===cameraID).map(source=>source.details?.contents?.last??0).sort().join(',');
+function applyCameraShutter(){
+  for(const source of state.sources){
+    if(source.transport!=='camera')continue;
+    const known=cameraShutter.get(cameraOf(source).cameraID);
+    if(known?.count!==undefined)source.details={...source.details,shutterCount:known.count,...(known.note?{shutterNote:known.note}:{})};
+  }
+}
+/** Starts reading the shutter count of each camera whose catalog is complete (its cards' contents are known). */
+function readCameraShutter(){
+  for(const source of state.sources){
+    if(source.transport!=='camera'||!source.details?.contents)continue;
+    const {cameraID}=cameraOf(source),key=cameraKey(cameraID);
+    if(shutterReading.has(cameraID)||cameraShutter.get(cameraID)?.key===key)continue;
+    shutterReading.add(cameraID);
+    void withNewestCameraPhoto(cameraID,file=>metadata(file,{details:false}))
+      .then(read=>{cameraShutter.set(cameraID,{key,...(read?.shutterCount!==undefined?{count:read.shutterCount}:{}),...(read?.shutterNote?{note:read.shutterNote}:{})});log('detailed','camera','shutter-count',{camera:source.name,count:read?.shutterCount,note:read?.shutterNote});applyCameraShutter();emit();})
+      .catch(error=>{cameraShutter.set(cameraID,{key});log('normal','camera','shutter-count-failed',{camera:source.name,error:toMessage(error)});})
+      .finally(()=>shutterReading.delete(cameraID));
+  }
+}
 async function refresh(){
  if(refreshing)return;refreshing=true;
  try{
-  const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});{const unanswered=qaFixtureRoot?[]:lastUnansweredCameras();if(unanswered.join('\n')!==(state.unansweredCameras??[]).join('\n')){state.unansweredCameras=unanswered.length?unanswered:undefined;if(unanswered.length)log('normal','camera','not-offered',{cameras:unanswered});}}releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
+  const volumes=mounts=await mountedVolumes();const chosen=chosenFolders(state.preferences),destinations=await Promise.all(chosen.map(folder=>volumeInfo(folder.path,volumes)));const found=qaFixtureRoot?[]:await getSources(volumes,{destinations});{const unanswered=qaFixtureRoot?[]:lastUnansweredCameras();if(JSON.stringify(unanswered)!==JSON.stringify(state.unansweredCameras??[])){state.unansweredCameras=unanswered.length?unanswered:undefined;if(unanswered.length)log('normal','camera','not-offered',{cameras:unanswered});}const loadingNow=qaFixtureRoot?[]:lastLoadingCameras();if(loadingNow.join('\n')!==(state.loadingCameras??[]).join('\n'))state.loadingCameras=loadingNow.length?loadingNow:undefined;}releaseMissingVolumes(volumes);dropStaleOriginals(volumes);
   state.destinationStatus=destinations;state.driveFormats=driveFormatsOf(volumes);await configureCatalog().catch(error=>log('normal','catalog','configure-warning',{error}));
   // Records go to the store at the configured destination a library lies beneath (or at a folder organized in place).
   registerDestinations([...chosen.map(folder=>recordsBase(folder.path)),...organizationLocations.filter(location=>location.folder).map(location=>location.destination)]);
@@ -397,7 +422,7 @@ async function refresh(){
   const detected=found;
   // A chosen folder the system now detects as a volume at the same path becomes that volume, still chosen.
   for(const source of detected){const selected=Array.from(folders.entries()).find(([,value])=>value.source.path===source.path);if(selected&&selected[0]!==source.id){folders.delete(selected[0]);folders.set(source.id,{source,backup:selected[1].backup});selection.replace(selected[0],source.id);}}
-  state.sources=selection.apply([...detected,...Array.from(folders.values(),v=>v.source).filter(source=>source.transport==='folder'&&!detected.some(s=>s.path===source.path))],state.preferences.rememberedDevices??={},state.preferences.ignoredDevices??={},state.preferences.deviceHistory??={});publishDevices();loadRememberedScans();
+  state.sources=selection.apply([...detected,...Array.from(folders.values(),v=>v.source).filter(source=>source.transport==='folder'&&!detected.some(s=>s.path===source.path))],state.preferences.rememberedDevices??={},state.preferences.ignoredDevices??={},state.preferences.deviceHistory??={});publishDevices();loadRememberedScans();applyCameraShutter();readCameraShutter();
   const connected=new Set(state.sources.map(s=>s.id));for(const id of Object.keys(state.sourceInventories??{}))if(!connected.has(id)){delete state.sourceInventories![id];delete state.sourceCameraInfo?.[id];scanControls.get(id)?.abort();}for(const id of seen)if(!connected.has(id))seen.delete(id);
   // Automatic imports wait until every destination the copy policy needs is connected;
   // unqueued sources stay unseen and are picked up on a later refresh.

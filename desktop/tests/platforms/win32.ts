@@ -12,6 +12,15 @@ export const win32: PlatformProfile = {
     { Path: 'I:\\', Label: 'A006', VolumeId: '\\\\?\\Volume{ssd}\\', DriveType: 'Fixed', Size: 2000319152128, SizeRemaining: 192869695488, DiskNumber: 1, UniqueId: '5000000000000001', BusType: 'USB', FriendlyName: 'Micron CT2000X9PROSSD9', FileSystem: 'exFAT', IsReadOnly: false },
   ]),
   driveNames: ['Sony DSC (D:)', 'A006'],
+  driveMedia: ['camera', 'external-disk'],
+  // Get-Volume/Get-Disk: a disc is DriveType CD-ROM; a reader's model names its card; a floppy is 1.44 MB FAT.
+  otherMedia: () => parseWindowsVolumes([
+    { Path: 'E:\\', Label: 'CFEB', DriveType: 'Removable', Size: 512e9, SizeRemaining: 4e11, DiskNumber: 3, BusType: 'USB', FriendlyName: 'ProGrade CFexpress Type B USB Device', FileSystem: 'exFAT', IsReadOnly: false },
+    { Path: 'F:\\', Label: 'MICRO', DriveType: 'Removable', Size: 128e9, SizeRemaining: 1e11, DiskNumber: 4, BusType: 'USB', FriendlyName: 'Generic- Micro SD/M2 USB Device', FileSystem: 'exFAT', IsReadOnly: false },
+    { Path: 'G:\\', Label: 'STICK', DriveType: 'Removable', Size: 64e9, SizeRemaining: 6e10, DiskNumber: 5, BusType: 'USB', FriendlyName: 'SanDisk Ultra Fit USB Device', FileSystem: 'exFAT', IsReadOnly: false },
+    { Path: 'H:\\', Label: 'HOLIDAY', DriveType: 'CD-ROM', Size: 4.7e9, SizeRemaining: 0, FileSystem: 'UDF', IsReadOnly: true },
+    { Path: 'A:\\', Label: '', DriveType: 'Removable', Size: 1457664, SizeRemaining: 1e6, DiskNumber: 6, BusType: 'USB', FriendlyName: 'TEAC USB UF000x USB Device', FileSystem: 'FAT', IsReadOnly: false },
+  ]),
   link: (target, at) => symlink(target, at, 'junction'),
   navigatorPlatform: 'Win32',
   cameraPlace: 'USB\\Z f',

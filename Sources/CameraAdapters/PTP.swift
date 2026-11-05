@@ -7,6 +7,9 @@ public enum PTP {
     public static let getStorageInfo: UInt16 = 0x1005
     public static let getObjectHandles: UInt16 = 0x1007
     public static let getObjectInfo: UInt16 = 0x1008
+    public static let getDevicePropDesc: UInt16 = 0x1014
+    /// The standard battery level property (PTP 1.1, 13.5.2).
+    public static let batteryLevel: UInt32 = 0x5001
     public static let ok: UInt16 = 0x2001
     /// ObjectFormatCode of a folder.
     public static let association: UInt16 = 0x3001
@@ -38,13 +41,29 @@ public enum PTP {
 
     public struct StorageInfo: Equatable, Sendable {
         public let maxCapacity: UInt64, freeSpace: UInt64, description: String, label: String
+        /// How many more pictures the camera says fit (0xFFFFFFFF: it does not say).
+        public var freeImages: UInt32 = .max
     }
     public static func storageInfo(_ data: Data) -> StorageInfo? {
         var reader = Reader(data)
         _ = reader.u16(); _ = reader.u16(); _ = reader.u16()
-        let capacity = reader.u64(), free = reader.u64(); _ = reader.u32()
+        let capacity = reader.u64(), free = reader.u64(), images = reader.u32()
         let description = reader.string(), label = reader.string()
-        return reader.overrun ? nil : StorageInfo(maxCapacity: capacity, freeSpace: free, description: description, label: label)
+        return reader.overrun ? nil : StorageInfo(maxCapacity: capacity, freeSpace: free, description: description, label: label, freeImages: images)
+    }
+
+    /// The battery level in percent from its property description (GetDevicePropDesc 0x5001): the current value placed
+    /// in the camera's own range (Nikon 0–100, others 0–3 or 0–4 steps), or nil when it is not a UINT8 range or enum.
+    public static func batteryPercent(_ data: Data) -> Int? {
+        var reader = Reader(data)
+        guard reader.u16() == UInt16(batteryLevel), reader.u16() == 0x0002 else { return nil }
+        _ = reader.u8(); _ = reader.u8()
+        let current = Int(reader.u8()), form = reader.u8()
+        var low = 0, high = 100
+        if form == 1 { low = Int(reader.u8()); high = Int(reader.u8()); _ = reader.u8() }
+        else if form == 2 { let count = Int(reader.u16()); let values = (0..<count).map { _ in Int(reader.u8()) }; low = values.min() ?? 0; high = values.max() ?? 100 }
+        guard !reader.overrun, high > low, current >= low, current <= high else { return nil }
+        return Int((Double(current - low) / Double(high - low) * 100).rounded())
     }
 
     public struct ObjectInfo: Equatable, Sendable {

@@ -698,6 +698,11 @@ test('the drive popup shows when a reconnected drive last finished a scan or a v
     const freshRow = both.match(/<li[^>]*data-source-id="fresh"[\s\S]*$/)?.[0] ?? '';
     assert.ok(freshRow.includes(t('Last scan finished {date}', { date: formatWhen('2026-10-18T09:00:00Z', language) })) && !freshRow.includes(t('Last import verified {date}', { date: '@@' }).split('@@')[0]), `${language}: new drive with history shows its scan`);
     assert.ok(freshRow.includes(t('Import from this drive')) && freshRow.includes(t("Don't import").replaceAll("'", '&#x27;')), `${language}: still needs a choice`);
+    // A camera whose cards are still read shows as loading, never as a drive; one no longer connected is not listed.
+    const loading = render({ newDevices: ['fresh', 'gone'], loadingCameras: ['Z f'] });
+    assert.ok(loading.includes('data-testid="drive-loading"') && loading.includes('Z f') && loading.includes(t("Reading the camera's cards and capacity…").replaceAll("'", '&#x27;')), `${language}: loading camera row`);
+    assert.ok(!loading.includes('data-testid="drive-unplugged"') && !loading.includes('data-source-id="gone"'), `${language}: no unplugged row`);
+    assert.ok(render({ loadingCameras: ['Z f'] }).includes('data-testid="drive-loading"'), `${language}: only a loading camera still shows`);
   }
 });
 

@@ -199,6 +199,58 @@ Recheck|重新检查|重新檢查|再確認
 Import|导入|匯入|インポート
 Verified|已校验|已驗證|検証済み
 Capacity unavailable over USB|USB 连接不提供容量信息|USB 連接不提供容量資訊|USB経由では容量を取得できません
+Reading the camera's cards and capacity…|正在读取相机的存储卡和容量…|正在讀取相機的記憶卡和容量…|カメラのカードと容量を読み取っています…
+USB camera|USB 相机|USB 相機|USB カメラ
+Serial {serial}|序列号 {serial}|序號 {serial}|シリアル {serial}
+{count} card slots|{count} 个卡槽|{count} 個卡槽|カードスロット {count} 基
+{name} shows no memory card it can read.|{name} 没有可读取的存储卡。|{name} 沒有可讀取的記憶卡。|{name} に読み取れるメモリーカードがありません。
+Turn the camera on or wake it, check that a card is in it, and check its USB mode: the camera may be in a mode that shows no files (tethering, webcam or phone).|请打开相机或将其唤醒，确认已插入存储卡，并检查 USB 模式：相机可能处于不显示文件的模式（联机拍摄、网络摄像头或手机）。|請開啟相機或將其喚醒，確認已插入記憶卡，並檢查 USB 模式：相機可能處於不顯示檔案的模式（連線拍攝、網路攝影機或手機）。|カメラの電源を入れるかスリープから復帰させ、カードが入っているか、USBモードを確認してください。ファイルが表示されないモード（テザー撮影、ウェブカメラ、スマートフォン）になっている可能性があります。
+Low: charge or change the battery before a long import.|电量低：长时间导入前请充电或更换电池。|電量低：長時間匯入前請充電或更換電池。|残量が少なくなっています。長い読み込みの前に充電または交換してください。
+Camera battery at {percent} %. Charge or change it, or connect power, before a long import.|相机电量为 {percent}%。长时间导入前请充电、更换电池或接通电源。|相機電量為 {percent}%。長時間匯入前請充電、更換電池或接上電源。|カメラのバッテリー残量は {percent}% です。長い読み込みの前に充電・交換するか、電源につないでください。
+Space|空间|空間|容量
+Room for|还可拍|還可拍|残り撮影可能
+About {count} more photos, as the camera estimates|约 {count} 张（相机估算）|約 {count} 張（相機估算）|約 {count} 枚（カメラの推定）
+On the card|卡内文件|卡內檔案|カードの内容
+No files|没有文件|沒有檔案|ファイルなし
+Battery|电量|電量|バッテリー
+Serial number|序列号|序號|シリアル番号
+File system|文件系统|檔案系統|ファイルシステム
+Write-protected|写保护|寫入保護|書き込み禁止
+Files can be copied but not deleted from it.|可以从中复制文件，但无法删除。|可以從中拷貝檔案，但無法刪除。|ファイルはコピーできますが、削除はできません。
+{count} RAW|{count} 个 RAW|{count} 個 RAW|RAW {count} 件
+{count} JPEG|{count} 个 JPEG|{count} 個 JPEG|JPEG {count} 件
+{count} HEIF|{count} 个 HEIF|{count} 個 HEIF|HEIF {count} 件
+{count} other photos|{count} 张其他照片|{count} 張其他照片|その他の写真 {count} 件
+{count} videos|{count} 个视频|{count} 個影片|動画 {count} 件
+Shutter count {count}|快门次数 {count}|快門次數 {count}|シャッター回数 {count}
+Battery {percent} %|电量 {percent}%|電量 {percent}%|バッテリー {percent}%
+Camera (USB drive)|相机（USB 驱动器）|相機（USB 磁碟）|カメラ（USBドライブ）
+SD card|SD 卡|SD 卡|SDカード
+microSD card|microSD 卡|microSD 卡|microSDカード
+CompactFlash card|CF 卡|CF 卡|CFカード
+CFast card|CFast 卡|CFast 卡|CFastカード
+CFexpress Type A card|CFexpress A 型卡|CFexpress A 型卡|CFexpress Type Aカード
+CFexpress Type B card|CFexpress B 型卡|CFexpress B 型卡|CFexpress Type Bカード
+CFexpress card|CFexpress 卡|CFexpress 卡|CFexpressカード
+XQD card|XQD 卡|XQD 卡|XQDカード
+Memory card|存储卡|記憶卡|メモリーカード
+USB flash drive|U 盘|USB 隨身碟|USBメモリ
+External drive|外置硬盘|外接硬碟|外付けドライブ
+CD or DVD|光盘|光碟|CD/DVD
+Floppy disk|软盘|軟碟|フロッピーディスク
+Canon: turn the camera’s Wi-Fi and Bluetooth fully off, and quit EOS Utility.|佳能：请彻底关闭相机的 Wi-Fi 和蓝牙，并退出 EOS Utility。|佳能：請徹底關閉相機的 Wi-Fi 和藍牙，並結束 EOS Utility。|キヤノン：カメラの Wi-Fi と Bluetooth を完全にオフにし、EOS Utility を終了してください。
+Sony: set Setup › USB › USB Connection Mode to MTP or Mass Storage, with PC Remote off.|索尼：将“设置 › USB › USB 连接模式”设为 MTP 或大容量存储，并关闭电脑遥控。|索尼：將「設定 › USB › USB 連接模式」設為 MTP 或大容量儲存，並關閉電腦遙控。|ソニー：「セットアップ › USB › USB接続モード」を MTP またはマスストレージにし、PCリモートをオフにしてください。
+Nikon: set Network › USB to MTP/PTP (not iPhone), and keep the camera on.|尼康：将“网络 › USB”设为 MTP/PTP（不要选 iPhone），并保持相机开机。|尼康：將「網路 › USB」設為 MTP/PTP（不要選 iPhone），並保持相機開機。|ニコン：「ネットワーク › USB」を MTP/PTP（iPhone 以外）にし、カメラの電源を入れたままにしてください。
+Fujifilm: set Connection Setting › PC Connection Mode to USB Card Reader (not tethering, RAW conversion or webcam).|富士：将“连接设置 › 电脑连接模式”设为 USB 读卡器（不要选联机拍摄、RAW 转换或网络摄像头）。|富士：將「連接設定 › 電腦連接模式」設為 USB 讀卡機（不要選連線拍攝、RAW 轉換或網路攝影機）。|富士フイルム：「接続設定 › PC接続モード」を USBカードリーダーにしてください（テザー撮影、RAW現像、ウェブカメラ以外）。
+Panasonic: set Setup › USB Mode to PC(Storage).|松下：将“设置 › USB 模式”设为 PC(Storage)。|松下：將「設定 › USB 模式」設為 PC(Storage)。|パナソニック：「セットアップ › USBモード」を PC(Storage) にしてください。
+OM System / Olympus: set USB Settings › USB Mode to Storage or MTP.|OM System / 奥林巴斯：将“USB 设置 › USB 模式”设为存储或 MTP。|OM System / 奧林巴斯：將「USB 設定 › USB 模式」設為儲存或 MTP。|OM System / オリンパス：「USB設定 › USBモード」をストレージまたは MTP にしてください。
+Pentax / Ricoh: set USB Connection to MTP or MSC before plugging the camera in.|宾得 / 理光：连接相机前，请将“USB 连接”设为 MTP 或 MSC。|賓得 / 理光：連接相機前，請將「USB 連接」設為 MTP 或 MSC。|ペンタックス / リコー：カメラをつなぐ前に「USB接続」を MTP または MSC にしてください。
+Leica: set USB Mode to Mass Storage (fastest) or PTP.|徕卡：将 USB 模式设为大容量存储（最快）或 PTP。|徠卡：將 USB 模式設為大容量儲存（最快）或 PTP。|ライカ：USBモードをマスストレージ（最速）または PTP にしてください。
+Sigma: set USB Mode to Mass Storage before connecting.|适马：连接前请将 USB 模式设为大容量存储。|適馬：連接前請將 USB 模式設為大容量儲存。|シグマ：接続する前に USBモードをマスストレージにしてください。
+Hasselblad: choose Mass Storage in the dialog the camera shows when it is connected.|哈苏：连接后，请在相机显示的对话框中选择大容量存储。|哈蘇：連接後，請在相機顯示的對話框中選擇大容量儲存。|ハッセルブラッド：接続したときにカメラに表示されるダイアログでマスストレージを選んでください。
+GoPro: set Preferences › Connections › USB Connection to MTP.|GoPro：将“偏好设置 › 连接 › USB 连接”设为 MTP。|GoPro：將「偏好設定 › 連線 › USB 連線」設為 MTP。|GoPro：「設定 › 接続 › USB接続」を MTP にしてください。
+DJI: accept the connection prompt on the camera, with webcam mode off.|大疆：请在相机上确认连接提示，并关闭网络摄像头模式。|大疆：請在相機上確認連線提示，並關閉網路攝影機模式。|DJI：カメラに表示される接続の確認を承認し、ウェブカメラモードをオフにしてください。
+Insta360: choose USB Drive (U-Disk) mode on the camera.|Insta360：请在相机上选择 USB 驱动器（U 盘）模式。|Insta360：請在相機上選擇 USB 磁碟（隨身碟）模式。|Insta360：カメラで USBドライブ（U-Disk）モードを選んでください。
 {name} is connected but not answering.|{name} 已连接，但没有响应。|{name} 已連接，但沒有回應。|{name} は接続されていますが応答しません。
 Turn the camera off and on, or unplug it and plug it in again. Quit Photos, Image Capture or another app that may be using it.|请将相机关机再开机，或拔下后重新连接。如果“照片”“图像捕捉”或其他应用可能正在使用它，请先退出。|請將相機關機再開機，或拔下後重新連接。如果「照片」、「影像擷取」或其他 App 可能正在使用它，請先結束。|カメラの電源を入れ直すか、ケーブルを抜いて差し直してください。「写真」や「イメージキャプチャ」など、カメラを使っている可能性のあるアプリは終了してください。
 This camera's cards and capacity could not be read, so it imports as one source. Turn it off and on to read them again.|无法读取这台相机的存储卡和容量，因此它会作为一个来源导入。将相机关机再开机即可重新读取。|無法讀取這台相機的記憶卡和容量，因此它會作為一個來源匯入。將相機關機再開機即可重新讀取。|このカメラのカードと容量を読み取れなかったため、1 つのソースとして読み込みます。電源を入れ直すと読み取り直します。

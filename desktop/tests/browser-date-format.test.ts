@@ -4,7 +4,7 @@ import {openCatalog} from '../catalog/store';
 import {library,record} from './catalog-fixtures';
 import type {CatalogQuery,Filter} from '../catalog/types';
 import {formatGroup} from '../media-formats';
-import {addDates,buildDateTree,covers,toggleDate,visibleDateRows} from '../renderer/browser/date-tree';
+import {addDates,buildDateTree,covers,dateState,toggleDate,visibleDateRows} from '../renderer/browser/date-tree';
 import {addBlock,createBlock,dateTreeLevels,defaultConfiguration,fieldForBlock,readConfiguration,updateBlock,type HierarchyBlock} from '../renderer/browser/configuration';
 import {chosenRowKeys,formatRows,selectionSummary,toggleBlockSelection} from '../renderer/browser/BrowserPage';
 
@@ -27,13 +27,25 @@ test('dates show as a tree of the chosen levels, each label saying only what its
  assert.equal(buildDateTree(days,['year','month','day'],'ja')[1]!.children[0]!.children[0]!.label,'1日 · 日曜日');
 });
 
-test('a chosen year or month covers the rows below it; taking one out keeps the rest chosen',()=>{
+test('choosing a row unchooses only the rows above and below it; a partly chosen row is striped, a fully chosen one full',()=>{
  const tree=buildDateTree([...days,{value:'2026-10-20',count:2}],['year','month','day'],'en');
- const year=tree[1]!,november=year.children[1]!,second=november.children[1]!;
+ const year=tree[1]!,october=year.children[0]!,november=year.children[1]!,first=november.children[0]!,second=november.children[1]!;
  assert.ok(covers(['2026'],'2026-11-02')&&!covers(['2026-1'],'2026-11-02'));
  assert.deepEqual(toggleDate([],tree,year,false),['2026']);
- // Out of a chosen year: its other month and the other days of that month stay chosen.
- assert.deepEqual(toggleDate(['2025','2026'],tree,second,true).sort(),['2025','2026-10','2026-11-01','2026-11-03']);
+ // A chosen year: only the year is highlighted, and all of it is chosen.
+ assert.deepEqual([year,november,second].map(node=>dateState(['2026'],node)),['full','none','none']);
+ // A month inside a chosen year: only that month; the year goes, the other year stays.
+ let chosen=toggleDate(['2025','2026'],tree,november,true);
+ assert.deepEqual(chosen.sort(),['2025','2026-11']);
+ assert.deepEqual([year,october,november].map(node=>dateState(chosen,node)),['partial','none','full']);
+ // Another month too: both chosen, the year now full (every month chosen).
+ chosen=toggleDate(chosen,tree,october,true);
+ assert.deepEqual(chosen.sort(),['2025','2026-10','2026-11']);assert.equal(dateState(chosen,year),'full');
+ // A day of a chosen month: that month goes, the other month stays.
+ chosen=toggleDate(chosen,tree,second,true);
+ assert.deepEqual(chosen.sort(),['2025','2026-10','2026-11-02']);
+ assert.deepEqual([year,november,first,second].map(node=>dateState(chosen,node)),['partial','partial','none','full']);
+ // Clicking a chosen row unchooses it.
  assert.deepEqual(toggleDate(['2026'],tree,year,true),[]);
  // Choosing a month drops its days, which it now covers; a Shift range adds without duplicates.
  assert.deepEqual(toggleDate(['2026-11-01','2025'],tree,november,true).sort(),['2025','2026-11']);

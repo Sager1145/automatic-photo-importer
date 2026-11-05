@@ -50,21 +50,27 @@ export function visibleDateRows(tree:readonly DateNode[],expanded:ReadonlySet<st
  walk(tree,0);return rows;
 }
 
-/** A row is chosen when it or a row above it is (a chosen year covers its months and days). */
+/** A row's files are chosen when it or a row above it is (a chosen year covers its months and days). */
 export const covers=(chosen:readonly string[],value:string)=>chosen.some(v=>value===v||value.startsWith(v+'-'));
 
-/** A click on a row. Alone it becomes the only choice. With Command or Space (`multi`) it is added, or taken out: a row
- * chosen through its year or month leaves that choice as its other months or days, so everything else stays chosen.
- * Choosing a row drops the choices below it, which it now covers. */
-export function toggleDate(chosen:readonly string[],tree:readonly DateNode[],node:DateNode,multi:boolean):string[] {
+/** How a row shows: full when it is chosen itself or every row below it is (all its months, or all their days); partial
+ * (striped) when only some rows below it are; none otherwise. Rows below a chosen row are not highlighted themselves. */
+export function dateState(chosen:readonly string[],node:DateNode):'full'|'partial'|'none' {
+ if(chosen.includes(node.value))return 'full';
+ if(!node.children.length)return 'none';
+ const states=node.children.map(child=>dateState(chosen,child));
+ if(states.every(state=>state==='full'))return 'full';
+ return states.some(state=>state!=='none')?'partial':'none';
+}
+
+/** A click on a row (`multi`, as a click or Space in the list) chooses it or, when chosen, unchooses it; every other
+ * choice stays, so years, months and days of several years can be chosen together. Choosing a row unchooses the rows
+ * above it (a month inside a chosen year leaves only that month of the year chosen, the year's other months not) and
+ * the rows below it, which it covers. Without `multi` (Enter) it becomes the only choice. */
+export function toggleDate(chosen:readonly string[],_tree:readonly DateNode[],node:DateNode,multi:boolean):string[] {
  if(!multi)return [node.value];
  if(chosen.includes(node.value))return chosen.filter(v=>v!==node.value);
- const above=chosen.find(v=>node.value.startsWith(v+'-'));
- if(above===undefined)return [...chosen.filter(v=>!v.startsWith(node.value+'-')),node.value];
- // Split the covering choice into the rows beside the path down to this one.
- const next=chosen.filter(v=>v!==above);let level=find(tree,above);
- while(level&&level.value!==node.value){const step=level.children.find(child=>node.value===child.value||node.value.startsWith(child.value+'-'));for(const child of level.children)if(child!==step)next.push(child.value);level=step;}
- return next;
+ return [...chosen.filter(v=>!node.value.startsWith(v+'-')&&!v.startsWith(node.value+'-')),node.value];
 }
 /** Adds rows (a Shift range, or Select all), dropping choices they cover. */
 export function addDates(chosen:readonly string[],nodes:readonly DateNode[]):string[] {

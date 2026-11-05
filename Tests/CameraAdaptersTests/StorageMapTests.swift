@@ -59,6 +59,23 @@ struct StorageMapTests {
         #expect(PTPStorage.name(label: " ", description: "", index: 1) == "Card 2")
         #expect(PTPStorage(id: 0x0002_0001, name: "Slot 2", total: nil, free: nil).key == "20001")
         #expect(PTP.present(0x0001_0001) && !PTP.present(0x0002_0000))
+        // Labels every card gets alike name no card: a Canon card is EOS_DIGITAL, others NO NAME or Untitled.
+        #expect(PTPStorage.name(label: "EOS_DIGITAL", description: "SD", index: 0) == "SD")
+        #expect(PTPStorage.name(label: "NO NAME", description: "", index: 1) == "Card 2")
+        // Two cards named alike are named by their physical slot.
+        let alike = [PTPStorage(id: 0x0001_0001, name: "SD", total: 1, free: 1), PTPStorage(id: 0x0002_0001, name: "SD", total: 2, free: 2)]
+        #expect(PTPStorage.distinctNames(alike).map(\.name) == ["Slot 1", "Slot 2"])
+        #expect(PTPStorage.distinctNames([PTPStorage(id: 0x0001_0001, name: "CFexpress", total: nil, free: nil), PTPStorage(id: 0x0002_0001, name: "SD", total: nil, free: nil)]).map(\.name) == ["CFexpress", "SD"])
+    }
+
+    @Test func batteryLevelFromEachCamerasOwnRange() {
+        func bytes(_ hex: String) -> Data { Data(stride(from: 0, to: hex.count, by: 2).map { UInt8(hex.dropFirst($0).prefix(2), radix: 16)! }) }
+        // Nikon Z f: range 1–100, at 60. Fujifilm X100VI: range 0–10, at 10.
+        #expect(PTP.batteryPercent(bytes("0150020000643c01016401")) == 60)
+        #expect(PTP.batteryPercent(bytes("01500200000a0a01000a01")) == 100)
+        // An enumeration (0, 25, 50, 75, 100), and a property that is not the battery.
+        #expect(PTP.batteryPercent(bytes("015002000064320205000019324b64")) == 50)
+        #expect(PTP.batteryPercent(bytes("0250020000643c01016401")) == nil)
     }
 
     @Test func ptpDatasetsAreParsed() {
@@ -70,7 +87,7 @@ struct StorageMapTests {
         #expect(PTP.array(Data(le(UInt32(2)) + le(UInt32(0x0001_0001)) + le(UInt32(0x0002_0001)))) == [0x0001_0001, 0x0002_0001])
         #expect(PTP.array(Data(le(UInt32(3)) + le(UInt32(1)))) == nil)
         let info = Data(le(UInt16(4)) + le(UInt16(3)) + le(UInt16(2)) + le(UInt64(124_642_131_968)) + le(UInt64(92_846_555_136)) + le(UInt32(1893)) + string("") + string("NIKON Z F   [Slot 1]"))
-        #expect(PTP.storageInfo(info) == PTP.StorageInfo(maxCapacity: 124_642_131_968, freeSpace: 92_846_555_136, description: "", label: "NIKON Z F   [Slot 1]"))
+        #expect(PTP.storageInfo(info) == PTP.StorageInfo(maxCapacity: 124_642_131_968, freeSpace: 92_846_555_136, description: "", label: "NIKON Z F   [Slot 1]", freeImages: 1893))
         #expect(PTP.storageInfo(info.prefix(20)) == nil)
         let object = Data(le(UInt32(0x0001_0001)) + le(PTP.association) + le(UInt16(0)) + le(UInt32(0)) + le(UInt16(0)) + Array(repeating: 0, count: 24) + le(UInt32(0x1100_4000)) + le(UInt16(1)) + le(UInt32(0)) + le(UInt32(0)) + string("102NZF__"))
         #expect(PTP.objectInfo(object) == PTP.ObjectInfo(storage: 0x0001_0001, format: PTP.association, size: 0, parent: 0x1100_4000, name: "102NZF__"))

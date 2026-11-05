@@ -7,24 +7,44 @@ public struct PTPStorage: Hashable, Sendable {
     public let name: String
     public let total: Int64?
     public let free: Int64?
+    /// How many more pictures fit, as the camera estimates them; nil when it does not say.
+    public var freeImages: Int? = nil
     /// The id the app keeps for this slot: the PTP storage id in hex ("10001" for Slot 1, "20001" for Slot 2), as the
     /// Windows bridge names it from WPD's "SID-{10001,...}", so a slot is the same source on every connection.
     public var key: String { String(id, radix: 16, uppercase: true) }
 
-    public init(id: UInt32, name: String, total: Int64?, free: Int64?) {
-        self.id = id; self.name = name; self.total = total; self.free = free
+    public init(id: UInt32, name: String, total: Int64?, free: Int64?, freeImages: Int? = nil) {
+        self.id = id; self.name = name; self.total = total; self.free = free; self.freeImages = freeImages
     }
 
+    /// Card labels cameras and computers give every card alike, which name no card: Canon formats each card as
+    /// EOS_DIGITAL, others leave NO NAME or Untitled.
+    static let genericLabels: Set<String> = ["EOS_DIGITAL", "NO NAME", "NONAME", "UNTITLED", "LUMIX", "CANON", "NIKON", "SONY", "FUJIFILM", "OLYMPUS", "OM SYSTEM", "PENTAX", "RICOH", "LEICA", "GOPRO", "DJI", "INSTA360", "SIGMA", "HASSELBLAD", "CARD", "SD", "DCIM"]
+
     /// The name from a storage's label and description: the bracketed slot of a label ("Slot 1"), else the label,
-    /// else the description ("External Memory"); labels that are only zeros or blank (a Fujifilm X100VI) are not names.
+    /// else the description ("External Memory"); labels that are only zeros, blank or generic (EOS_DIGITAL) are not names.
     public static func name(label: String, description: String, index: Int) -> String {
-        let meaningful = { (text: String) -> String? in
+        let meaningful = { (text: String, isLabel: Bool) -> String? in
             let tidy = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return tidy.isEmpty || tidy.allSatisfy({ $0 == "0" }) ? nil : tidy
+            if tidy.contains("["), tidy.contains("]") { return tidy }
+            return tidy.isEmpty || tidy.allSatisfy({ $0 == "0" }) || isLabel && genericLabels.contains(tidy.uppercased()) ? nil : tidy
         }
-        if let label = meaningful(label) { return CameraStorages.displayName(label) }
-        if let description = meaningful(description) { return CameraStorages.displayName(description) }
+        if let label = meaningful(label, true) { return CameraStorages.displayName(label) }
+        if let description = meaningful(description, false) { return CameraStorages.displayName(description) }
         return "Card \(index + 1)"
+    }
+}
+
+extension PTPStorage {
+    /// Cards whose names repeat (two cards both "SD", or both labelled alike) are named by their physical slot instead:
+    /// a PTP storage id's high 16 bits number the slot ("Slot 1" for 0x00010001, "Slot 2" for 0x00020001).
+    public static func distinctNames(_ cards: [PTPStorage]) -> [PTPStorage] {
+        let names = cards.map(\.name)
+        guard Set(names).count < names.count else { return cards }
+        return cards.enumerated().map { index, card in
+            let slot = card.id >> 16
+            return PTPStorage(id: card.id, name: slot > 0 ? "Slot \(slot)" : "Card \(index + 1)", total: card.total, free: card.free, freeImages: card.freeImages)
+        }
     }
 }
 

@@ -3,15 +3,29 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import type { Source } from '../shared';
+import type { CardContents, Source, SourceDetails } from '../shared';
+import { slotMedia } from '../camera-slots';
 import { registerListedSource, type ListedFile } from '../core/source-fs';
 import { windowsCameraBridgeArgs } from './windows-camera';
 
-interface Camera {name:string;cameraID:string;storages?:unknown;problem?:unknown;unanswered?:unknown;}
+interface Camera {name:string;cameraID:string;storages?:unknown;problem?:unknown;unanswered?:unknown;loading?:unknown;vendor?:unknown;battery?:unknown;serial?:unknown;summary?:unknown;}
+/** A card's contents as the helper sends them, checked. */
+export function cardContents(value:unknown):CardContents|undefined {
+  const raw=value as {extensions?:unknown;first?:unknown;last?:unknown}|undefined;
+  if(!raw||typeof raw.extensions!=='object'||!raw.extensions)return undefined;
+  const extensions:Record<string,[number,number]>={};
+  for(const [ext,pair] of Object.entries(raw.extensions as Record<string,unknown>))if(/^[a-z0-9]{0,8}$/.test(ext)&&Array.isArray(pair)&&pair.length===2&&pair.every(n=>Number.isSafeInteger(n)&&(n as number)>=0))extensions[ext]=[pair[0] as number,pair[1] as number];
+  const ms=(n:unknown)=>typeof n==='number'&&Number.isFinite(n)&&n>0?n:undefined;
+  return {extensions,...(ms(raw.first)?{first:ms(raw.first)}:{}),...(ms(raw.last)?{last:ms(raw.last)}:{})};
+}
+/** A camera's own details: battery (percent) and serial. */
+function cameraDetails(camera:Camera):SourceDetails {
+  return {...(Number.isInteger(camera.battery)&&(camera.battery as number)>=0&&(camera.battery as number)<=100?{battery:camera.battery as number}:{}),...(typeof camera.serial==='string'&&camera.serial.trim()?{serial:camera.serial.trim().slice(0,64)}:{})};
+}
 interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;progress?:(completed:number,total:number)=>void;/** Restarts the timeout: a request that reports progress is timed from its last report, not its start. */alive():void;}
 let child:ChildProcessWithoutNullStreams|undefined;
 let starting:Promise<boolean>|undefined;
-let stdout:string[]=[];let stdoutLength=0;let stderr='';let opened=0;let cached:Source[]=[];let unanswered:string[]=[];
+let stdout:string[]=[];let stdoutLength=0;let stderr='';let opened=0;let cached:Source[]=[];let unanswered:{name:string;vendor?:number;reason?:'notOffered'|'noCards'}[]=[];let loading:string[]=[];
 const pending=new Map<string,Pending>();
 /** The longest line the helper may send: a 16 MB read is 22 MB of base64. */
 const MAX_LINE=96*1024*1024;
@@ -93,10 +107,10 @@ async function request(command:Record<string,unknown>, timeout:number, progress?
   });
 }
 const size=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:undefined;
-type Storage={id?:string;name:string;total?:number;free?:number};
+type Storage={id?:string;name:string;total?:number;free?:number;freeImages?:number;contents?:CardContents};
 function cameraStorages(value:unknown):Storage[] {
   if(!Array.isArray(value))return [];
-  return value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({...(typeof item.id==='string'&&item.id?{id:String(item.id)}:{}),name:String(item.name),total:size(item.total),free:size(item.free)}));
+  return value.filter(item=>typeof item?.name==='string'&&item.name).map(item=>({...(typeof item.id==='string'&&item.id?{id:String(item.id)}:{}),name:String(item.name),total:size(item.total),free:size(item.free),...(size(item.freeImages)!==undefined?{freeImages:size(item.freeImages)}:{}),...(cardContents(item.summary)?{contents:cardContents(item.summary)}:{})}));
 }
 /** A camera's storages as the helper reported them, and its capacity: their sums, when every storage reported one. */
 export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'free'> {
@@ -110,18 +124,27 @@ export function cameraCapacity(value:unknown):Pick<Source,'storages'|'total'|'fr
  * storage's id (the camera's own id for that slot, never its position), so it is the same source on every
  * connection. A camera with one storage stays one source under its own name and id, as it always was. */
 export function cameraSourcesFrom(result:unknown[]):Source[] {
-  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string'&&!(camera as Camera).unanswered).flatMap(camera=>{
-    const problem:Pick<Source,'cameraProblem'>=camera.problem==='cardsUnknown'||camera.problem==='notAnswering'?{cameraProblem:camera.problem}:{};
-    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...problem};
+  return result.filter((camera):camera is Camera=>typeof (camera as Camera)?.cameraID==='string'&&typeof (camera as Camera)?.name==='string'&&!(camera as Camera).unanswered&&!(camera as Camera).loading&&(camera as Camera).problem!=='noCards').flatMap(camera=>{
+    const problem:Pick<Source,'cameraProblem'|'usbVendor'>={...(camera.problem==='cardsUnknown'||camera.problem==='notAnswering'?{cameraProblem:camera.problem}:{}),...(vendorOf(camera)!==undefined?{usbVendor:vendorOf(camera)}:{})};
+    const own=cameraDetails(camera),one=cameraStorages(camera.storages);
+    // One card (or cards not told apart): the camera's own details with that card's room and contents.
+    const whole:SourceDetails={...own,...(one.length===1&&one[0]!.freeImages!==undefined?{freeImages:one[0]!.freeImages}:{}),...((one.length===1?one[0]!.contents:undefined)??cardContents(camera.summary)?{contents:(one.length===1?one[0]!.contents:undefined)??cardContents(camera.summary)}:{})};
+    const single=one.length<=1?slotMedia(camera.name,one[0]?.name,0):undefined;
+    const base={id:`camera:${camera.cameraID}`,name:camera.name,path:`camera://${encodeURIComponent(camera.cameraID)}`,transport:'camera' as const,...problem,...(single?{media:single}:{}),...(Object.keys(whole).length?{details:whole}:{})};
     const storages=cameraStorages(camera.storages),ids=storages.map(storage=>storage.id);
     if(storages.length<2||ids.some(id=>id===undefined)||new Set(ids).size!==ids.length)return [{...base,...cameraCapacity(camera.storages)}];
-    return storages.map(storage=>({id:`${base.id}|${storage.id}`,name:`${camera.name} · ${storage.name}`,path:`${base.path}/${encodeURIComponent(storage.id!)}`,transport:'camera' as const,total:storage.total,free:storage.free,storage:{id:storage.id!,name:storage.name,camera:camera.name}}));
+    return storages.map((storage,index)=>{const media=slotMedia(camera.name,storage.name,index);const details:SourceDetails={...own,...(storage.freeImages!==undefined?{freeImages:storage.freeImages}:{}),...(storage.contents?{contents:storage.contents}:{})};return {id:`${base.id}|${storage.id}`,name:`${camera.name} · ${storage.name}`,path:`${base.path}/${encodeURIComponent(storage.id!)}`,transport:'camera' as const,total:storage.total,free:storage.free,storage:{id:storage.id!,name:storage.name,camera:camera.name},...(media?{media}:{}),...(Object.keys(details).length?{details}:{}),...(problem.usbVendor!==undefined?{usbVendor:problem.usbVendor}:{})};});
   });
 }
 /** The helper's cameras on USB that the system has not offered to apps (macOS: a still-image USB device ImageCaptureCore has not listed for 20 s). */
-export function unansweredCameras(result:unknown[]):string[] {return result.filter((camera):camera is Camera=>!!(camera as Camera)?.unanswered&&typeof (camera as Camera).name==='string').map(camera=>camera.name);}
+export function unansweredCameras(result:unknown[]):{name:string;vendor?:number;reason?:'notOffered'|'noCards'}[] {return result.filter((camera):camera is Camera=>(!!(camera as Camera)?.unanswered||(camera as Camera)?.problem==='noCards')&&typeof (camera as Camera).name==='string').map(camera=>({name:camera.name,...(vendorOf(camera)!==undefined?{vendor:vendorOf(camera)}:{}),...(camera.problem==='noCards'?{reason:'noCards' as const}:{})}));}
+/** A USB vendor id the helper reported (0 or anything else is none). */
+const vendorOf=(camera:Camera)=>typeof camera.vendor==='number'&&Number.isInteger(camera.vendor)&&camera.vendor>0&&camera.vendor<0x10000?camera.vendor:undefined;
+/** Cameras whose cards are still being read (just connected), by name: not sources yet, so they are never announced as one drive and then replaced by their cards. */
+export function loadingCameras(result:unknown[]):string[] {return result.filter((camera):camera is Camera=>!!(camera as Camera)?.loading&&typeof (camera as Camera).name==='string').map(camera=>camera.name);}
+export const lastLoadingCameras=():string[]=>loading;
 /** The cameras the last list found on USB but not offered, by name. */
-export const lastUnansweredCameras=():string[]=>unanswered;
+export const lastUnansweredCameras=():{name:string;vendor?:number;reason?:'notOffered'|'noCards'}[]=>unanswered;
 export async function cameraSources():Promise<Source[]> {
   // While a camera is being imported its helper serves that import; the last list stands.
   if(opened)return cached;
@@ -129,7 +152,7 @@ export async function cameraSources():Promise<Source[]> {
   // The first Windows request also compiles the bridge's reader, so it gets longer.
   const result=await request({command:'list'},process.platform==='win32'?30000:10000);
   if(!Array.isArray(result))throw new Error('The camera helper returned an invalid source list.');
-  cached=cameraSourcesFrom(result);unanswered=unansweredCameras(result);
+  cached=cameraSourcesFrom(result);unanswered=unansweredCameras(result);loading=loadingCameras(result);
   return cached;
 }
 /** One file as the helper lists it: its storage (card slot), folders, name, size, dates (ms) and the helper's own id for it. */
@@ -193,6 +216,29 @@ export async function prepareCamera(source:Source, signal?:AbortSignal, onProgre
     let closed=false;
     return {path:root,cleanup:async()=>{if(closed)return;closed=true;unregister();opened--;await endSession(cameraID);}};
   } finally { if(release){opened--;await endSession(cameraID);} }
+}
+/** The camera's newest photo (by its date), made readable for `use` by its path, without downloading anything: the
+ * shutter count is read from its EXIF header through the camera. Undefined when it holds no photo. */
+export async function withNewestCameraPhoto<T>(cameraID:string,use:(file:string)=>Promise<T>):Promise<T|undefined> {
+  opened++;sessions.set(cameraID,(sessions.get(cameraID)??0)+1);
+  try {
+    const {files}=cameraFiles(await request({command:'files',cameraID},120000));
+    const photos=files.filter(file=>/\.(nef|nrw|arw|srf|sr2|cr2|cr3|crw|raf|orf|rw2|pef|dng|srw|3fr|fff|iiq|x3f|rwl|jpe?g|hif|heic|heif)$/i.test(file.name));
+    const newest=photos.sort((a,b)=>(b.modified??b.created??0)-(a.modified??a.created??0)||b.name.localeCompare(a.name))[0];
+    if(!newest)return undefined;
+    const listed=listedFiles([newest]);
+    const {root,unregister}=registerListedSource({id:`${cameraID}\0newest`,files:listed,
+      async read(file,offset,length){
+        const result=await request({command:'read',cameraID,objectID:(file as typeof listed[number]).objectID,offset,length},120000) as {bytes?:unknown;data?:unknown};
+        if(typeof result?.data!=='string'||!Number.isSafeInteger(result.bytes))throw new Error('The camera helper returned an invalid read.');
+        const data=Buffer.from(result.data,'base64');
+        if(data.length!==result.bytes||data.length>length)throw new Error('The camera helper returned an invalid read.');
+        return data;
+      },
+      release(){},
+    });
+    try { return await use(path.join(root,...listed[0]!.relative.split('/'))); } finally { unregister(); }
+  } finally { opened--;await endSession(cameraID); }
 }
 /** Imports of each camera now open (one per card slot being imported). */
 const sessions=new Map<string,number>();

@@ -12,17 +12,28 @@ public struct CameraSource: Identifiable, Hashable, Sendable {
     public let storages: [CameraStorage]
     /// Set when the camera could not be reached in full; the app says what to do.
     public var problem: CameraProblem? = nil
+    /// Its cards are being read (just connected): the app shows it as loading, not yet as a source to import.
+    public var loading = false
+    /// The camera's USB vendor id (0x04B0 Nikon, 0x04CB Fujifilm…), for the app's brand-specific setup hints; 0 when unknown.
+    public var vendor = 0
+    /// Battery level in percent, when the camera reports it (an import can stop when it runs out).
+    public var battery: Int? = nil
+    /// The camera's serial number: two bodies of one model stay apart.
+    public var serial: String? = nil
+    /// What the camera holds when its cards are not told apart (else each storage has its own).
+    public var summary: CardSummary? = nil
 }
 
 /// Why a camera is listed without everything: its cards and capacity could not be read (it can still be imported as one
 /// source), or its session would not open.
-public enum CameraProblem: String, Sendable { case cardsUnknown, notAnswering }
+public enum CameraProblem: String, Sendable { case cardsUnknown, notAnswering, noCards }
 
 /// A USB camera the system has on its bus that ImageCaptureCore has not offered for a while: it cannot be read until
 /// it is turned off and on, or reconnected.
 public struct UnansweredCamera: Sendable {
     public let name: String
     public let location: Int
+    public let vendor: Int
 }
 
 /// One storage of a camera (a card slot). `id` names the same slot on every connection: its PTP storage id in hex
@@ -33,6 +44,18 @@ public struct CameraStorage: Hashable, Sendable {
     public let name: String
     public var total: Int64? = nil
     public var free: Int64? = nil
+    /// How many more pictures fit, as the camera estimates them.
+    public var freeImages: Int? = nil
+    /// What the card holds, once the camera's catalog is complete.
+    public var summary: CardSummary? = nil
+}
+
+/// What a card holds, from the camera's catalog (nothing is read from the files): files and bytes per extension, and
+/// the dates of its earliest and latest file. For choosing what to import and checking it fits.
+public struct CardSummary: Hashable, Sendable {
+    public var extensions: [String: [Int64]] = [:]
+    public var first: Date? = nil
+    public var last: Date? = nil
 }
 
 /// One file of a camera as the bridge lists it: its storage (card slot), the folders below that, its name, size,
@@ -87,14 +110,38 @@ public final class DeviceDiscovery: NSObject {
     private var problems: [String: CameraProblem] = [:]
     /// How often a camera whose cards were not read in full is probed again, and when the last one began.
     private var reprobes: [String: Int] = [:]
+    /// The cards each camera reported last, kept across a reconnect: shown at once when it comes back (its id is the
+    /// same), and replaced as soon as the camera answers again, about 15 s later for a full Nikon Z f.
+    private var lastCards: [String: [CameraStorage]] = [:]
+    /// What each camera's cards hold (by card id, "all" when not told apart) and its battery, from its last complete catalog.
+    private var summaries: [String: [String: CardSummary]] = [:]
+    private var batteries: [String: Int] = [:]
+    /// Cameras whose cards this connection has read from the camera itself (not remembered).
+    private var live: Set<String> = []
     /// USB still-image devices first seen at (by USB location id), to tell a camera ImageCaptureCore never offers.
     private var usbSeen: [Int: Date] = [:]
+    /// When the device browser was last started again (see unanswered).
+    private var restarted = Date.distantPast
 
     public override init() {
         super.init()
         browser.delegate = self
         browser.browsedDeviceTypeMask = ICDeviceTypeMask(rawValue: ICDeviceTypeMask.camera.rawValue | ICDeviceLocationTypeMask.local.rawValue)!
         browser.start()
+    }
+
+    /// Closes every session, open or still opening, and waits for the cameras to confirm, for at most `limit` seconds;
+    /// then stops. A process that ends with a session open (killed) can leave the system holding it: until the camera
+    /// is reconnected, it is then not offered to this app again while other apps still see it.
+    public func shutdown(limit: TimeInterval = 1.5) async {
+        let all = Array(sessions.values) + opening.values.map(\.session)
+        trace("shutdown: closing \(all.count) session(s)")
+        var left = all.count
+        for session in all { Task { @MainActor in await session.close(); left -= 1 } }
+        let deadline = Date().addingTimeInterval(limit)
+        while left > 0, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        trace("shutdown: \(all.count - left) of \(all.count) closed")
+        stop()
     }
 
     public func stop() {
@@ -115,7 +162,7 @@ public final class DeviceDiscovery: NSObject {
     }
 
     public var sources: [CameraSource] {
-        cameras.filter { isPTP($0.value) }.map { CameraSource(id: $0.key, name: $0.value.name ?? "USB camera", storages: storages[$0.key] ?? [], problem: probes[$0.key] == nil ? problems[$0.key] : nil) }
+        cameras.filter { isPTP($0.value) }.map { entry in CameraSource(id: entry.key, name: entry.value.name ?? "USB camera", storages: (storages[entry.key] ?? []).map { card in var card = card; card.summary = summaries[entry.key]?[card.id]; return card }, problem: probes[entry.key] == nil ? problems[entry.key] : nil, loading: probes[entry.key] != nil && (storages[entry.key] ?? []).isEmpty && entry.value.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue), vendor: Int(entry.value.usbVendorID), battery: batteries[entry.key], serial: entry.value.serialNumberString.flatMap { $0.isEmpty ? nil : $0 }, summary: (storages[entry.key] ?? []).isEmpty ? summaries[entry.key]?["all"] : nil) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -132,13 +179,38 @@ public final class DeviceDiscovery: NSObject {
         guard let camera = cameras[id], isPTP(camera) else { throw CameraAdapterError.unavailable }
         let session = CameraSession(camera: camera)
         if let progress { session.listen(progress) }
+        // The cards and their capacity show as soon as the camera reports them; the files of each follow with the catalog.
+        session.onCards = { [weak self] cards in
+            guard let self, self.cameras[id] != nil else { return }
+            let known = self.live.contains(id) ? self.storages[id] ?? [] : []
+            self.live.insert(id)
+            if known.count <= cards.count, known.filter({ $0.total != nil }).count <= cards.filter({ $0.total != nil }).count {
+                // Live answers replace remembered ones even when they report less (a card taken out while unplugged).
+                self.storages[id] = cards.map { CameraStorage(id: $0.key, name: $0.name, total: $0.total, free: $0.free, freeImages: $0.freeImages) }
+                self.lastCards[id] = self.storages[id]
+                if let battery = session.battery { self.batteries[id] = battery }
+                trace("cards \(id): \(cards.count) shown before the catalog is complete")
+            }
+        }
         let task = Task { @MainActor [weak self] in
             await self?.closing[id]?.value
             try await session.open()
             await session.learnStorages()
+            self?.summaries[id] = session.summaries()
+            if session.battery == nil { await session.readBattery() }
+            if let battery = session.battery { self?.batteries[id] = battery }
             self?.sessions[id] = session
             // Card details learned before (a probe at connect) stay when this session could not read them again.
-            if let learned = session.storages { self?.storages[id] = learned; self?.problems[id] = session.storagesComplete ? nil : .cardsUnknown }
+            // The camera answers but has no card it can read: asleep or off, in a USB mode that shows no files, or no card.
+            if session.storages == nil, (camera.mediaFiles ?? []).isEmpty { self?.problems[id] = .noCards; self?.storages[id] = nil }
+            else if let learned = session.storages {
+                // A session that could not tell the files of several cards apart reports them as one ("all"): that never
+                // replaces cards already known one by one (another session's, or this one's early read).
+                let known = self?.storages[id] ?? []
+                let worse = learned.count == 1 && learned[0].id == "all" && known.count > 1
+                if !worse { self?.storages[id] = learned; self?.lastCards[id] = learned }
+                self?.live.insert(id); self?.problems[id] = session.storagesComplete ? nil : .cardsUnknown
+            }
             else if self?.storages[id]?.isEmpty ?? true { self?.storages[id] = CameraStorages.storages(in: camera.contents ?? []); self?.problems[id] = .cardsUnknown }
         }
         opening[id] = (session, task)
@@ -165,20 +237,39 @@ public final class DeviceDiscovery: NSObject {
                 }
             }
             // Its storages are known now; unless an import began meanwhile, the camera is let go again.
-            if let opened, !self.held.contains(id), self.sessions[id] === opened { self.end(id) }
+            // The session stays open a while for what usually follows (the app reading the newest photo's shutter count,
+            // or an import): opening another would make the camera list every file again, a minute or more on a full card.
+            if let opened, !self.held.contains(id), self.sessions[id] === opened {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(90))
+                    guard let self, !self.held.contains(id), self.sessions[id] === opened else { return }
+                    self.end(id)
+                }
+            }
         }
     }
 
-    /// USB still-image devices (interface class 6, PTP/MTP) on the bus for 20 s or more that ImageCaptureCore has not offered.
+    /// USB still-image devices (interface class 6, PTP/MTP) on the bus for 35 s or more that ImageCaptureCore has not
+    /// offered. The system can take about 15 s to let go of a session another process left open (a helper that was
+    /// ended), so the browser is started again after 20 s and only then, if still nothing, the camera is reported.
     public func unanswered(now: Date = Date()) -> [UnansweredCamera] {
         let offered = Set(cameras.values.map { Int($0.usbLocationID) })
         let present = USBStillImage.devices()
         usbSeen = usbSeen.filter { seen in present.contains { $0.location == seen.key } }
-        var result: [UnansweredCamera] = []
+        var result: [UnansweredCamera] = [], waiting: [String] = []
         for device in present where !offered.contains(device.location) {
             let since = usbSeen[device.location] ?? now
             usbSeen[device.location] = since
-            if now.timeIntervalSince(since) >= 20 { result.append(UnansweredCamera(name: device.name, location: device.location)) }
+            if now.timeIntervalSince(since) >= 20 { waiting.append(device.name) }
+            if now.timeIntervalSince(since) >= 35 { result.append(UnansweredCamera(name: device.name, location: device.location, vendor: device.vendor)) }
+        }
+        // A browser started while the system was still letting go of another app's session (this helper restarted at
+        // once) can stay without devices: start it again, at most every 30 s, while a camera on USB is not offered.
+        if !waiting.isEmpty, now.timeIntervalSince(restarted) >= 30 {
+            restarted = now
+            trace("browser: \(waiting) on USB but not offered; restarting the device browser")
+            browser.stop()
+            browser.start()
         }
         return result
     }
@@ -208,6 +299,8 @@ public final class DeviceDiscovery: NSObject {
     public func files(id: String, storageID: String?, progress: ((Int) -> Void)? = nil) async throws -> [CameraFileEntry] {
         held.insert(id)
         let open = try await session(id, progress: progress)
+        // Cards known but their files not yet told apart (the match failed while the camera was busy): try again first.
+        if !open.storagesComplete { await open.learnStorages() }
         trace("files: session ready, listing")
         let list = try open.files(storageID: storageID)
         trace("files: \(list.count) listed")
@@ -229,6 +322,7 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
         cameras[id] = camera
         problems[id] = nil
         reprobes[id] = 0
+        if let remembered = lastCards[id], storages[id] == nil { storages[id] = remembered; trace("cards \(id): last known shown until the camera answers") }
         probe(id: id)
     }
     public func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
@@ -242,6 +336,9 @@ extension DeviceDiscovery: @preconcurrency ICDeviceBrowserDelegate {
             storages[id] = nil
             problems[id] = nil
             reprobes[id] = nil
+            live.remove(id)
+            summaries[id] = nil
+            batteries[id] = nil
             cameras[id] = nil
         }
     }
@@ -274,13 +371,15 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
     var storages: [CameraStorage]? {
         guard let ptpStorages, !ptpStorages.isEmpty else { return nil }
         if folderStorage != nil || ptpStorages.count == 1 {
-            return ptpStorages.map { CameraStorage(id: $0.key, name: $0.name, total: $0.total, free: $0.free) }
+            return ptpStorages.map { CameraStorage(id: $0.key, name: $0.name, total: $0.total, free: $0.free, freeImages: $0.freeImages) }
         }
         let sum = { (values: [Int64?]) in values.contains(where: { $0 == nil }) ? nil : values.compactMap { $0 }.reduce(0, +) }
         return [CameraStorage(id: "all", name: "Camera", total: sum(ptpStorages.map(\.total)), free: sum(ptpStorages.map(\.free)))]
     }
 
-    /// One PTP request, answered with its data phase, or nil when it fails, is refused or gets no answer in 15 s.
+    /// One PTP request, answered with its data phase, or nil when it fails, is refused or gets no answer in 60 s. While
+    /// ImageCaptureCore lists a reconnected camera's files its own requests go first (one PTP transaction at a time):
+    /// a Nikon Z f with 7,900 files answered the first one after about 15 s.
     private func ptp(_ code: UInt16, _ parameters: [UInt32]) async -> Data? {
         guard camera.hasOpenSession, failure == nil else { return nil }
         transaction &+= 1
@@ -292,7 +391,7 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
                 let answer = error == nil && PTP.responseCode(response) == PTP.ok ? data : nil
                 Task { @MainActor in self?.ptpWaits.removeValue(forKey: token)?.resume(returning: answer) }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
                 MainActor.assumeIsolated { self?.ptpWaits.removeValue(forKey: token)?.resume(returning: nil) }
             }
         }
@@ -301,6 +400,34 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
     /// Learns the camera's storages (GetStorageIDs, GetStorageInfo: names, capacity, free space) and, when it has
     /// several, which card each catalog folder is on (see StorageMap). Read-only PTP requests; a camera that does
     /// not answer them is listed as before.
+    /// Every card read, with its capacity.
+    var cardsRead: Bool { !(ptpStorages ?? []).isEmpty && ptpStorages!.allSatisfy { $0.total != nil } }
+    /// Told the cards and their capacity as soon as they are read, before the catalog is complete: a camera with
+    /// thousands of files can take a minute or more to list them after it is reconnected.
+    var onCards: (([PTPStorage]) -> Void)?
+    private var cardsAsked = false
+
+    /// The camera's battery level in percent, when it reports one (ImageCaptureCore, else the PTP battery property).
+    private(set) var battery: Int?
+    func readBattery() async {
+        if camera.batteryLevelAvailable { battery = Int(camera.batteryLevel); return }
+        let data = await ptp(PTP.getDevicePropDesc, [PTP.batteryLevel])
+        trace("battery \(camera.name ?? "?"): \(data.map { $0.map { String(format: "%02x", $0) }.joined() } ?? "no answer")")
+        if let data, let percent = PTP.batteryPercent(data) { battery = percent }
+    }
+
+    /// Reads the cards once the session is open, while the catalog still loads. PTP requests are answered meanwhile.
+    private func readCardsEarly() async {
+        for wait in [0, 1, 2, 3, 4] {
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard failure == nil, camera.hasOpenSession, ready != nil else { return }
+            await readStorages()
+            if cardsRead { break }
+        }
+        await readBattery()
+        if let cards = ptpStorages, !cards.isEmpty { onCards?(cards) }
+    }
+
     /// Whether the camera's cards were read in full: every one with its capacity, and with several, which files are on which.
     var storagesComplete: Bool {
         guard let ptpStorages, !ptpStorages.isEmpty, ptpStorages.allSatisfy({ $0.total != nil }) else { return false }
@@ -317,7 +444,13 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
         for (attempt, wait) in [0, 1, 2, 3, 4].enumerated() {
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard failure == nil, camera.hasOpenSession else { return }
-            await readStorages()
+            if !cardsRead { await readStorages() }
+            if battery == nil { await readBattery() }
+            // Which card each folder is on needs the complete catalog, which this runs after.
+            if cardsRead, let cards = ptpStorages, cards.count > 1, folderStorage == nil {
+                folderStorage = await mapFolders(cards)
+                trace("storages \(camera.name ?? "?"): files \(folderStorage == nil ? "not told apart" : "told apart per card")")
+            }
             if storagesComplete { return }
             trace("storages \(camera.name ?? "?"): incomplete on attempt \(attempt + 1)")
         }
@@ -332,15 +465,14 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
         for (index, id) in ids.enumerated() {
             let info = await ptp(PTP.getStorageInfo, [id]).flatMap(PTP.storageInfo)
             let capacity = info.map { Int64(clamping: $0.maxCapacity) }, free = info.map { Int64(clamping: $0.freeSpace) }
-            found.append(PTPStorage(id: id, name: PTPStorage.name(label: info?.label ?? "", description: info?.description ?? "", index: index), total: capacity.flatMap { $0 > 0 ? $0 : nil }, free: capacity.flatMap { $0 > 0 ? free : nil }))
+            let images = info.flatMap { $0.freeImages == .max ? nil : Int($0.freeImages) }
+            found.append(PTPStorage(id: id, name: PTPStorage.name(label: info?.label ?? "", description: info?.description ?? "", index: index), total: capacity.flatMap { $0 > 0 ? $0 : nil }, free: capacity.flatMap { $0 > 0 ? free : nil }, freeImages: images))
         }
+        found = PTPStorage.distinctNames(found)
         // A read that came back with less than an earlier one (a card not mounted yet) does not replace it.
         if let known = ptpStorages, known.count > found.count || known.filter({ $0.total != nil }).count > found.filter({ $0.total != nil }).count { return }
         ptpStorages = found
         trace("storages \(camera.name ?? "?"): \(found.map { "\($0.key) \($0.name) \($0.total ?? -1)/\($0.free ?? -1)" })")
-        guard found.count > 1 else { return }
-        folderStorage = await mapFolders(found)
-        trace("storages \(camera.name ?? "?"): files \(folderStorage == nil ? "not told apart" : "told apart per card")")
     }
 
     /// Which card each folder of the catalog is on, from the folders the camera lists per storage; nil when any
@@ -421,6 +553,10 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
                 let count = (self.camera.mediaFiles?.count ?? 0) + Int(self.camera.contentCatalogPercentCompleted)
                 trace("watch \(self.camera.name ?? "?"): open=\(self.camera.hasOpenSession) files=\(self.camera.mediaFiles?.count ?? -1) catalog=\(self.camera.contentCatalogPercentCompleted)%")
                 if count != listed { listed = count; lastChange = Date(); for listener in self.listeners { listener(self.camera.mediaFiles?.count ?? 0) } }
+                if self.camera.hasOpenSession, !self.cardsAsked, self.camera.capabilities.contains(ICDeviceCapability.cameraDeviceCanAcceptPTPCommands.rawValue) {
+                    self.cardsAsked = true
+                    Task { @MainActor in await self.readCardsEarly() }
+                }
                 if self.complete { self.becameReady() }
                 else if Date().timeIntervalSince(lastChange) > Self.quiet { self.fail(CameraAdapterError.notAnswering) }
             }
@@ -440,11 +576,28 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
         opened = true
     }
 
+    /// The camera said its catalog is complete (or reported 100 %). A Nikon Z f was seen to say so with 4,351 of its
+    /// 7,862 files listed while ImageCaptureCore still added more, so the catalog counts as complete only once its
+    /// file count has not changed for 1.5 s.
+    private var settling = false
     private func becameReady() {
-        trace("ready \(camera.name ?? "?"): files=\(camera.mediaFiles?.count ?? -1) waiting=\(ready != nil)")
-        let pending = ready
-        ready = nil
-        pending?.resume()
+        guard ready != nil, !settling else { return }
+        settling = true
+        Task { @MainActor [weak self] in
+            var last = -1, steady = 0
+            while let self, self.ready != nil, steady < 3 {
+                let count = self.camera.mediaFiles?.count ?? 0
+                steady = count == last ? steady + 1 : 0
+                last = count
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            guard let self else { return }
+            self.settling = false
+            trace("ready \(self.camera.name ?? "?"): files=\(self.camera.mediaFiles?.count ?? -1) waiting=\(self.ready != nil)")
+            let pending = self.ready
+            self.ready = nil
+            pending?.resume()
+        }
     }
 
     func files(storageID: String?) throws -> [CameraFileEntry] {
@@ -485,6 +638,28 @@ private final class CameraSession: NSObject, @preconcurrency ICCameraDeviceDeleg
             entries.append(CameraFileEntry(storage: top, folder: components.dropFirst().map(safeComponent), name: name, size: Int64(file.fileSize), modified: file.modificationDate, created: file.creationDate, objectID: id))
         }
         return entries
+    }
+
+    /// What each card holds (by its id; "all" when the cards are not told apart), from the complete catalog: files and
+    /// bytes per extension, and the earliest and latest file dates a camera can have (1990 to 2100).
+    func summaries() -> [String: CardSummary] {
+        var result: [String: CardSummary] = [:]
+        let cards = ptpStorages ?? []
+        for file in allFiles(camera.contents ?? []) {
+            var key = "all"
+            if cards.count == 1 { key = cards[0].key }
+            else if let parent = file.parentFolder, let id = folderStorage?[ObjectIdentifier(parent)], let card = cards.first(where: { $0.id == id }) { key = card.key }
+            let ext = ((file.name ?? "") as NSString).pathExtension.lowercased()
+            var summary = result[key] ?? CardSummary()
+            var counts = summary.extensions[ext] ?? [0, 0]
+            counts[0] += 1; counts[1] += Int64(file.fileSize)
+            summary.extensions[ext] = counts
+            if let date = file.creationDate ?? file.modificationDate, date.timeIntervalSince1970 > 631_152_000, date.timeIntervalSince1970 < 4_102_444_800 {
+                summary.first = min(summary.first ?? date, date); summary.last = max(summary.last ?? date, date)
+            }
+            result[key] = summary
+        }
+        return result
     }
 
     /// The files of each card (or of `storageID`'s only), under the card's name and their whole folder path
@@ -668,7 +843,7 @@ enum CameraStorages {
 
 /// USB devices with a still-image interface (class 6: PTP/MTP cameras), read from the I/O Registry.
 enum USBStillImage {
-    struct Device { let location: Int; let name: String }
+    struct Device { let location: Int; let name: String; let vendor: Int }
     static func devices() -> [Device] {
         guard let matching = IOServiceMatching("IOUSBHostInterface") as NSMutableDictionary? else { return [] }
         matching["IOPropertyMatch"] = ["bInterfaceClass": 6]
@@ -686,7 +861,8 @@ enum USBStillImage {
             func property(_ key: String) -> Any? { IORegistryEntryCreateCFProperty(device, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() }
             guard let location = (property("locationID") as? NSNumber)?.intValue else { continue }
             let name = (property("USB Product Name") as? String) ?? (property("kUSBProductString") as? String) ?? "USB camera"
-            if !result.contains(where: { $0.location == location }) { result.append(Device(location: location, name: name)) }
+            let vendor = (property("idVendor") as? NSNumber)?.intValue ?? 0
+            if !result.contains(where: { $0.location == location }) { result.append(Device(location: location, name: name, vendor: vendor)) }
         }
         return result
     }

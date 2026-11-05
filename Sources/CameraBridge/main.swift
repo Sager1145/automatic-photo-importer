@@ -52,6 +52,14 @@ struct NativeCameraBridge {
         return result
     }
 
+    /// A card's contents as JSON: {"extensions": {"nef": [files, bytes]}, "first": ms, "last": ms}.
+    static func json(_ summary: CardSummary) -> [String: Any] {
+        var value: [String: Any] = ["extensions": summary.extensions.mapValues { $0.map { NSNumber(value: $0) } }]
+        if let first = milliseconds(summary.first) { value["first"] = first }
+        if let last = milliseconds(summary.last) { value["last"] = last }
+        return value
+    }
+
     static func milliseconds(_ date: Date?) -> Int64? {
         // Some cameras report a missing date as a far-future or invalid value (an X100VI does); converting that
         // trapped the helper. Only dates a camera can have taken count: 1990 to 2100. The app reads the capture date
@@ -60,9 +68,21 @@ struct NativeCameraBridge {
         return Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
+    /// The app's way to end the helper (SIGTERM, then SIGKILL 2 s later), and Ctrl-C: sessions are closed first.
+    static var signalSources: [DispatchSourceSignal] = []
+    static func endOnSignals(_ discovery: DeviceDiscovery) {
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler { Task { @MainActor in await discovery.shutdown(); exit(0) } }
+            source.resume()
+            signalSources.append(source)
+        }
+    }
+
     static func serve() async {
         let discovery = DeviceDiscovery()
-        defer { discovery.stop() }
+        endOnSignals(discovery)
         do {
             for try await text in FileHandle.standardInput.bytes.lines {
                 guard let data = text.data(using: .utf8),
@@ -73,6 +93,8 @@ struct NativeCameraBridge {
         } catch {
             FileHandle.standardError.write(Data(("Native camera bridge: \(error.localizedDescription)\n").utf8))
         }
+        // The app closed its end: close the cameras' sessions before going.
+        await discovery.shutdown()
         NSApplication.shared.terminate(nil)
     }
 
@@ -83,18 +105,25 @@ struct NativeCameraBridge {
                         let cameras = discovery.sources.map { source -> [String: Any] in
                             var camera: [String: Any] = ["name": source.name, "cameraID": source.id]
                             if let problem = source.problem { camera["problem"] = problem.rawValue }
+                            if source.loading { camera["loading"] = true }
+                            if source.vendor != 0 { camera["vendor"] = source.vendor }
+                            if let battery = source.battery, (0...100).contains(battery) { camera["battery"] = battery }
+                            if let serial = source.serial { camera["serial"] = serial }
+                            if let summary = source.summary { camera["summary"] = json(summary) }
                             if !source.storages.isEmpty {
                                 camera["storages"] = source.storages.map { storage -> [String: Any] in
                                     var entry: [String: Any] = ["id": storage.id, "name": storage.name]
                                     if let total = storage.total { entry["total"] = total }
                                     if let free = storage.free { entry["free"] = free }
+                                    if let images = storage.freeImages { entry["freeImages"] = images }
+                                    if let summary = storage.summary { entry["summary"] = json(summary) }
                                     return entry
                                 }
                             }
                             return camera
                         }
                         // Cameras on USB that the system has not offered: listed apart, never as a source to import.
-                        let unanswered = discovery.unanswered().map { ["name": $0.name, "cameraID": "usb:\($0.location)", "unanswered": true] as [String: Any] }
+                        let unanswered = discovery.unanswered().map { ["name": $0.name, "cameraID": "usb:\($0.location)", "unanswered": true, "vendor": $0.vendor] as [String: Any] }
                         emit(["id": command.id, "result": cameras + unanswered])
                     case "files":
                         guard let cameraID = command.cameraID else { throw CameraAdapterError.unavailable }

@@ -1702,6 +1702,19 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 /* A USB camera that is connected but cannot be read, or read only in part: what to do about it. */
 .camera-notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .7rem;padding:.6rem .8rem;border-radius:var(--radius-md);background:var(--warning-soft);border:1px solid var(--warning-border);font-size:var(--text-footnote)}
 .camera-notice svg{flex:none;margin-top:.1rem;color:var(--warning)}
+.camera-notice.is-loading{background:var(--fill-4);border-color:var(--separator)}.camera-notice.is-loading svg{color:var(--label-secondary)}
+.source-kind{margin-left:.5rem;padding:.05rem .45rem;border-radius:var(--radius-capsule);background:var(--fill-3);color:var(--label-secondary);font-size:var(--text-caption);font-weight:600;vertical-align:middle;white-space:nowrap}
+/* One USB camera: its own facts once, a card per slot inside (CameraCard). */
+.camera-card{display:grid;gap:.6rem;padding:.7rem;border:1px solid var(--separator-strong);border-radius:var(--radius-lg,14px);background:var(--fill-4)}
+.source-layout-grid .camera-card{grid-column:1/-1}
+.camera-card-head{display:flex;align-items:center;gap:.7rem}
+.camera-card-head h3{margin:0;font-size:var(--text-headline,1rem)}
+.camera-card-head small{color:var(--label-secondary);font-size:var(--text-caption)}
+.camera-card-slots{display:grid;gap:.6rem}
+.source-layout-grid .camera-card-slots{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.new-drive-camera{display:grid;gap:.5rem;padding:.6rem;border:1px solid var(--separator-strong);border-radius:var(--radius-md);list-style:none}
+.new-drive-camera>ul{display:grid;gap:.5rem;margin:0;padding:0;list-style:none}
+.camera-brand-hint{display:block;margin-top:.25rem;font-weight:600}
 .camera-notice.is-inline{margin:.3rem 0 .5rem;padding:.4rem .6rem;font-size:var(--text-caption)}
 /* A field: a grip to drag it onto the levels, its name, and + to add it last. */
 .browser-field-chip{display:inline-flex;align-items:center;gap:.15rem;min-height:var(--control-height-sm);padding:0 .2rem 0 .1rem;border-radius:var(--radius-capsule);background:var(--fill-3);border:1px solid var(--separator);font-size:var(--text-footnote);font-weight:550;cursor:grab;user-select:none}
@@ -1713,6 +1726,8 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-field-add:hover{filter:brightness(1.08)}
 .browser-path-slot button svg{opacity:.85}
 /* Date tree rows: indent and an arrow that opens the rows below. */
+/* A tree row with only some of the rows below it chosen: striped, beside a full highlight for a chosen row. */
+.browser-row.is-partial{background:repeating-linear-gradient(135deg,var(--accent-soft) 0 6px,transparent 6px 12px);box-shadow:inset 3px 0 color-mix(in srgb,var(--accent-fill) 55%,transparent)}
 .browser-tree-lead{display:inline-flex;align-items:center;flex:none}
 .browser-row:has(.browser-tree-lead){justify-content:flex-start}.browser-row:has(.browser-tree-lead)>small:last-child{margin-left:auto}
 .browser-disclosure,.browser-disclosure-space{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border-radius:var(--radius-sm);flex:none}

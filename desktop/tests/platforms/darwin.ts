@@ -11,6 +11,15 @@ export const darwin: PlatformProfile = {
     parseMacVolume({ MountPoint: '/Volumes/A006', VolumeName: 'A006', VolumeUUID: 'SSD-UUID', BusProtocol: 'USB', RemovableMedia: false, Internal: false, SolidState: true, Writable: true, TotalSize: 2000319152128, VolumeFreeSpace: 192869695488, FilesystemType: 'exfat', DeviceIdentifier: 'disk5s1', ParentWholeDisk: 'disk5' }, '/Volumes/A006'),
   ],
   driveNames: ['NIKON Z F', 'A006'],
+  driveMedia: ['sd', 'external-disk'],
+  // `diskutil info -plist` of each volume, with its whole disk's (which names the reader or medium).
+  otherMedia: () => [
+    parseMacVolume({ MountPoint: '/Volumes/CFEB', VolumeName: 'CFEB', BusProtocol: 'USB', RemovableMedia: true, Internal: false, ParentWholeDisk: 'disk8', DeviceIdentifier: 'disk8s1', FilesystemType: 'exfat', TotalSize: 512e9 }, '/Volumes/CFEB', { IORegistryEntryName: 'ProGrade Digital CFexpress Type B Media', MediaName: 'CFexpress Type B', BusProtocol: 'USB' }),
+    parseMacVolume({ MountPoint: '/Volumes/MICRO', VolumeName: 'MICRO', BusProtocol: 'USB', RemovableMedia: true, Internal: false, ParentWholeDisk: 'disk9', DeviceIdentifier: 'disk9s1', FilesystemType: 'exfat', TotalSize: 128e9 }, '/Volumes/MICRO', { IORegistryEntryName: 'Generic- Micro SD/M2 Media', BusProtocol: 'USB' }),
+    parseMacVolume({ MountPoint: '/Volumes/STICK', VolumeName: 'STICK', BusProtocol: 'USB', RemovableMedia: true, Internal: false, ParentWholeDisk: 'disk10', DeviceIdentifier: 'disk10s1', FilesystemType: 'exfat', TotalSize: 64e9 }, '/Volumes/STICK', { IORegistryEntryName: 'SanDisk Ultra Fit Media', BusProtocol: 'USB' }),
+    parseMacVolume({ MountPoint: '/Volumes/HOLIDAY', VolumeName: 'HOLIDAY', BusProtocol: 'USB', RemovableMedia: true, Internal: false, Writable: false, ParentWholeDisk: 'disk11', DeviceIdentifier: 'disk11', FilesystemType: 'udf', TotalSize: 4.7e9 }, '/Volumes/HOLIDAY', { OpticalDeviceType: 'DVD-RW', OpticalMediaType: 'DVD-ROM' }),
+    parseMacVolume({ MountPoint: '/Volumes/UNTITLED', VolumeName: 'UNTITLED', BusProtocol: 'USB', RemovableMedia: true, Internal: false, ParentWholeDisk: 'disk12', DeviceIdentifier: 'disk12', FilesystemType: 'msdos', TotalSize: 1474560 }, '/Volumes/UNTITLED', { IORegistryEntryName: 'TEAC FD-05PUW Media' }),
+  ],
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'MacIntel',
   cameraPlace: 'USB/Z f',

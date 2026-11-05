@@ -11,6 +11,15 @@ export const linux: PlatformProfile = {
     { name: 'sdb', path: '/dev/sdb', type: 'disk', rm: false, rota: false, hotplug: true, tran: 'usb', children: [{ name: 'sdb1', path: '/dev/sdb1', mountpoints: ['/media/user/A006'], uuid: 'SSD-UUID', label: 'A006', size: 2000319152128, fsavail: 192869695488, fstype: 'exfat' }] },
   ] }),
   driveNames: ['NIKON Z F', 'A006'],
+  driveMedia: ['sd', 'external-disk'],
+  // `lsblk` with MODEL and VENDOR: a reader's model names its card; a disc is TYPE rom, a floppy is fd0.
+  otherMedia: () => parseLinuxVolumes({ blockdevices: [
+    { name: 'sdc', path: '/dev/sdc', type: 'disk', rm: true, hotplug: true, tran: 'usb', vendor: 'ProGrade', model: 'CFexpress Type B Reader', children: [{ name: 'sdc1', path: '/dev/sdc1', mountpoints: ['/media/user/CFEB'], label: 'CFEB', size: 512e9, fstype: 'exfat' }] },
+    { name: 'sdd', path: '/dev/sdd', type: 'disk', rm: true, hotplug: true, tran: 'usb', vendor: 'Generic-', model: 'Micro SD/M2', children: [{ name: 'sdd1', path: '/dev/sdd1', mountpoints: ['/media/user/MICRO'], label: 'MICRO', size: 128e9, fstype: 'exfat' }] },
+    { name: 'sde', path: '/dev/sde', type: 'disk', rm: true, hotplug: true, tran: 'usb', vendor: 'SanDisk', model: 'Ultra Fit', children: [{ name: 'sde1', path: '/dev/sde1', mountpoints: ['/media/user/STICK'], label: 'STICK', size: 64e9, fstype: 'exfat' }] },
+    { name: 'sr0', path: '/dev/sr0', type: 'rom', rm: true, hotplug: true, tran: 'usb', vendor: 'HL-DT-ST', model: 'DVDRAM GP65NB60', mountpoints: ['/media/user/HOLIDAY'], label: 'HOLIDAY', size: 4.7e9, fstype: 'udf', ro: true },
+    { name: 'fd0', path: '/dev/fd0', type: 'disk', rm: true, mountpoints: ['/media/user/FLOPPY'], label: 'FLOPPY', size: 1474560, fstype: 'vfat' },
+  ] }),
   link: (target, at) => symlink(target, at, 'dir'),
   navigatorPlatform: 'Linux x86_64',
   cameraPlace: 'USB/Z f',
