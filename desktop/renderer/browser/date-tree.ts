@@ -50,11 +50,12 @@ export function visibleDateRows(tree:readonly DateNode[],expanded:ReadonlySet<st
  walk(tree,0);return rows;
 }
 
-/** A row's files are chosen when it or a row above it is (a chosen year covers its months and days). */
+/** A row's files are chosen when it or a row above it is checked (a checked year covers its months and days). */
 export const covers=(chosen:readonly string[],value:string)=>chosen.some(v=>value===v||value.startsWith(v+'-'));
 
-/** How a row shows: full when it is chosen itself or every row below it is (all its months, or all their days); partial
- * (striped) when only some rows below it are; none otherwise. Rows below a chosen row are not highlighted themselves. */
+/** How a row's checkbox shows: checked when the row is checked itself or every row below it is (all its months, or all their
+ * days); partial (half set, the row striped) when only some rows below it are; none otherwise. Rows below a checked row are
+ * not checked themselves. */
 export function dateState(chosen:readonly string[],node:DateNode):'full'|'partial'|'none' {
  if(chosen.includes(node.value))return 'full';
  if(!node.children.length)return 'none';
@@ -63,16 +64,22 @@ export function dateState(chosen:readonly string[],node:DateNode):'full'|'partia
  return states.some(state=>state!=='none')?'partial':'none';
 }
 
-/** A click on a row (`multi`, as a click or Space in the list) chooses it or, when chosen, unchooses it; every other
- * choice stays, so years, months and days of several years can be chosen together. Choosing a row unchooses the rows
- * above it (a month inside a chosen year leaves only that month of the year chosen, the year's other months not) and
- * the rows below it, which it covers. Without `multi` (Enter) it becomes the only choice. */
+/** The column's header: its top rows (each year, and Missing details when `missing.shown`), how many have anything in them chosen
+ * (checked, or the clicked `picked` date or 'missing'), and whether all is checked: every year full, and Missing details if shown. */
+export function dateTreeSummary(tree:readonly DateNode[],chosen:readonly string[],missing:{shown:boolean;chosen:boolean},picked?:string):{all:boolean;chosen:number;total:number} {
+ const top=[...tree.map(node=>dateState(chosen,node)!=='none'||picked!==undefined&&covers([node.value],picked)),...(missing.shown?[missing.chosen||picked==='missing']:[])];
+ return {all:tree.length>0&&tree.every(node=>dateState(chosen,node)==='full')&&(!missing.shown||missing.chosen),chosen:top.filter(Boolean).length,total:top.length};
+}
+/** A row's checkbox (`multi`; Space or Ctrl/Command-click in the list) checks it or, when checked, unchecks it; every other
+ * check stays, so years, months and days of several years can be checked together. Checking a row unchecks the rows
+ * above it (a month inside a checked year leaves only that month of the year checked, the year's other months not) and
+ * the rows below it, which it covers. Without `multi` it becomes the only one. */
 export function toggleDate(chosen:readonly string[],_tree:readonly DateNode[],node:DateNode,multi:boolean):string[] {
  if(!multi)return [node.value];
  if(chosen.includes(node.value))return chosen.filter(v=>v!==node.value);
  return [...chosen.filter(v=>!node.value.startsWith(v+'-')&&!v.startsWith(node.value+'-')),node.value];
 }
-/** Adds rows (a Shift range, or Select all), dropping choices they cover. */
+/** Checks rows (a Shift range, or the column's checkbox), dropping checks they cover. */
 export function addDates(chosen:readonly string[],nodes:readonly DateNode[]):string[] {
  let next=[...chosen];
  for(const node of nodes)if(!covers(next,node.value))next=[...next.filter(v=>!v.startsWith(node.value+'-')),node.value];

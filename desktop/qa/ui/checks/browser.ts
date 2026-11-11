@@ -84,7 +84,7 @@ export const browserChecks=():Check[]=>[{
   assert.equal(await h.js<string>("(()=>{const e=document.activeElement;return document.getElementById(e.getAttribute('aria-activedescendant'))?.querySelector('span')?.textContent;})()"),'f/2.8','Continuous arrows retain focus and move active row without refocusing');
   await choosePreset(h,'builtin-aperture');await assertKinds(h,['aperture']);await setField(h,'Numeric grouping','exact');await selectFirst(h,0);
   await h.until('aperture directly exposes files',"document.querySelector('[data-testid=browser-files] [role=option]')");
-  await key(h,'[data-testid=browser-files] [role=listbox]','Space');
+  await key(h,'[data-testid=browser-files] [role=listbox]','Enter');
   await h.until('actual browser thumbnail decoded',"(()=>{const i=document.querySelector('[data-testid=browser-preview] img');return i?.complete&&i.naturalWidth>0;})()",30000);
   await h.shot('browser-aperture-preview');await key(h,'[data-testid=browser-files] [role=listbox]','Escape');
   // Keyboard equivalent: palette focused then Enter inserts; reorder and remove use focused buttons.

@@ -19,7 +19,7 @@ import {parseArgs} from 'node:util';
 import {setTimeout as sleep} from 'node:timers/promises';
 import type {ShutterNote,HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,DuplicateRemovalPlan,PlanEntry} from './shared';
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
-import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
+import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,previewSize,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
 import {checkFolderPair,checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
@@ -1743,7 +1743,7 @@ async function boot(){
   try{event.sender.startDrag({file:files[0]!,files,icon:image});}catch(error){log('normal','catalog','drag-failed',{error});}});
  ipcMain.handle('importer:summary',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file),{details:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
- ipcMain.handle('importer:thumbnail',async(event,file:string)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview,nativeDecoder)}));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:thumbnail',async(event,file:string,size?:unknown)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview,nativeDecoder),size:previewSize(size)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
  ipcMain.handle('importer:conflicts',(event,jobId:unknown)=>{trusted(event);return typeof jobId==='string'?conflictBooks.get(jobId)?.list()??[]:[];});

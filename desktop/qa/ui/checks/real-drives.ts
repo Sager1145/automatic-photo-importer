@@ -124,10 +124,10 @@ const forbiddenClick=/start|organi[sz]|check|remove|delete|clean|eject|import|ap
 const setValue=(h:Harness,selector:string,value:string)=>h.js<boolean>(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return false;const proto=e instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event(e instanceof HTMLSelectElement?'change':'input',{bubbles:true}));return true;})()`);
 const buttonByText=(h:Harness,text:string)=>h.js<boolean>(`(()=>{const e=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${JSON.stringify(text)});e?.click();return !!e;})()`);
 interface Row {key:string;label:string;count:number|null}
-const rowsOf=(h:Harness,column:string)=>h.js<Row[]>(`Array.from(document.querySelectorAll(${JSON.stringify(column+' [role=option]')})).map(e=>({key:e.getAttribute('data-row-key'),label:e.querySelector('span')?.textContent?.trim()??'',count:e.querySelector('small')?Number(e.querySelector('small').textContent.replace(/[^0-9]/g,'')):null}))`);
+const rowsOf=(h:Harness,column:string)=>h.js<Row[]>(`Array.from(document.querySelectorAll(${JSON.stringify(column+' [role=option]')})).map(e=>({key:e.getAttribute('data-row-key'),label:e.querySelector(':scope > span:not(.browser-tree-lead)')?.textContent?.trim()??'',count:e.querySelector('small')?Number(e.querySelector('small').textContent.replace(/[^0-9]/g,'')):null}))`);
 const clickRow=(h:Harness,column:string,key:string)=>h.js<boolean>(`(()=>{const e=Array.from(document.querySelectorAll(${JSON.stringify(column+' [role=option]')})).find(e=>e.getAttribute('data-row-key')===${JSON.stringify(key)});e?.click();return !!e;})()`);
 const filesColumn='[data-testid=browser-files]';
-const filesTotal=(h:Harness)=>h.js<number>(`Number(document.querySelector('${filesColumn} header small')?.textContent.replace(/[^0-9]/g,'')??-1)`);
+const filesTotal=(h:Harness)=>h.js<number>(`Number((document.querySelector('${filesColumn} header small')?.textContent.split('/').at(-1)??'').replace(/[^0-9]/g,'')||-1)`);
 const filesBusy=(h:Harness)=>h.js<boolean>(`document.querySelector('${filesColumn} [role=listbox]')?.getAttribute('aria-busy')!=='false'`);
 
 interface Timings {[name:string]:unknown}
@@ -203,7 +203,7 @@ async function openFile(h:Harness,shot:(name:string)=>Promise<void>,library:Cata
  await setValue(h,'.browser-search input',target.name);
  await h.waitFor(`Files list shows ${page.total} match(es) of "${target.name}"`,async()=>!(await filesBusy(h))&&await filesTotal(h)===page.total,{timeoutMs:60000,interval:100,seen:async()=>({files:await filesTotal(h),wanted:page.total})});
  if(index===0)await shot('search');
- await h.js<void>(`document.querySelector('${filesColumn} .browser-virtual-list').scrollTop=${Math.max(0,position*48-96)}`);
+ await h.js<void>(`document.querySelector('${filesColumn} .browser-virtual-list').scrollTop=${Math.max(0,position*36-72)}`);
  const rowSelector=`${filesColumn} [role=option]`;
  await h.waitFor(`row of ${target.rel} rendered`,()=>clickable(h,rowSelector,row.fileId),{timeoutMs:20000,interval:50});
  const started=performance.now();

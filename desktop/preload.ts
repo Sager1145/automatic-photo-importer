@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('importer',{
   ipcRenderer.on('importer:updated',callback);
   return()=>ipcRenderer.removeListener('importer:updated',callback);
  },
- thumbnail:(path:string):Promise<Thumbnail>=>ipcRenderer.invoke('importer:thumbnail',path),
+ thumbnail:(path:string,size?:number):Promise<Thumbnail>=>ipcRenderer.invoke('importer:thumbnail',path,size),
  summary:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:summary',path),
  exif:(path:string):Promise<Metadata>=>ipcRenderer.invoke('importer:exif',path),
  duplicateGroups:():Promise<DuplicateGroup[]>=>ipcRenderer.invoke('importer:duplicates'),

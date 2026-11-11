@@ -40,7 +40,8 @@ import { openCatalog } from '../catalog/store';
 import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
 import { resolveCatalogFile } from '../catalog/access';
 import { collectDragFiles } from '../core/file-drag';
-import { systemDecoders } from '../platform/thumbnails';
+import { systemDecoders, thumbnail } from '../platform/thumbnails';
+import { PREVIEW_SIZES, previewSize } from '../shared';
 import { activityTargets, type DriveSampler } from '../platform/drive-activity';
 import type { StorageMedia } from '../core/storage-media';
 
@@ -650,6 +651,21 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       if (profile.previews.photos === 'system') return;
       assert.equal(await decoders.poster(clip, output, 64), profile.previews.posters, 'a video gets a poster frame where the system makes them');
       assert.deepEqual(asked, profile.previews.posters ? [`shell ${clip}`] : []);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'previews: the larger Library browser preview asks this system\'s decoder for a bigger picture, cached apart from the normal one': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-large-previews-')));
+    try {
+      const photo = join(root, 'photo.png'), cache = join(root, 'cache'), sizes: number[] = [];
+      await writeFile(photo, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6XHgAAAAASUVORK5CYII=', 'base64'));
+      const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]), record = async (_file: string, size: number) => { sizes.push(size); return jpeg; };
+      const decoders = systemDecoders(async () => undefined, { shell: record, image: record });
+      // What the renderer may ask over IPC: the normal size, the large one, or anything else (which gets the normal one).
+      for (const asked of [undefined, PREVIEW_SIZES.large, 99999]) assert.equal((await thumbnail(photo, { cache, decoders, size: previewSize(asked) })).via, 'system');
+      assert.equal((await readdir(cache)).filter(name => name.endsWith('.jpg')).length, 2, 'each size is cached on its own');
+      // macOS asks sips (-Z) for the size; elsewhere the app's decoder gets it and scales down to it, never up.
+      assert.deepEqual(sizes, profile.previews.photos === 'system' ? [] : [PREVIEW_SIZES.normal, PREVIEW_SIZES.large]);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
 };

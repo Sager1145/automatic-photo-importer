@@ -4,9 +4,9 @@ import {openCatalog} from '../catalog/store';
 import {library,record} from './catalog-fixtures';
 import type {CatalogQuery,Filter} from '../catalog/types';
 import {formatGroup} from '../media-formats';
-import {addDates,buildDateTree,covers,dateState,toggleDate,visibleDateRows} from '../renderer/browser/date-tree';
+import {addDates,buildDateTree,covers,dateState,dateTreeSummary,toggleDate,visibleDateRows} from '../renderer/browser/date-tree';
 import {addBlock,createBlock,dateTreeLevels,defaultConfiguration,fieldForBlock,readConfiguration,updateBlock,type HierarchyBlock} from '../renderer/browser/configuration';
-import {chosenRowKeys,formatRows,selectionSummary,toggleBlockSelection} from '../renderer/browser/BrowserPage';
+import {chosenRowKeys,formatRows,selectionSummary,toggleBlockSelection} from '../renderer/browser/selection';
 
 // The day counts of the Lightroom view this follows: November 2026, days 1-3, and one older day.
 const days=[{value:'2026-11-01',count:1},{value:'2026-11-02',count:5},{value:'2026-11-03',count:382},{value:'2025-06-10',count:4}];
@@ -27,7 +27,7 @@ test('dates show as a tree of the chosen levels, each label saying only what its
  assert.equal(buildDateTree(days,['year','month','day'],'ja')[1]!.children[0]!.children[0]!.label,'1日 · 日曜日');
 });
 
-test('choosing a row unchooses only the rows above and below it; a partly chosen row is striped, a fully chosen one full',()=>{
+test('checking a row unchecks only the rows above and below it; a row with only some rows below it checked is partial, one with all of them full',()=>{
  const tree=buildDateTree([...days,{value:'2026-10-20',count:2}],['year','month','day'],'en');
  const year=tree[1]!,october=year.children[0]!,november=year.children[1]!,first=november.children[0]!,second=november.children[1]!;
  assert.ok(covers(['2026'],'2026-11-02')&&!covers(['2026-1'],'2026-11-02'));
@@ -45,11 +45,24 @@ test('choosing a row unchooses only the rows above and below it; a partly chosen
  chosen=toggleDate(chosen,tree,second,true);
  assert.deepEqual(chosen.sort(),['2025','2026-10','2026-11-02']);
  assert.deepEqual([year,november,first,second].map(node=>dateState(chosen,node)),['partial','partial','none','full']);
- // Clicking a chosen row unchooses it.
+ // A checked row's checkbox unchecks it.
  assert.deepEqual(toggleDate(['2026'],tree,year,true),[]);
  // Choosing a month drops its days, which it now covers; a Shift range adds without duplicates.
  assert.deepEqual(toggleDate(['2026-11-01','2025'],tree,november,true).sort(),['2025','2026-11']);
  assert.deepEqual(addDates(['2026-11'],[november,second,tree[0]!]).sort(),['2025','2026-11']);
+});
+
+test('a date column’s header counts its top rows and is fully checked only when every year is, expanded or not',()=>{
+ const tree=buildDateTree(days,['year','month','day'],'en');const none={shown:false,chosen:false};
+ assert.deepEqual(dateTreeSummary(tree,['2025','2026'],none),{all:true,chosen:2,total:2},'checked years, whatever is expanded below them');
+ assert.deepEqual(dateTreeSummary(tree,['2025','2026-11'],none),{all:true,chosen:2,total:2},'every month of a year checked is the year');
+ assert.deepEqual(dateTreeSummary(tree,['2026-11-01','2026-11-02','2026-11-03'],none),{all:false,chosen:1,total:2},'three days of one year: one of two years, never 3/1');
+ assert.deepEqual(dateTreeSummary(tree,['2026-11-01'],none),{all:false,chosen:1,total:2});
+ assert.deepEqual(dateTreeSummary(tree,['2026'],none,'2025-06-10'),{all:false,chosen:2,total:2},'a picked day counts its year, but checks nothing');
+ assert.deepEqual(dateTreeSummary(tree,['2025','2026'],{shown:true,chosen:false}),{all:false,chosen:2,total:3},'Missing details is a top row too');
+ assert.deepEqual(dateTreeSummary(tree,['2025','2026'],{shown:true,chosen:true}),{all:true,chosen:3,total:3});
+ assert.deepEqual(dateTreeSummary(tree,[],{shown:true,chosen:false},'missing'),{all:false,chosen:1,total:3});
+ assert.deepEqual(dateTreeSummary([],[],none),{all:false,chosen:0,total:0});
 });
 
 test('the catalog filters capture days and months by a year or month, as one value each',async()=>{

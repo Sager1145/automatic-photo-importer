@@ -138,10 +138,16 @@ This file may need organization.|此文件可能需要整理。|此檔案可能�
 Open organization tool|打开整理工具|開啟整理工具|整理ツールを開く
 Review and apply changes in the separate organization tool.|请在独立整理工具中审核并应用更改。|請在獨立整理工具中檢閱並套用變更。|別の整理ツールで変更を確認して適用します。
 Placement has not been checked.|尚未检查文件位置。|尚未檢查檔案位置。|配置は未確認です。
-Click or Space selects and deselects; select several to see them together in the next columns. Shift adds a range. Arrow keys navigate. Esc clears. Tab moves to controls.|单击或按空格键选择，再按一次取消选择；选择多项后，后续分栏显示它们的合集。Shift 选择一个范围。方向键浏览，Esc 清除，Tab 切换控件。|按一下或按空白鍵選取，再按一次取消選取；選取多項後，後續欄位顯示它們的合集。Shift 選取一個範圍。方向鍵瀏覽，Esc 清除，Tab 切換控制項。|クリックまたはスペースで選択し、もう一度で選択解除。複数選ぶと次の列にまとめて表示されます。Shift で範囲を選択。矢印キーで移動、Esc で解除、Tab で操作項目へ移動します。
+Click a row to show it for now; its checkbox (or Space) keeps it chosen. Checked rows are shown together in the next columns. Shift adds a range. Arrow keys navigate. Esc clears. Tab moves to controls.|单击某行可临时查看；勾选它的复选框（或按空格键）可保持选中。已勾选的各行会在后续分栏中合并显示。Shift 选择一个范围。方向键浏览，Esc 清除，Tab 切换控件。|按一下某列可暫時檢視；勾選它的核取方塊（或按空白鍵）可保持選取。已勾選的各列會在後續欄位中合併顯示。Shift 選取一個範圍。方向鍵瀏覽，Esc 清除，Tab 切換控制項。|行をクリックすると一時的に表示します。チェックボックス（またはスペース）で選択を固定します。チェックした行は次の列にまとめて表示されます。Shift で範囲を選択。矢印キーで移動、Esc で解除、Tab で操作項目へ移動します。
 Selection|选择|選取|選択
 Select all|全选|全選|すべて選択
 Deselect all|取消全选|取消全選|すべて選択解除
+Select all: {name}|全选：{name}|全選：{name}|すべて選択：{name}
+Deselect all: {name}|取消全选：{name}|取消全選：{name}|すべて選択解除：{name}
+Checked|已勾选|已勾選|チェック済み
+Partly checked|部分勾选|部分勾選|一部チェック済み
+Shown for now, not checked|临时查看，未勾选|暫時檢視，未勾選|一時表示中（未チェック）
+Select {name}|选择 {name}|選取 {name}|{name} を選択
 Too many values to select at once|值太多，无法一次全选|值太多，無法一次全選|値が多すぎて一度に選択できません
 {count} selected|已选 {count} 项|已選 {count} 項|{count} 件選択
 {count} files selected|已选 {count} 个文件|已選 {count} 個檔案|{count} 個のファイルを選択
@@ -156,4 +162,27 @@ Drag onto Lightroom Classic’s Library grid or Import window to import these ph
 Date → Camera → Format|日期 → 相机 → 格式|日期 → 相機 → 格式|日付 → カメラ → 形式
 Camera → Lens → Focal length|相机 → 镜头 → 焦距|相機 → 鏡頭 → 焦距|カメラ → レンズ → 焦点距離
 Aperture → Date → Format → Camera|光圈 → 日期 → 格式 → 相机|光圈 → 日期 → 格式 → 相機|絞り → 日付 → 形式 → カメラ
+Library filter|图库过滤器|圖庫篩選器|ライブラリフィルター
+Filter|过滤|篩選|フィルター
+View preset|视图预设|檢視預設|表示プリセット
+Built-in views|内置视图|內建檢視|標準の表示
+Saved views|已存视图|已儲存的檢視|保存した表示
+Columns|列|欄|列
+Add, remove and arrange the columns, and save the view as a preset|添加、移除和排列各列，并将视图存为预设|加入、移除和排列各欄，並將檢視儲存為預設|列の追加・削除・並べ替えと、表示のプリセット保存
+Column options: {field}|列选项：{field}|欄選項：{field}|列のオプション：{field}
+Show in this column|此列显示|此欄顯示|この列に表示
+Add column after|在后面添加一列|在後面加入一欄|後ろに列を追加
+Remove column|移除此列|移除此欄|この列を削除
+Add a column|添加一列|加入一欄|列を追加
+Preview width|预览宽度|預覽寬度|プレビューの幅
+Drag or use the arrow keys to resize the preview. Double-click restores the default width.|拖动或使用方向键调整预览宽度。双击恢复默认宽度。|拖曳或使用方向鍵調整預覽寬度。按兩下恢復預設寬度。|ドラッグまたは矢印キーでプレビューの幅を変更します。ダブルクリックで標準の幅に戻ります。
+Larger preview|放大预览|放大預覽|大きいプレビュー
+Show the preview larger, beside a narrow file list|放大显示预览，旁边的文件列表变窄|放大顯示預覽，旁邊的檔案列表變窄|プレビューを大きく表示し、横のファイル一覧を狭くします
+Show the library and filter bars|显示图库栏和过滤栏|顯示圖庫列和篩選列|ライブラリバーとフィルターバーを表示
+Hide or show the library row, the filter bar and the selection path|隐藏或显示图库行、过滤栏和选择路径|隱藏或顯示圖庫列、篩選列和選取路徑|ライブラリの行、フィルターバー、選択パスを表示または非表示にします
+Show the category columns|显示分类栏|顯示分類欄|カテゴリの列を表示
+Hide or show the category columns. Their filters still apply.|隐藏或显示分类栏。其过滤条件仍然有效。|隱藏或顯示分類欄。其篩選條件仍然有效。|カテゴリの列を表示または非表示にします。非表示でも絞り込みは適用されます。
+Filters: {count}|过滤条件：{count}|篩選條件：{count}|フィルター：{count}
+Clear filters|清除过滤条件|清除篩選條件|フィルターをクリア
+Click a row to show it for now. Tick its box to keep it chosen.|单击某行可临时查看；勾选它的复选框可保持选中。|按一下某列可暫時檢視；勾選它的核取方塊可保持選取。|行をクリックすると一時的に表示します。チェックボックスで選択を固定します。
 `;

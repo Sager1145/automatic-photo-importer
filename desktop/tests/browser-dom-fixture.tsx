@@ -1,6 +1,7 @@
 import {createElement} from 'react';
 import {createRoot} from 'react-dom/client';
-import {BrowserPage,type BrowserAPI} from '../renderer/browser/BrowserPage';
+import {BrowserPage} from '../renderer/browser/BrowserPage';
+import type {BrowserAPI} from '../renderer/browser/api';
 import {createBlock,defaultConfiguration} from '../renderer/browser/configuration';
 import {I18nProvider} from '../renderer/i18n';
 import type {CatalogLibrary,CatalogQuery,CatalogStatus} from '../catalog/types';
@@ -18,56 +19,79 @@ async function mount(){
  const column=()=>host.querySelector<HTMLElement>('[data-testid=facet-column]')!;
  const list=()=>column()?.querySelector<HTMLElement>('[role=listbox]')!;
  const row=(label:string)=>[...(column()?.querySelectorAll<HTMLElement>('[role=option]')??[])].find(node=>node.querySelector('span')?.textContent===label)!;
+ /** A row's checkbox. */
+ const box=(label:string)=>row(label).querySelector<HTMLInputElement>('[data-testid=row-check]')!;
+ const master=()=>column().querySelector<HTMLInputElement>('[data-testid=column-check-all]')!;
+ const click=(node:HTMLElement,options:MouseEventInit={})=>node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,...options}));
+ const key=(name:string,options:KeyboardEventInit={})=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,...options}));
  const scrollTo=(top:number)=>{const node=list();node.scrollTop=top;node.dispatchEvent(new Event('scroll',{bubbles:true}));};
- const button=(label:string)=>[...(column()?.querySelectorAll<HTMLButtonElement>('button')??[])].find(node=>node.textContent===label)!;
- const values=()=>latest?.filters.flatMap(filter=>filter.kind==='values'?filter.values:[])??[];
+ /** What the files are filtered by, in any order: the column's checked rows and its picked row. */
+ const values=()=>JSON.stringify((latest?.filters.flatMap(filter=>filter.kind==='values'?filter.values.map(String):[])??[]).sort());
+ const picked=(label:string)=>row(label)?.getAttribute('data-picked')==='true';
  await until(()=>!!row('Camera 1')&&list().getAttribute('aria-busy')==='false','Initial delayed facets did not render');
  // The fixture has no stylesheet: give the list the bounded, scrolling box the app's CSS gives it.
  Object.assign(list().style,{height:'336px',overflowY:'auto'});
- return {host,column,list,row,button,values,render,scrollTo,dispose:()=>{root.unmount();host.remove();}};
+ return {host,column,list,row,box,master,click,key,values,picked,render,scrollTo,dispose:()=>{root.unmount();host.remove();}};
 }
 const checks:{name:string;passed:boolean;error?:string}[]=[];
 async function run(name:string,body:()=>Promise<void>){try{await body();checks.push({name,passed:true});}catch(error){checks.push({name,passed:false,error:String(error)});}}
+const sorted=(...labels:string[])=>JSON.stringify(labels.sort());
 void (async()=>{
- await run('cross-page OR selection retains hidden choices and toggles them independently',async()=>{const ui=await mount();try{
-  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1"]','First-page selection missing');
+ await run('checked rows on two pages stay checked, and each unchecks on its own',async()=>{const ui=await mount();try{
+  ui.box('Camera 1').click();await delay(100);check(ui.values()===sorted('Camera 1'),`First-page check missing: ${ui.values()}`);
   ui.scrollTo(ui.list().scrollHeight);await until(()=>!!ui.row('Camera 201'),'Second facet page not appended');
-  ui.row('Camera 201').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1","Camera 201"]',`Hidden selection lost: ${JSON.stringify(ui.values())}`);
+  ui.click(ui.row('Camera 201'),{ctrlKey:true});await delay(100);check(ui.values()===sorted('Camera 1','Camera 201'),`Hidden check lost: ${ui.values()}`);
   ui.scrollTo(0);await until(()=>!!ui.row('Camera 1'),'First rows not rendered after scrolling back');
-  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 201"]',`Toggle lost hidden second-page value: ${JSON.stringify(ui.values())}`);
+  check(ui.box('Camera 1').checked,'The first-page checkbox is not checked after scrolling back');
+  ui.box('Camera 1').click();await delay(100);check(ui.values()===sorted('Camera 201'),`Unchecking lost the second-page value: ${ui.values()}`);
  }finally{ui.dispose();}});
- await run('a click selects, a second click deselects, and the selection bar lists each choice with their number',async()=>{const ui=await mount();try{
-  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);
-  ui.row('Camera 2').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 1","Camera 2"]',`Second click replaced the first: ${JSON.stringify(ui.values())}`);
-  const bar=()=>ui.host.querySelector('[data-testid=browser-selection]')?.textContent??'';check(bar().includes('Camera 1, Camera 2')&&bar().includes('(2)'),`Selection bar: ${bar()}`);
-  check(ui.column().querySelector('header small')!.textContent!.startsWith('2/')&&ui.column().querySelector('header small')!.getAttribute('title')==='2 selected','Column header count missing');
-  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 2"]',`Second click did not deselect: ${JSON.stringify(ui.values())}`);
-  ui.row('Camera 1').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);ui.row('Camera 3').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true}));await delay(100);check(JSON.stringify(ui.values())==='["Camera 2","Camera 1","Camera 3"]',`Shift range: ${JSON.stringify(ui.values())}`);
+ await run('a click picks a row and the next click moves it; a checkbox checks a row until it is unchecked',async()=>{const ui=await mount();try{
+  ui.click(ui.row('Camera 1'));await delay(100);check(ui.values()===sorted('Camera 1'),`Click did not pick: ${ui.values()}`);
+  check(ui.picked('Camera 1')&&ui.row('Camera 1').getAttribute('aria-selected')==='true'&&!ui.box('Camera 1').checked,'A picked row is shown chosen, unchecked');
+  ui.click(ui.row('Camera 2'));await delay(100);check(ui.values()===sorted('Camera 2')&&!ui.picked('Camera 1')&&ui.picked('Camera 2'),`The next click did not move the pick: ${ui.values()}`);
+  ui.box('Camera 3').click();await delay(100);check(ui.values()===sorted('Camera 2','Camera 3'),`A check dropped the pick: ${ui.values()}`);check(!ui.picked('Camera 3')&&ui.picked('Camera 2'),'The checkbox picked its row');
+  ui.click(ui.row('Camera 4'));await delay(100);check(ui.values()===sorted('Camera 3','Camera 4'),`A click dropped the check: ${ui.values()}`);check(ui.box('Camera 3').checked,'The checked row lost its checkbox');
+  const header=ui.column().querySelector('header small')!;check(header.textContent!.startsWith('2/')&&header.getAttribute('title')==='2 selected',`Column header count: ${header.textContent}`);
+  const bar=ui.host.querySelector('[data-testid=browser-selection]')?.textContent??'';check(bar.includes('Camera 3')&&bar.includes('Camera 4'),`Selection bar: ${bar}`);
+  ui.click(ui.row('Camera 4'));await delay(100);check(ui.values()===sorted('Camera 3')&&!ui.picked('Camera 4'),`A second click did not drop the pick: ${ui.values()}`);
+  ui.click(ui.row('Camera 5'),{ctrlKey:true});await delay(100);check(ui.values()===sorted('Camera 3','Camera 5')&&ui.box('Camera 5').checked,`Ctrl-click did not check: ${ui.values()}`);
+  ui.box('Camera 5').click();await delay(100);check(ui.values()===sorted('Camera 3')&&!ui.box('Camera 5').checked,`The checkbox did not uncheck: ${ui.values()}`);
+  ui.click(ui.row('Camera 7'),{shiftKey:true});await delay(100);check(ui.values()===sorted('Camera 3','Camera 5','Camera 6','Camera 7'),`Shift range: ${ui.values()}`);
+  ui.click(ui.row('Camera 9'));await delay(100);ui.box('Camera 9').click();await delay(100);
+  check(ui.box('Camera 9').checked&&!ui.picked('Camera 9'),'Checking the picked row did not lock it');check(ui.values()===sorted('Camera 3','Camera 5','Camera 6','Camera 7','Camera 9'),`After locking the pick: ${ui.values()}`);
  }finally{ui.dispose();}});
- await run('Select all reads every page and selects each value; Deselect all clears the column; each disables when it would do nothing',async()=>{const ui=await mount();try{
-  const all=()=>ui.column().querySelector<HTMLButtonElement>('[data-testid=column-select-all]')!,none=()=>ui.column().querySelector<HTMLButtonElement>('[data-testid=column-deselect-all]')!;
-  check(!all().disabled&&none().disabled,'Initial button states');
-  all().click();await until(()=>ui.values().length===202,`Select all chose ${ui.values().length}`);await delay(50);
-  check(all().disabled&&!none().disabled,'Select all stays enabled after selecting everything');check(ui.row('Camera 1')?.getAttribute('aria-selected')==='true','Rows not shown selected');
-  none().click();await until(()=>ui.values().length===0,'Deselect all left values');await delay(50);check(none().disabled&&!all().disabled,'Buttons after deselect');
-  const files=ui.host.querySelector('[data-testid=browser-files]')!;check(!!files.querySelector('[data-testid=column-select-all]')&&!!files.querySelector('[data-testid=lightroom-drag]'),'Files column lacks Select all or the Lightroom drag handle');
+ await run('the column checkbox reads every page and checks each row; checked or half set, it clears the column',async()=>{const ui=await mount();try{
+  check(!ui.master().checked&&!ui.master().indeterminate&&!ui.master().disabled,'Initial column checkbox');
+  ui.click(ui.row('Camera 5'));await delay(100);check(!ui.master().checked&&!ui.master().indeterminate,'A pick alone sets the column checkbox');
+  ui.master().click();await until(()=>JSON.parse(ui.values()).length===202,`Checking every row chose ${JSON.parse(ui.values()).length}`);await delay(50);
+  check(ui.master().checked&&!ui.master().indeterminate,'The column checkbox is not checked after checking every row');check(ui.row('Camera 1')?.getAttribute('aria-selected')==='true'&&ui.box('Camera 1').checked,'Rows not shown checked');check(!ui.picked('Camera 5'),'The pick stayed although its row is checked');
+  ui.master().click();await until(()=>JSON.parse(ui.values()).length===0,'Clearing the column left values');await delay(50);check(!ui.master().checked&&!ui.master().indeterminate,'Column checkbox after clearing');
+  ui.box('Camera 2').click();ui.click(ui.row('Camera 8'));await delay(100);check(ui.master().indeterminate&&!ui.master().checked,'Some rows checked: the column checkbox is not half set');
+  ui.master().click();await until(()=>JSON.parse(ui.values()).length===0,`Clearing a half-set column left ${ui.values()}`);check(!ui.picked('Camera 8'),'Clearing kept the pick');
+  const files=ui.host.querySelector('[data-testid=browser-files]')!;check(!!files.querySelector('[data-testid=column-check-all]')&&!!files.querySelector('[data-testid=lightroom-drag]'),'The files lack their checkbox or the Lightroom drag handle');
  }finally{ui.dispose();}});
- await run('continuous ArrowDown survives delayed responses without refocus',async()=>{const ui=await mount();try{
-  const list=ui.list();list.focus();list.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));await delay(100);
+ await run('arrow keys move the pick and survive delayed responses without refocus; Space checks, Enter picks, Escape clears',async()=>{const ui=await mount();try{
+  const list=ui.list();list.focus();ui.key('ArrowDown');await delay(100);
   check(document.activeElement===list&&ui.list()===list,`Focused list replaced after first response: ${document.activeElement?.tagName}`);
-  document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));await delay(100);
-  check(document.activeElement===list,'Focus lost after second response');check(JSON.stringify(ui.values())==='["Camera 3"]',`Second ArrowDown did not advance: ${JSON.stringify(ui.values())}`);
+  ui.key('ArrowDown');await delay(100);
+  check(document.activeElement===list,'Focus lost after second response');check(ui.values()===sorted('Camera 3'),`Second ArrowDown did not move the pick: ${ui.values()}`);
   const active=list.getAttribute('aria-activedescendant');check(active&&document.getElementById(active)&&list.contains(document.getElementById(active)),'Active descendant is missing from the live list');
+  ui.box('Camera 1').click();await delay(100);ui.key('ArrowDown');await delay(100);check(ui.values()===sorted('Camera 1','Camera 2'),`ArrowDown after a check: ${ui.values()}`);
+  ui.key('ArrowDown',{ctrlKey:true});await delay(100);check(ui.values()===sorted('Camera 1','Camera 2'),`Ctrl+ArrowDown moved the pick: ${ui.values()}`);
+  ui.key('Enter');await delay(100);check(ui.values()===sorted('Camera 1','Camera 3')&&ui.picked('Camera 3'),`Enter did not pick the cursor row: ${ui.values()}`);
+  ui.key(' ');await delay(100);check(ui.box('Camera 3').checked&&!ui.picked('Camera 3')&&ui.values()===sorted('Camera 1','Camera 3'),`Space did not check the cursor row: ${ui.values()}`);
+  ui.key('ArrowDown',{shiftKey:true});await delay(100);check(ui.box('Camera 4').checked&&ui.values()===sorted('Camera 1','Camera 3','Camera 4'),`Shift+ArrowDown did not check: ${ui.values()}`);
+  ui.key('Escape');await delay(100);check(ui.values()===sorted(),`Escape left ${ui.values()}`);
  }finally{ui.dispose();}});
  await run('appending the next page keeps the scroll position and the listbox',async()=>{const ui=await mount();try{
   const list=ui.list();list.focus();ui.scrollTo(list.scrollHeight);const top=list.scrollTop;check(top>0,'Fixture list did not scroll');
   await until(()=>!!ui.row('Camera 202'),'Second page not appended');await delay(20);
   check(ui.list()===list,'Appending replaced listbox identity');check(list.scrollTop===top,`Appending moved the scroll position: ${top} -> ${list.scrollTop}`);
  }finally{ui.dispose();}});
- await run('a revision refresh keeps the scroll position and the selection',async()=>{const ui=await mount();try{
-  ui.scrollTo(480);await until(()=>!!ui.row('Camera 12'),'Scrolled rows not rendered');ui.row('Camera 12').dispatchEvent(new MouseEvent('click',{bubbles:true}));await delay(100);
+ await run('a revision refresh keeps the scroll position, the pick and the checks',async()=>{const ui=await mount();try{
+  ui.scrollTo(480);await until(()=>!!ui.row('Camera 12'),'Scrolled rows not rendered');ui.click(ui.row('Camera 12'));ui.box('Camera 13').click();await delay(100);
   ui.render(2);await delay(150);
-  check(ui.list().scrollTop===480,`Refresh moved the scroll position: ${ui.list().scrollTop}`);check(ui.row('Camera 12')?.getAttribute('aria-selected')==='true','Refresh lost the selection');
+  check(ui.list().scrollTop===480,`Refresh moved the scroll position: ${ui.list().scrollTop}`);check(ui.picked('Camera 12')&&ui.row('Camera 12').getAttribute('aria-selected')==='true','Refresh lost the pick');check(ui.box('Camera 13').checked,'Refresh lost the check');
  }finally{ui.dispose();}});
  await run('a focused listbox remains mounted throughout a delayed revision refresh',async()=>{const ui=await mount();try{
   const list=ui.list();list.focus();ui.render(2);await delay(5);check(ui.list()===list&&document.activeElement===list,'Refresh replaced the focused list while loading');

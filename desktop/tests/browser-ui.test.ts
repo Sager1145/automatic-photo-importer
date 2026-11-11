@@ -4,9 +4,13 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {browserTranslationRows} from '../renderer/browser/translations';
 import {I18nProvider,createTranslator} from '../renderer/i18n';
-import {selectedKeys,HierarchyEditor,BrowserPage,PreviewPanel,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/BrowserPage';
-import {defaultConfiguration,addBlock,createBlock,blockLabels} from '../renderer/browser/configuration';
-import type {BrowserAPI} from '../renderer/browser/BrowserPage';
+import {BrowserPage} from '../renderer/browser/BrowserPage';
+import {HierarchyEditor} from '../renderer/browser/HierarchyEditor';
+import {PreviewPanel} from '../renderer/browser/PreviewPanel';
+import {selectedKeys,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/selection';
+import {defaultConfiguration,addBlock,createBlock,blockLabels,changeBlockKind,unusedBlockKind,presetMenu,applyPreset} from '../renderer/browser/configuration';
+import {AddColumn,ColumnMenu} from '../renderer/browser/ColumnMenu';
+import type {BrowserAPI} from '../renderer/browser/api';
 import type {CatalogRow,CatalogLibrary,Filter} from '../catalog/types';
 import type {Language} from '../shared';
 const render=(child:ReturnType<typeof createElement>,language:Language='en')=>renderToStaticMarkup(createElement(I18nProvider,{language,children:child}));
@@ -91,12 +95,79 @@ test('selection chips use photographic units for exact values and ranges',()=>{
  assert.equal(selectionValueLabel(aperture,{kind:'range',field:'fNumber',min:2,max:4,maxInclusive:true},'en'),'≥ f/2 – ≤ f/4');
  assert.equal(selectionValueLabel(camera,{kind:'values',field:'camera',values:['QA Camera Alpha']},'en'),'QA Camera Alpha');
 });
-test('one toolbar row holds navigation, filters and sort; indexing sits with its status; the selection bar shows only when something is selected',()=>{
- const html=render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration:defaultConfiguration(),onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
- const toolbar=html.match(/<div class="browser-toolbar"[^>]*>([\s\S]*?)<div class="browser-status"/)?.[1]??'';
- for(const part of ['Browser mode','Search names','Newest capture first','RAW + JPEG'])assert.ok(toolbar.includes(part),`${part} in the toolbar`);
- assert.ok(/<div class="browser-status">[\s\S]*Needs organization[\s\S]*Refresh index/.test(html),'placement filter and indexing beside the index status');
- assert.ok(!toolbar.includes('browser-toolbar-break'),'a single row');
+const page=(configuration=defaultConfiguration())=>render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration,onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
+test('the page reads as one tool: source, filter bar, columns, height handle, results; the selection path shows only when something is chosen',()=>{
+ const html=page();
+ const at=(part:string)=>{const index=html.indexOf(part);assert.ok(index>=0,`${part} on the page`);return index;};
+ // In order: the source row (library, then the index status with Refresh index), the filter bar, the column editor (closed), the columns, the handle, the results.
+ const order=['<div class="browser-toolbar">','<div class="browser-source-row">','aria-label="Library"','aria-label="Back"','<div class="browser-status">','Refresh index','<div class="browser-filter-bar"','aria-label="Browser mode"','Search names','Needs organization','<div class="browser-filter-end">','browser-preset-menu','>Columns</button>','>Clear all</button>','data-testid="hierarchy-editor"','<div class="browser-workspace">','class="browser-horizontal browser-columns"','data-testid="facet-column"','class="browser-add-column"','browser-height-resize','data-testid="browser-files"','Newest capture first','RAW + JPEG'].map(at);
+ assert.deepEqual(order,[...order].sort((a,b)=>a-b),'regions in order');
+ const toolbar=html.slice(at('<div class="browser-toolbar">'),at('data-testid="hierarchy-editor"'));
+ assert.match(toolbar,/<div class="browser-status"><div class="browser-status-text" role="status">[^]*Offline/,'the index status sits in the source row');
+ assert.match(html,/<button[^>]*browser-clear-all[^>]*disabled=""[^>]*>Clear all<\/button>/,'Clear all is off while nothing is chosen');
  assert.ok(!html.includes('browser-selection-bar'),'no empty selection row');
- assert.ok(html.includes('browser-height-resize'),'the columns area has a height handle');
+ assert.match(html,/<details id="[^"]+" class="browser-editor[^"]*" data-testid="hierarchy-editor">/,'the column editor starts closed');
+ assert.match(html,/aria-expanded="false" aria-controls="([^"]+)"[^>]*>[^]*?Columns<\/button>/,'the Columns button controls the editor');
+ // The results: Files, the count, sort and the drag-out handle in the header; no Files column in the strip and no preview until a file is picked.
+ const results=html.slice(at('data-testid="browser-files"'));
+ assert.match(results,/<header>[^]*<h3>Files<\/h3><small>0<\/small>[^]*Newest capture first[^]*data-testid="lightroom-drag"[^]*<\/header>/);
+ assert.ok(!html.includes('browser-file-column')&&!html.includes('data-testid="browser-preview"'));
+ assert.ok(html.slice(at('class="browser-horizontal browser-columns"'),at('browser-height-resize')).includes('aria-label="Column options: Date"'),'each category column has its header menu');
+});
+test('the view preset menu lists the built-in views and the saved ones, and shows Custom view when none is active',()=>{
+ const c=defaultConfiguration();
+ assert.match(page(c),/<select><option value="" disabled="">Custom view<\/option><optgroup label="Built-in views"><option value="builtin-date-camera-format" selected="">Date → Camera → Format<\/option>/);
+ const mine={...c,presets:[{id:'preset-mine',name:'Mine',blocks:c.blocks}],activePresetId:undefined};const html=page(mine);
+ assert.match(html,/<option value="" disabled="" selected="">Custom view<\/option>/);assert.match(html,/<optgroup label="Saved views"><option value="preset-mine">Mine<\/option><\/optgroup>/);
+ assert.ok(!html.includes('value="builtin-iso"'),'single fields are not listed');
+ // A single-field view is listed while it is the active one, so the menu still names it.
+ const single=applyPreset(c,'builtin-iso');assert.deepEqual(presetMenu(single).builtIn.map(p=>p.id),['builtin-iso','builtin-date-camera-format','builtin-camera-lens-focal','builtin-aperture-date-format-camera']);
+ assert.match(page(single),/<option value="builtin-iso" selected="">ISO<\/option>/);
+ assert.match(createTranslator('ja')('Custom view'),/カスタム/);
+});
+test('a column header menu changes the field in place, adds a column after it or removes it',()=>{
+ const c=defaultConfiguration();const [date,camera,format]=c.blocks;
+ const changed=changeBlockKind(c,camera!.id,'lens');
+ assert.deepEqual(changed.blocks.map(b=>b.kind),['date','lens','format']);assert.equal(changed.blocks[0],date);assert.equal(changed.blocks[2],format);
+ assert.notEqual(changed.blocks[1]!.id,camera!.id,'a new block, so the old choice in that column does not carry over');assert.equal(changed.activePresetId,undefined,'an edited view is custom');
+ const toDate=changeBlockKind(c,format!.id,'date');assert.deepEqual(toDate.blocks[2]!.dateLevels,['year','month','day'],'a new date column is the full tree');
+ assert.equal(changeBlockKind(c,camera!.id,'camera'),c,'the same field changes nothing');assert.equal(changeBlockKind(c,'missing','iso'),c);
+ assert.equal(unusedBlockKind(c),'name');assert.equal(unusedBlockKind({...c,blocks:[]}),'date');
+ let all=c;for(let i=0;i<9;i++)all=addBlock(all,unusedBlockKind(all),all.blocks.length);assert.equal(unusedBlockKind(all),'date','every field shown: Date again');
+ const menu=render(createElement(ColumnMenu,{configuration:c,block:date!,onChange:()=>{}}));
+ assert.match(menu,/popover="auto"/);assert.match(menu,/aria-label="Column options: Date"/);assert.doesNotMatch(menu,/aria-haspopup/,'a button that discloses a group, not an ARIA menu');assert.match(menu,/aria-controls="([^"]+)"[^]*id="\1" popover="auto" class="browser-menu" role="group"/);assert.match(menu,/Show in this column/);
+ for(const kind of ['date','name','format','camera','lens','focal','aperture','shutter','iso'])assert.match(menu,new RegExp(`data-field-kind="${kind}" aria-pressed="${kind==='date'}"`));
+ assert.ok(!menu.includes('data-block-kind'),'the editor\'s field chips stay the only [data-block-kind]');
+ assert.match(menu,/data-testid="date-level-toggles"><button type="button" aria-pressed="true">Year<\/button>/);assert.match(menu,/Add column after/);assert.match(menu,/Remove column/);
+ assert.doesNotMatch(render(createElement(ColumnMenu,{configuration:c,block:camera!,onChange:()=>{}})),/date-level-toggles/,'Year, Month and Day only on a date column');
+ const add=render(createElement(AddColumn,{configuration:c,onChange:()=>{}}));assert.match(add,/class="browser-add-column"/);assert.match(add,/aria-label="Add a column"/);assert.equal(add.match(/data-field-kind=/g)?.length,9);assert.doesNotMatch(add,/aria-pressed/,'no field is current in a new column');
+ for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['Filter','Columns','View preset','Show in this column','Add column after','Remove column','Add a column'])assert.notEqual(t(label),label,`${language}: ${label}`);}
+});
+test('the results header toggles the bars and the columns (pressed = shown); hidden, they are not rendered and the results keep their parts',()=>{
+ const shown=page();
+ assert.match(shown,/<button type="button" class="browser-toggle" aria-pressed="true"[^>]*>[^]*?RAW \+ JPEG<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the library and filter bars" title="[^"]+">[^]*?<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the category columns" title="[^"]+">[^]*?<\/button>[^]*data-testid="lightroom-drag"/,'after RAW + JPEG, before Drag to Lightroom');
+ assert.equal(shown.match(/class="browser-toggle"/g)?.length,1,'browser-toggle stays the RAW + JPEG toggle only');
+ assert.ok(!shown.includes('browser-filter-note'),'no filter note while nothing is hidden');
+ const bars=page({...defaultConfiguration(),hideBars:true});
+ for(const gone of ['browser-toolbar','browser-source-row','browser-filter-bar','browser-status','browser-selection-bar','hierarchy-editor'])assert.ok(!bars.includes(gone),`${gone} hidden with the bars`);
+ for(const kept of ['class="browser-horizontal browser-columns"','browser-height-resize','data-testid="browser-files"','RAW + JPEG','data-testid="lightroom-drag"'])assert.ok(bars.includes(kept),`${kept} kept`);
+ assert.match(bars,/aria-pressed="false" aria-label="Show the library and filter bars"/);
+ const columns=page({...defaultConfiguration(),hideColumns:true});
+ for(const gone of ['class="browser-horizontal browser-columns"','browser-height-resize','data-testid="facet-column"','browser-add-column'])assert.ok(!columns.includes(gone),`${gone} hidden with the columns`);
+ for(const kept of ['<div class="browser-toolbar">','<div class="browser-filter-bar"','<div class="browser-workspace">','data-testid="browser-files"'])assert.ok(columns.includes(kept),`${kept} kept`);
+ assert.match(columns,/aria-pressed="false" aria-label="Show the category columns"/);
+ assert.match(columns,/<header>[^]*<h3>Files<\/h3><small>0<\/small>/,'the count stays the first small in the header');
+ const both=page({...defaultConfiguration(),hideBars:true,hideColumns:true});
+ assert.ok(!both.includes('browser-toolbar')&&!both.includes('class="browser-horizontal browser-columns"')&&!both.includes('browser-height-resize'));
+ assert.match(both,/<section class="browser-results [^"]*" data-testid="browser-files"[^]*aria-label="Show the library and filter bars"[^]*aria-label="Show the category columns"/,'both toggles stay reachable');
+});
+test('the preview header has a Larger preview toggle beside Close preview; the details sit under the picture',()=>{
+ const row:CatalogRow={fileId:'f',libraryId:'l',relativePath:'a.jpg',parentPath:'',name:'a.jpg',mediaKind:'JPEG',extension:'jpg',size:'10',metadataStatus:'ready',values:{metadataStatus:'ready'},placement:{status:'inPlace',actualRelativePath:'a.jpg',rulesScope:'r'},companionCount:0} as CatalogRow;
+ const props={row,online:false,api,onOrganization:()=>{},onReveal:()=>{},onClose:()=>{}};
+ const normal=render(createElement(PreviewPanel,{...props,onLarge:()=>{}})),large=render(createElement(PreviewPanel,{...props,large:true,onLarge:()=>{}}));
+ assert.match(normal,/<aside class="browser-preview" data-testid="browser-preview"[^>]*><header><h3>a.jpg<\/h3><div class="browser-preview-tools"><button type="button" class="[^"]*browser-preview-size" aria-label="Larger preview" aria-pressed="false"[^>]*>[^]*?<\/button><button[^>]*aria-label="Close preview"/);
+ assert.match(large,/<aside class="browser-preview is-large"[^]*aria-label="Larger preview" aria-pressed="true"/);
+ assert.match(normal,/<div class="browser-photo"[^]*<\/div><div class="browser-preview-info">[^]*<dl class="browser-file-details"><div>/,'the details scroll under the picture');
+ assert.ok(!render(createElement(PreviewPanel,props)).includes('Larger preview'),'no toggle without a handler');
+ assert.ok(!normal.includes('class="browser-toggle"'));
 });

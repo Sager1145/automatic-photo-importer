@@ -1,8 +1,8 @@
 import test from 'node:test';
 import {readCatalogPreview} from '../renderer/browser/preview';
 import assert from 'node:assert/strict';
-import {defaultConfiguration,createBlock,addBlock,moveBlock,removeBlock,updateBlock,savePreset,renamePreset,deletePreset,applyPreset,readConfiguration,writeConfiguration,fieldForBlock,numericBuckets,safeDatePattern,parseNumericInput} from '../renderer/browser/configuration';
-import {initialBrowserState,browserReducer,queryFor,selectionFilter,LatestRequest,keyboardIntent,virtualWindow} from '../renderer/browser/state';
+import {clampPreviewWidth,minListWidth,minPreviewWidth,previewHandleWidth,defaultConfiguration,createBlock,addBlock,moveBlock,removeBlock,updateBlock,savePreset,renamePreset,deletePreset,applyPreset,readConfiguration,writeConfiguration,fieldForBlock,numericBuckets,safeDatePattern,parseNumericInput} from '../renderer/browser/configuration';
+import {initialBrowserState,browserReducer,effectiveSelections,queryFor,selectionFilter,LatestRequest,keyboardIntent,virtualWindow} from '../renderer/browser/state';
 
 test('arbitrary repeated blocks retain identity and complete configuration across preset restart',()=>{
  let c=defaultConfiguration(); c={...c,blocks:[]};
@@ -100,4 +100,50 @@ test('each column is narrowed by the choices in the columns before it, in any or
  // A block that now groups by another field drops its choice.
  c=updateBlock(c,date.id,{dateGranularity:'year',datePattern:'YYYY'});s=browserReducer(s,{type:'blocks',blocks:c.blocks});
  assert.deepEqual(Object.keys(s.selections),[camera.id]);
+});
+
+test('a pick, like a check, drops the checks and picks of the columns after it; Back and Forward bring a pick back',()=>{
+ let c=defaultConfiguration();c={...c,blocks:[]};for(const k of ['camera','lens','format'] as const)c=addBlock(c,k,c.blocks.length);
+ let s=browserReducer(initialBrowserState(c.blocks),{type:'library',libraryId:'l'});const [camera,lens,format]=s.blocks as [typeof c.blocks[0],typeof c.blocks[0],typeof c.blocks[0]];
+ const values=()=>queryFor(s).filters.map(f=>f.kind==='values'?f.values:[]);
+ s=browserReducer(s,{type:'select',blockId:camera.id,filter:selectionFilter(camera,['Nikon'])});
+ s=browserReducer(s,{type:'pick',blockId:camera.id,filter:selectionFilter(camera,['Sony'])});
+ s=browserReducer(s,{type:'select',blockId:lens.id,filter:selectionFilter(lens,['24–70'])});
+ s=browserReducer(s,{type:'pick',blockId:lens.id,filter:selectionFilter(lens,['50'])});
+ s=browserReducer(s,{type:'pick',blockId:format.id,filter:selectionFilter(format,['nef'])});
+ s=browserReducer(s,{type:'file',fileId:'f'});
+ assert.deepEqual(values(),[['Nikon','Sony'],['24–70','50'],['nef']]);
+ assert.deepEqual(Object.keys(effectiveSelections(s)),[camera.id,lens.id,format.id]);
+ // Another pick in the first column: its own check stays, the columns after it start over, and so do the files.
+ s=browserReducer(s,{type:'pick',blockId:camera.id,filter:selectionFilter(camera,['Canon'])});
+ assert.deepEqual(values(),[['Nikon','Canon']]);assert.deepEqual(Object.keys(s.picks),[camera.id]);assert.equal(s.selectedFile,undefined);
+ s=browserReducer(s,{type:'back'});assert.deepEqual(values(),[['Nikon','Sony'],['24–70','50'],['nef']],'Back brings every pick back');
+ s=browserReducer(s,{type:'back'});assert.deepEqual(values(),[['Nikon','Sony'],['24–70','50']]);
+ s=browserReducer(s,{type:'forward'});s=browserReducer(s,{type:'forward'});assert.deepEqual(values(),[['Nikon','Canon']]);
+ // Checking in the second column drops the third's pick, keeps its own.
+ s=browserReducer(s,{type:'back'});s=browserReducer(s,{type:'select',blockId:lens.id,filter:selectionFilter(lens,['24–70','35'])});
+ assert.deepEqual(values(),[['Nikon','Sony'],['24–70','35','50']]);
+ // A new hierarchy keeps a pick whose block still groups by the same field.
+ s=browserReducer(s,{type:'blocks',blocks:[lens,camera,format]});assert.deepEqual(Object.keys(s.picks).sort(),[camera.id,lens.id].sort());
+ s=browserReducer(s,{type:'blocks',blocks:[lens,format]});assert.deepEqual(Object.keys(s.picks),[lens.id]);
+ for(const action of [{type:'clear'},{type:'mode',mode:'folders'},{type:'library',libraryId:'other'}] as const){const cleared=browserReducer(s,action);assert.deepEqual([cleared.selections,cleared.picks],[{},{}],action.type);}
+});
+test('the layout fields: absent by default, clamped and validated on read, and kept through a write and read',()=>{
+ const c=defaultConfiguration();
+ for(const key of ['previewWidth','previewLarge','hideBars','hideColumns'] as const)assert.equal(c[key],undefined,`${key} starts absent (default layout, everything shown)`);
+ assert.equal(clampPreviewWidth(100),minPreviewWidth,'never narrower than the minimum');
+ assert.equal(clampPreviewWidth(500,1000),500);
+ assert.equal(clampPreviewWidth(900,1000),1000-minListWidth-previewHandleWidth,'the list keeps its minimum');
+ assert.equal(clampPreviewWidth(900,300),minPreviewWidth,'a room too small still gets the minimum preview');
+ assert.equal(clampPreviewWidth(380.6),381);
+ const memory=new Map<string,string>();const storage={getItem:(k:string)=>memory.get(k)??null,setItem:(k:string,v:string)=>{memory.set(k,v);}};
+ writeConfiguration(storage,{...c,previewWidth:520,previewLarge:true,hideBars:true,hideColumns:false});
+ const read=readConfiguration(storage);
+ assert.deepEqual([read.previewWidth,read.previewLarge,read.hideBars,read.hideColumns],[520,true,true,false]);
+ assert.deepEqual(read.blocks,c.blocks,'the view is unchanged');
+ const odd=readConfiguration({getItem:()=>JSON.stringify({...c,previewWidth:99999,previewLarge:'yes',hideBars:1,hideColumns:null})});
+ assert.equal(odd.previewWidth,clampPreviewWidth(99999),'an oversized width is clamped');
+ assert.ok(!('previewLarge' in odd)&&!('hideBars' in odd)&&!('hideColumns' in odd),'invalid values are dropped, so their defaults apply');
+ assert.ok(!('previewWidth' in readConfiguration({getItem:()=>JSON.stringify({...c,previewWidth:-5})})));
+ assert.ok(!('previewWidth' in readConfiguration({getItem:()=>JSON.stringify({...c,previewWidth:'wide'})})));
 });
