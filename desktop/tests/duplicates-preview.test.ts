@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { thumbnail, pruneThumbnails, type ThumbnailDecoders } from '../platform/thumbnails';
+import { thumbnail, pruneThumbnails, previewThumbnail, fitWithin, sipsLongerSide, type ThumbnailDecoders } from '../platform/thumbnails';
+import { PREVIEW_SIZES, previewSize } from '../shared';
+import { LARGE_PREVIEW_DWELL_MS, dwell, readCatalogPreview, upgradesToLarge } from '../renderer/browser/preview';
 import { categorize } from '../renderer/exif-categories';
 import { metadataFromTags } from '../platform/metadata';
 
@@ -33,6 +35,50 @@ test('with no decoder and no embedded preview only the message remains; a decoda
   assert.equal((await thumbnail(photo, { cache: path.join(base, 'c'), decoders })).via, 'system');
   await thumbnail(photo, { cache: path.join(base, 'c'), decoders });
   assert.equal(calls, 1);
+});
+test('an embedded preview is read and cached once whatever size is asked for, and says it is embedded', async t => {
+  const base = await scratch(t), raw = path.join(base, 'new-camera.NEF'), cache = path.join(base, 'cache'), camera = Buffer.from([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
+  await fs.writeFile(raw, 'raw bytes');
+  let reads = 0;
+  const decoders: ThumbnailDecoders = { decode: async () => false, poster: async () => false, embedded: async () => { reads++; return camera; } };
+  const normal = await thumbnail(raw, { cache, decoders, size: PREVIEW_SIZES.normal }), large = await thumbnail(raw, { cache, decoders, size: PREVIEW_SIZES.large });
+  assert.deepEqual(large, normal); assert.equal(large.via, 'embedded'); assert.equal(large.problem, 'raw-unsupported');
+  assert.equal(reads, 1, 'the camera\'s preview is read once');
+  assert.deepEqual((await fs.readdir(cache)).filter(name => name.endsWith('.jpg')).length, 1, 'and cached once');
+});
+test('the IPC handler\'s size: anything but the large size gets the normal one, and that is what the decoder is asked for', async t => {
+  const base = await scratch(t), photo = path.join(base, 'b.JPG'), sizes: number[] = [];
+  await fs.writeFile(photo, 'y');
+  const decoders: ThumbnailDecoders = { decode: async (_f, out, size) => { sizes.push(size); await fs.writeFile(out, jpeg); return true; }, poster: async () => false, embedded: async () => undefined };
+  for (const asked of [undefined, null, 1600, '1600', 1600.5, 99999, -1, Number.NaN, { size: 1600 }, 900]) await previewThumbnail(photo, asked, { cache: path.join(base, String(sizes.length)), decoders });
+  assert.deepEqual(sizes, [900, 900, 1600, 900, 900, 900, 900, 900, 900, 900]);
+  assert.deepEqual([undefined, 1600, '1600', 0].map(previewSize), [900, 1600, 900, 900]);
+});
+test('a decoded picture is scaled down to fit the size asked for, never up', () => {
+  assert.deepEqual(fitWithin(2400, 1600, 900), { width: 900, height: 600 });
+  assert.deepEqual(fitWithin(1600, 2400, 1600), { width: 1067, height: 1600 });
+  assert.equal(fitWithin(600, 400, 1600), undefined, 'a smaller picture keeps its size');
+  assert.equal(fitWithin(1600, 900, 1600), undefined);
+  assert.equal(fitWithin(0, 0, 900), undefined);
+  // macOS reads the size from sips first so -Z never enlarges (recorded `sips -g pixelWidth -g pixelHeight` output).
+  assert.equal(sipsLongerSide('/Users/me/Pictures/shot.png\n  pixelWidth: 1280\n  pixelHeight: 2772\n'), 2772);
+  assert.equal(sipsLongerSide('Error: Unable to obtain image properties.\n'), undefined);
+});
+test('the Library browser asks for the large picture only for a decoded one, once the file has stayed selected', async () => {
+  assert.equal(upgradesToLarge({ src: 'data:', via: 'system' }, PREVIEW_SIZES.normal), true);
+  assert.equal(upgradesToLarge({ src: 'data:', via: 'embedded', problem: 'raw-unsupported' }, PREVIEW_SIZES.normal), false, 'an embedded preview is the same at every size');
+  assert.equal(upgradesToLarge({ via: 'none', problem: 'unreadable' }, PREVIEW_SIZES.normal), false);
+  assert.equal(upgradesToLarge({ src: 'data:', via: 'system' }, PREVIEW_SIZES.large), false, 'already large');
+  const started = Date.now(); await dwell(started - LARGE_PREVIEW_DWELL_MS);
+  assert.ok(Date.now() - started < LARGE_PREVIEW_DWELL_MS, 'a file selected long enough asks at once');
+  // A file passed before the dwell ends never asks for a picture; its summary is still read, and the shown file's picture is asked for once.
+  const asked: string[] = []; let current = true, release!: () => void;
+  const api = { catalogResolve: async (_library: string, id: string) => `/library/${id}`, thumbnail: async (file: string, size?: number) => { asked.push(`${file} ${size}`); return { src: 'data:', via: 'system' as const }; }, summary: async () => ({ fields: {} }) };
+  const passed = readCatalogPreview(api, 'lib', 'passed', () => current, PREVIEW_SIZES.large, () => new Promise<void>(resolve => { release = resolve; }));
+  await new Promise(resolve => setImmediate(resolve)); current = false; release();
+  assert.equal(await passed, undefined); assert.deepEqual(asked, []);
+  const shown = await readCatalogPreview(api, 'lib', 'shown', () => true, PREVIEW_SIZES.large, async () => {});
+  assert.equal(shown?.thumbnail?.via, 'system'); assert.deepEqual(asked, ['/library/shown 1600']);
 });
 test('full EXIF is grouped into curated categories with friendly units and no binary or repeated tags', () => {
   // Exposure and capture time are the interpreter's values in the summary card's format, not formatted again here.

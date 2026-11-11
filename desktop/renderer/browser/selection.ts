@@ -35,13 +35,18 @@ export function toggleBlockSelection(block:HierarchyBlock,filter:Filter|undefine
  return selectionFromRows(block,next);
 }
 /** Checks rows (a Shift range, or the column's checkbox) in addition to the column's checked rows, keeping choices outside the loaded page. */
-export function addBlockSelection(block:HierarchyBlock,filter:Filter|undefined,rows:BrowserOption[]):Filter|undefined {
- const previous=selectionOptions(filter),keys=new Set(previous.map(option=>option.key));
- return selectionFromRows(block,[...previous,...rows.flatMap(memberOptions).filter(row=>!keys.has(row.key))]);
+export function addBlockSelection(block:HierarchyBlock,filter:Filter|undefined,rows:BrowserOption[]):Filter|undefined {return addWithinLimit(block,filter,rows).filter;}
+/** Adds rows in their order while the filter holds at most `maxFilterValues` (a merged row adds all its values or none);
+ * `cut` when some were left out. Missing details adds no value, so it is always added. */
+export function addWithinLimit(block:HierarchyBlock,filter:Filter|undefined,rows:readonly BrowserOption[]):{filter:Filter|undefined;cut:boolean} {
+ const next=selectionOptions(filter),keys=new Set(next.map(option=>option.key));let size=next.filter(option=>!option.missing).length,cut=false;
+ for(const row of rows){const members=memberOptions(row).filter(member=>!keys.has(member.key)),adds=members.filter(member=>!member.missing).length;if(adds&&(cut||size+adds>maxFilterValues)){cut=true;continue;}size+=adds;for(const member of members){keys.add(member.key);next.push(member);}}
+ return {filter:selectionFromRows(block,next),cut};
 }
 /** The most values (or ranges) one filter may hold: the catalog refuses more. */
 export const maxFilterValues=500;
-const filterSize=(f:Filter|undefined)=>f?.kind==='values'?f.values.length:f?.kind==='ranges'?f.ranges.length:0;
+/** How many values (or ranges) a filter holds, which the catalog limits to `maxFilterValues`. */
+export const filterSize=(f:Filter|undefined)=>f?.kind==='values'?f.values.length:f?.kind==='ranges'?f.ranges.length:0;
 /** Everything two filters of one column choose, as one filter (the catalog ORs one filter's values): the checked rows and
  * the clicked one. Values, ranges and Missing details each once, with their labels; a date inside a chosen year or month adds nothing.
  * When the two together would hold more than `maxFilterValues`, `a` alone (the checked rows without the click). */

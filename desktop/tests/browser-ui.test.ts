@@ -8,7 +8,8 @@ import {BrowserPage} from '../renderer/browser/BrowserPage';
 import {HierarchyEditor} from '../renderer/browser/HierarchyEditor';
 import {PreviewPanel} from '../renderer/browser/PreviewPanel';
 import {selectedKeys,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/selection';
-import {defaultConfiguration,addBlock,createBlock,blockLabels,changeBlockKind,unusedBlockKind,presetMenu,applyPreset} from '../renderer/browser/configuration';
+import {defaultConfiguration,addBlock,createBlock,blockLabels,changeBlockKind,unusedBlockKind,presetMenu,applyPreset,readConfiguration,configurationKey,restoreDefaultView,savePreset} from '../renderer/browser/configuration';
+import {paneHeights,minWorkspaceHeight,heightHandle,minContentHeight,minResultsHeight} from '../renderer/browser/HorizontalStrip';
 import {AddColumn,ColumnMenu} from '../renderer/browser/ColumnMenu';
 import type {BrowserAPI} from '../renderer/browser/api';
 import type {CatalogRow,CatalogLibrary,Filter} from '../catalog/types';
@@ -170,4 +171,32 @@ test('the preview header has a Larger preview toggle beside Close preview; the d
  assert.match(normal,/<div class="browser-photo"[^]*<\/div><div class="browser-preview-info">[^]*<dl class="browser-file-details"><div>/,'the details scroll under the picture');
  assert.ok(!render(createElement(PreviewPanel,props)).includes('Larger preview'),'no toggle without a handler');
  assert.ok(!normal.includes('class="browser-toggle"'));
+});
+test('a height saved before the columns had their own (the whole area) is dropped: the columns and the results split the room as by default',()=>{
+ const blocks=defaultConfiguration().blocks;const stored=(value:object)=>({getItem:(key:string)=>key===configurationKey?JSON.stringify({version:1,blocks,presets:[],activePresetId:'builtin-date-camera-format',...value}):null});
+ const old=readConfiguration(stored({contentHeight:560,columnWidth:260,previewWidth:300,hideBars:true}));
+ assert.ok(!('contentHeight' in old),'the old field goes on the next write');assert.equal(old.columnsHeight,undefined);
+ assert.equal(old.columnWidth,260);assert.equal(old.previewWidth,300);assert.equal(old.hideBars,true);assert.deepEqual(old.blocks.map(b=>b.kind),['date','camera','format'],'the rest of an old view still loads');
+ assert.deepEqual(paneHeights(800,old.columnsHeight),paneHeights(800,undefined));const split=paneHeights(800,undefined);assert.equal(split.columns,Math.round((800-heightHandle)*.45));assert.equal(split.results,800-heightHandle-split.columns!);
+ assert.ok(paneHeights(800,560).results!<split.results!,'560 read as the columns alone would squeeze the results');
+ assert.equal(readConfiguration(stored({columnsHeight:300})).columnsHeight,300,'the new field is kept');assert.equal(readConfiguration(stored({columnsHeight:'tall'})).columnsHeight,undefined);
+});
+test('the columns, their handle and the results fit the least room exactly, and the results take all of it with the columns hidden',()=>{
+ assert.equal(minWorkspaceHeight,minContentHeight+heightHandle+minResultsHeight);
+ for(const room of [minWorkspaceHeight,500,1000]){const {columns,results}=paneHeights(room,undefined);assert.equal(columns!+heightHandle+results!,room,`${room}px`);assert.ok(columns!>=minContentHeight&&results!>=minResultsHeight);}
+ assert.equal(paneHeights(minWorkspaceHeight,2000).columns,minContentHeight,'a saved height leaves the results their minimum');
+ assert.equal(paneHeights(600,undefined,true).results,600);assert.deepEqual(paneHeights(undefined,300),{columns:300,columnsMax:2400,results:undefined});
+});
+test('Restore default view restores the default columns only: presets and every layout setting stay',()=>{
+ const c={...savePreset(addBlock(defaultConfiguration(),'iso',0),'Mine','preset-mine'),columnWidth:300,columnsHeight:320,previewWidth:420,previewLarge:true,hideBars:true,hideColumns:true,combinePairs:false};
+ const restored=restoreDefaultView(c);assert.deepEqual(restored.blocks.map(b=>b.kind),['date','camera','format']);assert.equal(restored.activePresetId,'builtin-date-camera-format');
+ assert.deepEqual(restored.presets,c.presets);for(const key of ['columnWidth','columnsHeight','previewWidth','previewLarge','hideBars','hideColumns','combinePairs'] as const)assert.equal(restored[key],c[key],key);
+});
+test('the filter bar is a labelled group, the storage error names no one system, the menus do not inherit the strip help, and the hints translate',()=>{
+ const html=page();assert.match(html,/<div class="browser-filter-bar" role="group" aria-label="Library filter"/);assert.doesNotMatch(html,/role="toolbar"/,'no toolbar role without its arrow-key behaviour');
+ const failed=render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration:defaultConfiguration(),onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{},storageError:true}));
+ assert.match(failed,/role="alert">This view could not be saved on this computer\.<\/p>/);assert.doesNotMatch(failed,/this Mac/);
+ assert.match(html,/class="browser-horizontal browser-columns" aria-label="Library columns" title="[^"]*Right from the last column moves to the files[^"]*Esc closes the preview first, then clears/,'the strip help says what Right and Esc do');
+ const menu=render(createElement(ColumnMenu,{configuration:defaultConfiguration(),block:defaultConfiguration().blocks[0]!,onChange:()=>{}}));assert.match(menu,/class="browser-menu" role="group" aria-label="[^"]+" title=""/,'an empty title stops the strip help showing over the menu');
+ for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['This view could not be saved on this computer.','Click a folder to open it: its subfolders show in the next column, its files below.','Click a folder (or press Enter) to open it: its subfolders show in the next column. Arrow keys navigate; Right from the last column moves to the files, Left comes back. Esc closes the preview. Tab moves to controls.'])assert.notEqual(t(label),label,`${language}: ${label}`);assert.doesNotMatch(t('This view could not be saved on this computer.'),/Mac/);}
 });

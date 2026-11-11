@@ -70,19 +70,21 @@ export function dateTreeSummary(tree:readonly DateNode[],chosen:readonly string[
  const top=[...tree.map(node=>dateState(chosen,node)!=='none'||picked!==undefined&&covers([node.value],picked)),...(missing.shown?[missing.chosen||picked==='missing']:[])];
  return {all:tree.length>0&&tree.every(node=>dateState(chosen,node)==='full')&&(!missing.shown||missing.chosen),chosen:top.filter(Boolean).length,total:top.length};
 }
-/** A row's checkbox (`multi`; Space or Ctrl/Command-click in the list) checks it or, when checked, unchecks it; every other
- * check stays, so years, months and days of several years can be checked together. Checking a row unchecks the rows
+/** A row's checkbox (`multi`; Space or Ctrl/Command-click in the list) checks it or, when it shows checked, unchecks it; every
+ * other check stays, so years, months and days of several years can be checked together. A row that shows checked through
+ * the rows below it (every month of a year) unchecks them, and anything under them. Checking a row unchecks the rows
  * above it (a month inside a checked year leaves only that month of the year checked, the year's other months not) and
  * the rows below it, which it covers. Without `multi` it becomes the only one. */
 export function toggleDate(chosen:readonly string[],_tree:readonly DateNode[],node:DateNode,multi:boolean):string[] {
  if(!multi)return [node.value];
- if(chosen.includes(node.value))return chosen.filter(v=>v!==node.value);
+ if(dateState(chosen,node)==='full')return chosen.filter(v=>v!==node.value&&!v.startsWith(node.value+'-'));
  return [...chosen.filter(v=>!node.value.startsWith(v+'-')&&!v.startsWith(node.value+'-')),node.value];
 }
-/** Checks rows (a Shift range, or the column's checkbox), dropping checks they cover. */
-export function addDates(chosen:readonly string[],nodes:readonly DateNode[]):string[] {
+/** Checks rows (a Shift range, or the column's checkbox), dropping checks they cover, in their order while at most `limit`
+ * values are checked; a row that would pass it, and the rows after it, are left out (`covers` tells which were added). */
+export function addDates(chosen:readonly string[],nodes:readonly DateNode[],limit=Infinity):string[] {
  let next=[...chosen];
- for(const node of nodes)if(!covers(next,node.value))next=[...next.filter(v=>!v.startsWith(node.value+'-')),node.value];
+ for(const node of nodes)if(!covers(next,node.value)){const added=[...next.filter(v=>!v.startsWith(node.value+'-')),node.value];if(added.length>limit)break;next=added;}
  return next;
 }
 export function find(tree:readonly DateNode[],value:string):DateNode|undefined {

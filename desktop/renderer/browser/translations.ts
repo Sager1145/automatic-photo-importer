@@ -13,7 +13,7 @@ In place|位置正确|位置正確|配置済み
 {count} undetermined|{count} 个位置未定|{count} 個位置未定|配置未定 {count} 件
 Last indexed: {time}|上次索引：{time}|上次索引：{time}|前回の索引作成：{time}
 Loading preview…|正在加载预览…|正在載入預覽…|プレビューを読み込み中…
-Resize the columns area|调整栏位区域高度|調整欄位區域高度|列エリアの高さを変更
+Resize the columns area|调整列区域高度|調整分類欄的高度|列エリアの高さを変更
 Index queued|索引排队中|索引排隊中|索引作成待ち
 RAW + JPEG|RAW + JPEG|RAW + JPEG|RAW + JPEG
 RAW file|RAW 文件|RAW 檔案|RAW ファイル
@@ -39,7 +39,6 @@ Next page|下一页|下一頁|次のページ
 Previous page|上一页|上一頁|前のページ
 
 Library browser|分类预览|分類預覽|ライブラリブラウザ
-Browser presets|浏览预设|瀏覽預設|表示プリセット
 Preset name|预设名称|預設名稱|プリセット名
 Save current view|保存当前视图|儲存目前檢視|現在の表示を保存
 Delete preset|删除预设|刪除預設|プリセットを削除
@@ -50,8 +49,6 @@ Virtual hierarchy|虚拟层级|虛擬階層|仮想階層
 Files always come last|文件始终位于末端|檔案一律位於最後|ファイルは常に最後です
 Block palette|分类块素材|分類區塊素材|分類ブロック
 Add block|添加分类块|加入分類區塊|ブロックを追加
-Insert at position|插入位置|插入位置|挿入位置
-Drag blocks into the path, or use Add and Move.|拖动分类块到路径中，或使用添加和移动按钮。|拖曳分類區塊到路徑中，或使用加入和移動按鈕。|パスにブロックをドラッグするか、追加と移動ボタンを使います。
 Hierarchy path|层级路径|階層路徑|階層パス
 Move earlier|前移|往前移|前に移動
 Move later|后移|往後移|後ろに移動
@@ -67,7 +64,7 @@ Hide levels|收起|收合|閉じる
 Merge spellings of one format|合并同一格式的不同扩展名|合併同一格式的不同副檔名|同じ形式の異なる拡張子をまとめる
 JPG, JPEG and JPE show as JPEG; TIF and TIFF as TIFF; HEIC, HEIF and HIF as HEIF. Upper and lower case are always the same.|JPG、JPEG 和 JPE 显示为 JPEG；TIF 和 TIFF 显示为 TIFF；HEIC、HEIF 和 HIF 显示为 HEIF。大小写始终视为相同。|JPG、JPEG 和 JPE 顯示為 JPEG；TIF 和 TIFF 顯示為 TIFF；HEIC、HEIF 和 HIF 顯示為 HEIF。大小寫一律視為相同。|JPG、JPEG、JPE は JPEG、TIF と TIFF は TIFF、HEIC、HEIF、HIF は HEIF として表示します。大文字と小文字は常に同じものとして扱います。
 Show every RAW format as RAW|将所有 RAW 格式统一显示为 RAW|將所有 RAW 格式統一顯示為 RAW|すべての RAW 形式を RAW として表示
-ARW, NEF, RAF, CR3, DNG and other camera RAW files show as one RAW row.|ARW、NEF、RAF、CR3、DNG 等各相机的 RAW 文件合并为一行 RAW。|ARW、NEF、RAF、CR3、DNG 等各相機的 RAW 檔案合併為一列 RAW。|ARW、NEF、RAF、CR3、DNG などのカメラ RAW ファイルを 1 行の RAW にまとめます。
+ARW, NEF, RAF, CR3, DNG and other camera RAW files show as one RAW row.|ARW、NEF、RAF、CR3、DNG 等各相机的 RAW 文件合并为一行 RAW。|ARW、NEF、RAF、CR3、DNG 等各相機的 RAW 檔案合併為一項 RAW。|ARW、NEF、RAF、CR3、DNG などのカメラ RAW ファイルを 1 行の RAW にまとめます。
 Month|月|月|月
 Date display|日期显示|日期顯示|日付の表示
 Year|年|年|年
@@ -87,7 +84,6 @@ Numeric grouping|数值分类|數值分類|数値の分類
 Exact values|具体值|確切值|個別の値
 Custom buckets|自定义分桶|自訂分組|カスタム区間
 Bucket boundaries|分桶边界|分組邊界|区間の境界
-Comma-separated numbers. Shared edges belong to the next bucket.|以逗号分隔数值。边界值归入下一个分桶。|以逗號分隔數值。邊界值歸入下一個分組。|数値をカンマで区切ります。境界値は次の区間に含まれます。
 Apply boundaries|应用边界|套用邊界|境界を適用
 Group by exact values. Missing details have their own category.|按具体值分类，缺失信息单独列出。|依確切值分類，缺少資訊另列一類。|個別の値で分類します。未記録の情報は別の分類に表示されます。
 Custom range|自定义范围|自訂範圍|カスタム範囲
@@ -98,11 +94,9 @@ Missing details|未记录|未記錄|未記録
 {known} known · {missing} missing|{known} 个已知 · {missing} 个未记录|{known} 個已知 · {missing} 個未記錄|記録済み {known} 件 · 未記録 {missing} 件
 {count} pending|{count} 个尚未读取|{count} 個尚未讀取|未読み取り {count} 件
 {count} unreadable|{count} 个读取失败|{count} 個讀取失敗|読み取り失敗 {count} 件
-{count} ranges|{count} 个范围|{count} 個範圍|{count} 個の範囲
 No matching files or categories.|没有匹配的文件或分类。|沒有符合的檔案或分類。|一致するファイルや分類がありません。
-Load more|载入更多|載入更多|さらに読み込む
 Could not read the catalog.|无法读取索引。|無法讀取索引。|カタログを読み取れませんでした。
-Real folders|实际文件夹|實際檔案夾|実際のフォルダ
+Real folders|实际文件夹|實際資料夾|実際のフォルダ
 Categories|分类浏览|分類瀏覽|分類
 Browser mode|浏览模式|瀏覽模式|表示モード
 Back|后退|上一頁|戻る
@@ -111,7 +105,7 @@ Search names|搜索名称|搜尋名稱|名前を検索
 Refresh index|刷新索引|重新整理索引|索引を更新
 Stop indexing|停止索引|停止索引|索引作成を停止
 Browse originals through virtual categories. Files and organization rules stay unchanged.|通过虚拟分类浏览原文件。文件与整理规则保持不变。|透過虛擬分類瀏覽原始檔案。檔案與整理規則保持不變。|仮想分類でオリジナルを閲覧します。ファイルと整理ルールは変わりません。
-This view could not be saved on this Mac.|无法在这台 Mac 上保存此视图。|無法在這台 Mac 上儲存此檢視。|この Mac に表示設定を保存できませんでした。
+This view could not be saved on this computer.|无法在这台电脑上保存此视图。|無法在這台電腦上儲存此檢視。|このコンピュータに表示設定を保存できませんでした。
 No indexed libraries|尚无已索引的图库|尚無已索引的圖庫|索引済みのライブラリがありません
 Choose a destination in Settings to browse its photo or video library.|在设置中选择目标位置后，即可浏览照片或视频图库。|在設定中選擇目的地後，即可瀏覽照片或影片圖庫。|設定で保存先を選ぶと、写真やビデオのライブラリを閲覧できます。
 Offline — indexed details are available. Connect the drive for previews.|磁盘离线，可查看已索引的信息。连接磁盘后可预览。|磁碟離線，可查看已索引的資訊。連接磁碟後可預覽。|オフラインです。索引済みの情報を表示しています。プレビューにはドライブを接続してください。
@@ -126,7 +120,7 @@ Name Z–A|名称 Z–A|名稱 Z–A|名前 Z–A
 Newest capture first|拍摄日期从新到旧|拍攝日期從新到舊|撮影日の新しい順
 Oldest capture first|拍摄日期从旧到新|拍攝日期從舊到新|撮影日の古い順
 Column width|列宽|欄寬|列の幅
-Library columns|图库分栏|圖庫分欄|ライブラリの列
+Library columns|图库分类列|圖庫分類欄|ライブラリの列
 File preview|文件预览|檔案預覽|ファイルのプレビュー
 Close preview|关闭预览|關閉預覽|プレビューを閉じる
 Connect the drive to load a preview.|连接磁盘以载入预览。|連接磁碟以載入預覽。|プレビューを読み込むにはドライブを接続してください。
@@ -138,7 +132,6 @@ This file may need organization.|此文件可能需要整理。|此檔案可能�
 Open organization tool|打开整理工具|開啟整理工具|整理ツールを開く
 Review and apply changes in the separate organization tool.|请在独立整理工具中审核并应用更改。|請在獨立整理工具中檢閱並套用變更。|別の整理ツールで変更を確認して適用します。
 Placement has not been checked.|尚未检查文件位置。|尚未檢查檔案位置。|配置は未確認です。
-Click a row to show it for now; its checkbox (or Space) keeps it chosen. Checked rows are shown together in the next columns. Shift adds a range. Arrow keys navigate. Esc clears. Tab moves to controls.|单击某行可临时查看；勾选它的复选框（或按空格键）可保持选中。已勾选的各行会在后续分栏中合并显示。Shift 选择一个范围。方向键浏览，Esc 清除，Tab 切换控件。|按一下某列可暫時檢視；勾選它的核取方塊（或按空白鍵）可保持選取。已勾選的各列會在後續欄位中合併顯示。Shift 選取一個範圍。方向鍵瀏覽，Esc 清除，Tab 切換控制項。|行をクリックすると一時的に表示します。チェックボックス（またはスペース）で選択を固定します。チェックした行は次の列にまとめて表示されます。Shift で範囲を選択。矢印キーで移動、Esc で解除、Tab で操作項目へ移動します。
 Selection|选择|選取|選択
 Select all|全选|全選|すべて選択
 Deselect all|取消全选|取消全選|すべて選択解除
@@ -162,11 +155,11 @@ Drag onto Lightroom Classic’s Library grid or Import window to import these ph
 Date → Camera → Format|日期 → 相机 → 格式|日期 → 相機 → 格式|日付 → カメラ → 形式
 Camera → Lens → Focal length|相机 → 镜头 → 焦距|相機 → 鏡頭 → 焦距|カメラ → レンズ → 焦点距離
 Aperture → Date → Format → Camera|光圈 → 日期 → 格式 → 相机|光圈 → 日期 → 格式 → 相機|絞り → 日付 → 形式 → カメラ
-Library filter|图库过滤器|圖庫篩選器|ライブラリフィルター
-Filter|过滤|篩選|フィルター
+Library filter|图库筛选器|圖庫篩選器|ライブラリフィルター
+Filter|筛选|篩選|フィルター
 View preset|视图预设|檢視預設|表示プリセット
 Built-in views|内置视图|內建檢視|標準の表示
-Saved views|已存视图|已儲存的檢視|保存した表示
+Saved views|已保存的视图|已儲存的檢視|保存した表示
 Columns|列|欄|列
 Add, remove and arrange the columns, and save the view as a preset|添加、移除和排列各列，并将视图存为预设|加入、移除和排列各欄，並將檢視儲存為預設|列の追加・削除・並べ替えと、表示のプリセット保存
 Column options: {field}|列选项：{field}|欄選項：{field}|列のオプション：{field}
@@ -178,11 +171,16 @@ Preview width|预览宽度|預覽寬度|プレビューの幅
 Drag or use the arrow keys to resize the preview. Double-click restores the default width.|拖动或使用方向键调整预览宽度。双击恢复默认宽度。|拖曳或使用方向鍵調整預覽寬度。按兩下恢復預設寬度。|ドラッグまたは矢印キーでプレビューの幅を変更します。ダブルクリックで標準の幅に戻ります。
 Larger preview|放大预览|放大預覽|大きいプレビュー
 Show the preview larger, beside a narrow file list|放大显示预览，旁边的文件列表变窄|放大顯示預覽，旁邊的檔案列表變窄|プレビューを大きく表示し、横のファイル一覧を狭くします
-Show the library and filter bars|显示图库栏和过滤栏|顯示圖庫列和篩選列|ライブラリバーとフィルターバーを表示
-Hide or show the library row, the filter bar and the selection path|隐藏或显示图库行、过滤栏和选择路径|隱藏或顯示圖庫列、篩選列和選取路徑|ライブラリの行、フィルターバー、選択パスを表示または非表示にします
-Show the category columns|显示分类栏|顯示分類欄|カテゴリの列を表示
-Hide or show the category columns. Their filters still apply.|隐藏或显示分类栏。其过滤条件仍然有效。|隱藏或顯示分類欄。其篩選條件仍然有效。|カテゴリの列を表示または非表示にします。非表示でも絞り込みは適用されます。
-Filters: {count}|过滤条件：{count}|篩選條件：{count}|フィルター：{count}
-Clear filters|清除过滤条件|清除篩選條件|フィルターをクリア
-Click a row to show it for now. Tick its box to keep it chosen.|单击某行可临时查看；勾选它的复选框可保持选中。|按一下某列可暫時檢視；勾選它的核取方塊可保持選取。|行をクリックすると一時的に表示します。チェックボックスで選択を固定します。
+Show the library and filter bars|显示图库栏和筛选栏|顯示圖庫與篩選區|ライブラリバーとフィルターバーを表示
+Hide or show the library row, the filter bar and the selection path|隐藏或显示图库行、筛选栏和选择路径|隱藏或顯示圖庫來源區、篩選區和選取路徑|ライブラリの行、フィルターバー、選択パスを表示または非表示にします
+Show the category columns|显示分类列|顯示分類欄|分類の列を表示
+Hide or show the category columns. Their filters still apply.|隐藏或显示分类列。其筛选条件仍然有效。|隱藏或顯示分類欄。其篩選條件仍然有效。|分類の列を表示または非表示にします。非表示でも絞り込みは適用されます。
+Filters: {count}|筛选条件：{count}|篩選條件：{count}|フィルター：{count}
+Clear filters|清除筛选条件|清除篩選條件|フィルターをクリア
+Click a row to show it for now. Tick its box to keep it chosen.|单击某行可临时查看；勾选它的复选框可保持选中。|按一下某個項目可暫時檢視；勾選它的核取方塊可保持選取。|行をクリックすると一時的に表示します。チェックボックスで選択を固定します。
+Click a folder to open it: its subfolders show in the next column, its files below.|单击某个文件夹即可打开：其子文件夹显示在下一列，其中的文件显示在下方。|按一下某個資料夾即可打開：其子資料夾顯示在下一欄，其中的檔案顯示在下方。|フォルダをクリックすると開きます。サブフォルダは次の列に、ファイルは下に表示されます。
+Click a folder (or press Enter) to open it: its subfolders show in the next column. Arrow keys navigate; Right from the last column moves to the files, Left comes back. Esc closes the preview. Tab moves to controls.|单击文件夹（或按 Enter）即可打开：其子文件夹显示在下一列。方向键浏览；在最后一列按右方向键可移到文件列表，按左方向键返回。Esc 关闭预览，Tab 切换控件。|按一下資料夾（或按 Enter）即可打開：其子資料夾顯示在下一欄。方向鍵瀏覽；在最後一欄按右方向鍵可移到檔案列表，按左方向鍵返回。Esc 關閉預覽，Tab 切換控制項。|フォルダをクリック（または Enter）すると開き、サブフォルダが次の列に表示されます。矢印キーで移動し、最後の列で右矢印キーを押すとファイル一覧へ、左矢印キーで戻ります。Esc でプレビューを閉じ、Tab で操作項目へ移動します。
+Click a row to show it for now; its checkbox (or Space) keeps it chosen. Checked rows are shown together in the next columns. Shift adds a range. Arrow keys navigate; Right from the last column moves to the files, Left comes back. Esc closes the preview first, then clears. Tab moves to controls.|单击某行可临时查看；勾选它的复选框（或按空格键）可保持选中。已勾选的各行会在后续列中合并显示。Shift 勾选一个范围。方向键浏览；在最后一列按右方向键可移到文件列表，按左方向键返回。Esc 先关闭预览，再清除选择。Tab 切换控件。|按一下某個項目可暫時檢視；勾選它的核取方塊（或按空白鍵）可保持選取。已勾選的項目會在後續欄中合併顯示。Shift 可勾選一個範圍。方向鍵瀏覽；在最後一欄按右方向鍵可移到檔案列表，按左方向鍵返回。Esc 先關閉預覽，再清除選取。Tab 切換控制項。|行をクリックすると一時的に表示します。チェックボックス（またはスペース）で選択を固定します。チェックした行は次の列にまとめて表示されます。Shift で範囲をチェック。矢印キーで移動し、最後の列で右矢印キーを押すとファイル一覧へ、左矢印キーで戻ります。Esc はまずプレビューを閉じ、次に選択を解除します。Tab で操作項目へ移動します。
+A column can filter by at most {max} values.|每列最多可按 {max} 个值筛选。|每欄最多可依 {max} 個值篩選。|1 つの列で絞り込みに使える値は最大 {max} 個です。
+All tags|所有标签|所有標籤|すべてのタグ
 `;

@@ -19,7 +19,7 @@ import {parseArgs} from 'node:util';
 import {setTimeout as sleep} from 'node:timers/promises';
 import type {ShutterNote,HistoryEntry,ResourceUse,DuplicateGroup,DuplicateScope,DuplicatesState,Action,AppState,Preferences,Job,Source,SourceCameraInfo,TransferPlan,DestinationStatus,Inventory,Listing,Progress,Review,DestinationSpace,OrganizeOptions,ProblemFile,NoMetadataSummary,DuplicateRemovalPlan,PlanEntry} from './shared';
 import {blockedActions,type GatedAction,type InternalWork} from './gates';
-import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,previewSize,requiredDestinations} from './shared';
+import {NO_METADATA_LIST_LIMIT,UNKNOWN_FILES_FOLDER,isLive,isRunning,requiredDestinations} from './shared';
 import {misplacedScope,staleMisplaced,touchedMisplaced} from './misplaced-results';
 import {checkFolderPair,checkFolderSettings,ruleOptions,rulesScope} from './routing-options';
 import {unknownDecision} from './unknown-confirm';
@@ -50,7 +50,7 @@ import {loadListingHint,rememberListing} from './platform/listing-memory';
 import {forgetPlacement,loadPlacement,placedMatches,placedOutcomes,placementId,placementScope,rememberEntries,replacePlacement} from './platform/placement-memory';
 import {listingEstimate,scopeHint,type ListingHint} from './listing-estimate';
 import {metadata,closeMetadata,primeRouting,routingEntriesUnder,cachedRouting,carryRouting,embeddedPreview} from './platform/metadata';
-import {thumbnail,systemDecoders,type NativeDecoder} from './platform/thumbnails';
+import {fitWithin,previewThumbnail,systemDecoders,type NativeDecoder} from './platform/thumbnails';
 import {removeDuplicates,afterRemoval,type RemovalResult} from './core/duplicate-removal';
 import {resolveGroups,summarize} from './duplicate-rules';
 import {findResidue,cleanResidue,removeUnboundReceipt,findRunResidue,runLeftoverGroups,type Residue,type ResidueItem} from './core/residue';
@@ -319,7 +319,7 @@ let lastUsageMB=0,overLimit=false;
 const resourceUse=():ResourceUse=>{const host=hostNow(),limits=resourceLimits();return {threads:limits.maxCpuThreads,memoryMB:Math.round(lastUsageMB),limitMB:limits.memoryLimitMB,cores:host.cores,totalMemMB:Math.round(host.totalMemBytes/MB),memoryMaxMB:memoryRange(host).max,defaultThreads:defaultCpuThreads(host),defaultMemoryMB:defaultMemoryLimitMB(host),...(overLimit?{warning:true}:{})};};
 const thumbnailSlots=limiter(()=>cpuWorkers(4));
 /** Pictures for previews on Windows and Linux (macOS uses its own sips and Quick Look). Empty results mean "cannot". */
-const jpegOf=(image:Electron.NativeImage,size:number)=>{if(image.isEmpty())return undefined;const {width,height}=image.getSize(),scale=Math.min(1,size/Math.max(width,height,1));return (scale<1?image.resize({width:Math.max(1,Math.round(width*scale)),height:Math.max(1,Math.round(height*scale)),quality:'good'}):image).toJPEG(75);};
+const jpegOf=(image:Electron.NativeImage,size:number)=>{if(image.isEmpty())return undefined;const {width,height}=image.getSize(),fit=fitWithin(width,height,size);return (fit?image.resize({...fit,quality:'good'}):image).toJPEG(75);};
 const nativeDecoder:NativeDecoder={
  shell:async(file,size)=>jpegOf(await nativeImage.createThumbnailFromPath(file,{width:size,height:size}),size),
  image:async(file,size)=>jpegOf(nativeImage.createFromPath(file),size),
@@ -1743,7 +1743,7 @@ async function boot(){
   try{event.sender.startDrag({file:files[0]!,files,icon:image});}catch(error){log('normal','catalog','drag-failed',{error});}});
  ipcMain.handle('importer:summary',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file),{details:false});}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:exif',async(event,file:string)=>{trusted(event);if(qaHooks?.inspect)return qaHooks.inspect(file);inspecting++;try{return await metadata(await allowed(file));}finally{inspecting--;void releaseIfIdle();}});
- ipcMain.handle('importer:thumbnail',async(event,file:string,size?:unknown)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>thumbnail(allowedFile,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview,nativeDecoder),size:previewSize(size)}));}finally{inspecting--;void releaseIfIdle();}});
+ ipcMain.handle('importer:thumbnail',async(event,file:string,size?:unknown)=>{trusted(event);inspecting++;try{const allowedFile=await allowed(file);return await thumbnailSlots(()=>previewThumbnail(allowedFile,size,{cache:path.join(app.getPath('userData'),'thumbnails'),decoders:systemDecoders(embeddedPreview,nativeDecoder)}));}finally{inspecting--;void releaseIfIdle();}});
  ipcMain.handle('importer:errorPaths',(event,jobId:unknown,code:unknown)=>{trusted(event);const job=typeof jobId==='string'?state.jobs.find(item=>item.id===jobId):undefined;return job&&typeof code==='string'?issuePaths(job,code):[];});
  ipcMain.handle('importer:duplicates',event=>{trusted(event);return duplicateGroups;});
  ipcMain.handle('importer:conflicts',(event,jobId:unknown)=>{trusted(event);return typeof jobId==='string'?conflictBooks.get(jobId)?.list()??[]:[];});

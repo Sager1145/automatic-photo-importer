@@ -5,7 +5,7 @@ import type {PreparedDrag} from '../../shared';
 import {MAX_DRAG_FILES,type DragRequest} from '../../core/file-drag';
 import {Icon} from '../ui';
 import {useTranslation} from '../i18n';
-import {fileSelectionCount,type FileSelection} from './state';
+import {chosenFiles,fileSelectionCount,type FileSelection} from './state';
 import type {BrowserAPI} from './api';
 /** The picture under the pointer while photos are dragged out: a small stack of photos with their number. */
 function dragIcon(count:number):string{
@@ -28,7 +28,8 @@ export function dragRequestFor(libraryId:string,query:CatalogQuery,selection:Fil
  * the system drag starts at once. `selection` is what the Files column has chosen: `effectiveFiles` of the browser state. */
 export function LightroomDrag({api,libraryId,online,query,selection,rows,total,revision}:{api:BrowserAPI;libraryId:string;online:boolean;query:CatalogQuery;selection:FileSelection;rows:CatalogRow[];total:number;revision:number}){
  const {t,formatNumber}=useTranslation();const chosen=fileSelectionCount(selection,total),count=chosen||total;
- const request=dragRequestFor(libraryId,query,selection,rows);const key=JSON.stringify([request,revision]);
+ // A selection that holds no file (every file unchecked after checking them all) carries every file shown, as its label says.
+ const request=dragRequestFor(libraryId,query,chosenFiles(selection,total),rows);const key=JSON.stringify([request,revision]);
  const prepared=useRef<{key:string;promise:Promise<PreparedDrag>}>(undefined);const [ready,setReady]=useState<{key:string;result?:PreparedDrag;error?:string}>();
  const unavailable=!api.prepareDrag||!api.startDrag,disabled=unavailable||!online||count===0||count>MAX_DRAG_FILES;
  const prepare=()=>{if(disabled)return undefined;if(prepared.current?.key!==key){const promise=api.prepareDrag!(request);prepared.current={key,promise};promise.then(result=>setReady({key,result}),error=>setReady({key,error:String(error)}));}return prepared.current.promise;};

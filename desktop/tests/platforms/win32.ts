@@ -43,7 +43,7 @@ export const win32: PlatformProfile = {
   // Explorer and Lightroom take drive-letter paths with backslashes (C:\…).
   dropPath: /^[A-Za-z]:\\(?!.*\/)/,
   heldOpen,
-  previews: { photos: 'shell', posters: true },
+  previews: { photos: 'shell', posters: true, measured: { skip: 'the shell thumbnailer is reached through Electron\'s nativeImage, which exists only inside the app' } },
   // Win32_PerfRawData_PerfDisk_PhysicalDisk as the app's reader prints it: instances by disk number and drive letters.
   driveActivity: { disks: [['D:'], ['I:']], sampler: now => {
     let next = 0;

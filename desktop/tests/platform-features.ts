@@ -40,8 +40,9 @@ import { openCatalog } from '../catalog/store';
 import { CatalogCoordinator, bindLibrary } from '../catalog/coordinator';
 import { resolveCatalogFile } from '../catalog/access';
 import { collectDragFiles } from '../core/file-drag';
-import { systemDecoders, thumbnail } from '../platform/thumbnails';
-import { PREVIEW_SIZES, previewSize } from '../shared';
+import { previewThumbnail, systemDecoders, type NativeDecoder } from '../platform/thumbnails';
+import { PREVIEW_SIZES, type Thumbnail } from '../shared';
+import { deflateSync, crc32 } from 'node:zlib';
 import { activityTargets, type DriveSampler } from '../platform/drive-activity';
 import type { StorageMedia } from '../core/storage-media';
 
@@ -90,7 +91,10 @@ export interface PlatformProfile {
   heldOpen(root: string): Promise<string[]>;
   /** Who makes preview pictures: macOS's own sips and Quick Look (photos, RAW and video posters), Windows's shell
    * thumbnailer through the app's decoder (photos, installed RAW codecs and posters), or on Linux the app's decoder for JPEG/PNG only. */
-  previews: { photos: 'system' | 'shell' | 'image'; posters: boolean };
+  previews: { photos: 'system' | 'shell' | 'image'; posters: boolean;
+    /** The system's real decoding for pictures that are measured: `native`, the app's decoder where this system needs one
+     * and a test can run it, or why it cannot (Electron's nativeImage exists only inside the app). */
+    measured: { native?: NativeDecoder } | { skip: string } };
   /** The drive activity meter: the disk names this system's counters give the card and the SSD, and a sampler over
    * two recorded readings of its own counters (ioreg on macOS, PhysicalDisk through CIM on Windows, /proc/diskstats
    * on Linux), the card read or written between them. */
@@ -102,6 +106,27 @@ export interface PlatformProfile {
 const onNative = (profile: PlatformProfile, t: TestContext) => {
   if (process.platform === profile.platform) return true;
   t.skip(`needs a ${profile.platform} filesystem`); return false;
+};
+/** A real grayscale PNG of `width`×`height` with detail in it (no flat colour a decoder could shortcut). */
+const png = (width: number, height: number) => {
+  const chunk = (type: string, data: Buffer) => { const body = Buffer.concat([Buffer.from(type, 'latin1'), data]), out = Buffer.alloc(body.length + 8); out.writeUInt32BE(data.length, 0); body.copy(out, 4); out.writeUInt32BE(crc32(body), body.length + 4); return out; };
+  const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 0;
+  const rows = Buffer.alloc((width + 1) * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) rows[y * (width + 1) + 1 + x] = (x ^ y) & 255;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+};
+/** The longer side of a preview's JPEG, read from its frame header. */
+const longerSide = (picture: Thumbnail) => {
+  assert.ok(picture.src?.startsWith('data:image/jpeg;base64,'), `a JPEG picture (${picture.via})`);
+  const jpeg = Buffer.from(picture.src!.slice(picture.src!.indexOf(',') + 1), 'base64');
+  for (let at = 2; at + 9 < jpeg.length;) {
+    if (jpeg[at] !== 0xff) break;
+    const marker = jpeg[at + 1]!;
+    if (marker === 0xff) { at++; continue; }
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return Math.max(jpeg.readUInt16BE(at + 5), jpeg.readUInt16BE(at + 7));
+    at += 2 + jpeg.readUInt16BE(at + 2);
+  }
+  assert.fail('the JPEG has a frame header');
 };
 
 export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext) => void | Promise<void>> = {
@@ -653,19 +678,39 @@ export const FEATURES: Record<string, (profile: PlatformProfile, t: TestContext)
       assert.deepEqual(asked, profile.previews.posters ? [`shell ${clip}`] : []);
     } finally { await rm(root, { recursive: true, force: true }); }
   },
-  'previews: the larger Library browser preview asks this system\'s decoder for a bigger picture, cached apart from the normal one': async (profile, t) => {
+  'previews: the larger Library browser preview reaches this system\'s decoder at its size, cached apart from the normal one': async (profile, t) => {
     if (!onNative(profile, t)) return;
     const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-large-previews-')));
     try {
       const photo = join(root, 'photo.png'), cache = join(root, 'cache'), sizes: number[] = [];
-      await writeFile(photo, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6XHgAAAAASUVORK5CYII=', 'base64'));
+      await writeFile(photo, png(64, 48));
+      // macOS decodes with its own sips here. On Windows and Linux the app's Electron decoder cannot run in a test: a stand-in
+      // records the size it is asked for (the decoding itself is measured in the next feature where it can run).
       const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]), record = async (_file: string, size: number) => { sizes.push(size); return jpeg; };
       const decoders = systemDecoders(async () => undefined, { shell: record, image: record });
-      // What the renderer may ask over IPC: the normal size, the large one, or anything else (which gets the normal one).
-      for (const asked of [undefined, PREVIEW_SIZES.large, 99999]) assert.equal((await thumbnail(photo, { cache, decoders, size: previewSize(asked) })).via, 'system');
+      // What the renderer may send over IPC, coerced as the handler does: the normal size, the large one, or anything else (the normal one).
+      for (const asked of [undefined, PREVIEW_SIZES.large, 99999, '1600', PREVIEW_SIZES.normal]) assert.equal((await previewThumbnail(photo, asked, { cache, decoders })).via, 'system', String(asked));
       assert.equal((await readdir(cache)).filter(name => name.endsWith('.jpg')).length, 2, 'each size is cached on its own');
-      // macOS asks sips (-Z) for the size; elsewhere the app's decoder gets it and scales down to it, never up.
-      assert.deepEqual(sizes, profile.previews.photos === 'system' ? [] : [PREVIEW_SIZES.normal, PREVIEW_SIZES.large]);
+      assert.deepEqual(sizes, profile.previews.photos === 'system' ? [] : [PREVIEW_SIZES.normal, PREVIEW_SIZES.large], 'the app\'s decoder is asked for each size once');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  },
+  'previews: each size, measured from this system\'s real decoder, is no larger than asked, the large one larger, and a small picture never enlarged': async (profile, t) => {
+    if (!onNative(profile, t)) return;
+    const measured = profile.previews.measured;
+    if ('skip' in measured) { t.skip(`needs the app's decoder: ${measured.skip}`); return; }
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'feature-measured-previews-')));
+    try {
+      const wide = join(root, 'wide.png'), small = join(root, 'small.png'), cache = join(root, 'cache');
+      await writeFile(wide, png(2400, 1600)); await writeFile(small, png(600, 400));
+      const decoders = systemDecoders(async () => undefined, measured.native), options = { cache, decoders };
+      const normal = longerSide(await previewThumbnail(wide, undefined, options)), large = longerSide(await previewThumbnail(wide, PREVIEW_SIZES.large, options));
+      assert.ok(normal <= PREVIEW_SIZES.normal, `the normal picture's longer side ${normal} fits ${PREVIEW_SIZES.normal}`);
+      assert.ok(large <= PREVIEW_SIZES.large, `the large picture's longer side ${large} fits ${PREVIEW_SIZES.large}`);
+      assert.ok(large > normal, `the large picture (${large}) is larger than the normal one (${normal})`);
+      for (const asked of [undefined, PREVIEW_SIZES.large]) {
+        const side = longerSide(await previewThumbnail(small, asked, options));
+        assert.ok(side <= 600, `a 600 px picture asked at ${asked ?? 'the normal size'} keeps at most its own size (got ${side})`);
+      }
     } finally { await rm(root, { recursive: true, force: true }); }
   },
 };

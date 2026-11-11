@@ -42,7 +42,7 @@ export const linux: PlatformProfile = {
   // File managers take POSIX paths with forward slashes.
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
-  previews: { photos: 'image', posters: false },
+  previews: { photos: 'image', posters: false, measured: { skip: 'the decoder is Electron\'s nativeImage, which exists only inside the app' } },
   // Two readings of /proc/diskstats (whole disks and partitions); the card (mmcblk0) was read between them.
   driveActivity: { disks: [['mmcblk0'], ['sdb']], sampler: now => {
     let next = 0;

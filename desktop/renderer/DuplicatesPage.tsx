@@ -4,6 +4,7 @@ import type { AppState, DuplicatesState, DuplicateFile, DuplicateGroup, Duplicat
 import { isLive } from '../shared';
 import { exifKey, organizedPath, resolveGroups, summarize, type OrganizeRules, type RemovalSummary, type ResolvedGroup } from '../duplicate-rules';
 import { categorize } from './exif-categories';
+import { categoryIcon, exifIcon } from './exif-icons';
 import { formatCaptureDateTime, formatExposure } from './metadata-display';
 import { useTranslation, type Translator } from './i18n';
 import { message } from '../messages';
@@ -92,8 +93,8 @@ function FullExif({ outcome }: { outcome?: Outcome<Metadata> }) {
   return <details className="duplicate-full-exif" data-testid="full-exif">
     <summary>{t("Full EXIF")}</summary>
     {outcome && 'error' in outcome ? <p className="muted">{t("This file's EXIF could not be read.")}</p> : !metadata ? <p className="muted">{t("Loading…")}</p> : categories.length === 0 ? <p className="muted">{t("No EXIF found")}</p> : categories.map(category => <section key={category.id} data-category={category.id}>
-      <h4>{t(category.title)}</h4>
-      <dl>{category.rows.map(row => <div key={row.tag}><dt>{t(row.label)}</dt><dd>{t(row.value)}</dd></div>)}</dl>
+      <h4><Icon icon={categoryIcon(category.id)} size={13} />{t(category.title)}</h4>
+      <dl>{category.rows.map(row => <div key={row.tag}><dt><Icon icon={exifIcon(row.tag, row.label)} size={14} className="exif-field-icon" />{t(row.label)}</dt><dd>{t(row.value)}</dd></div>)}</dl>
     </section>)}
   </details>;
 }

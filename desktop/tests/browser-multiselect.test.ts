@@ -4,11 +4,12 @@ import {readFile} from 'node:fs/promises';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {I18nProvider} from '../renderer/i18n';
-import {addBlockSelection,maxFilterValues,pickFits,selectedKeys,selectionSummary,toggleBlockSelection,unionFilters} from '../renderer/browser/selection';
+import {addBlockSelection,addWithinLimit,filterSize,maxFilterValues,pickFits,selectedKeys,selectionSummary,toggleBlockSelection,unionFilters} from '../renderer/browser/selection';
 import {dragRequestFor,LightroomDrag} from '../renderer/browser/LightroomDrag';
 import type {BrowserAPI} from '../renderer/browser/api';
 import {addBlock,createBlock,defaultConfiguration} from '../renderer/browser/configuration';
-import {browserReducer,effectiveFiles,effectiveSelections,fileSelected,fileSelectionCount,initialBrowserState,queryFor,selectionFilter} from '../renderer/browser/state';
+import {browserReducer,chosenFiles,effectiveFiles,effectiveSelections,fileSelected,fileSelectionCount,initialBrowserState,noFiles,queryFor,selectionFilter} from '../renderer/browser/state';
+import {PagedList} from '../renderer/browser/use-paged';
 import {VirtualList} from '../renderer/browser/VirtualList';
 import {ColumnCheckAll} from '../renderer/browser/ColumnCheckAll';
 import {openCatalog} from '../catalog/store';
@@ -257,4 +258,93 @@ test('IPC: the preload exposes prepareDrag and startDrag, and main checks the se
  assert.match(main,/event\.sender\.startDrag\(\{file:files\[0\]!,files,icon:image\}\)/);
  assert.match(main,/nativeImage\.createFromBitmap/,'macOS needs a drag picture: a fallback exists');
  for(const source of [worker,client,session])assert.match(source,/'companions'/,'the catalog worker serves companions');
+});
+test('Shift ranges and Select all check at most 500 values in a column, and the reducer never keeps more',async()=>{
+ const rows=Array.from({length:600},(_,i)=>option(`camera ${i}`));
+ const {filter,cut}=addWithinLimit(camera,selectionFilter(camera,['camera 0','x']),[...rows,missing]);
+ assert.equal(cut,true);assert.equal(filter?.kind==='values'&&filter.values.length,maxFilterValues,'trimmed to the limit');assert.deepEqual(filter?.kind==='values'&&filter.values.slice(0,3),['camera 0','x','camera 1'],'in their order, after the checked ones');
+ assert.equal(filter?.kind==='values'&&filter.orMissing,true,'Missing details adds no value and is still checked');
+ assert.equal(filterSize(addBlockSelection(camera,undefined,rows)),maxFilterValues,'addBlockSelection is capped too');
+ assert.deepEqual(addWithinLimit(camera,undefined,rows.slice(0,3)),{filter:selectionFilter(camera,['camera 0','camera 1','camera 2'],['camera 0','camera 1','camera 2']),cut:false});
+ const format=createBlock('format'),merged={key:'format:JPEG',label:'JPEG',chip:'JPEG',values:['jpg','jpeg']};
+ const nearly=selectionFilter(format,Array.from({length:maxFilterValues-1},(_,i)=>`f${i}`));
+ assert.deepEqual(addWithinLimit(format,nearly,[merged,option('png')]),{filter:nearly,cut:true},'a merged row is added whole or not at all, and nothing after it');
+ let s={...initialBrowserState([camera]),libraryId:library.libraryId};const before=s;
+ s=browserReducer(s,{type:'select',blockId:camera.id,filter:selectionFilter(camera,rows.map(row=>row.value))});assert.equal(s,before,'a check past the limit is refused');
+ s=browserReducer(s,{type:'pick',blockId:camera.id,filter:selectionFilter(camera,rows.map(row=>row.value))});assert.equal(s,before);
+ s=browserReducer(s,{type:'select',blockId:camera.id,filter});
+ const c=openCatalog(':memory:');await c.configure([library]);
+ try{await c.query(queryFor(s));await c.facets(queryFor(s,0),'camera');}finally{await c.close();}
+});
+
+test('a click that does not fit beside 500 checked values is not kept, and a check that fills the column drops the click',()=>{
+ const full=selectionFilter(camera,Array.from({length:maxFilterValues},(_,i)=>`camera ${i}`)),outside=selectionFilter(camera,['other']),inside=selectionFilter(camera,['camera 3']);
+ let s={...initialBrowserState([camera]),libraryId:'l'};s=browserReducer(s,{type:'select',blockId:camera.id,filter:full});
+ const before=s;s=browserReducer(s,{type:'pick',blockId:camera.id,filter:outside});assert.equal(s,before,'refused: nothing stored, no history, later columns kept');
+ s=browserReducer(s,{type:'pick',blockId:camera.id,filter:inside});assert.deepEqual(s.picks[camera.id],inside,'a click among the checked rows adds nothing and is kept');
+ let t={...initialBrowserState([camera]),libraryId:'l'};t=browserReducer(t,{type:'pick',blockId:camera.id,filter:outside});
+ t=browserReducer(t,{type:'select',blockId:camera.id,filter:full});assert.equal(t.picks[camera.id],undefined,'the click no longer fits: it goes with the check');
+ t=browserReducer(t,{type:'select',blockId:camera.id,filter:selectionFilter(camera,['a'])});assert.equal(t.picks[camera.id],undefined);
+});
+
+test('checking every file keeps the preview; clearing them lets the click go; a sort or pairing drops the click',()=>{
+ let s={...initialBrowserState([]),libraryId:'l'};s=browserReducer(s,{type:'file',fileId:'a'});
+ s=browserReducer(s,{type:'allFiles',select:true});assert.equal(s.selectedFile,'a','checking all never moves the preview');assert.deepEqual(s.files,{all:true,ids:[]});
+ s=browserReducer(s,{type:'allFiles',select:false});assert.equal(s.selectedFile,undefined);assert.deepEqual(s.files,noFiles);
+ s=browserReducer(s,{type:'file',fileId:'a'});s=browserReducer(s,{type:'toggleFile',fileId:'b'});
+ const sorted=browserReducer(s,{type:'sort',sort:{field:'captured',direction:'desc'}});assert.equal(sorted.selectedFile,undefined,'the sort can move the click off the pages read');assert.deepEqual(sorted.files,s.files,'the same files: the checks stay');
+ const paired=browserReducer(s,{type:'pairs',combine:false});assert.equal(paired.selectedFile,undefined);assert.deepEqual(paired.files,noFiles,'other rows shown: like a search, nothing chosen');
+ assert.equal(fileSelectionCount(effectiveFiles(paired),10),0);
+});
+
+test('every file unchecked after checking them all is nothing chosen: the drag label and request both carry every file shown',()=>{
+ const none={all:true,ids:['a','b']};assert.deepEqual(chosenFiles(none,2),noFiles);assert.deepEqual(chosenFiles({all:true,ids:['a']},2),{all:true,ids:['a']});assert.deepEqual(chosenFiles({all:false,ids:['a']},0),{all:false,ids:['a']});
+ const request=dragRequestFor('l',query,chosenFiles(none,2),[row('a'),row('b')]);assert.ok('except' in request);assert.deepEqual(request.except,[],'every file, not every file except all of them');
+ const html=render(createElement(LightroomDrag,{api:dragApi,libraryId:'l',online:true,query,rows:[row('a'),row('b')],revision:1,selection:none,total:2}));
+ assert.match(html,/All 2/);assert.match(html,/draggable="true"/);
+});
+
+const paged=(pages=3)=>{
+ const s={key:'A',revision:1,pages,calls:[] as string[]};const waiting:{settle:(error?:unknown)=>void}[]=[];
+ const list=new PagedList<string>(cursor=>new Promise((resolve,reject)=>{const n=cursor?Number(cursor):0,key=s.key;s.calls.push(`${key}${n}`);waiting.push({settle:error=>error?reject(error):resolve({rows:[`${key}${n}a`,`${key}${n}b`],revision:s.revision,...(n+1<s.pages?{nextCursor:String(n+1)}:{})})});}));
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ /** Answers the oldest request (or fails it) and lets the list act on it. */
+ const answer=async(error?:unknown)=>{await tick();const next=waiting.shift();assert.ok(next,'a request is waiting');next.settle(error);await tick();};
+ const shown=()=>({rows:list.snapshot.value.rows.length,loading:list.snapshot.loading,more:!!list.snapshot.value.nextCursor,error:list.snapshot.error});
+ return {s,list,answer,tick,waiting,shown};
+};
+const staleError=new Error('Catalog or query changed; restart pagination.');
+test('a paged list never stays loading: a revision refresh while the next page loads, a stale cursor, a new query or none',async()=>{
+ let p=paged();p.list.start(1);assert.equal(p.list.snapshot.loading,true);await p.answer();assert.deepEqual(p.shown(),{rows:2,loading:false,more:true,error:''});
+ p.list.more();assert.equal(p.list.snapshot.loading,true);await p.tick();p.list.revise(2);p.list.revise(3);
+ await p.answer();assert.deepEqual(p.shown(),{rows:4,loading:false,more:true,error:''},'the page appends; the refresh waits for it');
+ await p.answer();await p.answer();assert.deepEqual(p.s.calls,['A0','A1','A0','A1'],'one refresh for both revisions, of the rows loaded');assert.equal(p.waiting.length,0);
+ p.list.more();await p.answer();assert.deepEqual(p.shown(),{rows:6,loading:false,more:false,error:''},'paging goes on');
+ // A cursor the index ended reads the list again.
+ p=paged();p.list.start(1);await p.answer();p.list.more();await p.answer(staleError);assert.equal(p.list.snapshot.loading,false);await p.answer();assert.deepEqual(p.shown(),{rows:2,loading:false,more:true,error:''});
+ // Another error waits for Retry instead of asking again.
+ p.list.more();await p.answer(new Error('disk gone'));assert.deepEqual(p.shown(),{rows:2,loading:false,more:true,error:'Error: disk gone'});p.list.more();await p.tick();assert.equal(p.waiting.length,0);
+ // A new query while a page loads: the old page is dropped, the list loads until the new first page arrives.
+ p=paged();p.list.start(1);await p.answer();p.list.more();await p.tick();p.s.key='B';p.list.start(1);
+ await p.answer();assert.deepEqual([p.list.snapshot.value.rows[0],p.list.snapshot.loading],['A0a',true],'the old query’s page is not shown');
+ await p.answer();assert.deepEqual([p.list.snapshot.value.rows,p.list.snapshot.loading],[['B0a','B0b'],false]);
+ // No query (no library): empty and idle, whatever was loading.
+ p=paged();p.list.start(1);await p.answer();p.list.more();await p.tick();p.list.disable();assert.deepEqual(p.shown(),{rows:0,loading:false,more:false,error:''});await p.answer();assert.deepEqual(p.shown(),{rows:0,loading:false,more:false,error:''});
+});
+
+test('reading every page retries a stale cursor, waits out a refresh, and reads only the current query',async()=>{
+ let p=paged();p.list.start(1);await p.answer();
+ let all=p.list.readAll();await p.answer();await p.answer(staleError);for(let i=0;i<3;i++)await p.answer();
+ assert.deepEqual(await all,['A0a','A0b','A1a','A1b','A2a','A2b'],'read again from the start');assert.deepEqual(p.shown(),{rows:6,loading:false,more:false,error:''});
+ // A revision during the read: the read finishes, then the refresh runs.
+ p=paged();p.list.start(1);await p.answer();all=p.list.readAll();await p.answer();p.s.revision=2;p.list.revise(2);await p.answer();await p.answer();
+ assert.equal((await all)?.length,6);assert.equal(p.list.snapshot.loading,false);for(let i=0;i<3;i++)await p.answer();assert.equal(p.waiting.length,0);assert.equal(p.list.snapshot.value.revision,2);
+ // Clicked before a new query's first page: the first page still loads, then every row of the new query.
+ p=paged();p.list.start(1);await p.answer();p.s.key='B';p.list.start(1);all=p.list.readAll();
+ for(let i=0;i<4;i++)await p.answer();
+ assert.deepEqual(await all,['B0a','B0b','B1a','B1b','B2a','B2b']);assert.equal(p.list.snapshot.loading,false);
+ p.list.revise(2);await p.tick();assert.equal(p.waiting.length,1,'later revisions still refresh the new query');await p.answer();await p.answer();await p.answer();
+ // The query changes during the read: nothing comes back.
+ p=paged();p.list.start(1);await p.answer();all=p.list.readAll();await p.answer();p.s.key='C';p.list.start(1);await p.answer();await p.answer();
+ assert.equal(await all,undefined);assert.deepEqual([p.list.snapshot.value.rows[0],p.list.snapshot.loading],['C0a',false]);
 });

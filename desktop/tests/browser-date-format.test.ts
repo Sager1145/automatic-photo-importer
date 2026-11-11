@@ -4,7 +4,7 @@ import {openCatalog} from '../catalog/store';
 import {library,record} from './catalog-fixtures';
 import type {CatalogQuery,Filter} from '../catalog/types';
 import {formatGroup} from '../media-formats';
-import {addDates,buildDateTree,covers,dateState,dateTreeSummary,toggleDate,visibleDateRows} from '../renderer/browser/date-tree';
+import {addDates,buildDateTree,covers,dateState,dateTreeSummary,toggleDate,visibleDateRows,type DateNode} from '../renderer/browser/date-tree';
 import {addBlock,createBlock,dateTreeLevels,defaultConfiguration,fieldForBlock,readConfiguration,updateBlock,type HierarchyBlock} from '../renderer/browser/configuration';
 import {chosenRowKeys,formatRows,selectionSummary,toggleBlockSelection} from '../renderer/browser/selection';
 
@@ -119,4 +119,26 @@ test('date levels: new and saved date fields are trees, one level is a flat list
  // A view saved before date trees (a month list) opens as the full tree.
  const saved={...defaultConfiguration(),blocks:[{...createBlock('date'),dateLevels:undefined}]};
  assert.deepEqual(dateTreeLevels(readConfiguration({getItem:()=>JSON.stringify(saved)}).blocks[0]!),['year','month','day']);
+});
+test('a row that shows checked through the rows below it unchecks them, and the header agrees',()=>{
+ const tree=buildDateTree([...days,{value:'2026-10-20',count:2}],['year','month','day'],'en');
+ const year=tree[1]!,october=year.children[0]!,november=year.children[1]!;const none={shown:false,chosen:false};
+ assert.equal(dateState(['2026-10','2026-11'],year),'full');
+ assert.deepEqual(toggleDate(['2026-10','2026-11'],tree,year,true),[],'every month checked: the year unchecks them');
+ assert.deepEqual(toggleDate(['2025','2026-10','2026-11'],tree,year,true),['2025'],'other checks stay');
+ const allDays=['2026-11-01','2026-11-02','2026-11-03'];assert.equal(dateState(allDays,november),'full');
+ assert.deepEqual(toggleDate([...allDays,'2025'],tree,november,true),['2025'],'a month full through its days');
+ assert.deepEqual(toggleDate(['2026-10-20',...allDays],tree,year,true),[],'a year full through months full through days: everything under it');
+ assert.deepEqual(toggleDate(['2026-10'],tree,year,true).sort(),['2026'],'a partial year checks as before');
+ const after=toggleDate(['2025','2026-10','2026-11'],tree,year,true);
+ assert.deepEqual(dateTreeSummary(tree,['2025','2026-10','2026-11'],none),{all:true,chosen:2,total:2});assert.deepEqual(dateTreeSummary(tree,after,none),{all:false,chosen:1,total:2});
+ assert.equal(dateState(after,october),'none');
+});
+
+test('checking dates stops at the column’s limit; a row that covers checked days takes their place',()=>{
+ const tree=buildDateTree(days,['year','month','day'],'en');const november=tree[1]!.children[0]!,[first,second,third]=november.children as [DateNode,DateNode,DateNode];
+ assert.deepEqual(addDates([],[first,second,third],2),['2026-11-01','2026-11-02'],'the third day would pass the limit');
+ assert.deepEqual(addDates(['2026-11-01','2026-11-02'],[tree[1]!],2),['2026'],'the year replaces its two days');
+ assert.deepEqual(addDates(['2025'],[first,second],2),['2025','2026-11-01']);
+ const chosen=addDates(['2025'],[first,second],2);assert.deepEqual([first,second].filter(node=>!covers(chosen,node.value)),[second],'covers tells which were left out');
 });

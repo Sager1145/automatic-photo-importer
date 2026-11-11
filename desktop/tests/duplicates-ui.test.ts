@@ -54,8 +54,9 @@ test('basic EXIF lists camera, lens, date and time, exposure, dimensions, size a
  const basic=html.match(/data-testid="basic-exif"[\s\S]*?<\/dl>/g)!.find(block=>block.includes('NIKKOR'))!;
  for(const text of ['Camera','Nikon Z6','NIKKOR 24-70','Capture date','Capture time','10:00:00.123','1/250 s','f/2.8','200','50 mm','6000 × 4000','1 KB','2026/202605/Nikon Z6/DSC_0001.NEF'])assert.ok(basic.includes(text),text);
  assert.match(html,/<details class="duplicate-full-exif" data-testid="full-exif">/);
- assert.match(html,/<h4>Exposure<\/h4>/);assert.match(html,/<h4>Camera &amp; Lens<\/h4>/);assert.match(html,/Shutter speed/);
- assert.match(view(sha,{exifs:{[organized.path]:metadata}},'ja'),/<h4>露出<\/h4>/);
+ assert.match(html,/<h4><svg[^>]*aria-hidden="true"[^]*?<\/svg>Exposure<\/h4>/);assert.match(html,/<h4><svg[^]*?<\/svg>Camera &amp; Lens<\/h4>/);
+ assert.match(html,/<dt><svg[^>]*class="[^"]*exif-field-icon[^"]*"[^]*?<\/svg>Shutter speed<\/dt>/,'every curated row has its icon');
+ assert.match(view(sha,{exifs:{[organized.path]:metadata}},'ja'),/<svg[^]*?<\/svg>露出<\/h4>/);
 });
 
 test('a RAW the system cannot decode shows the macOS update / DNG Converter message with the embedded preview',()=>{

@@ -1595,22 +1595,23 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 /* The title bar names the page; the heading stays for assistive technology. */
 .browser-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .browser-index-actions,.browser-history,.browser-preview-actions{display:flex;gap:.4rem;flex-wrap:wrap}
-.browser-toolbar label,.browser-selection-bar label,.browser-block-options label,.browser-preset-save label,.browser-insertion label,.browser-range label{display:grid;gap:.25rem;font-size:var(--text-caption);color:var(--label-secondary)}
-.browser-toolbar select,.browser-toolbar input,.browser-block-options input,.browser-block-options select,.browser-preset-save input,.browser-preset input,.browser-selection-bar select,.browser-insertion input,.browser-range input,.browser-sort select{min-height:var(--control-height);max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-md);color:var(--label);font:inherit;font-size:var(--text-footnote)}
+.browser-toolbar label,.browser-block-options label,.browser-preset-save label,.browser-range label{display:grid;gap:.25rem;font-size:var(--text-caption);color:var(--label-secondary)}
+.browser-toolbar select,.browser-toolbar input,.browser-block-options input,.browser-block-options select,.browser-preset-save input,.browser-preset input,.browser-range input,.browser-sort select{min-height:var(--control-height);max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-md);color:var(--label);font:inherit;font-size:var(--text-footnote)}
 /* One toolbar row: every control is one height and shape family, labelled for assistive technology rather than by a caption above it. */
 .browser-heading{display:contents}
 /* The top of the page: the source row (library and its index), then the filter bar, like Lightroom Classic's Library Filter. */
 .browser-toolbar{display:grid;gap:.5rem}
-.browser-source-row{display:flex;align-items:center;gap:.5rem 1rem;flex-wrap:wrap;min-width:0}.browser-library select{max-width:16rem!important}
+.browser-source-row{display:flex;align-items:center;gap:.5rem 1rem;flex-wrap:wrap;min-width:0}
 .browser-filter-bar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;min-width:0;padding:.4rem .5rem;border:1px solid var(--separator);border-radius:var(--radius-md);background:var(--fill-4)}
 .browser-filter-label{flex:none;padding:0 .2rem 0 .25rem;font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
 .browser-filter-end{display:flex;align-items:center;gap:.4rem;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
-.browser-filter-end .browser-field select{max-width:12rem}.browser-placement-filter select{max-width:10rem!important}.browser-filter-end .button{min-height:var(--control-height)}
+.browser-filter-end .browser-field select{max-width:12rem}.browser-filter-end .button{min-height:var(--control-height)}
 .browser-columns-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .browser-toolbar .browser-field{display:block;flex:none}.browser-toolbar .browser-field select{width:auto;max-width:12rem}
+.browser-toolbar .browser-library select{max-width:16rem}.browser-toolbar .browser-placement-filter select{max-width:10rem}
 .browser-toolbar select,.browser-toolbar input{height:var(--control-height);padding-block:0}
 .browser-toolbar .segmented{flex:none}.browser-history{flex-wrap:nowrap}.browser-history .button{width:var(--control-height);min-width:var(--control-height);padding:0;border-radius:var(--radius-capsule)}
-.browser-search{flex:0 1 13rem!important;min-width:8rem}.browser-search input{width:100%}
+.browser-toolbar .browser-search{flex:0 1 13rem;min-width:8rem}.browser-search input{width:100%}
 .browser-toggle{display:inline-flex;align-items:center;gap:.4rem;height:var(--control-height);padding:0 .9rem;border-radius:var(--radius-capsule);background:var(--fill-3);color:var(--label-secondary);font-size:var(--text-footnote);font-weight:550;flex:none}.browser-toggle[aria-pressed=true]{background:var(--accent-soft);color:var(--label);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .browser-row-badge{margin-left:auto;padding:0 .4rem;border-radius:var(--radius-sm);background:var(--fill-3);font-weight:600}
 .browser-library-picker{display:flex;align-items:center;gap:.3rem;flex:none}.browser-icon-button{width:var(--control-height);min-width:var(--control-height);padding:0}
@@ -1630,7 +1631,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-editor>summary small{font-size:var(--text-caption);color:var(--label-secondary);font-weight:400}
 .browser-horizontal{overflow-x:auto;overflow-y:hidden;min-width:0;scroll-behavior:auto;overscroll-behavior-x:contain}
 .browser-horizontal-track{min-width:100%;display:flex}.browser-columns .browser-column-placeholder{height:100%;border-right:1px solid var(--separator)}
-.browser-block-path{padding:.2rem 0 .6rem}
 .browser-path-slot{min-height:48px;padding:2px 8px 2px 12px;border-left:2px dotted var(--separator-strong);display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:3px}
 /* Year, Month and Day under a date level: on is filled; the last one on cannot be turned off. */
 .browser-date-toggles{display:flex;gap:3px}
@@ -1646,7 +1646,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-block-options{display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap;margin-top:.4rem}
 .browser-block-options>label{flex:1;min-width:10rem}.browser-block-options form{display:flex;gap:.6rem;align-items:center;flex:2;min-width:14rem}.browser-block-options form label{flex:1}
 .browser-block-options small{font-size:var(--text-caption)}.browser-block-options p{font-size:var(--text-footnote)}
-.browser-selection-bar{font-size:var(--text-footnote);min-height:var(--control-height)}.browser-selection-hint{display:flex;align-items:center;min-height:var(--control-height);margin:0;font-size:var(--text-caption);color:var(--label-tertiary)}.browser-selection-bar>button:not(.button){padding:.4rem .6rem;border-radius:var(--radius-sm);background:var(--accent-soft);min-height:var(--control-height);overflow-wrap:anywhere}
+.browser-selection-bar{font-size:var(--text-footnote);min-height:var(--control-height)}.browser-selection-hint{display:flex;align-items:center;min-height:var(--control-height);margin:0;font-size:var(--text-caption);color:var(--label-tertiary)}
 /* The filter columns, their height handle and the results share the window's height below the bars (BrowserPage measures it). */
 .browser-workspace{display:flex;flex-direction:column;min-width:0}
 .browser-content{display:flex;min-width:0;align-items:stretch;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface);height:280px;flex:none}
@@ -1665,6 +1665,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-drag-handle{display:flex;flex:none;align-items:center;gap:.45rem;min-height:var(--control-height-sm);padding:0 .8rem;border:1px dashed var(--accent-fill);border-radius:var(--radius-md);background:var(--accent-soft);cursor:grab;font-size:var(--text-footnote);font-weight:600;user-select:none}.browser-drag-handle:active{cursor:grabbing}.browser-drag-handle:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
 .browser-drag-handle .browser-drag-label{white-space:nowrap;line-height:1.25}.browser-drag-handle small{color:var(--label-secondary);font-weight:400;font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
 .browser-drag-handle.is-disabled{cursor:not-allowed;opacity:.5;border-color:var(--separator-strong);background:var(--fill-4)}.browser-drag-note{font-size:var(--text-caption);color:var(--label-secondary);min-width:0;max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-column-note{flex:none;margin:0;padding:.3rem .6rem;font-size:var(--text-caption);color:var(--warning-text,var(--label));background:var(--fill-3);border-bottom:1px solid var(--separator)}
 .browser-coverage{font-size:var(--text-caption);color:var(--label-secondary);padding:.3rem .6rem;overflow-wrap:anywhere;flex:none}
 .browser-virtual-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;position:relative;outline-offset:-3px!important;border-radius:0!important}
 .browser-row{display:flex;align-items:center;justify-content:flex-start;gap:.4rem;padding:0 .65rem;cursor:default;border-bottom:1px solid var(--separator);font-size:var(--text-footnote)}
@@ -1675,7 +1676,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-row.is-picked{background:color-mix(in srgb,var(--accent-soft) 55%,transparent);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .browser-row.is-checked.is-picked{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent-fill),inset 0 0 0 1px var(--accent-border)}
 .browser-virtual-list.is-single .browser-row.is-picked{background:var(--accent-soft);box-shadow:inset 3px 0 var(--accent-fill)}
-/* A row's checkbox: small, in a taller label that is easy to hit inside the 48px row. */
+/* A row's checkbox: small, in a taller label that is easy to hit inside the 36px row. */
 .browser-row-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:32px;margin-inline:-.4rem -.15rem;cursor:pointer}
 .browser-tree-lead+.browser-row-check{margin-inline-start:-.3rem}
 .browser-row-check>input[type=checkbox],.browser-column-check>input[type=checkbox]{width:14px;height:14px;cursor:inherit;accent-color:var(--accent-fill)}
@@ -1689,7 +1690,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-range{padding:.5rem .6rem;font-size:var(--text-footnote)}.browser-range>summary{cursor:pointer;min-height:30px}.browser-range form{display:grid;gap:.4rem}.browser-range input{width:100%}
 /* The preview beside the list: as wide as ResultsPane sets (--browser-preview-width; the default before it is measured), the picture
  * at the top scaled into its box, the details under it scrolling on their own. Larger preview: the picture takes the height. */
-.browser-preview{width:var(--browser-preview-width,clamp(260px,34%,380px));flex:none;min-width:240px;border-left:1px solid var(--separator);padding:.8rem;height:100%;overflow:auto;display:flex;flex-direction:column;min-height:0}
+.browser-preview{width:var(--browser-preview-width,clamp(250px,34%,380px));flex:none;min-width:240px;border-left:1px solid var(--separator);padding:.8rem;height:100%;overflow:auto;display:flex;flex-direction:column;min-height:0}
 .browser-preview-info{flex:1 1 auto;min-height:4.5rem;overflow:auto;margin:0 -.8rem;padding:0 .8rem}
 .browser-preview.is-large .browser-photo{flex:1 1 0;height:auto;min-height:140px}.browser-preview.is-large .browser-preview-info{flex:0 1 auto;max-height:36%}.browser-preview.is-large .browser-file-details{grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.5rem 1rem}
 .browser-preview-tools{display:flex;align-items:center;gap:.25rem;flex:none}.browser-preview-size[aria-pressed=true]{background:var(--accent-soft);color:var(--label);box-shadow:inset 0 0 0 1px var(--accent-border)}
@@ -1700,22 +1701,27 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-height-resize{height:12px;flex:none;display:flex;align-items:center;justify-content:center;cursor:row-resize;touch-action:none;border-radius:var(--radius-sm)}.browser-height-resize>span{width:44px;height:4px;border-radius:var(--radius-capsule);background:var(--separator-strong)}.browser-height-resize:hover>span,.browser-height-resize:focus-visible>span{background:var(--accent-fill)}
 .browser-preview>header{justify-content:space-between;flex-wrap:nowrap;margin-bottom:.5rem}.browser-preview h3{overflow-wrap:anywhere;font-size:var(--text-footnote)}
 .browser-photo{background:var(--photo-stage);border-radius:var(--radius-sm);flex:none;height:clamp(120px,48%,440px);min-height:120px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5rem;color:var(--photo-label);text-align:center;font-size:var(--text-caption)}.browser-photo img{display:block;max-height:100%;max-width:100%;min-height:0;object-fit:contain}.browser-photo p{padding:.5rem}
-.browser-file-details{display:grid;gap:.4rem;margin:.7rem 0;font-size:var(--text-footnote)}.browser-file-details>div{display:grid;gap:.15rem}.browser-file-details dt{color:var(--label-secondary);font-size:var(--text-caption)}.browser-file-details dd{overflow-wrap:anywhere;user-select:text}
+.browser-file-details{display:grid;gap:.4rem;margin:.7rem 0;font-size:var(--text-footnote)}.browser-file-details>div{display:grid;grid-template-columns:1.2em minmax(0,1fr);column-gap:.5rem;row-gap:.15rem;align-content:start}.browser-file-details>div>dt,.browser-file-details>div>dd{grid-column:2}.browser-file-details dt{color:var(--label-secondary);font-size:var(--text-caption)}.browser-file-details dd{overflow-wrap:anywhere;user-select:text}
 .browser-placement{padding:.6rem;background:var(--warning-soft);display:grid;gap:.4rem;border-radius:var(--radius-sm);font-size:var(--text-footnote)}.browser-placement p{overflow-wrap:anywhere;user-select:text}.browser-placement span,.browser-placement small{font-size:var(--text-caption);color:var(--label-secondary)}.browser-preview-actions{margin:.7rem 0}
-.browser-full-exif{font-size:var(--text-caption);max-height:300px;overflow:auto}.browser-full-exif dl{display:grid;gap:.5rem}.browser-full-exif dt{color:var(--label-secondary)}.browser-full-exif dd{overflow-wrap:anywhere;user-select:text}
-.browser-keyboard-note{font-size:var(--text-caption);color:var(--label-secondary)}
+.browser-full-exif{font-size:var(--text-caption)}.browser-full-exif dl{display:grid;gap:.5rem}.browser-full-exif dt{color:var(--label-secondary)}.browser-full-exif dd{overflow-wrap:anywhere;user-select:text}
 .browser-empty{display:grid;justify-items:center;gap:.6rem;padding:3rem 1rem;text-align:center;color:var(--label-secondary)}
 /* Narrow windows (down to the 1000px minimum, less the sidebar): the bars wrap into rows, the preview narrows beside the list. */
-@media(max-width:1100px){.browser-filter-bar{gap:.4rem}.browser-search{flex-basis:8rem!important}.browser-filter-end .browser-field select{max-width:11rem}.browser-preview{width:var(--browser-preview-width,250px);min-width:230px;padding:.6rem}.browser-preview-info{margin:0 -.6rem;padding:0 .6rem}.browser-drag-note{max-width:10rem}.browser-results>header{column-gap:.45rem}.browser-results>header .browser-toggle{padding:0 .7rem}.browser-sort>span{display:none}}
-@media(max-width:650px){.browser-filter-bar,.browser-filter-end{align-items:stretch}.browser-filter-end{margin-left:0}.browser-toolbar .browser-field select{width:100%;max-width:none}.browser-results-body{flex-direction:column}.browser-preview{width:100%;min-width:0;border-left:0;border-top:1px solid var(--separator);height:auto;max-height:50%}.browser-preview-resize{display:none}.browser-palette{gap:.2rem}.browser-block-options>label,.browser-block-options form{min-width:100%}}
+@media(max-width:1100px){.browser-filter-bar{gap:.4rem}.browser-toolbar .browser-search{flex-basis:8rem}.browser-filter-end .browser-field select{max-width:11rem}.browser-preview{width:var(--browser-preview-width,250px);min-width:240px;padding:.6rem}.browser-preview-info{margin:0 -.6rem;padding:0 .6rem}.browser-drag-note{max-width:10rem}.browser-results>header{column-gap:.45rem}.browser-results>header .browser-toggle{padding:0 .7rem}.browser-sort>span{display:none}}
+@media(max-width:650px){.browser-filter-bar,.browser-filter-end{align-items:stretch}.browser-filter-end{margin-left:0}.browser-toolbar .browser-field select{width:100%;max-width:none}.browser-results-body{flex-direction:column}.browser-preview{width:100%;min-width:0;border-left:0;border-top:1px solid var(--separator);height:auto;max-height:50%}.browser-preview-resize{display:none}.browser-editor-row .browser-palette{gap:.2rem}.browser-block-options>label,.browser-block-options form{min-width:100%}}
 
 :root{--photo-label:#f5f5f7}
-.browser-photo{color:var(--photo-label)}
 .browser-column-frame{position:relative}
 .browser-column-resize{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize;touch-action:none;z-index:1}
 .browser-column-resize:hover,.browser-column-resize:focus-visible{background:var(--accent-ring)}
 
-.browser-exif-scroll{height:288px;overflow:auto}.browser-exif-scroll dl{display:block}.browser-exif-scroll dl>div{padding:.3rem 0;border-bottom:1px solid var(--separator);overflow:hidden}.browser-exif-scroll dt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.browser-exif-scroll dd{max-height:44px;overflow:auto}
+.browser-exif-scroll{height:288px;overflow:auto}.browser-exif-scroll dl{display:block}.browser-exif-scroll dl>div{padding:.3rem 0;border-bottom:1px solid var(--separator);overflow:hidden;box-sizing:border-box}.browser-exif-scroll dt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.browser-exif-scroll dd{max-height:44px;overflow:auto}
+/* Field icons: one per field in the preview details and in Full EXIF (desktop/renderer/exif-icons.ts); sized in em so they follow the text scale. */
+.browser-field-icon{grid-column:1;grid-row:1/span 2;align-self:start;width:1.2em;height:1.2em;margin-top:.05em;color:var(--accent)}
+.browser-exif-fields>div,.browser-exif-scroll dl>div{display:grid;grid-template-columns:1.2em minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);column-gap:.5rem;row-gap:.1rem;align-content:start}.browser-exif-fields>div>dt,.browser-exif-fields>div>dd,.browser-exif-scroll dl>div>dt,.browser-exif-scroll dl>div>dd{grid-column:2;min-width:0}
+.browser-exif-category h4{display:flex;align-items:center;gap:.4rem;margin:.8rem 0 .4rem;font-size:var(--text-caption);font-weight:650;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}.browser-exif-category h4 svg{flex:none;width:1.15em;height:1.15em}.browser-exif-category:first-child h4{margin-top:.2rem}
+.browser-full-exif .browser-exif-fields{display:grid;gap:.45rem}.browser-preview.is-large .browser-exif-fields{grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.5rem 1rem}
+.browser-exif-all{margin-top:.8rem}.browser-exif-all>summary{cursor:pointer;color:var(--label-secondary);font-weight:650;margin-bottom:.4rem}.browser-exif-all>summary small{font-weight:400;margin-left:.25rem}
+.duplicate-full-exif dt{display:flex;align-items:flex-start;gap:.35rem;min-width:0}.exif-field-icon{flex:none;width:1.15em;height:1.15em;margin-top:.1em;color:var(--accent)}.duplicate-full-exif h4{display:flex;align-items:center;gap:.35rem}.duplicate-full-exif h4 svg{flex:none;width:1.1em;height:1.1em}
 
 
 /* The view panel: levels (a drop zone), fields, presets, saving, and the selected level's options, as aligned rows. */
@@ -1729,7 +1735,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-block-path{border:1px dashed var(--separator-strong);border-radius:var(--radius-md);padding:.15rem .25rem;transition:border-color var(--quick) var(--ease-out),background-color var(--quick) var(--ease-out)}
 .browser-editor.is-dragging .browser-block-path{border-color:var(--accent-fill);background:var(--accent-soft)}
 .browser-path-slot.is-drop-target{border-left:3px solid var(--accent-fill)}
-.browser-path-slot button{display:inline-flex;align-items:center;gap:.3rem;cursor:grab}.browser-path-slot button svg{flex:none;opacity:.55}
+.browser-path-slot button{display:inline-flex;align-items:center;gap:.3rem;cursor:grab}.browser-path-slot button svg{flex:none;opacity:.85}
 .browser-palette{display:flex;gap:.3rem;flex-wrap:wrap}
 /* A USB camera that is connected but cannot be read, or read only in part: what to do about it. */
 .camera-notice{display:flex;align-items:flex-start;gap:.5rem;margin:0 0 .7rem;padding:.6rem .8rem;border-radius:var(--radius-md);background:var(--warning-soft);border:1px solid var(--warning-border);font-size:var(--text-footnote)}
@@ -1756,7 +1762,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-field-name{padding:0 .25rem}
 .browser-field-add{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border-radius:50%;background:var(--accent-fill);color:var(--on-accent);cursor:pointer}
 .browser-field-add:hover{filter:brightness(1.08)}
-.browser-path-slot button svg{opacity:.85}
 /* Date tree rows: indent and an arrow that opens the rows below. */
 /* A tree row with only some of the rows below it chosen: striped, beside a full highlight for a chosen row. */
 .browser-row.is-partial{background:repeating-linear-gradient(135deg,var(--accent-soft) 0 6px,transparent 6px 12px);box-shadow:inset 3px 0 color-mix(in srgb,var(--accent-fill) 55%,transparent)}.browser-row.is-partial.is-picked{box-shadow:inset 3px 0 color-mix(in srgb,var(--accent-fill) 55%,transparent),inset 0 0 0 1px var(--accent-border)}

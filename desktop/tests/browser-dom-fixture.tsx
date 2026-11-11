@@ -13,6 +13,8 @@ async function until(predicate:()=>boolean,message:string){for(let attempt=0;att
 const library:CatalogLibrary={libraryId:'l',volumeId:'v',trustedVolumeId:true,name:'Test library',relativeRoot:'photos',role:'photos',online:false,rulesScope:'r',revision:1};
 const status:CatalogStatus={libraryId:'l',online:false,revision:1,dirty:false,state:'idle',total:202,checked:0,misplaced:0,unclassifiable:0,unchecked:202,progress:{discovered:202,read:202,failed:0}};
 async function mount(){
+ // The fixture has no stylesheet, and its hidden window delivers no resize notifications: the lists get their bounded, scrolling box before they first measure themselves.
+ if(!document.getElementById('fixture-style')){const style=document.createElement('style');style.id='fixture-style';style.textContent='.browser-virtual-list{height:336px;overflow-y:auto}';document.head.append(style);}
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const configuration={...defaultConfiguration(),blocks:[createBlock('camera')]};let latest:CatalogQuery|undefined;
  const api:BrowserAPI={catalogStatus:async()=>status,catalogQuery:async query=>{latest=query;await delay(30);return {rows:[],total:0,revision:1};},catalogDirectories:async()=>({rows:[],revision:1}),catalogFacets:async(query,field)=>{await delay(30);return {field,rows:(query.cursor?[201,202]:Array.from({length:200},(_,i)=>i+1)).map(i=>({value:`Camera ${i}`,label:`Camera ${i}`,count:1})),nextCursor:query.cursor?undefined:'second',revision:1,total:202,knownCount:202,missingCount:0,pendingCount:0,errorCount:0};},catalogResolve:async()=>{throw new Error('No file in this fixture');},thumbnail:async()=>({via:'none'}),summary:async()=>({fields:{}}),exif:async()=>({fields:{}})};
  const render=(revision=1)=>root.render(createElement(I18nProvider,{language:'en',children:createElement(BrowserPage,{libraries:[library],statuses:{l:{...status,revision}},configuration,onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}})}));render();
@@ -20,9 +22,9 @@ async function mount(){
  const list=()=>column()?.querySelector<HTMLElement>('[role=listbox]')!;
  const row=(label:string)=>[...(column()?.querySelectorAll<HTMLElement>('[role=option]')??[])].find(node=>node.querySelector('span')?.textContent===label)!;
  /** A row's checkbox. */
- const box=(label:string)=>row(label).querySelector<HTMLInputElement>('[data-testid=row-check]')!;
+ const box=(label:string)=>{const node=row(label);if(!node)throw new Error('Row '+label+' not rendered; shown: '+[...column().querySelectorAll('[role=option]')].map(n=>n.querySelector('span')?.textContent).join(', ')+'; scroll '+list().scrollTop);return node.querySelector<HTMLInputElement>('[data-testid=row-check]')!;};
  const master=()=>column().querySelector<HTMLInputElement>('[data-testid=column-check-all]')!;
- const click=(node:HTMLElement,options:MouseEventInit={})=>node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,...options}));
+ const click=(node:HTMLElement,options:MouseEventInit={})=>{if(!node)throw new Error('Row not rendered; shown: '+[...column().querySelectorAll('[role=option]')].map(n=>n.querySelector('span')?.textContent).join(', ')+'; list height '+list().clientHeight+', scroll '+list().scrollTop);return node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,...options}));};
  const key=(name:string,options:KeyboardEventInit={})=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,...options}));
  const scrollTo=(top:number)=>{const node=list();node.scrollTop=top;node.dispatchEvent(new Event('scroll',{bubbles:true}));};
  /** What the files are filtered by, in any order: the column's checked rows and its picked row. */
@@ -89,7 +91,7 @@ void (async()=>{
   check(ui.list()===list,'Appending replaced listbox identity');check(list.scrollTop===top,`Appending moved the scroll position: ${top} -> ${list.scrollTop}`);
  }finally{ui.dispose();}});
  await run('a revision refresh keeps the scroll position, the pick and the checks',async()=>{const ui=await mount();try{
-  ui.scrollTo(480);await until(()=>!!ui.row('Camera 12'),'Scrolled rows not rendered');ui.click(ui.row('Camera 12'));ui.box('Camera 13').click();await delay(100);
+  ui.scrollTo(480);await until(()=>!!ui.row('Camera 20'),'Scrolled rows not rendered');ui.click(ui.row('Camera 12'));ui.box('Camera 13').click();await delay(100);
   ui.render(2);await delay(150);
   check(ui.list().scrollTop===480,`Refresh moved the scroll position: ${ui.list().scrollTop}`);check(ui.picked('Camera 12')&&ui.row('Camera 12').getAttribute('aria-selected')==='true','Refresh lost the pick');check(ui.box('Camera 13').checked,'Refresh lost the check');
  }finally{ui.dispose();}});

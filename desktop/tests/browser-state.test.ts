@@ -2,7 +2,9 @@ import test from 'node:test';
 import {readCatalogPreview} from '../renderer/browser/preview';
 import assert from 'node:assert/strict';
 import {clampPreviewWidth,minListWidth,minPreviewWidth,previewHandleWidth,defaultConfiguration,createBlock,addBlock,moveBlock,removeBlock,updateBlock,savePreset,renamePreset,deletePreset,applyPreset,readConfiguration,writeConfiguration,fieldForBlock,numericBuckets,safeDatePattern,parseNumericInput} from '../renderer/browser/configuration';
-import {initialBrowserState,browserReducer,effectiveSelections,queryFor,selectionFilter,LatestRequest,keyboardIntent,virtualWindow} from '../renderer/browser/state';
+import {initialBrowserState,browserReducer,effectiveSelections,facetSort,queryFor,rangeFrom,selectionFilter,LatestRequest,keyboardIntent,virtualWindow} from '../renderer/browser/state';
+import {openCatalog} from '../catalog/store';
+import {library} from './catalog-fixtures';
 
 test('arbitrary repeated blocks retain identity and complete configuration across preset restart',()=>{
  let c=defaultConfiguration(); c={...c,blocks:[]};
@@ -146,4 +148,32 @@ test('the layout fields: absent by default, clamped and validated on read, and k
  assert.ok(!('previewLarge' in odd)&&!('hideBars' in odd)&&!('hideColumns' in odd),'invalid values are dropped, so their defaults apply');
  assert.ok(!('previewWidth' in readConfiguration({getItem:()=>JSON.stringify({...c,previewWidth:-5})})));
  assert.ok(!('previewWidth' in readConfiguration({getItem:()=>JSON.stringify({...c,previewWidth:'wide'})})));
+});
+test('the category columns do not query by the files’ sort, so a new sort reloads only the files; the catalog takes their query',async()=>{
+ const camera=createBlock('camera');let s=browserReducer(initialBrowserState([camera]),{type:'library',libraryId:library.libraryId});
+ const column=JSON.stringify(queryFor(s,0));s=browserReducer(s,{type:'sort',sort:{field:'captured',direction:'desc'}});
+ assert.equal(JSON.stringify(queryFor(s,0)),column,'the column’s key is unchanged');assert.deepEqual(queryFor(s,0).sort,facetSort);assert.deepEqual(queryFor(s).sort,{field:'captured',direction:'desc'},'the files follow the sort');
+ const c=openCatalog(':memory:');await c.configure([library]);
+ try{await c.facets(queryFor(s,0),'camera');await c.query({...queryFor(s,0),limit:1});}finally{await c.close();}
+});
+
+test('the first library and silent corrections leave no history entry: Back never lands on no library, and Forward stays',()=>{
+ const camera=createBlock('camera');let s=browserReducer(initialBrowserState([camera]),{type:'library',libraryId:'A'});
+ assert.deepEqual([s.libraryId,s.past.length,s.future.length],['A',0,0],'from no library: nothing to go Back to');
+ s=browserReducer(s,{type:'select',blockId:camera.id,filter:selectionFilter(camera,['Nikon'])});s=browserReducer(s,{type:'back'});s=browserReducer(s,{type:'back'});
+ assert.deepEqual([s.libraryId,s.selections],['A',{}],'Back stops at the first library');
+ s=browserReducer(s,{type:'forward'});s=browserReducer(s,{type:'placement',status:'misplaced'});s=browserReducer(s,{type:'library',libraryId:'B'});
+ const past=s.past.length;s=browserReducer(s,{type:'placement',silent:true});
+ assert.deepEqual([s.placement,s.past.length,s.future.length],[undefined,past,0],'a silent placement: applied, no entry');
+ s=browserReducer(s,{type:'back'});assert.deepEqual([s.libraryId,s.placement,s.future.length],['A','misplaced',1]);
+ const future=s.future;s=browserReducer(s,{type:'placement',silent:true});assert.equal(s.future,future,'a silent correction keeps Forward');assert.equal(s.placement,undefined);
+ s=browserReducer(s,{type:'library',libraryId:'C',silent:true});assert.deepEqual([s.libraryId,s.past.length,s.future],['C',past-1,future]);assert.deepEqual([s.selections,s.picks],[{},{}],'a silent library clears the columns like any other');
+ s=browserReducer(s,{type:'forward'});assert.equal(s.libraryId,'B');
+ // A library chosen by the user is a step back, as before.
+ s=browserReducer(s,{type:'library',libraryId:'D'});s=browserReducer(s,{type:'back'});assert.equal(s.libraryId,'B');
+});
+
+test('a Shift range runs from the cursor to the row, nearest the cursor first',()=>{
+ const rows=['a','b','c','d','e'];
+ assert.deepEqual(rangeFrom(rows,1,3),['b','c','d']);assert.deepEqual(rangeFrom(rows,3,0),['d','c','b','a'],'Shift+Home from the cursor');assert.deepEqual(rangeFrom(rows,2,4),['c','d','e'],'Shift+End through the last row');assert.deepEqual(rangeFrom(rows,2,2),['c']);
 });

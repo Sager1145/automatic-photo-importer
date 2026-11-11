@@ -44,7 +44,8 @@ export const darwin: PlatformProfile = {
   // Finder and Lightroom take POSIX paths: /Volumes/… with forward slashes.
   dropPath: /^\/(?!.*\\)/,
   heldOpen,
-  previews: { photos: 'system', posters: true },
+  // sips is the real decoder and runs in a test: pictures are decoded and measured.
+  previews: { photos: 'system', posters: true, measured: {} },
   // Two readings of `ioreg -c IOBlockStorageDriver -r -w0 -l -a` on a Mac; disk4 was written between them.
   driveActivity: { disks: [['disk4'], ['disk5']], sampler: now => {
     const readings = ['a', 'b'].map(name => readFileSync(new URL(`../fixtures/ioreg-storage-${name}.plist`, import.meta.url), 'utf8'));
