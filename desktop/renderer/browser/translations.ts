@@ -183,4 +183,8 @@ Click a folder (or press Enter) to open it: its subfolders show in the next colu
 Click a row to show it for now; its checkbox (or Space) keeps it chosen. Checked rows are shown together in the next columns. Shift adds a range. Arrow keys navigate; Right from the last column moves to the files, Left comes back. Esc closes the preview first, then clears. Tab moves to controls.|单击某行可临时查看；勾选它的复选框（或按空格键）可保持选中。已勾选的各行会在后续列中合并显示。Shift 勾选一个范围。方向键浏览；在最后一列按右方向键可移到文件列表，按左方向键返回。Esc 先关闭预览，再清除选择。Tab 切换控件。|按一下某個項目可暫時檢視；勾選它的核取方塊（或按空白鍵）可保持選取。已勾選的項目會在後續欄中合併顯示。Shift 可勾選一個範圍。方向鍵瀏覽；在最後一欄按右方向鍵可移到檔案列表，按左方向鍵返回。Esc 先關閉預覽，再清除選取。Tab 切換控制項。|行をクリックすると一時的に表示します。チェックボックス（またはスペース）で選択を固定します。チェックした行は次の列にまとめて表示されます。Shift で範囲をチェック。矢印キーで移動し、最後の列で右矢印キーを押すとファイル一覧へ、左矢印キーで戻ります。Esc はまずプレビューを閉じ、次に選択を解除します。Tab で操作項目へ移動します。
 A column can filter by at most {max} values.|每列最多可按 {max} 个值筛选。|每欄最多可依 {max} 個值篩選。|1 つの列で絞り込みに使える値は最大 {max} 個です。
 All tags|所有标签|所有標籤|すべてのタグ
+indexed {time}|索引于 {time}|索引於 {time}|索引作成 {time}
+Index details|索引详情|索引詳細資料|索引の詳細
+Page layout|页面布局|頁面版面配置|ページのレイアウト
+Add column|添加列|加入欄|列を追加
 `;

@@ -1589,44 +1589,31 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .backup-action>.button,.copy-policy>.button{justify-self:start;align-self:start}
 
 /* Read-only catalog browser: independent virtual hierarchy and bounded columns. */
-.browser-page{display:grid;gap:.6rem;min-width:0}
+/* One control height for the whole page (the app's compact one), so every row lines up: buttons, fields, dropdowns, toggles. */
+.browser-page{display:grid;gap:.5rem;min-width:0;--control-height:var(--control-height-sm);--browser-column-header:2.6rem}
 .browser-heading,.browser-toolbar,.browser-selection-bar,.browser-block-heading,.browser-preview>header{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
 .browser-heading{justify-content:space-between;align-items:flex-start}
 /* The title bar names the page; the heading stays for assistive technology. */
 .browser-heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.browser-index-actions,.browser-history,.browser-preview-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.browser-index-actions,.browser-preview-actions{display:flex;gap:.4rem;flex-wrap:wrap}
 .browser-toolbar label,.browser-block-options label,.browser-preset-save label,.browser-range label{display:grid;gap:.25rem;font-size:var(--text-caption);color:var(--label-secondary)}
-.browser-toolbar select,.browser-toolbar input,.browser-block-options input,.browser-block-options select,.browser-preset-save input,.browser-preset input,.browser-range input,.browser-sort select{min-height:var(--control-height);max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-md);color:var(--label);font:inherit;font-size:var(--text-footnote)}
+.browser-toolbar input,.browser-block-options input,.browser-preset-save input,.browser-preset input,.browser-range input{min-height:var(--control-height);max-width:100%;padding:.45rem .6rem;background:var(--field);border:1px solid var(--field-border);border-radius:var(--radius-md);color:var(--label);font:inherit;font-size:var(--text-footnote)}
 /* One toolbar row: every control is one height and shape family, labelled for assistive technology rather than by a caption above it. */
 .browser-heading{display:contents}
 /* The top of the page: the source row (library and its index), then the filter bar, like Lightroom Classic's Library Filter. */
 .browser-toolbar{display:grid;gap:.5rem}
-.browser-source-row{display:flex;align-items:center;gap:.5rem 1rem;flex-wrap:wrap;min-width:0}
-.browser-filter-bar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;min-width:0;padding:.4rem .5rem;border:1px solid var(--separator);border-radius:var(--radius-md);background:var(--fill-4)}
 .browser-filter-label{flex:none;padding:0 .2rem 0 .25rem;font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
-.browser-filter-end{display:flex;align-items:center;gap:.4rem;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
-.browser-filter-end .browser-field select{max-width:12rem}.browser-filter-end .button{min-height:var(--control-height)}
-.browser-columns-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-border)}
-.browser-toolbar .browser-field{display:block;flex:none}.browser-toolbar .browser-field select{width:auto;max-width:12rem}
-.browser-toolbar .browser-library select{max-width:16rem}.browser-toolbar .browser-placement-filter select{max-width:10rem}
-.browser-toolbar select,.browser-toolbar input{height:var(--control-height);padding-block:0}
-.browser-toolbar .segmented{flex:none}.browser-history{flex-wrap:nowrap}.browser-history .button{width:var(--control-height);min-width:var(--control-height);padding:0;border-radius:var(--radius-capsule)}
-.browser-toolbar .browser-search{flex:0 1 13rem;min-width:8rem}.browser-search input{width:100%}
-.browser-toggle{display:inline-flex;align-items:center;gap:.4rem;height:var(--control-height);padding:0 .9rem;border-radius:var(--radius-capsule);background:var(--fill-3);color:var(--label-secondary);font-size:var(--text-footnote);font-weight:550;flex:none}.browser-toggle[aria-pressed=true]{background:var(--accent-soft);color:var(--label);box-shadow:inset 0 0 0 1px var(--accent-border)}
 .browser-row-badge{margin-left:auto;padding:0 .4rem;border-radius:var(--radius-sm);background:var(--fill-3);font-weight:600}
-.browser-library-picker{display:flex;align-items:center;gap:.3rem;flex:none}.browser-icon-button{width:var(--control-height);min-width:var(--control-height);padding:0}
 [data-testid=backup-folders-note]:not(.separate-video-cue){display:flex;align-items:flex-start;gap:.35rem}[data-testid=backup-folders-note] svg{flex:none;margin-top:.15em}
 .separate-video-cue{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}.separate-video-cue>span{display:inline-flex;align-items:center;gap:.35rem}
 .browser-hidden-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.browser-status{display:flex;align-items:center;justify-content:flex-end;gap:.5rem 1rem;flex:1 1 20rem;min-width:0}.browser-status-text{min-height:1.25rem;justify-content:flex-end;text-align:right;color:var(--label-secondary);font-size:var(--text-caption);display:flex;align-items:center;gap:0 .9rem;flex-wrap:wrap}.browser-status-text>span{display:inline-flex;align-items:center;gap:.3rem}
-.browser-status .browser-index-actions{flex:none;align-items:center;flex-wrap:nowrap}.browser-page .button-small{min-height:var(--control-height-sm);padding:0 .8rem;font-size:var(--text-footnote)}
 .browser-editor>summary{cursor:pointer;display:flex;align-items:center;gap:.8rem;font-weight:600;padding:.3rem 0;list-style:none}
 .browser-editor>summary::-webkit-details-marker{display:none}
 /* The hierarchy's own expand control: a pill at the end of its row, its arrow turning when open. */
 .browser-editor-toggle{margin-left:auto;display:inline-flex;align-items:center;gap:.35rem;flex:none;min-height:var(--control-height-sm);padding:0 .8rem;border-radius:var(--radius-capsule);background:var(--fill-3);border:1px solid var(--separator-strong);font-size:var(--text-footnote);font-weight:600;color:var(--label)}
 .browser-editor>summary:hover .browser-editor-toggle{background:var(--fill-2)}
 .browser-editor-toggle svg{transition:rotate var(--quick) var(--ease-out)}.browser-editor-toggle:not(.is-open) svg{rotate:-90deg}
-.browser-editor-toggle.is-open{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent)}
+.browser-editor-toggle.is-open{background:var(--fill-2)}
 .browser-editor-path{font-weight:500;color:var(--label-secondary);font-size:var(--text-footnote)}
 .browser-editor>summary small{font-size:var(--text-caption);color:var(--label-secondary);font-weight:400}
 .browser-horizontal{overflow-x:auto;overflow-y:hidden;min-width:0;scroll-behavior:auto;overscroll-behavior-x:contain}
@@ -1646,27 +1633,20 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-block-options{display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap;margin-top:.4rem}
 .browser-block-options>label{flex:1;min-width:10rem}.browser-block-options form{display:flex;gap:.6rem;align-items:center;flex:2;min-width:14rem}.browser-block-options form label{flex:1}
 .browser-block-options small{font-size:var(--text-caption)}.browser-block-options p{font-size:var(--text-footnote)}
-.browser-selection-bar{font-size:var(--text-footnote);min-height:var(--control-height)}.browser-selection-hint{display:flex;align-items:center;min-height:var(--control-height);margin:0;font-size:var(--text-caption);color:var(--label-tertiary)}
 /* The filter columns, their height handle and the results share the window's height below the bars (BrowserPage measures it). */
 .browser-workspace{display:flex;flex-direction:column;min-width:0}
 .browser-content{display:flex;min-width:0;align-items:stretch;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface);height:280px;flex:none}
 .browser-columns{flex:1;min-width:180px;height:100%}.browser-columns>.browser-horizontal-track{display:flex;height:100%}.browser-column-frame{height:100%}
 /* Columns run the full height of the area; only their lists scroll. */
 .browser-column{min-width:180px;border-right:1px solid var(--separator);height:100%;display:flex;flex-direction:column;min-height:0}
-.browser-column>header{display:flex;align-items:center;justify-content:space-between;padding:.45rem .6rem;min-height:40px;border-bottom:1px solid var(--separator);gap:.4rem;flex:none}
 .browser-column h3{display:flex;align-items:center;gap:.35rem;font-size:var(--text-footnote)}.browser-column>header small{color:var(--label-secondary);font-size:var(--text-caption)}
-/* A column header: its name, how many rows are chosen of how many, the check-all box, then the column menu. */
-.browser-column>header h3{flex:1;min-width:0}.browser-column>header small{display:flex;align-items:center;white-space:nowrap;font-variant-numeric:tabular-nums}.browser-column-selected{color:var(--accent-text,var(--accent-fill));font-weight:600}
 /* The selection as a path: one crumb per column with a choice, its values, and how many when there are several. */
 .browser-breadcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;list-style:none;margin:0;padding:0;min-width:0;flex:1}.browser-breadcrumb>li{display:flex;align-items:center;gap:.3rem;min-width:0}.browser-breadcrumb>li+li::before{content:'›';color:var(--label-secondary);font-size:var(--text-body,1rem);padding:0 .1rem}
-.browser-breadcrumb button{display:inline-flex;align-items:baseline;gap:.35rem;padding:.4rem .6rem;border-radius:var(--radius-sm);background:var(--accent-soft);min-height:var(--control-height);overflow-wrap:anywhere;text-align:left}.browser-breadcrumb button small{color:var(--label-secondary);font-size:var(--text-caption)}.browser-selection-count{color:var(--label-secondary);font-variant-numeric:tabular-nums}.browser-selection-files{color:var(--label-secondary)}
+.browser-breadcrumb button small{color:var(--label-secondary);font-size:var(--text-caption)}.browser-selection-count{color:var(--label-secondary);font-variant-numeric:tabular-nums}.browser-selection-files{color:var(--label-secondary)}
 /* The drag-out handle ends the results header: drag it onto Lightroom Classic or a file manager. Its note sits before it. */
-.browser-drag-out{flex:0 1 auto;margin-left:auto;min-width:min-content;max-width:100%;display:flex;flex-direction:row-reverse;align-items:center;gap:.5rem}
-.browser-drag-handle{display:flex;flex:none;align-items:center;gap:.45rem;min-height:var(--control-height-sm);padding:0 .8rem;border:1px dashed var(--accent-fill);border-radius:var(--radius-md);background:var(--accent-soft);cursor:grab;font-size:var(--text-footnote);font-weight:600;user-select:none}.browser-drag-handle:active{cursor:grabbing}.browser-drag-handle:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
-.browser-drag-handle .browser-drag-label{white-space:nowrap;line-height:1.25}.browser-drag-handle small{color:var(--label-secondary);font-weight:400;font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
-.browser-drag-handle.is-disabled{cursor:not-allowed;opacity:.5;border-color:var(--separator-strong);background:var(--fill-4)}.browser-drag-note{font-size:var(--text-caption);color:var(--label-secondary);min-width:0;max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-drag-handle:active{cursor:grabbing}.browser-drag-handle:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
+.browser-drag-out>.browser-drag-handle{flex:none}.browser-drag-note{flex:0 1 auto;font-size:var(--text-caption);color:var(--label-secondary);min-width:0;max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-column-note{flex:none;margin:0;padding:.3rem .6rem;font-size:var(--text-caption);color:var(--warning-text,var(--label));background:var(--fill-3);border-bottom:1px solid var(--separator)}
-.browser-coverage{font-size:var(--text-caption);color:var(--label-secondary);padding:.3rem .6rem;overflow-wrap:anywhere;flex:none}
 .browser-virtual-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;position:relative;outline-offset:-3px!important;border-radius:0!important}
 .browser-row{display:flex;align-items:center;justify-content:flex-start;gap:.4rem;padding:0 .65rem;cursor:default;border-bottom:1px solid var(--separator);font-size:var(--text-footnote)}
 .browser-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.browser-row small{color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;flex:none}
@@ -1680,8 +1660,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-row-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:32px;margin-inline:-.4rem -.15rem;cursor:pointer}
 .browser-tree-lead+.browser-row-check{margin-inline-start:-.3rem}
 .browser-row-check>input[type=checkbox],.browser-column-check>input[type=checkbox]{width:14px;height:14px;cursor:inherit;accent-color:var(--accent-fill)}
-/* The column header's checkbox: check every row, or clear the column. */
-.browser-column-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border-radius:var(--radius-sm);cursor:pointer}
 .browser-column-check:not([data-disabled]):hover{background:var(--fill-4)}.browser-column-check[data-disabled]{cursor:default}
 .browser-virtual-list:focus-visible:has(.browser-row.is-active){outline:none}.browser-virtual-list:focus-visible .browser-row.is-active{outline:2px solid var(--accent-fill);outline-offset:-2px}
 .browser-list-empty,.browser-column-error{padding:.7rem;color:var(--label-secondary);font-size:var(--text-footnote)}
@@ -1706,14 +1684,10 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-full-exif{font-size:var(--text-caption)}.browser-full-exif dl{display:grid;gap:.5rem}.browser-full-exif dt{color:var(--label-secondary)}.browser-full-exif dd{overflow-wrap:anywhere;user-select:text}
 .browser-empty{display:grid;justify-items:center;gap:.6rem;padding:3rem 1rem;text-align:center;color:var(--label-secondary)}
 /* Narrow windows (down to the 1000px minimum, less the sidebar): the bars wrap into rows, the preview narrows beside the list. */
-@media(max-width:1100px){.browser-filter-bar{gap:.4rem}.browser-toolbar .browser-search{flex-basis:8rem}.browser-filter-end .browser-field select{max-width:11rem}.browser-preview{width:var(--browser-preview-width,250px);min-width:240px;padding:.6rem}.browser-preview-info{margin:0 -.6rem;padding:0 .6rem}.browser-drag-note{max-width:10rem}.browser-results>header{column-gap:.45rem}.browser-results>header .browser-toggle{padding:0 .7rem}.browser-sort>span{display:none}}
-@media(max-width:650px){.browser-filter-bar,.browser-filter-end{align-items:stretch}.browser-filter-end{margin-left:0}.browser-toolbar .browser-field select{width:100%;max-width:none}.browser-results-body{flex-direction:column}.browser-preview{width:100%;min-width:0;border-left:0;border-top:1px solid var(--separator);height:auto;max-height:50%}.browser-preview-resize{display:none}.browser-editor-row .browser-palette{gap:.2rem}.browser-block-options>label,.browser-block-options form{min-width:100%}}
-
 :root{--photo-label:#f5f5f7}
 .browser-column-frame{position:relative}
 .browser-column-resize{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize;touch-action:none;z-index:1}
 .browser-column-resize:hover,.browser-column-resize:focus-visible{background:var(--accent-ring)}
-
 .browser-exif-scroll{height:288px;overflow:auto}.browser-exif-scroll dl{display:block}.browser-exif-scroll dl>div{padding:.3rem 0;border-bottom:1px solid var(--separator);overflow:hidden;box-sizing:border-box}.browser-exif-scroll dt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.browser-exif-scroll dd{max-height:44px;overflow:auto}
 /* Field icons: one per field in the preview details and in Full EXIF (desktop/renderer/exif-icons.ts); sized in em so they follow the text scale. */
 .browser-field-icon{grid-column:1;grid-row:1/span 2;align-self:start;width:1.2em;height:1.2em;margin-top:.05em;color:var(--accent)}
@@ -1722,8 +1696,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-full-exif .browser-exif-fields{display:grid;gap:.45rem}.browser-preview.is-large .browser-exif-fields{grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.5rem 1rem}
 .browser-exif-all{margin-top:.8rem}.browser-exif-all>summary{cursor:pointer;color:var(--label-secondary);font-weight:650;margin-bottom:.4rem}.browser-exif-all>summary small{font-weight:400;margin-left:.25rem}
 .duplicate-full-exif dt{display:flex;align-items:flex-start;gap:.35rem;min-width:0}.exif-field-icon{flex:none;width:1.15em;height:1.15em;margin-top:.1em;color:var(--accent)}.duplicate-full-exif h4{display:flex;align-items:center;gap:.35rem}.duplicate-full-exif h4 svg{flex:none;width:1.1em;height:1.1em}
-
-
 /* The view panel: levels (a drop zone), fields, presets, saving, and the selected level's options, as aligned rows. */
 /* Opened by the filter bar's Columns button (or its own summary): a panel under the bars; closed, nothing of it shows. */
 .browser-editor{border:1px solid var(--separator);border-radius:var(--radius-md);background:var(--surface);padding:.2rem .8rem}.browser-editor:not([open]){display:none}
@@ -1784,9 +1756,6 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-preset-save .browser-preset-name{display:flex;align-items:center;gap:.6rem;flex:1;min-width:14rem}.browser-preset-name>span{white-space:nowrap}.browser-preset-name input{flex:1;min-width:0}
 .browser-presets,.browser-presets *{-webkit-app-region:no-drag}
 /* A column header's menu and the add-column slot (ColumnMenu.tsx): popovers in the top layer, placed under their button. */
-.browser-menu-button{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px;padding:0;border-radius:var(--radius-sm);color:var(--label-secondary);cursor:pointer}
-.browser-menu-button:hover{background:var(--fill-3);color:var(--label)}.browser-menu-button[aria-expanded=true]{background:var(--accent-soft);color:var(--accent)}
-.browser-menu{position:fixed;inset:auto;margin:0;box-sizing:border-box;width:14rem;max-width:calc(100vw - 16px);overflow:auto;padding:.35rem;background:var(--surface);color:var(--label);border:1px solid var(--separator-strong);border-radius:var(--radius-md);box-shadow:var(--shadow-2);font-size:var(--text-footnote)}
 .browser-menu-heading{padding:.3rem .5rem .2rem;font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
 .browser-menu-fields{display:grid}
 .browser-menu-item{display:flex;align-items:center;gap:.45rem;width:100%;min-height:28px;padding:0 .5rem;border-radius:var(--radius-sm);text-align:left;color:var(--label);cursor:pointer}
@@ -1794,21 +1763,110 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-menu-check{display:inline-flex;align-items:center;justify-content:center;width:16px;flex:none;color:var(--accent)}.browser-menu-item.is-danger .browser-menu-check{color:inherit}
 .browser-menu hr{border:0;border-top:1px solid var(--separator);margin:.3rem 0}
 .browser-menu .browser-date-toggles{padding:.1rem .5rem .35rem}.browser-menu .browser-date-toggles button{min-height:24px}
-.browser-add-column{flex:none;width:48px;height:100%;display:flex;justify-content:center;padding-top:.45rem;background:var(--fill-4)}
-.browser-add-column .browser-menu-button{width:30px;height:30px;border:1px dashed var(--separator-strong);border-radius:50%}.browser-add-column .browser-menu-button:hover{border-color:var(--accent-fill);color:var(--accent)}
 /* The results (ResultsPane.tsx), like Lightroom's grid: a header with the count, check-all, sort and the drag-out handle; the
  * list fills the pane, the picked file's details beside it. */
 .browser-results{display:flex;flex-direction:column;min-width:0;min-height:200px;height:420px;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface)}
-.browser-results>header{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .7rem;flex:none;min-height:44px;padding:.35rem .6rem;border-bottom:1px solid var(--separator);min-width:0}
 .browser-results>header h3{font-size:var(--text-footnote);flex:none;white-space:nowrap}.browser-results>header>small{color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
-.browser-sort{display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary);margin-left:.4rem}.browser-sort select{height:var(--control-height-sm);min-height:var(--control-height-sm);padding-block:0}
 .browser-results-body{flex:1;min-height:0;display:flex}
 .browser-results-list{flex:1;min-width:0;display:flex;flex-direction:column}
-/* The results header's layout toggles (after RAW + JPEG): hide or show the bars above and the category columns; pressed = shown.
- * With either hidden, a note counts the filters that still apply, with a button that clears them. */
-.browser-layout-toggle{display:inline-flex;align-items:center;justify-content:center;width:var(--control-height-sm);height:var(--control-height-sm);flex:none;border-radius:var(--radius-sm);color:var(--label-secondary)}.browser-layout-toggle:hover{background:var(--fill-3);color:var(--label)}.browser-layout-toggle[aria-pressed=true]{color:var(--accent-text,var(--accent-fill))}.browser-layout-toggle[aria-pressed=false]{background:var(--fill-3)}.browser-layout-toggle:focus-visible,.browser-filter-clear:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
 .browser-filter-note{display:inline-flex;align-items:center;gap:.3rem;flex:none;height:var(--control-height-sm);padding:0 .2rem 0 .6rem;border-radius:var(--radius-capsule);background:var(--accent-soft);color:var(--label);font-size:var(--text-caption);font-weight:550;white-space:nowrap}.browser-filter-clear{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;color:var(--label-secondary)}.browser-filter-clear:hover{background:var(--fill-3);color:var(--label)}
-
+/* ---------- Library browser layout: one row per purpose ----------
+ * Where you are (.browser-source-row): Back and Forward, the library, Categories or Real folders; the index status at the end.
+ * What you see (.browser-filter-bar): the Filter group and the View group; the bar wraps by whole group, never inside one.
+ * What is chosen (.browser-path-row): the selection path or its hint, and Clear all at the row's end. */
+.browser-source-row{display:flex;align-items:center;gap:.5rem .75rem;flex-wrap:wrap;min-width:0}
+.browser-history{display:flex;gap:.2rem;flex:none}.browser-history .button,.browser-icon-button{width:var(--control-height);min-width:var(--control-height);padding:0}
+.browser-library-picker{display:flex;align-items:center;gap:.25rem;flex:none;min-width:0}
+.browser-toolbar .segmented{flex:none}
+.browser-toolbar .browser-field{display:block;flex:none;min-width:0}
+.browser-library select{width:15rem}.browser-placement-filter select{width:11.5rem}.browser-preset-menu select{width:13rem}.browser-sort select{width:11.5rem}
+/* The index status: one line (a state dot, the count, when it was indexed) that opens the details; an error stays beside it. */
+.browser-status{display:flex;align-items:center;justify-content:flex-end;gap:.5rem;flex:1 1 auto;min-width:0;margin-left:auto}
+.browser-menu-button.browser-status-summary{flex:0 1 auto;width:auto;height:var(--control-height);min-width:0;max-width:100%;gap:.45rem;padding:0 .5rem 0 .6rem;border-radius:var(--radius-md);font-size:var(--text-caption);color:var(--label-secondary)}
+.browser-status-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-status-dot{display:inline-flex;align-items:center;justify-content:center;flex:none;width:.5rem;height:.5rem;border-radius:50%;background:var(--success)}
+.browser-status[data-state=offline] .browser-status-dot{background:var(--label-tertiary)}.browser-status[data-state=stale] .browser-status-dot{background:var(--warning)}.browser-status[data-state=error] .browser-status-dot{background:var(--danger)}
+.browser-status[data-state=scanning] .browser-status-dot{width:auto;height:auto;background:none;color:var(--accent)}
+.browser-status-error{min-width:0;max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-caption)}
+.browser-status .browser-index-actions{flex:none;flex-wrap:nowrap}
+.browser-menu.browser-status-details{width:max-content;max-width:min(28rem,calc(100vw - 16px))}.browser-status-details:popover-open{display:grid;gap:.35rem;padding:.6rem .75rem;font-size:var(--text-caption);color:var(--label-secondary)}.browser-status-details>p:first-child{color:var(--label);font-weight:600}.browser-status-details .field-error{font-size:var(--text-caption);overflow-wrap:anywhere}
+/* The filter bar: Filter (name search, placement), then View (preset, Columns, RAW + JPEG) after a divider. */
+.browser-filter-bar{display:flex;align-items:center;gap:.4rem 1rem;flex-wrap:wrap;min-width:0;padding:.35rem .5rem;border:1px solid var(--separator);border-radius:var(--radius-md);background:var(--fill-4)}
+.browser-filter-group,.browser-view-group{display:flex;align-items:center;gap:.4rem;flex-wrap:nowrap;min-width:0}
+.browser-filter-group{flex:1 1 auto}.browser-view-group{flex:none;margin-left:auto;padding-left:1rem;border-left:1px solid var(--separator-strong)}
+.browser-filter-label{flex:none;padding:0 .25rem 0 .2rem;font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
+.browser-toolbar .browser-search{flex:1 1 12rem;min-width:9rem;max-width:22rem}.browser-search input{width:100%;height:var(--control-height);padding-block:0}
+.browser-columns-button[aria-expanded=true]{background:var(--fill-2)}
+/* RAW + JPEG: a compact toggle; on, it is tinted, as it changes what the list counts. */
+.browser-toggle{display:inline-flex;align-items:center;gap:.35rem;flex:none;height:var(--control-height);padding:0 .75rem;border-radius:var(--radius-capsule);border:1px solid var(--field-border);color:var(--label-secondary);font-size:var(--text-footnote);font-weight:550;white-space:nowrap}
+.browser-toggle:hover{background:var(--fill-4);color:var(--label)}.browser-toggle[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent-border);color:var(--label)}.browser-toggle[aria-pressed=true] svg{color:var(--accent)}
+/* The path row keeps its height with or without a selection; Clear all stays at its end. */
+.browser-path-row{display:flex;align-items:center;gap:.5rem;min-height:var(--control-height);min-width:0}
+.browser-path-row>.browser-selection-bar,.browser-path-row>.browser-selection-hint{flex:1;min-width:0}
+.browser-selection-bar{font-size:var(--text-footnote)}.browser-selection-hint{margin:0;font-size:var(--text-caption);color:var(--label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.browser-clear-all{flex:none;margin-left:auto}
+.browser-breadcrumb button{display:inline-flex;align-items:center;gap:.35rem;padding:0 .5rem 0 .6rem;border-radius:var(--radius-md);background:var(--accent-soft);min-height:var(--control-height);overflow-wrap:anywhere;text-align:left}.browser-breadcrumb button>svg{flex:none;opacity:.6}.browser-breadcrumb button:hover>svg{opacity:1}
+/* A column header, one line like Lightroom's: the check-all box straight over the rows' boxes, the name that opens the column
+ * menu, the count. Every header has the same height; the coverage under it keeps one line (all of it in its tooltip). */
+.browser-column>header{display:flex;align-items:center;gap:.3rem;height:var(--browser-column-header);padding:0 .6rem 0 .65rem;border-bottom:1px solid var(--separator);flex:none;min-width:0}
+.browser-column>header h3{flex:1;min-width:0;display:flex;align-items:center;gap:.35rem;overflow:hidden;white-space:nowrap}
+.browser-column>header small{flex:none;display:flex;align-items:center;margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}.browser-column-selected{color:var(--accent-text,var(--accent-fill));font-weight:600}
+.browser-column-check{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:28px;border-radius:var(--radius-sm);cursor:pointer}
+.browser-column>header .browser-column-check,.browser-results>header .browser-column-check{margin-inline:-.4rem -.15rem}.browser-column.is-tree>header .browser-column-check{margin-inline-start:calc(20px + .1rem)}
+.browser-coverage{flex:none;padding:.25rem .65rem;font-size:var(--text-caption);color:var(--label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Menu buttons: an icon alone, or text with a small chevron (a column's name, the index status, Add column). */
+.browser-menu-button{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px;padding:0;border-radius:var(--radius-sm);color:var(--label-secondary);cursor:pointer}
+.browser-menu-button:hover,.browser-menu-button[aria-expanded=true]{background:var(--fill-3);color:var(--label)}
+.browser-menu-button.has-text{width:auto;gap:.25rem}.browser-menu-button.has-text>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.browser-menu-button.has-text>svg:last-child{flex:none;opacity:.7}
+.browser-menu-button.browser-column-name{min-width:0;max-width:100%;height:1.9rem;margin-inline-start:-.1rem;padding:0 .35rem;font:inherit;font-weight:600;color:var(--label)}
+.browser-add-column{flex:none;align-self:flex-start;display:flex;align-items:center;height:var(--browser-column-header);padding:0 .6rem}
+.browser-menu-button.browser-add-column-button,.browser-add-column .browser-menu-button{height:var(--control-height);padding:0 .75rem 0 .6rem;gap:.35rem;border:1px dashed var(--separator-strong);border-radius:var(--radius-capsule);font-size:var(--text-footnote);font-weight:550}
+.browser-add-column .browser-menu-button:hover,.browser-add-column .browser-menu-button[aria-expanded=true]{border-color:var(--accent-fill);color:var(--accent);background:none}
+/* Popups: the column menus, the index details and every dropdown's list share one look: the surface, a strong hairline, a
+ * raised shadow, 20rem high at most (or the room there) with their own scrolling. */
+.browser-menu{position:fixed;inset:auto;margin:0;box-sizing:border-box;width:14rem;max-width:calc(100vw - 16px);overflow:auto;overscroll-behavior:contain;padding:.3rem;background:var(--surface-elevated);color:var(--label);border:1px solid var(--separator-strong);border-radius:var(--radius-md);box-shadow:var(--shadow-3);font-size:var(--text-footnote)}
+/* Dropdowns: every select on the page is one height (the row's), one shape and one chevron. Where the browser has customizable
+ * selects (Chromium 135 and later: Electron on every system), the list is drawn in the page's popup look, under its select and
+ * aligned to its start edge, at least as wide, flipping above when the room below is under 10rem; elsewhere the system list shows. */
+.browser-page select{height:var(--control-height);min-height:var(--control-height);max-width:100%;padding:0 .55rem 0 .7rem;border:1px solid var(--field-border);border-radius:var(--radius-md);background:var(--field);color:var(--label);font:inherit;font-size:var(--text-footnote);box-shadow:var(--shadow-1);cursor:pointer;white-space:nowrap;text-overflow:ellipsis}
+.browser-page select:hover:not(:disabled){border-color:var(--separator-strong)}
+.browser-block-options select{width:100%}
+@supports (appearance:base-select){
+ .browser-page select,.browser-page ::picker(select){appearance:base-select}
+ .browser-page select{display:flex;align-items:center;gap:.4rem;overflow:hidden}
+ .browser-page select::picker-icon{content:'';flex:none;width:.7rem;height:.7rem;margin-inline-start:auto;background:currentColor;color:var(--label-secondary);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;transition:rotate var(--quick) var(--ease-out)}
+ .browser-page select:open::picker-icon{rotate:180deg}
+ .browser-page select:open{border-color:var(--accent-fill)}
+ .browser-page ::picker(select){box-sizing:border-box;margin:4px 0;padding:.3rem;border:1px solid var(--separator-strong);border-radius:var(--radius-md);background:var(--surface-elevated);color:var(--label);box-shadow:var(--shadow-3);font-size:var(--text-footnote);overflow:auto;overscroll-behavior:contain;
+  position-try-order:normal;position-try-fallbacks:flip-block;min-block-size:calc-size(fit-content,min(size,10rem));max-block-size:calc-size(stretch,min(size,20rem))}
+ .browser-page option{display:flex;align-items:center;gap:.45rem;min-height:28px;padding:0 .6rem 0 .4rem;border-radius:var(--radius-sm);color:var(--label);white-space:nowrap;cursor:pointer}
+ .browser-page option:hover:not(:disabled),.browser-page option:focus-visible{background:var(--fill-3);outline:none}
+ .browser-page option:checked{font-weight:600}.browser-page option:disabled{color:var(--label-tertiary);cursor:default}
+ .browser-page option::checkmark{content:'✓';width:16px;flex:none;text-align:center;color:var(--accent);font-weight:600}
+ .browser-page option:not(:checked)::checkmark{visibility:hidden}
+ .browser-page optgroup{display:block;padding-top:.2rem;font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
+ .browser-page optgroup+optgroup{margin-top:.2rem;border-top:1px solid var(--separator)}
+ .browser-page optgroup option{font-size:var(--text-footnote);font-weight:400;color:var(--label);text-transform:none;letter-spacing:normal}.browser-page optgroup option:checked{font-weight:600}
+}
+/* The results header: what the list is at its start (check-all, Files, the count, Sort); at its end the filter note, the layout
+ * toggles and Drag to Lightroom, the page's main action. It wraps once, by group. */
+.browser-results>header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.35rem 1rem;flex:none;min-height:calc(var(--control-height) + .8rem);padding:.4rem .6rem .4rem .65rem;border-bottom:1px solid var(--separator);min-width:0}
+.browser-results-title,.browser-results-tools{display:flex;align-items:center;gap:.5rem;min-width:0}
+.browser-results-title{gap:.4rem}.browser-results-tools{margin-left:auto;flex-wrap:nowrap}
+.browser-sort{display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary);margin-left:.5rem}
+/* Show or hide the bars and the columns: a neutral segmented pair; pressed = shown. */
+.browser-layout-toggles{display:inline-flex;flex:none;gap:2px;padding:2px;border-radius:var(--radius-md);background:var(--fill-3)}
+.browser-layout-toggle{display:inline-flex;align-items:center;justify-content:center;width:calc(var(--control-height) - 4px);height:calc(var(--control-height) - 4px);flex:none;border-radius:calc(var(--radius-md) - 2px);color:var(--label-tertiary)}
+.browser-layout-toggle:hover{color:var(--label)}.browser-layout-toggle[aria-pressed=true]{background:var(--surface);color:var(--label);box-shadow:0 1px 2px rgba(0,0,0,.14)}:root[data-theme=dark] .browser-layout-toggle[aria-pressed=true]{background:#5a5a5f}
+.browser-layout-toggle:focus-visible,.browser-filter-clear:focus-visible{outline:2px solid var(--accent-fill);outline-offset:1px}
+/* Drag to Lightroom: the page's primary action, filled with the accent; its dashed inner edge says it is dragged, not clicked. */
+.browser-drag-out{flex:0 1 auto;min-width:0;max-width:100%;display:flex;flex-direction:row-reverse;align-items:center;gap:.5rem}
+.browser-drag-handle{display:flex;flex:none;align-items:center;gap:.45rem;height:var(--control-height);padding:0 .8rem;border:1px dashed color-mix(in srgb,var(--on-accent) 55%,transparent);border-radius:var(--radius-capsule);background:var(--accent-fill);color:var(--on-accent);box-shadow:var(--button-highlight),0 1px 2px rgba(0,0,0,.14);cursor:grab;font-size:var(--text-footnote);font-weight:600;user-select:none}
+.browser-drag-handle:not(.is-disabled):hover{background:var(--accent-fill-hover)}
+.browser-drag-handle .browser-drag-label{white-space:nowrap;line-height:1.25}.browser-drag-handle small{color:inherit;opacity:.82;font-weight:400;font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
+.browser-drag-handle.is-disabled{cursor:not-allowed;opacity:.5;border-color:var(--separator-strong);background:var(--fill-4);color:var(--label);box-shadow:none}
+@media(max-width:1100px){.browser-preview{width:var(--browser-preview-width,250px);min-width:240px;padding:.6rem}.browser-preview-info{margin:0 -.6rem;padding:0 .6rem}.browser-drag-note{max-width:10rem}.browser-sort>span{display:none}.browser-status-error{max-width:10rem}}
+@media(max-width:650px){.browser-results-body{flex-direction:column}.browser-preview{width:100%;min-width:0;border-left:0;border-top:1px solid var(--separator);height:auto;max-height:50%}.browser-preview-resize{display:none}.browser-editor-row .browser-palette{gap:.2rem}.browser-block-options>label,.browser-block-options form{min-width:100%}}
 
 /* Settings › Devices › Drive formats */
 .drive-format-list,.drive-format-drivers{list-style:none;margin:0;padding:0;display:grid;gap:.35rem}

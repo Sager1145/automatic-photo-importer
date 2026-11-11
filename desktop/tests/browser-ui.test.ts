@@ -96,24 +96,37 @@ test('selection chips use photographic units for exact values and ranges',()=>{
  assert.equal(selectionValueLabel(aperture,{kind:'range',field:'fNumber',min:2,max:4,maxInclusive:true},'en'),'≥ f/2 – ≤ f/4');
  assert.equal(selectionValueLabel(camera,{kind:'values',field:'camera',values:['QA Camera Alpha']},'en'),'QA Camera Alpha');
 });
-const page=(configuration=defaultConfiguration())=>render(createElement(BrowserPage,{libraries:[library],statuses:{},configuration,onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
-test('the page reads as one tool: source, filter bar, columns, height handle, results; the selection path shows only when something is chosen',()=>{
+const page=(configuration=defaultConfiguration(),lib:CatalogLibrary=library)=>render(createElement(BrowserPage,{libraries:[lib],statuses:{},configuration,onConfiguration:()=>{},api,onRefresh:()=>{},onStop:()=>{},onOrganization:()=>{},onReveal:()=>{}}));
+test('the page reads as one tool, a row per purpose: where you are, what you see, what is chosen, then the columns, the height handle and the results',()=>{
  const html=page();
  const at=(part:string)=>{const index=html.indexOf(part);assert.ok(index>=0,`${part} on the page`);return index;};
- // In order: the source row (library, then the index status with Refresh index), the filter bar, the column editor (closed), the columns, the handle, the results.
- const order=['<div class="browser-toolbar">','<div class="browser-source-row">','aria-label="Library"','aria-label="Back"','<div class="browser-status">','Refresh index','<div class="browser-filter-bar"','aria-label="Browser mode"','Search names','Needs organization','<div class="browser-filter-end">','browser-preset-menu','>Columns</button>','>Clear all</button>','data-testid="hierarchy-editor"','<div class="browser-workspace">','class="browser-horizontal browser-columns"','data-testid="facet-column"','class="browser-add-column"','browser-height-resize','data-testid="browser-files"','Newest capture first','RAW + JPEG'].map(at);
+ // In order: the source row (Back and Forward, the library, the mode, the index status with Refresh index), the filter bar (the
+ // Filter group, then the View group with the preset menu, Columns and RAW + JPEG), the path row (the hint, then Clear all), the
+ // column editor (closed), the columns with Add column after them, the handle, the results (Sort at the start, the layout toggles
+ // and Drag to Lightroom at the end).
+ const order=['<div class="browser-toolbar">','<div class="browser-source-row">','aria-label="Back"','aria-label="Forward"','aria-label="Library"','aria-label="Browser mode"','<div class="browser-status"','Refresh index','<div class="browser-filter-bar"','<div class="browser-filter-group">','Search names','Needs organization','<div class="browser-view-group"','browser-preset-menu','>Columns</button>','class="browser-toggle"','<div class="browser-path-row">','browser-selection-hint','>Clear all</button>','data-testid="hierarchy-editor"','<div class="browser-workspace">','class="browser-horizontal browser-columns"','data-testid="facet-column"','class="browser-add-column"','browser-height-resize','data-testid="browser-files"','Newest capture first','class="browser-layout-toggles"','data-testid="lightroom-drag"'].map(at);
  assert.deepEqual(order,[...order].sort((a,b)=>a-b),'regions in order');
- const toolbar=html.slice(at('<div class="browser-toolbar">'),at('data-testid="hierarchy-editor"'));
- assert.match(toolbar,/<div class="browser-status"><div class="browser-status-text" role="status">[^]*Offline/,'the index status sits in the source row');
- assert.match(html,/<button[^>]*browser-clear-all[^>]*disabled=""[^>]*>Clear all<\/button>/,'Clear all is off while nothing is chosen');
+ const toolbar=html.slice(at('<div class="browser-toolbar">'),at('<div class="browser-path-row">'));
+ // The index status is one line that opens its details; it is named by what it shows, and the details stay in the page for the popover.
+ assert.match(toolbar,/<div class="browser-status" data-state="offline"><button type="button" class="browser-menu-button has-text browser-status-summary"[^>]*aria-expanded="false" title="Index details"><span class="browser-status-dot" aria-hidden="true"><\/span><span class="browser-status-text" role="status">Offline · 0 indexed files<\/span>/,'the index status sits in the source row as one line');
+ assert.doesNotMatch(toolbar,/browser-status-summary"[^>]*aria-label=/,'the status line is named by its text');
+ assert.match(toolbar,/popover="auto" class="browser-menu browser-status-details" role="group" aria-label="Index details"[^>]*><p>Offline — indexed details are available\. Connect the drive for previews\.<\/p>/,'the details open from the status line');
+ assert.match(toolbar,/<div class="browser-view-group" role="group" aria-label="View"><span class="browser-filter-label" aria-hidden="true">View<\/span>/,'the View group has its caption, as Filter does');
+ assert.match(html,/<div class="browser-path-row"><p class="browser-selection-hint">[^<]+<\/p><button[^>]*browser-clear-all[^>]*disabled=""[^>]*>Clear all<\/button><\/div>/,'Clear all ends the path row and is off while nothing is chosen');
  assert.ok(!html.includes('browser-selection-bar'),'no empty selection row');
  assert.match(html,/<details id="[^"]+" class="browser-editor[^"]*" data-testid="hierarchy-editor">/,'the column editor starts closed');
  assert.match(html,/aria-expanded="false" aria-controls="([^"]+)"[^>]*>[^]*?Columns<\/button>/,'the Columns button controls the editor');
- // The results: Files, the count, sort and the drag-out handle in the header; no Files column in the strip and no preview until a file is picked.
+ // A column header is one line: the check-all box, the heading (the name, as its menu's button; the menu stays out of the heading), the count; the coverage keeps one line with all of it in its tooltip.
+ const column=html.slice(at('data-testid="facet-column"'),at('class="browser-add-column"'));
+ assert.match(column,/<header><label class="browser-column-check"[^>]*><input type="checkbox" data-testid="column-check-all"[^>]*\/><\/label><h3><button type="button" class="browser-menu-button has-text browser-column-name"[^>]*aria-label="Column options: Date"[^>]*><span>Date<\/span><svg[^]*?<\/button><\/h3><div[^>]*popover="auto"[^>]*>[^]*?<\/div><small>—<\/small><\/header><p class="browser-coverage" title="0 known · 0 missing">0 known · 0 missing<\/p>/);
+ assert.match(html,/<div class="browser-add-column"><button type="button" class="browser-menu-button has-text"[^>]*aria-label="Add a column"[^>]*><svg[^]*?<span>Add column<\/span><\/button>/,'Add column after the last column');
+ // The results: Files, the count and Sort at the start; the layout toggles and the drag-out handle at the end. No Files column in the strip and no preview until a file is picked.
  const results=html.slice(at('data-testid="browser-files"'));
- assert.match(results,/<header>[^]*<h3>Files<\/h3><small>0<\/small>[^]*Newest capture first[^]*data-testid="lightroom-drag"[^]*<\/header>/);
+ assert.match(results,/<header><div class="browser-results-title">[^]*<h3>Files<\/h3><small>0<\/small>[^]*Newest capture first[^]*<\/div><div class="browser-results-tools">[^]*data-testid="lightroom-drag"[^]*<\/header>/);
  assert.ok(!html.includes('browser-file-column')&&!html.includes('data-testid="browser-preview"'));
  assert.ok(html.slice(at('class="browser-horizontal browser-columns"'),at('browser-height-resize')).includes('aria-label="Column options: Date"'),'each category column has its header menu');
+ // A browsed folder has no placement filter; the rest of the bar stays.
+ const browsed=page(defaultConfiguration(),{...library,browseOnly:true});assert.ok(!browsed.includes('browser-placement-filter')&&browsed.includes('<div class="browser-view-group"'),'no placement filter for a browsed folder');
 });
 test('the view preset menu lists the built-in views and the saved ones, and shows Custom view when none is active',()=>{
  const c=defaultConfiguration();
@@ -142,20 +155,23 @@ test('a column header menu changes the field in place, adds a column after it or
  assert.match(menu,/data-testid="date-level-toggles"><button type="button" aria-pressed="true">Year<\/button>/);assert.match(menu,/Add column after/);assert.match(menu,/Remove column/);
  assert.doesNotMatch(render(createElement(ColumnMenu,{configuration:c,block:camera!,onChange:()=>{}})),/date-level-toggles/,'Year, Month and Day only on a date column');
  const add=render(createElement(AddColumn,{configuration:c,onChange:()=>{}}));assert.match(add,/class="browser-add-column"/);assert.match(add,/aria-label="Add a column"/);assert.equal(add.match(/data-field-kind=/g)?.length,9);assert.doesNotMatch(add,/aria-pressed/,'no field is current in a new column');
- for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['Filter','Columns','View preset','Show in this column','Add column after','Remove column','Add a column'])assert.notEqual(t(label),label,`${language}: ${label}`);}
+ for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['Filter','View','Columns','View preset','Show in this column','Add column after','Remove column','Add a column','Add column','Index details','Page layout','indexed {time}'])assert.notEqual(t(label),label,`${language}: ${label}`);}
 });
-test('the results header toggles the bars and the columns (pressed = shown); hidden, they are not rendered and the results keep their parts',()=>{
+test('the results header toggles the bars and the columns (a neutral pair, pressed = shown); hidden, they are not rendered and the results keep their parts',()=>{
  const shown=page();
- assert.match(shown,/<button type="button" class="browser-toggle" aria-pressed="true"[^>]*>[^]*?RAW \+ JPEG<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the library and filter bars" title="[^"]+">[^]*?<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the category columns" title="[^"]+">[^]*?<\/button>[^]*data-testid="lightroom-drag"/,'after RAW + JPEG, before Drag to Lightroom');
+ assert.match(shown,/<div class="browser-view-group"[^]*<button type="button" class="browser-toggle" aria-pressed="true"[^>]*>[^]*?RAW \+ JPEG<\/button><\/div>/,'RAW + JPEG ends the View group');
+ assert.match(shown,/<div class="browser-results-tools"><div class="browser-layout-toggles" role="group" aria-label="Page layout"><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the library and filter bars" title="[^"]+">[^]*?<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the category columns" title="[^"]+">[^]*?<\/button><\/div><div class="browser-drag-out" data-testid="lightroom-drag"/,'the layout pair, then Drag to Lightroom last');
  assert.equal(shown.match(/class="browser-toggle"/g)?.length,1,'browser-toggle stays the RAW + JPEG toggle only');
  assert.ok(!shown.includes('browser-filter-note'),'no filter note while nothing is hidden');
  const bars=page({...defaultConfiguration(),hideBars:true});
- for(const gone of ['browser-toolbar','browser-source-row','browser-filter-bar','browser-status','browser-selection-bar','hierarchy-editor'])assert.ok(!bars.includes(gone),`${gone} hidden with the bars`);
+ for(const gone of ['browser-toolbar','browser-source-row','browser-filter-bar','browser-status','browser-path-row','browser-clear-all','browser-selection-bar','hierarchy-editor'])assert.ok(!bars.includes(gone),`${gone} hidden with the bars`);
  for(const kept of ['class="browser-horizontal browser-columns"','browser-height-resize','data-testid="browser-files"','RAW + JPEG','data-testid="lightroom-drag"'])assert.ok(bars.includes(kept),`${kept} kept`);
+ assert.match(bars,/<div class="browser-results-tools"><button type="button" class="browser-toggle"[^]*?RAW \+ JPEG<\/button><div class="browser-layout-toggles"/,'with the bars hidden, RAW + JPEG moves to the results header');
+ assert.equal(bars.match(/class="browser-toggle"/g)?.length,1);
  assert.match(bars,/aria-pressed="false" aria-label="Show the library and filter bars"/);
  const columns=page({...defaultConfiguration(),hideColumns:true});
  for(const gone of ['class="browser-horizontal browser-columns"','browser-height-resize','data-testid="facet-column"','browser-add-column'])assert.ok(!columns.includes(gone),`${gone} hidden with the columns`);
- for(const kept of ['<div class="browser-toolbar">','<div class="browser-filter-bar"','<div class="browser-workspace">','data-testid="browser-files"'])assert.ok(columns.includes(kept),`${kept} kept`);
+ for(const kept of ['<div class="browser-toolbar">','<div class="browser-filter-bar"','<div class="browser-path-row">','<div class="browser-workspace">','data-testid="browser-files"'])assert.ok(columns.includes(kept),`${kept} kept`);
  assert.match(columns,/aria-pressed="false" aria-label="Show the category columns"/);
  assert.match(columns,/<header>[^]*<h3>Files<\/h3><small>0<\/small>/,'the count stays the first small in the header');
  const both=page({...defaultConfiguration(),hideBars:true,hideColumns:true});
