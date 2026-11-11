@@ -9,7 +9,8 @@ import {HierarchyEditor} from '../renderer/browser/HierarchyEditor';
 import {PreviewPanel} from '../renderer/browser/PreviewPanel';
 import {selectedKeys,selectionFromRows,bucketRows,displayFacetValue,visibleBucketRows,toggleBlockSelection,selectionValueLabel} from '../renderer/browser/selection';
 import {defaultConfiguration,addBlock,createBlock,blockLabels,changeBlockKind,unusedBlockKind,presetMenu,applyPreset,readConfiguration,configurationKey,restoreDefaultView,savePreset} from '../renderer/browser/configuration';
-import {paneHeights,minWorkspaceHeight,heightHandle,minContentHeight,minResultsHeight} from '../renderer/browser/HorizontalStrip';
+import {paneHeights,minWorkspaceHeight,heightHandle,minContentHeight,minResultsHeight,editorHeight,editorShare,minEditorHeight,minEditingWorkspaceHeight,editingResultsHeight} from '../renderer/browser/HorizontalStrip';
+import {nextSelectIndex,rendererPlatform,selectKeyDown} from '../renderer/browser/select-keys';
 import {AddColumn,ColumnMenu} from '../renderer/browser/ColumnMenu';
 import type {BrowserAPI} from '../renderer/browser/api';
 import type {CatalogRow,CatalogLibrary,Filter} from '../catalog/types';
@@ -104,18 +105,23 @@ test('the page reads as one tool, a row per purpose: where you are, what you see
  // Filter group, then the View group with the preset menu, Columns and RAW + JPEG), the path row (the hint, then Clear all), the
  // column editor (closed), the columns with Add column after them, the handle, the results (Sort at the start, the layout toggles
  // and Drag to Lightroom at the end).
- const order=['<div class="browser-toolbar">','<div class="browser-source-row">','aria-label="Back"','aria-label="Forward"','aria-label="Library"','aria-label="Browser mode"','<div class="browser-status"','Refresh index','<div class="browser-filter-bar"','<div class="browser-filter-group">','Search names','Needs organization','<div class="browser-view-group"','browser-preset-menu','>Columns</button>','class="browser-toggle"','<div class="browser-path-row">','browser-selection-hint','>Clear all</button>','data-testid="hierarchy-editor"','<div class="browser-workspace">','class="browser-horizontal browser-columns"','data-testid="facet-column"','class="browser-add-column"','browser-height-resize','data-testid="browser-files"','Newest capture first','class="browser-layout-toggles"','data-testid="lightroom-drag"'].map(at);
+ const order=['<div class="browser-toolbar">','<div class="browser-source-row">','aria-label="Back"','aria-label="Forward"','aria-label="Library"','aria-label="Browser mode"','<div class="browser-status"','Refresh index','<div class="browser-filter-bar"','<div class="browser-filter-group">','Search names','Needs organization','<div class="browser-view-group"','browser-preset-menu','>Columns</span></button>','class="browser-toggle"','<div class="browser-path-row">','browser-selection-hint','>Clear all</button>','data-testid="hierarchy-editor"','<div class="browser-workspace">','class="browser-horizontal browser-columns"','data-testid="facet-column"','class="browser-add-column"','browser-height-resize','data-testid="browser-files"','Newest capture first','class="browser-layout-toggles"','data-testid="lightroom-drag"'].map(at);
  assert.deepEqual(order,[...order].sort((a,b)=>a-b),'regions in order');
  const toolbar=html.slice(at('<div class="browser-toolbar">'),at('<div class="browser-path-row">'));
  // The index status is one line that opens its details; it is named by what it shows, and the details stay in the page for the popover.
- assert.match(toolbar,/<div class="browser-status" data-state="offline"><button type="button" class="browser-menu-button has-text browser-status-summary"[^>]*aria-expanded="false" title="Index details"><span class="browser-status-dot" aria-hidden="true"><\/span><span class="browser-status-text" role="status">Offline · 0 indexed files<\/span>/,'the index status sits in the source row as one line');
+ assert.match(toolbar,/<div class="browser-status" data-state="offline"><button type="button" class="browser-menu-button has-text browser-status-summary"[^>]*aria-expanded="false" title="Index details"><span class="browser-status-dot" aria-hidden="true"><\/span><span class="browser-status-text" role="status"><span class="browser-status-long">Offline · 0 indexed files<\/span><span class="browser-status-short" aria-hidden="true">0<\/span><\/span>/,'the index status sits in the source row as one line, with the count alone for a narrow toolbar');
+ // Narrow, Refresh index, Stop indexing, Columns and RAW + JPEG show only their icons: each keeps its name as its text (visually hidden) and a tooltip.
+ assert.match(toolbar,/<button type="button" class="button button-secondary  "[^>]*title="Refresh index"[^>]*><svg[^]*?<\/svg><span class="browser-compact-text">Refresh index<\/span><\/button>/,'Refresh index keeps its name when only its icon shows');
+ assert.match(toolbar,/class="button button-secondary  browser-columns-button"[^>]*title="Add, remove and arrange the columns, and save the view as a preset"[^>]*><svg[^]*?<\/svg><span class="browser-compact-text">Columns<\/span><\/button>/,'Columns keeps its name and tooltip');
+ // The toolbar's dropdowns show the chosen option through their own button, so a narrowed one ends in an ellipsis.
+ assert.equal(toolbar.match(/<select[^>]*><button><selectedcontent><\/selectedcontent><\/button>/g)?.length,3,'library, placement and preset dropdowns');
  assert.doesNotMatch(toolbar,/browser-status-summary"[^>]*aria-label=/,'the status line is named by its text');
  assert.match(toolbar,/popover="auto" class="browser-menu browser-status-details" role="group" aria-label="Index details"[^>]*><p>Offline — indexed details are available\. Connect the drive for previews\.<\/p>/,'the details open from the status line');
  assert.match(toolbar,/<div class="browser-view-group" role="group" aria-label="View"><span class="browser-filter-label" aria-hidden="true">View<\/span>/,'the View group has its caption, as Filter does');
  assert.match(html,/<div class="browser-path-row"><p class="browser-selection-hint">[^<]+<\/p><button[^>]*browser-clear-all[^>]*disabled=""[^>]*>Clear all<\/button><\/div>/,'Clear all ends the path row and is off while nothing is chosen');
  assert.ok(!html.includes('browser-selection-bar'),'no empty selection row');
  assert.match(html,/<details id="[^"]+" class="browser-editor[^"]*" data-testid="hierarchy-editor">/,'the column editor starts closed');
- assert.match(html,/aria-expanded="false" aria-controls="([^"]+)"[^>]*>[^]*?Columns<\/button>/,'the Columns button controls the editor');
+ assert.match(html,/aria-expanded="false" aria-controls="([^"]+)"[^>]*>[^]*?Columns<\/span><\/button>/,'the Columns button controls the editor');
  // A column header is one line: the check-all box, the heading (the name, as its menu's button; the menu stays out of the heading), the count; the coverage keeps one line with all of it in its tooltip.
  const column=html.slice(at('data-testid="facet-column"'),at('class="browser-add-column"'));
  assert.match(column,/<header><label class="browser-column-check"[^>]*><input type="checkbox" data-testid="column-check-all"[^>]*\/><\/label><h3><button type="button" class="browser-menu-button has-text browser-column-name"[^>]*aria-label="Column options: Date"[^>]*><span>Date<\/span><svg[^]*?<\/button><\/h3><div[^>]*popover="auto"[^>]*>[^]*?<\/div><small>—<\/small><\/header><p class="browser-coverage" title="0 known · 0 missing">0 known · 0 missing<\/p>/);
@@ -130,7 +136,7 @@ test('the page reads as one tool, a row per purpose: where you are, what you see
 });
 test('the view preset menu lists the built-in views and the saved ones, and shows Custom view when none is active',()=>{
  const c=defaultConfiguration();
- assert.match(page(c),/<select><option value="" disabled="">Custom view<\/option><optgroup label="Built-in views"><option value="builtin-date-camera-format" selected="">Date → Camera → Format<\/option>/);
+ assert.match(page(c),/<select><button><selectedcontent><\/selectedcontent><\/button><option value="" disabled="">Custom view<\/option><optgroup label="Built-in views"><option value="builtin-date-camera-format" selected="">Date → Camera → Format<\/option>/);
  const mine={...c,presets:[{id:'preset-mine',name:'Mine',blocks:c.blocks}],activePresetId:undefined};const html=page(mine);
  assert.match(html,/<option value="" disabled="" selected="">Custom view<\/option>/);assert.match(html,/<optgroup label="Saved views"><option value="preset-mine">Mine<\/option><\/optgroup>/);
  assert.ok(!html.includes('value="builtin-iso"'),'single fields are not listed');
@@ -159,14 +165,14 @@ test('a column header menu changes the field in place, adds a column after it or
 });
 test('the results header toggles the bars and the columns (a neutral pair, pressed = shown); hidden, they are not rendered and the results keep their parts',()=>{
  const shown=page();
- assert.match(shown,/<div class="browser-view-group"[^]*<button type="button" class="browser-toggle" aria-pressed="true"[^>]*>[^]*?RAW \+ JPEG<\/button><\/div>/,'RAW + JPEG ends the View group');
+ assert.match(shown,/<div class="browser-view-group"[^]*<button type="button" class="browser-toggle" aria-pressed="true"[^>]*>[^]*?<span class="browser-compact-text">RAW \+ JPEG<\/span><\/button><\/div>/,'RAW + JPEG ends the View group, its name kept in it when only its icon shows');
  assert.match(shown,/<div class="browser-results-tools"><div class="browser-layout-toggles" role="group" aria-label="Page layout"><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the library and filter bars" title="[^"]+">[^]*?<\/button><button type="button" class="browser-layout-toggle" aria-pressed="true" aria-label="Show the category columns" title="[^"]+">[^]*?<\/button><\/div><div class="browser-drag-out" data-testid="lightroom-drag"/,'the layout pair, then Drag to Lightroom last');
  assert.equal(shown.match(/class="browser-toggle"/g)?.length,1,'browser-toggle stays the RAW + JPEG toggle only');
  assert.ok(!shown.includes('browser-filter-note'),'no filter note while nothing is hidden');
  const bars=page({...defaultConfiguration(),hideBars:true});
  for(const gone of ['browser-toolbar','browser-source-row','browser-filter-bar','browser-status','browser-path-row','browser-clear-all','browser-selection-bar','hierarchy-editor'])assert.ok(!bars.includes(gone),`${gone} hidden with the bars`);
  for(const kept of ['class="browser-horizontal browser-columns"','browser-height-resize','data-testid="browser-files"','RAW + JPEG','data-testid="lightroom-drag"'])assert.ok(bars.includes(kept),`${kept} kept`);
- assert.match(bars,/<div class="browser-results-tools"><button type="button" class="browser-toggle"[^]*?RAW \+ JPEG<\/button><div class="browser-layout-toggles"/,'with the bars hidden, RAW + JPEG moves to the results header');
+ assert.match(bars,/<div class="browser-results-tools"><button type="button" class="browser-toggle"[^]*?RAW \+ JPEG<\/span><\/button><div class="browser-layout-toggles"/,'with the bars hidden, RAW + JPEG moves to the results header');
  assert.equal(bars.match(/class="browser-toggle"/g)?.length,1);
  assert.match(bars,/aria-pressed="false" aria-label="Show the library and filter bars"/);
  const columns=page({...defaultConfiguration(),hideColumns:true});
@@ -215,4 +221,28 @@ test('the filter bar is a labelled group, the storage error names no one system,
  assert.match(html,/class="browser-horizontal browser-columns" aria-label="Library columns" title="[^"]*Right from the last column moves to the files[^"]*Esc closes the preview first, then clears/,'the strip help says what Right and Esc do');
  const menu=render(createElement(ColumnMenu,{configuration:defaultConfiguration(),block:defaultConfiguration().blocks[0]!,onChange:()=>{}}));assert.match(menu,/class="browser-menu" role="group" aria-label="[^"]+" title=""/,'an empty title stops the strip help showing over the menu');
  for(const language of ['zh-Hans','zh-Hant','ja'] as const){const t=createTranslator(language);for(const label of ['This view could not be saved on this computer.','Click a folder to open it: its subfolders show in the next column, its files below.','Click a folder (or press Enter) to open it: its subfolders show in the next column. Arrow keys navigate; Right from the last column moves to the files, Left comes back. Esc closes the preview. Tab moves to controls.'])assert.notEqual(t(label),label,`${language}: ${label}`);assert.doesNotMatch(t('This view could not be saved on this computer.'),/Mac/);}
+});
+test('a closed dropdown steps to the previous or next enabled option, past disabled options and group labels, or to the first or last',()=>{
+ const entries=[{disabled:true},{group:true},{},{},{disabled:true},{group:true},{},{disabled:true}];
+ assert.equal(nextSelectIndex(entries,2,'ArrowDown'),3);assert.equal(nextSelectIndex(entries,3,'ArrowDown'),6,'skips a disabled option and a group label');
+ assert.equal(nextSelectIndex(entries,6,'ArrowDown'),6,'stays on the last enabled option');assert.equal(nextSelectIndex(entries,6,'ArrowUp'),3);
+ assert.equal(nextSelectIndex(entries,2,'ArrowUp'),2,'a disabled first option (Custom view) is never chosen');
+ assert.equal(nextSelectIndex(entries,6,'Home'),2);assert.equal(nextSelectIndex(entries,2,'End'),6);
+ assert.equal(nextSelectIndex(entries,-1,'ArrowDown'),2,'nothing chosen: Down picks the first enabled option');
+ assert.equal(nextSelectIndex([{disabled:true},{group:true}],-1,'Home'),-1,'no enabled option: nothing changes');
+ // macOS keeps the browser's own keys (the list opens); Windows and Linux change the value in place.
+ assert.equal(selectKeyDown('darwin'),undefined);assert.equal(typeof selectKeyDown('win32'),'function');assert.equal(typeof selectKeyDown('linux'),'function');
+ assert.equal(rendererPlatform('darwin'),'darwin');assert.equal(rendererPlatform('win32'),'win32');assert.equal(rendererPlatform('linux'),'linux');
+});
+test('the open column editor takes what the workspace minimum leaves, at most its share, and in a short window enough to use while the workspace keeps its editing minimum',()=>{
+ // A tall window: the editor takes its share; the workspace keeps more than its minimum.
+ assert.equal(editorHeight(1000),Math.round(1000*editorShare));assert.ok(1000-editorHeight(1000)>=minWorkspaceHeight);
+ // Middle: what the workspace minimum leaves.
+ assert.equal(editorHeight(640),640-minWorkspaceHeight);
+ // Short (a 720px window): the editor keeps its least height; the workspace shrinks to its editing minimum, never below.
+ assert.equal(editorHeight(407),Math.min(minEditorHeight,407-minEditingWorkspaceHeight));assert.ok(407-editorHeight(407)>=minEditingWorkspaceHeight);
+ for(const room of [300,407,500,640,800,1200])assert.ok(editorHeight(room)>0&&editorHeight(room)<=Math.round(room*editorShare)+1,'never over its share');
+ // While editing, the results may shrink toward their editing minimum so the columns and handle still fit the room.
+ const short=paneHeights(minEditingWorkspaceHeight,undefined,false,true);assert.equal(short.columns,minContentHeight);assert.equal(short.results,editingResultsHeight);assert.equal(short.columns!+heightHandle+short.results!,minEditingWorkspaceHeight);
+ assert.deepEqual(paneHeights(600,undefined,false,true),paneHeights(600,undefined),'with room enough, editing changes nothing');
 });

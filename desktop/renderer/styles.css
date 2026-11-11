@@ -1699,7 +1699,9 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 /* The view panel: levels (a drop zone), fields, presets, saving, and the selected level's options, as aligned rows. */
 /* Opened by the filter bar's Columns button (or its own summary): a panel under the bars; closed, nothing of it shows. */
 .browser-editor{border:1px solid var(--separator);border-radius:var(--radius-md);background:var(--surface);padding:.2rem .8rem}.browser-editor:not([open]){display:none}
-.browser-editor-body{display:grid;gap:.55rem;padding:.3rem 0 .7rem}
+.browser-editor-body{display:grid;gap:.45rem;padding:.2rem 0 .55rem}
+/* Open, the page gives it at most what the workspace leaves (BrowserPage sets max-height): it scrolls inside, its summary staying on top. */
+.browser-editor{box-sizing:border-box}.browser-editor[open]{overflow-y:auto;overscroll-behavior:contain}.browser-editor>summary{position:sticky;top:0;z-index:2;background:var(--surface)}
 .browser-editor-row{display:grid;grid-template-columns:5.5rem minmax(0,1fr);align-items:center;gap:.6rem}
 .browser-editor-path-row{grid-template-columns:5.5rem minmax(0,1fr) auto}
 .browser-editor-label{font-size:var(--text-caption);font-weight:600;color:var(--label-secondary);text-transform:uppercase;letter-spacing:.04em}
@@ -1765,7 +1767,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 .browser-menu .browser-date-toggles{padding:.1rem .5rem .35rem}.browser-menu .browser-date-toggles button{min-height:24px}
 /* The results (ResultsPane.tsx), like Lightroom's grid: a header with the count, check-all, sort and the drag-out handle; the
  * list fills the pane, the picked file's details beside it. */
-.browser-results{display:flex;flex-direction:column;min-width:0;min-height:200px;height:420px;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface)}
+.browser-results{display:flex;flex-direction:column;min-width:0;min-height:100px;height:420px;border:1px solid var(--separator);border-radius:var(--radius-md);overflow:hidden;background:var(--surface)}
 .browser-results>header h3{font-size:var(--text-footnote);flex:none;white-space:nowrap}.browser-results>header>small{color:var(--label-secondary);font-size:var(--text-caption);font-variant-numeric:tabular-nums;white-space:nowrap}
 .browser-results-body{flex:1;min-height:0;display:flex}
 .browser-results-list{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -1800,6 +1802,32 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
 /* RAW + JPEG: a compact toggle; on, it is tinted, as it changes what the list counts. */
 .browser-toggle{display:inline-flex;align-items:center;gap:.35rem;flex:none;height:var(--control-height);padding:0 .75rem;border-radius:var(--radius-capsule);border:1px solid var(--field-border);color:var(--label-secondary);font-size:var(--text-footnote);font-weight:550;white-space:nowrap}
 .browser-toggle:hover{background:var(--fill-4);color:var(--label)}.browser-toggle[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent-border);color:var(--label)}.browser-toggle[aria-pressed=true] svg{color:var(--accent)}
+/* Narrow windows: the source row and the filter bar stay one line each by compacting in steps, by the toolbar's own width (the
+ * sidebar's varies), as the title bar does. First the captions go, the index status shrinks to its dot and count (the whole line in
+ * its details and tooltip, an error turning the dot red) and Refresh index, Stop indexing and Columns keep only their icons, their
+ * names staying in them visually hidden; then the dropdowns narrow (with an ellipsis), the search shrinks and RAW + JPEG keeps its icon. */
+.browser-toolbar{container:browser-toolbar/inline-size}
+.browser-status-short,.browser-stop-index>svg{display:none}
+@container browser-toolbar (max-width:66rem){
+ .browser-filter-label{display:none}
+ .browser-filter-bar{column-gap:.75rem}.browser-view-group{padding-left:.75rem}
+ .browser-status-long,.browser-index-actions .browser-compact-text,.browser-columns-button .browser-compact-text{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ .browser-status-short{display:inline;font-variant-numeric:tabular-nums;color:var(--label)}
+ .browser-status-error{display:none}
+ .browser-status[data-error]:not([data-state=scanning]) .browser-status-dot{background:var(--danger)}.browser-status[data-error][data-state=scanning] .browser-status-dot{color:var(--danger)}
+ .browser-stop-index>svg{display:inline-block}
+ .browser-index-actions .button,.browser-toolbar .browser-columns-button{width:var(--control-height);min-width:var(--control-height);padding:0;gap:0;justify-content:center}
+}
+@container browser-toolbar (max-width:54rem){
+ .browser-library select{width:10rem}.browser-placement-filter select{width:9rem}.browser-preset-menu select{width:9.5rem}
+ .browser-toolbar .browser-search{min-width:8rem}
+ .browser-toolbar .browser-toggle .browser-compact-text{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ .browser-toolbar .browser-toggle{width:var(--control-height);padding:0;gap:0;justify-content:center}
+}
+@container browser-toolbar (max-width:44rem){
+ .browser-source-row{column-gap:.5rem}.browser-filter-bar{column-gap:.5rem;padding-inline:.4rem}.browser-view-group{padding-left:.5rem}
+ .browser-library select{width:8.5rem}.browser-placement-filter select{width:7.5rem}.browser-preset-menu select{width:8rem}
+}
 /* The path row keeps its height with or without a selection; Clear all stays at its end. */
 .browser-path-row{display:flex;align-items:center;gap:.5rem;min-height:var(--control-height);min-width:0}
 .browser-path-row>.browser-selection-bar,.browser-path-row>.browser-selection-hint{flex:1;min-width:0}
@@ -1837,6 +1865,9 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
  .browser-page select::picker-icon{content:'';flex:none;width:.7rem;height:.7rem;margin-inline-start:auto;background:currentColor;color:var(--label-secondary);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/contain no-repeat;transition:rotate var(--quick) var(--ease-out)}
  .browser-page select:open::picker-icon{rotate:180deg}
  .browser-page select:open{border-color:var(--accent-fill)}
+ /* A toolbar dropdown's own button (BrowserPage's selectButton): the chosen option's text, ending in an ellipsis when narrow. */
+ .browser-page select>button{display:flex;align-items:center;flex:1 1 auto;min-width:0;overflow:hidden;padding:0;border:0;background:none;color:inherit;font:inherit}
+ .browser-page selectedcontent{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .browser-page ::picker(select){box-sizing:border-box;margin:4px 0;padding:.3rem;border:1px solid var(--separator-strong);border-radius:var(--radius-md);background:var(--surface-elevated);color:var(--label);box-shadow:var(--shadow-3);font-size:var(--text-footnote);overflow:auto;overscroll-behavior:contain;
   position-try-order:normal;position-try-fallbacks:flip-block;min-block-size:calc-size(fit-content,min(size,10rem));max-block-size:calc-size(stretch,min(size,20rem))}
  .browser-page option{display:flex;align-items:center;gap:.45rem;min-height:28px;padding:0 .6rem 0 .4rem;border-radius:var(--radius-sm);color:var(--label);white-space:nowrap;cursor:pointer}
@@ -1852,7 +1883,7 @@ html[data-boot=reveal] .main-content{animation:boot-rise 300ms var(--ease-out) b
  * toggles and Drag to Lightroom, the page's main action. It wraps once, by group. */
 .browser-results>header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.35rem 1rem;flex:none;min-height:calc(var(--control-height) + .8rem);padding:.4rem .6rem .4rem .65rem;border-bottom:1px solid var(--separator);min-width:0}
 .browser-results-title,.browser-results-tools{display:flex;align-items:center;gap:.5rem;min-width:0}
-.browser-results-title{gap:.4rem}.browser-results-tools{margin-left:auto;flex-wrap:nowrap}
+.browser-results-title{gap:.4rem;flex:none}.browser-results-tools{flex:1 1 0;justify-content:flex-end;flex-wrap:nowrap}.browser-results-tools>:not(.browser-drag-out){flex:none}
 .browser-sort{display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;font-size:var(--text-caption);color:var(--label-secondary);margin-left:.5rem}
 /* Show or hide the bars and the columns: a neutral segmented pair; pressed = shown. */
 .browser-layout-toggles{display:inline-flex;flex:none;gap:2px;padding:2px;border-radius:var(--radius-md);background:var(--fill-3)}
